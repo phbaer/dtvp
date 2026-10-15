@@ -8,6 +8,66 @@ import respx
 from dtvp.cli import main
 
 
+@respx.mock
+def test_coverage_cli_forwards_frozen_selection_and_reports_complete_counts(monkeypatch, capsys):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            "coverage",
+            "--project",
+            "project",
+            "--state",
+            "a" * 64,
+            "--context",
+            "b" * 64,
+            "--vulnerability",
+            "CVE-test",
+            "--expected-preview",
+            "c" * 64,
+            "--limit",
+            "1",
+        ],
+    )
+    route = respx.post("http://dtvp.test/api/v3/projects/project/coverage/candidates").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "preview_digest": "c" * 64,
+                "statistics": {"versions": 4},
+                "total": 12,
+                "items": [
+                    {
+                        "version": "7.1.2",
+                        "context_id": "b" * 64,
+                        "team_id": "team",
+                        "coverage": {"status": "submitted"},
+                        "classification": "material_changed",
+                        "capabilities": ["assess"],
+                    }
+                ],
+                "next_offset": 1,
+            },
+        )
+    )
+    main()
+    assert json.loads(route.calls[0].request.content) == {
+        "source": "a" * 64,
+        "context_id": "b" * 64,
+        "vulnerability_id": "CVE-test",
+        "expected_preview": "c" * 64,
+    }
+    output = capsys.readouterr().out
+    assert "Versions: 4 · Targets: 12" in output
+    assert "coverage=submitted" in output and "comparison=material_changed" in output
+    assert "Read-only candidates" in output
+
+
 @pytest.mark.parametrize("part", [None, "supplier part"])
 @respx.mock
 def test_pipeline_cli_uploads_original_bytes_and_explicit_retry_metadata(

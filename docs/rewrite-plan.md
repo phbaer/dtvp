@@ -590,6 +590,13 @@ retries preserve the capture and expected head. Export/finding observations rema
 independent, including contradictions and full legacy DT documentation. Remote
 reads remain nontransactional, not a verified coherent snapshot.
 
+The native coverage matrix now compares a pinned source target with every current
+version, preserving separate consuming contexts, absent targets and independent
+decisions. API, CLI and the assessment UI share server classifications and a
+complete preview digest across pages. Shared draft/submission targets are explicit;
+reviews and publication never inherit across versions. Continuous applicability
+ranges and semantic cross-import identity reconciliation remain planned.
+
 Issued native exports now retain exact serializer-versioned bundle/manifest/input
 bytes and unchanged consumer receipts in a sharded per-project journal index.
 Preparation reuses issued selectors before recomputing; returned evidence resolves

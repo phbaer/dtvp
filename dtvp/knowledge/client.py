@@ -58,6 +58,15 @@ def configure(parser):
     sync.add_argument("--offset", type=int, default=0)
     sync.add_argument("--limit", type=int, default=50)
     sync.add_argument("--json", action="store_true")
+    coverage = commands.add_parser(
+        "coverage", help="Compare explicit assessment targets across current versions"
+    )
+    for name in ("project", "state", "context", "vulnerability"):
+        coverage.add_argument("--" + name, required=True)
+    coverage.add_argument("--expected-preview")
+    coverage.add_argument("--offset", type=int, default=0)
+    coverage.add_argument("--limit", type=int, default=50)
+    coverage.add_argument("--json", action="store_true")
     request = commands.add_parser("request", help="Read or mutate API resources using JSON")
     request.add_argument("method", choices=["GET", "POST", "PUT"])
     request.add_argument("path", help="Absolute /api/v3/ path; query parameters supported")
@@ -163,6 +172,41 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "coverage":
+            from urllib.parse import quote
+
+            result = read_response(
+                client.post(
+                    f"/api/v3/projects/{quote(args.project, safe='')}/coverage/candidates",
+                    params={"offset": args.offset, "limit": args.limit},
+                    json={
+                        "source": args.state,
+                        "context_id": args.context,
+                        "vulnerability_id": args.vulnerability,
+                        "expected_preview": args.expected_preview,
+                    },
+                )
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(
+                    f"Preview: {result['preview_digest']} · Versions: {result['statistics']['versions']} · Targets: {result['total']}"
+                )
+                for row in result["items"]:
+                    print(
+                        f"{row['version']}  context={row['context_id']}  team={row.get('team_id') or 'unresolved'}  "
+                        f"coverage={row['coverage']['status']}  comparison={row['classification']}  "
+                        f"actions={','.join(row.get('capabilities', [])) or 'read-only'}"
+                    )
+                print(
+                    "Read-only candidates; matching inputs do not grant applicability or reviewed coverage."
+                )
+                if result.get("next_offset") is not None:
+                    print(
+                        f"Next offset: {result['next_offset']} (pin --expected-preview {result['preview_digest']})"
+                    )
+            return
         if args.knowledge_command == "import-file":
             from urllib.parse import quote
 

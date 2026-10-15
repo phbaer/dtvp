@@ -230,6 +230,23 @@ viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Cross-version assessment scope
+
+The Knowledge assessment panel can load a pinned coverage matrix across current
+product versions. Candidates distinguish matching material, changed material,
+different consuming contexts, identity conflicts and absence. Extra targets are
+never preselected; compatible lineage alone does not establish applicability.
+Independent existing decisions are preserved. Explicit shared targets require
+supporting conditions and retain independent reviews per version/context.
+
+`POST /api/v3/projects/{id}/coverage/candidates` accepts `source`, `context_id`,
+`vulnerability_id` and optional `expected_preview`. The complete preview digest
+pins heads across pages; a changed selection returns 409. Results include current
+actor capabilities without granting access from team ownership. The HTTP CLI uses
+`knowledge coverage --project ID --state SHA --context SHA --vulnerability CVE`
+with `--json` for the complete server response. Review and score publication stay
+separate from selecting assessment coverage.
+
 ### Native Dependency-Track intake
 
 An administrator binds each product version independently using `PUT

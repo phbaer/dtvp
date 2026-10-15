@@ -36,8 +36,9 @@ def product_state(journal, state, project_id):
     return revision
 
 
-def reachable_states(journal, project_id):
-    refs = [(Ref.model_validate_json(key), state) for key, state in journal.references().items()]
+def reachable_states(journal, project_id, *, references=None):
+    selected = journal.references() if references is None else references
+    refs = [(Ref.model_validate_json(key), state) for key, state in selected.items()]
     pending = [
         state
         for ref, state in refs
