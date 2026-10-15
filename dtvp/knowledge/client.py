@@ -89,6 +89,12 @@ def display_workspace(result):
             f"team={row['context'].get('team_id') or 'unresolved'} "
             f"state={row['coverage']['status']}  source={source_text} contextual={score_text}"
         )
+        metadata = row.get("curated_metadata")
+        if metadata:
+            context = metadata["payload"]["annotations"]["cybersecurity"]
+            print(
+                f"  curated={metadata['status']} criticality={context['criticality']} exposure={context['exposure']}"
+            )
         for proposal in row.get("scoring_proposals", []):
             value = proposal.get("proposal") or {}
             status = (

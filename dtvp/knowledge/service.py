@@ -176,7 +176,10 @@ def import_inventory(
             )
         ),
         sections=sections,
-        artifacts=[sections["inventory"]["baseline"]["artifact_sha"]],
+        artifacts=sorted(
+            set(journal.state(parent).artifacts if parent else [])
+            | {sections["inventory"]["baseline"]["artifact_sha"]}
+        ),
     )
     return journal.publish(
         request_id=scoped_request,

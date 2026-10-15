@@ -174,6 +174,22 @@ def target_fingerprint(sections, version, context_id, vulnerability_id):
         "scope": collection_scope(inventory.get("baseline", {})),
         "parts": sorted(parts, key=canonical),
     }
+    # Preserve existing fingerprints when no authored metadata applies. New
+    # annotations are review evidence across this consuming tree, never approvals.
+    from dtvp.knowledge.metadata import FORMAT, identity_fingerprint, metadata_key
+
+    curated = {}
+    for ref in sorted(seen):
+        record = sections["history"].get(metadata_key(ref), {})
+        metadata = record.get("payload", {})
+        if (
+            record.get("format") == FORMAT
+            and metadata.get("version") == version
+            and metadata.get("identity_fingerprint") == identity_fingerprint(components.get(ref))
+        ):
+            curated[ref] = {key: metadata[key] for key in ("annotations", "provenance")}
+    if curated:
+        payload["curated_metadata"] = curated
     return digest(canonical(payload))
 
 

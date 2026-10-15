@@ -28,6 +28,10 @@ export type KnowledgeFinding = {
   source_ratings: { score?: number | null; vector?: string; method?: string; source?: string | { name?: string; url?: string }; observed_source?: string }[]
   coverage: { status: string; assessment?: KnowledgeAssessment | null; approved_assessment?: KnowledgeAssessment | null; [key: string]: unknown }
   published_score: { score: number; vector: string; current?: boolean } | null
+  curated_metadata?: { revision: string; status: string; applicable: boolean; payload: {
+    rationale: string; provenance: { source: string; reference: string }
+    annotations: { cybersecurity: { criticality: string; exposure: string; mitigations: string[]; testing_evidence: string[] }; deployment: { environment: string; usage: string; configuration: string }; support: { status: string; supplier: string; support_until: string | null; end_of_life: string | null }; notes: string; properties: Record<string, string> }
+  } }
   scoring_proposals?: KnowledgeProposal[]
   capabilities: string[]; evidence?: unknown[]; [key: string]: unknown
 }

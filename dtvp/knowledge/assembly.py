@@ -272,7 +272,7 @@ def publish_assembly(journal, *, project_id, version, actor_id, data):
         reason="Select product assembly",
         sections=sections,
         parents=parents,
-        artifacts=sorted(set(artifacts)),
+        artifacts=sorted(set(artifacts) | set(journal.state(parent).artifacts if parent else [])),
     )
     return journal.publish(
         request_id=scoped_request,

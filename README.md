@@ -208,6 +208,27 @@ Displayed totals always come from the server's complete filtered selection.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Curated component metadata
+
+`PUT /api/v3/projects/{id}/versions/{version}/metadata` explicitly replaces
+annotations for one exact component occurrence. It requires project management,
+`request_id`, expected branch head, expected metadata revision (null initially),
+`component_ref`, typed `annotations`, `provenance` and `rationale`. Cybersecurity
+criticality/exposure/mitigations/testing, deployment/usage and supplier/support
+information remain separate from imported facts. No approval or license clearance
+is implied. `GET .../states/{state}/metadata` lists current, stale, absent and
+out-of-scope records; `component_ref` selects one. The Knowledge detail displays
+these annotations and their attribution.
+
+Annotations survive baseline replacement and retain immutable revisions. Identity
+changes mark them stale; removed components retain absent records. Inherited
+annotations from another product version require explicit adoption. Current
+annotations and provenance throughout the consuming tree bind assessment/score
+fingerprints: changes require revalidation. Editing only the recording rationale
+without changing annotations/provenance does not invalidate coverage. Baseline
+updates retain artifact pins for authored revisions and external reports; retention
+and garbage collection remain explicit future maintenance work.
+
 ### License evidence worklist
 
 `GET /api/v3/projects/{id}/states/{state}/license-worklist` returns pinned,

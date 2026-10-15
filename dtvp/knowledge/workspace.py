@@ -217,8 +217,10 @@ def load_workspace(
                         connected[root_ref] = reachable(complete_graph, root_ref)
                     if ref in connected[root_ref]:
                         dependency_relation = "transitive"
+            from dtvp.knowledge.metadata import get_metadata
             from dtvp.knowledge.proposals import list_proposals
 
+            metadata = get_metadata(journal, sections, revision.version, ref)
             proposals = list_proposals(
                 journal, sections, revision.version, context["id"], identifier
             )
@@ -242,6 +244,7 @@ def load_workspace(
                     journal, sections, revision.version, context["id"], identifier, gate=gate
                 ),
                 **({"scoring_proposals": proposals} if proposals else {}),
+                **({"curated_metadata": metadata} if metadata else {}),
                 "evidence": [
                     item for item in observations if item.get("kind") == "external-status"
                 ],
