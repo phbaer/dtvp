@@ -53,6 +53,26 @@ def vscorer_worklist(project_id: str, state: Sha, request: Request, db: DB, acto
     return build_vscorer_worklist(journal, state)
 
 
+@router.get("/projects/{project_id}/states/{state}/license-worklist")
+def licenses(
+    project_id: str,
+    state: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    from dtvp.knowledge.comparison import product_state
+    from dtvp.knowledge.licenses import license_worklist
+
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    product_state(journal, state, project_id)
+    return license_worklist(journal, state, offset, limit)
+
+
 def authorize_team(db, actor, project_id):
     def authorize(team_id, capability):
         project_for(db, actor, project_id, capability)

@@ -208,6 +208,18 @@ Displayed totals always come from the server's complete filtered selection.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### License evidence worklist
+
+`GET /api/v3/projects/{id}/states/{state}/license-worklist` returns pinned,
+source-attributed license evidence with `offset`/`limit` and full-set statistics.
+SPDX declared, concluded and file-derived expressions remain separate, including
+`NONE`, `NOASSERTION` and custom identifiers. CycloneDX expressions, identifiers,
+names and embedded evidence remain verbatim. Multipart rows retain constituent
+format/provenance and declared collection coverage. No expression compatibility,
+obligations, legal conclusion or license clearance is inferred; absent/malformed
+information stays explicit. Document-level custom text remains in original sources.
+Human license-clearance and obligation workflows remain planned.
+
 ### Historical state comparison
 
 `GET /api/v3/projects/{id}/refs` lists product branches and immutable tags.
