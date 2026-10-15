@@ -94,3 +94,55 @@ def test_playground_cli_forwards_json_and_csrf_without_domain_logic(monkeypatch,
     assert json.loads(route.calls[0].request.content) == payload
     assert route.calls[0].request.headers["x-csrf-token"] == "csrf-test"
     assert json.loads(capsys.readouterr().out)["committed"] is True
+
+
+@respx.mock
+def test_workspace_cli_forwards_advanced_filters_and_keeps_server_totals(monkeypatch, capsys):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            "workspace",
+            "--project",
+            "p",
+            "--version",
+            "7.1.2",
+            "--source-severity",
+            "critical",
+            "--contextual-severity",
+            "none",
+            "--team-review",
+            "approved",
+            "--source-conflict",
+            "yes",
+            "--dependency",
+            "transitive",
+            "--provider",
+            "Supplier",
+        ],
+    )
+    route = respx.get("http://dtvp.test/api/v3/projects/p/versions/7.1.2/workspace").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "state": "a" * 64,
+                "statistics": {"totals": {"context_findings": 79}, "approved": 70, "submitted": 9},
+                "items": [],
+                "next_offset": 50,
+            },
+        )
+    )
+    main()
+    params = route.calls[0].request.url.params
+    assert params["source_severity"] == "critical"
+    assert params["contextual_severity"] == "none"
+    assert params["team_review"] == "approved"
+    assert params["source_conflict"] == "yes"
+    assert params["dependency"] == "transitive"
+    assert params["provider"] == "Supplier"
+    assert "Context findings: 79" in capsys.readouterr().out

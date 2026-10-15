@@ -202,6 +202,9 @@ uv run python -m dtvp.cli knowledge --persona reviewer request POST /api/v3/proj
 
 Production CLI calls read a bearer credential from `DTVP_API_TOKEN` (or the named
 `--token-env` variable); `--persona` works only against an enabled playground.
+Workspace flags mirror advanced server filters with hyphens, for example
+`--source-severity critical --team-review approved --dependency transitive`.
+Displayed totals always come from the server's complete filtered selection.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
@@ -331,8 +334,8 @@ without changing the baseline.
 Reassignment and inventory changes preserve existing assessment/review records
 and immutable tagged states. Current contexts are recomputed, not silently
 treated as renewed approvals. Context IDs remain based on source-local refs;
-cross-import semantic identity and verified assessment coverage remain planned.
-The new context workspace is API-only. Run the isolated interactive scenario:
+cross-import semantic identity remains planned. Exact contextual assessment coverage
+is available through the Knowledge workspace, HTTP API and CLI. Run the isolated scenario:
 
 ```bash
 uv run python scripts/ownership_demo.py

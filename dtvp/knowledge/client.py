@@ -8,6 +8,20 @@ from pathlib import Path
 import httpx
 
 
+WORKSPACE_FILTERS = (
+    "source_severity",
+    "contextual_severity",
+    "applicability",
+    "scoring_status",
+    "team_review",
+    "provider",
+    "cvss_version",
+    "dependency",
+    "source_conflict",
+    "component",
+)
+
+
 def configure(parser):
     command = parser.add_parser("knowledge", help="Use the journal-backed HTTP API")
     command.add_argument("--url", default=os.getenv("DTVP_URL", "http://127.0.0.1:8900"))
@@ -19,6 +33,8 @@ def configure(parser):
     workspace.add_argument("--version", required=True)
     for option in ("team", "q", "lifecycle", "expected"):
         workspace.add_argument("--" + option, default="")
+    for option in WORKSPACE_FILTERS:
+        workspace.add_argument("--" + option.replace("_", "-"), default="")
     workspace.add_argument("--offset", type=int, default=0)
     workspace.add_argument("--limit", type=int, default=50)
     workspace.add_argument("--json", action="store_true")
@@ -90,6 +106,9 @@ def run(args):
                 "q": args.q,
                 "lifecycle": args.lifecycle,
             }
+            params.update(
+                {name: getattr(args, name) for name in WORKSPACE_FILTERS if getattr(args, name)}
+            )
             if args.team:
                 params["team_id"] = args.team
             if args.expected:
