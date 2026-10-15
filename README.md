@@ -42,6 +42,9 @@ CPE discovery is intended to become an internal DTVP module, preserving reviewed
 mappings and provenance rather than requiring another standalone deployment.
 The concept's [integration status](docs/devsecops-evidence-concept.md#reviewed-integration-increments)
 records isolated sibling fixes, validation and remaining cutover gates.
+Its [pipeline examples](docs/devsecops-evidence-concept.md#exemplary-pipeline-integration)
+map PR/nightly builds, legacy C/C++, containers, supplier inputs and parallel
+versions to intake, review, release gates, documentation and monitoring.
 
 ### Explore the new core
 

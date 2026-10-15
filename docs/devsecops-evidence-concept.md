@@ -42,6 +42,152 @@ publish/export. Analysis and document generation can repeat without changing an
 approved baseline. UI and CLI use the same application contracts. External
 services stay separate; no bundled Agentyzer, mandatory broker or S3 dependency.
 
+## Exemplary pipeline integration
+
+The following describes the target workflow, not a claim that all integrations
+already ship. CI/CD remains responsible for building, testing, packaging and
+deployment. DTVP receives evidence at explicit boundaries and returns scoped
+status or approved outputs. It does not need to sit inside every build step.
+
+```mermaid
+flowchart LR
+    A[Build and package] --> B[Collect composition and provenance]
+    B --> C[DTVP candidate state]
+    S[DT / CyBeats / supplier SBOMs] --> C
+    C --> D[Reconcile and assemble]
+    D --> E[Contextual team review]
+    D --> X[VScorer / Agentyzer]
+    X --> E
+    E --> F[Scoped approvals and release tag]
+    F --> G[Generator and approved exports]
+    F --> H[CI/CD release-policy query]
+    V[Updated advisory evidence] --> I[Reassessment queue]
+    F --> I
+```
+
+### Integration points across a typical lifecycle
+
+| Pipeline boundary | Evidence submitted or consumed | DTVP action and useful result |
+| :--- | :--- | :--- |
+| Pull request / feature build | Optional candidate SBOM, resolved dependencies, source/configuration identity | Compare with an explicit base state; highlight new components, licenses, findings and missing identity. Use a candidate namespace so ephemeral builds cannot replace the authoritative nightly baseline. |
+| Successful build and packaging | Exact final artifact digest, SBOMs, collector details and source/build provenance | Validate intake, retain originals and advance the matching product-version candidate. A lockfile alone must not be presented as verified shipped composition. |
+| Product assembly / integration build | Manifest selecting required constituent revisions and deployment variant | Check required parts, build coherence and attachment relationships. Publish a coherent selected baseline atomically; retain incomplete candidates for investigation. |
+| After intake or material evidence changes | Vulnerability observations from sources, advisory updates and relevant usage facts | Reconcile attributed evidence; run configured CPE discovery and queue specialist analyses for exact subjects. Show meaningful changes and revalidation needs rather than duplicating unchanged work. |
+| Review queue, outside the critical build path | Team-specific component/dependency contexts and combined evidence | Analysts assess their contexts; required teams review each vulnerability; the security coordinator handles contextual scoring. License and architecture decisions retain their own owners. |
+| Release candidate / publication | Exact artifact/assembly state, required reviews and output-specific policy | Return ready, blocked or unknown with concrete reasons and pinned inputs. CI/CD enforces the configured gate; DTVP records evidence and decisions, not deployment authority. |
+| Controlled documentation and export | Approved pinned state, curated architecture mappings, templates and disclosure scope | Generator produces the established documents from DTVP. Authorized adapters deliver SBOM/VEX/VDR or other supported outputs, retaining digests, loss reports and receipts. |
+| After release / scheduled monitoring | New advisories, vendor corrections and additional analysis evidence | Open reassessment against affected released subjects without modifying the release tag. Preserve what was known at release alongside current knowledge about that release. |
+
+An early PR check can be advisory while release publication is stricter. Define
+the gate per purpose: input integrity, vulnerability review, license clearance
+and architecture-document readiness are separate results. Unknown coverage or
+an unavailable service must not silently produce a passing status. Conversely,
+an optional external analysis outage need not stop compilation; policy decides
+whether publication can proceed with an explicitly accepted limitation.
+
+### Example 1: managed application with a nightly build
+
+For a Java, .NET, Python or JavaScript application, export resolved dependency
+information during the build and collect evidence from the packaged deliverable.
+Submit both as attributed views of the same subject, with the build ID, source
+revision, configuration and artifact digest. They are not two additive inventories.
+If DT or CyBeats performs the first vulnerability analysis, import its observations
+and preserve its original ratings and attribution; DTVP owns subsequent decisions.
+
+The nightly build advances only its version branch. DTVP compares the new baseline
+with the previous accepted build, retains applicable assessments and queues new
+or changed contexts. Teams see their ownership realm and the evidence needed for
+assessment. VScorer receives the scoped vulnerability worklist plus the relevant
+threat-model/deployment inputs; Agentyzer receives a qualified, pinned source
+subject. Their results are comparable proposals, not automatic approvals.
+
+Before release, CI/CD queries readiness for the exact state and artifact it will
+publish. After the required decisions, freeze the release tag and generate
+documentation from those pinned inputs. The likely onboarding gap is proving
+that dependency export reflects packaging, including optional features and
+bundled code; DTVP cannot infer that equivalence from a successful upload.
+
+### Example 2: legacy C/C++ product or firmware
+
+Add collection around the existing build without first requiring a build-system
+rewrite. Gather available compiler/linker evidence, installed outputs, supplier
+inventories and source/license scan results. The producer combines these into
+the best available subject-specific composition and explicitly declares unknown
+versions, vendored code, local patches and collection limits. Store supporting
+evidence alongside the original SBOM rather than pretending a binary scan alone
+recovered every static dependency.
+
+DTVP makes unresolved identities and ownership actionable; internal CPE discovery
+can propose identifiers with provenance. Analysts review the actual product usage,
+including configuration-specific inclusion, rather than treating every source-tree
+library as delivered. Agentyzer source analysis needs the source/configuration
+relationship to that binary; a verified commit by itself does not establish it.
+License clearance may additionally need file-level notices and linking facts.
+
+This is the highest-effort onboarding case. The acceptance criterion is a reviewed
+reference inventory for representative builds, with known blind spots and a
+producer correction path. If the product cannot establish source-to-deliverable
+identity, restrict conclusions accordingly rather than manufacturing precision.
+
+### Example 3: containerized service with several delivery parts
+
+Collect from each final image by digest and platform, retaining application and
+OS package evidence separately. Supply deployment descriptors for services,
+sidecars and other declared delivery parts; runtime-mounted content needs its
+own evidence where it belongs to the product scope. An integration build submits
+an assembly manifest selecting, for example, backend, frontend and gateway
+revisions. A new backend build replaces that part only; a failed frontend scan
+does not remove the frontend from the product.
+
+DTVP shows both part-level deltas and the assembled product delta. The same
+package in different consuming trees can require separate contextual assessments;
+shared identity does not collapse those usage contexts. Preserve distro/vendor
+fixed-state evidence when reconciling upstream vulnerability claims. Generator
+combines the accepted assembly with curated deployment/interface mappings;
+package dependencies alone do not establish service communication architecture.
+
+The main gate is coherent subject selection: an image tag is insufficient to
+freeze a release, and unrelated platform builds must not become one apparent
+installation. Native assembly is still planned; legacy combined SBOMs can bridge
+intake but cannot restore provenance already discarded by an assembler.
+
+### Example 4: supplier binary or externally maintained subsystem
+
+Receive the supplier SBOM and any VEX/VDR with the delivered artifact identifier,
+digest, supplier attribution and declared applicability scope. Retain originals
+and revisions; treat later supplier corrections as new evidence. When identity or
+scope is missing, make the limitation visible and request correction from the
+producer. A supplier's not-affected statement remains attributed evidence until
+the organization's policy and appropriate reviewer accept it for the actual use.
+
+DTVP adds value by relating that subsystem to product contexts and recording the
+review trail. It cannot independently prove a proprietary binary's completeness
+or use Agentyzer source analysis when the relevant source is unavailable. Release
+policy must distinguish that limitation from a confirmed absence of vulnerabilities.
+
+### Example 5: parallel maintenance and feature versions
+
+Nightly pipelines for `6.15.6`, `7.1.1`, `7.1.2` and `7.2.0` submit to independent
+version branches. Build ordering is evaluated within the declared source/version
+stream; a late `7.1.1` job must not overwrite `7.1.2`. A cascading code merge can
+carry provenance that proposes assessment reuse, but DTVP checks the target
+inventory and contexts before extending the approved applicability range.
+
+Compare `7.1.1` and `7.1.2` by pinned states, including assembly, composition,
+coverage and decision differences. Released tags remain immutable when a later
+advisory appears or a team changes. Monitoring creates new knowledge and review
+work linked to those releases; it does not rewrite the original release record.
+
+### Recommended first integration
+
+Start with one representative product and one nightly pipeline: upload the final
+artifact's SBOM/provenance, expose the baseline delta, assign team review and
+produce one pinned Generator output. Measure producer correction effort, unresolved
+identity, review time and output parity. Then add a required second constituent
+to prove assembly behavior. Run a legacy C/C++ and container pilot before claiming
+broader acquisition coverage. Defer mandatory PR blocking until the evidence and
+decision contracts have proved useful and predictable in these pilots.
+
 ## Composition acquisition and its limits
 
 | Project type | Preferred evidence | Effort and likely gaps |
@@ -205,8 +351,10 @@ is derived evidence, not independent corroboration.
 
 ## Integration readiness and blocking contracts
 
-Repository observations describe the inspected local implementations, not a
-guarantee of deployed interfaces. Sibling repositories were inspected read-only.
+The table records the initially inspected repository baselines, not deployed
+interfaces. Subsequent isolated fixes are listed under
+[reviewed integration increments](#reviewed-integration-increments); the baseline
+gaps below must be read together with that status.
 
 | Service | Existing seam | Blocking work before trusted automation |
 | :--- | :--- | :--- |
