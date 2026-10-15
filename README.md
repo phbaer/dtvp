@@ -450,6 +450,11 @@ permissions. Cancel stops local work, not a claimed remote cancellation. Unknown
 submissions need reconciliation or a deliberately new request. Operational SQL
 backups remain necessary for jobs. Authenticated remote-ID reconciliation and
 native follow-up conversations remain planned.
+The specialist panel shows bounded jobs for the selected context/vulnerability.
+Qualified input preparation precedes an explicit queue action. Status refresh,
+retry and local cancellation are explicit; backend capabilities control actions.
+Failed submissions preserve guidance and retry identity. Unknown submissions show
+reconciliation guidance without a retry button.
 
 ### Qualified Agentyzer inputs
 

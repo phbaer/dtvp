@@ -2,12 +2,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi, type KnowledgeFinding } from '../knowledgeApi'
+import KnowledgeAnalysisJobs from './KnowledgeAnalysisJobs.vue'
 
 type Candidate = { cpe: string; identification_basis: string; basis_verification: string; provenance: Record<string, unknown> }
 type CpeResult = { inventory_state: string; policy_state: string | null; proposal: { algorithm_version: string; content_digest: string; catalog_content_digest: string; rules_content_digest: string; requested_purl: string | null; resolved_purl: string | null; candidates: Candidate[]; rejected_candidates: unknown[]; reviewed_rules: unknown[]; limitations: string[] } }
 type VScorerResult = { eligible: boolean; sbom: unknown; cves: unknown; dtvp_source: { state: string; artifacts: { sbom_sha256: string; cves_sha256: string } } | null; coverage: { included: string[]; excluded: { vulnerability_id: string; reason: string }[]; verification: string; remote_authenticity: string }; files?: Record<string, string> }
 type AgentyzerResult = { ready_to_submit: boolean; request: unknown; receipt: { state: string; request_sha256: string | null }; coverage: { reasons: string[]; limitations: string[]; source_verification: string; repository_authorization: string } }
-const props = defineProps<{ project: string; state: string; finding: KnowledgeFinding }>()
+const props = defineProps<{ project: string; state: string; version: string; finding: KnowledgeFinding }>()
 const cpe = ref<CpeResult | null>(null), vscorer = ref<VScorerResult | null>(null), agentyzer = ref<AgentyzerResult | null>(null)
 const cpeBusy = ref(false), vscorerBusy = ref(false), agentyzerBusy = ref(false)
 const cpeError = ref(''), vscorerError = ref(''), agentyzerError = ref(''), sourceBase = ref(''), exactFiles = ref(false)
@@ -77,7 +78,7 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence })
 <template>
   <details class="knowledge-specialists">
     <summary>Specialist inputs and CPE candidates</summary>
-    <p class="hint">Prepare local evidence and files for separate tools. Nothing is submitted externally or adopted as an assessment, identity or score.</p>
+    <p class="hint">Preparing or downloading specialist inputs does not submit work or adopt an assessment, identity or score. External analysis needs a separate explicit job request.</p>
     <p v-if="!componentRef" class="hint">The source component reference is unavailable; CPE and VScorer inputs cannot be prepared.</p>
     <details>
       <summary>CPE candidate discovery</summary>
@@ -109,7 +110,7 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence })
     </details>
     <details>
       <summary>Agentyzer repository input</summary>
-      <p class="hint">A producer-qualified repository and exact commit are required. An external orchestrator must authorize the repository and submit the request separately.</p>
+      <p class="hint">A producer-qualified repository and exact commit are required. Input preparation does not authorize or submit work; a configured worker validates the repository binding when a job is requested.</p>
       <button :disabled="agentyzerBusy" @click="prepareAgentyzer">{{ agentyzerBusy ? 'Preparing input…' : 'Prepare Agentyzer input' }}</button>
       <p v-if="agentyzerError" role="alert">{{ agentyzerError }}</p>
       <template v-if="agentyzer">
@@ -118,6 +119,7 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence })
         <details><summary>Agentyzer source pin and request</summary><pre>{{ JSON.stringify({ receipt: agentyzer.receipt, request: agentyzer.request }, null, 2) }}</pre></details>
         <button @click="downloadJson(agentyzer, 'dtvp-agentyzer-input.json')">Download Agentyzer input JSON</button>
       </template>
+      <KnowledgeAnalysisJobs :project="project" :state="state" :version="version" :context-id="finding.context_id" :vulnerability-id="finding.vulnerability_id" :source-ready="agentyzer?.ready_to_submit === true" />
     </details>
   </details>
 </template>
