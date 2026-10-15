@@ -22,8 +22,10 @@ Three sources must be assessed separately:
 3. Uncommitted experiments: filters, severity presentation, review context and
    related documentation/tests. Preserve these; they are not a validated release.
 
-These references describe the inspected local checkout, not a freshly fetched
-remote. Do not infer v1 feature parity from the smaller refactored implementation.
+On 2026-10-15, `origin/main` was freshly fetched at `f236a96` (team assessment
+statistics); local `main` remains at `bdc7ba4`. Its newer statistics source/tests
+are additional parity requirements below. Do not infer v1 feature parity from
+the smaller refactored implementation.
 
 | Area | Evidence in `main` | Refactoring assets | Target decision |
 | :--- | :--- | :--- | :--- |
@@ -69,6 +71,12 @@ behavior inform migration but do not override these agreed changes.
   consistently; translate legacy tmrescore names only at compatibility boundaries.
 - Extensible pipeline/security-result contracts; SBOM/SCA is the initial domain.
   Do not impose CVE/CVSS semantics on future finding types.
+- Scope includes cybersecurity, license compliance and architecture documentation;
+  no safety-analysis workflow. Producer SBOM accuracy is the input contract;
+  DTVP validates supported structure/provenance and exposes limitations.
+- Preserve Generator's established audit-document workflow/output while moving
+  inventory reads from DT to DTVP. Bring reusable CPE discovery into DTVP,
+  preserving reviewed rules/history; an external adapter is transitional.
 
 ### Product versions, branches and releases
 
@@ -188,6 +196,36 @@ PostgreSQL retains active projections and disposable caches, not a permanent cop
 of every historical state. Authentication, credentials, installation settings and
 operational jobs require a separate persistence/backup contract. Rebuilding the
 knowledge projection is not a complete installation disaster recovery procedure.
+
+### Product assembly and collection scope
+
+A product baseline may be an explicit assembly of multiple constituent SBOMs.
+Retain a versioned manifest of stable part IDs, required/optional roles, selected
+part revisions, build/subject/configuration identities, typed attachment relations,
+coverage, omissions and identity/mapping policy revisions. Combined SBOMs are
+derived exports; constituent originals and their provenance remain authoritative
+evidence. Distinguish delivery parts from overlapping evidence views of one subject.
+
+Part replacement changes only that part. Failed/missing inputs do not remove it;
+removal/withdrawal is explicit. Publish a coherent selected set atomically, showing
+mixed-build assemblies when compatibility is unestablished. A required missing part
+blocks publication as complete. Compare parts first, then components and evidence.
+Namespaced source refs `(part revision, ref)` prevent cross-document collisions;
+shared package identities do not flatten distinct consuming contexts.
+
+`../cdxcombine` provides the legacy workflow reference, not a verified authoritative
+assembler. Its current mapper/normalizer loses identity/provenance distinctions,
+can skip failed inputs and can write after validation errors. Contract hardening
+and collision/failure fixtures precede trusted automation. See the
+[critical review](devsecops-evidence-concept.md#product-assembly-from-several-sboms).
+
+Configuration UI remains deferred, but inputs retain subject digest, source/build
+identity, target/platform/configuration, collector version/method and coverage
+limitations now. Complete inventory replacement is within declared scope; it is
+not verified discovery of every product component. Source, binary, container and
+build evidence must not silently overwrite incompatible scopes. Preserve typed
+containment/dependency/communication relations and declared/observed/concluded
+distinctions across security, license and architecture workflows.
 
 ### Inventory layers and source acceptance
 
@@ -389,6 +427,28 @@ Separate unique vulnerabilities, affected occurrences and assessment workload;
 break down by version, team, source/contextual severity, applicability and workflow.
 Shared decisions and delegated contexts must not distort counts.
 
+Latest v1 parity reference: `origin/main` `f236a96`, fetched 2026-10-15. Carry over
+these corrected semantics as acceptance cases:
+
+- A team's recorded assessment work is counted independently from pending global
+  approval; new UI/API columns distinguish recorded/submitted/currently approved.
+- Combined team/version selection requires responsibility in the same version,
+  including `version:` search. Do not cross-join independent team/version unions.
+- Team/group breakdowns use the full filtered result and selected version owners;
+  selected teams restrict group membership/counts. Canonical aliases deduplicate.
+- A group's unrecorded work remains open if any responsible selected member lacks
+  its assessment. Wildcard fallback owners follow the same rules.
+- Severity/analysis distributions use current filters, empty/updating states and
+  a single selected team/group chart scope, retaining accessible tables.
+- V1 closed General/legacy results can show closed-for-all-owner statistics while
+  actual documentation remains missing. In v3 preserve this as historical closure,
+  not fabricated team records or a shortcut around required contextual approvals.
+
+Reference fixtures: `tests/test_task_group_query_services.py`, frontend
+`ProjectStatistics`, `StatsSidebarTeamFilter`, `vulnListIndex`, `vulnListViewModel`
+and `ProjectViewFilters` tests at `f236a96`. New statistics implementation is not
+delivered merely by recording this contract.
+
 ### Recovery, maintenance and local verification
 
 Implicit migrations run before readiness. Projection schema upgrades should be
@@ -418,7 +478,8 @@ credentials, model downloads or external services are needed for core scenarios.
 2. Specify journal/object formats, durable reference transactions, crash recovery,
    projection acknowledgment and separate operational-state persistence.
 3. Specify identity reconciliation, version ordering/ranges, context equivalence,
-   source authority/build ordering and material-change rules with concrete examples.
+   source authority/build ordering, constituent assembly and material-change rules
+   with concrete examples. See [pipeline direction and critical review](devsecops-evidence-concept.md).
 4. Freeze API/consumer contracts and permission semantics, including scoped evidence,
    atomic multi-branch operations, merge-aware synchronization and range approval coverage.
 5. Implement one end-to-end slice: import -> state -> projection -> team assessment

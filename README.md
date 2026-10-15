@@ -24,7 +24,22 @@ planned. Existing v2 data is not migrated or made journal-authoritative implicit
 Reuse decisions compare original v1 on local
 `main` (`bdc7ba4`), committed refactoring and uncommitted work separately; see the
 [baseline and reuse matrix](docs/rewrite-plan.md#baseline-and-reuse-matrix).
+Latest fetched `origin/main` is `f236a96`; its corrected team/version statistics
+are captured as rewrite acceptance requirements, including recorded versus
+approved coverage and filtered chart scope.
 Agentyzer remains external even though the historical `main` tree bundled it.
+
+[DevSecOps concept and critical review](docs/devsecops-evidence-concept.md) covers
+modern/legacy composition acquisition, multi-SBOM product assembly, CPE proposals,
+vulnerability evidence, license clearance and architecture documentation. DTVP
+coordinates evidence and controlled publication; it does not establish complete
+discovery, legal clearance or regulatory compliance from imported data alone.
+Scope is cybersecurity, license compliance and architecture documentation, not
+safety analysis. SBOM correctness is the producer's responsibility; DTVP validates
+its input contract and exposes coverage limits. Generator's established audit
+documents are the output baseline to preserve while replacing DT reads with DTVP.
+CPE discovery is intended to become an internal DTVP module, preserving reviewed
+mappings and provenance rather than requiring another standalone deployment.
 
 ### Explore the new core
 
