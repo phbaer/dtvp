@@ -9,6 +9,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
     description: 'A long vulnerability description. '.repeat(100),
     source_ratings: [{ source: 'Upstream', method: 'CVSSv31', score: 9.8, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
     coverage: { status: reviewer ? 'submitted' : 'unassessed', assessment: reviewer ? { revision: 'assessment-sha', stage: 'submitted', payload: { assessment_id: 'assessment-one', author_id: 'analyst', state: 'not_affected', justification: 'code_not_reachable', rationale: 'Reviewed deployment evidence excludes the path.', targets: [{ version: '7.1.2', context_id: 'ctx', vulnerability_id: 'CVE-2099-1234' }], evidence: [] } } : null },
+    legacy_evidence: [{ id: 'legacy-one', source: 'Dependency Track', status: 'parsed', legacy_format: 'dtvp-tagged', proposed_applicability: 'not_affected', conflicting: false, raw_text: 'Original historical documentation.', errors: [], current_records: [{ team: 'Platform', state: 'not_affected', rationale: 'Legacy deployment excludes the path.', assessor: 'Alice', reviewer: 'Bob', identity_gaps: [] }], records: [], comments: [], scoring_proposals: [] }],
     curated_metadata: { revision: 'metadata-sha', status: 'current', applicable: true, payload: { rationale: 'Deployment context recorded by component owner.', provenance: { source: 'Component owner', reference: 'DESIGN-42' }, annotations: { cybersecurity: { criticality: 'high', exposure: 'internal', mitigations: ['Input validation'], testing_evidence: ['TEST-42'] }, deployment: { environment: 'Private network', usage: 'Report generation', configuration: '' }, support: { status: 'supported', supplier: 'Example', support_until: null, end_of_life: null }, notes: '', properties: {} } } },
     scoring_proposals: coordinator ? [{ id: 'proposal-one', provider: 'vscorer', source_label: 'Threat model', current: true, eligible: true, ineligibility_reasons: [], report_sha256: 'report-sha', proposal: { base_score: 9.8, score: 0, base_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L' }, score_input: { base_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L' } }] : [],
     published_score: { score: 4.2, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }, capabilities: coordinator ? ['rescore'] : reviewer ? ['approve'] : ['assess'], evidence: [{ source: 'build', claim: 'Deployment report' }],
@@ -203,4 +204,18 @@ test('curated context remains attributed and available during assessment', async
   await expect(detail).toContainText('TEST-42')
   await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
   await expect(detail).toContainText('Report generation')
+})
+
+
+test('DT legacy documentation stays readable without manufacturing current approval', async ({ page }) => {
+  const { writes } = await fixture(page)
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  await page.getByText('Imported DT assessment history', { exact: true }).click()
+  const detail = page.getByLabel('Context finding detail')
+  await expect(detail).toContainText('Legacy deployment excludes the path.')
+  await expect(detail).toContainText('Historical assessor: Alice · reviewer: Bob')
+  await expect(detail).toContainText('do not establish current DTVP approval')
+  await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
+  await expect(detail.getByLabel('Reason and evidence', { exact: true })).toHaveValue('')
+  expect(writes).toHaveLength(0)
 })

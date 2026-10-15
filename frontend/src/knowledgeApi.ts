@@ -28,6 +28,7 @@ export type KnowledgeFinding = {
   source_ratings: { score?: number | null; vector?: string; method?: string; source?: string | { name?: string; url?: string }; observed_source?: string }[]
   coverage: { status: string; assessment?: KnowledgeAssessment | null; approved_assessment?: KnowledgeAssessment | null; [key: string]: unknown }
   published_score: { score: number; vector: string; current?: boolean } | null
+  legacy_evidence?: { id: string; source: string; status: string; legacy_format?: string; proposed_applicability: string | null; conflicting: boolean; raw_text?: string; raw_excerpt?: string; errors: string[]; current_records: { team: string; state: string | null; rationale: string; assessor?: string; reviewer?: string; justification?: string; identity_gaps: string[] }[]; records: unknown[]; comments: unknown[]; scoring_proposals: unknown[] }[]
   curated_metadata?: { revision: string; status: string; applicable: boolean; payload: {
     rationale: string; provenance: { source: string; reference: string }
     annotations: { cybersecurity: { criticality: string; exposure: string; mitigations: string[]; testing_evidence: string[] }; deployment: { environment: string; usage: string; configuration: string }; support: { status: string; supplier: string; support_until: string | null; end_of_life: string | null }; notes: string; properties: Record<string, string> }

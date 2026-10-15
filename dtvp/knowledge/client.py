@@ -89,6 +89,14 @@ def display_workspace(result):
             f"team={row['context'].get('team_id') or 'unresolved'} "
             f"state={row['coverage']['status']}  source={source_text} contextual={score_text}"
         )
+        for claim in row.get("legacy_evidence", []):
+            print(
+                f"  imported_dt={claim['status']} applicability={claim.get('proposed_applicability') or 'unknown'} (historical claim, not DTVP approval)"
+            )
+            for proposal in claim.get("scoring_proposals", []):
+                print(
+                    f"    legacy_score={proposal.get('claimed_score')} preview_usable={proposal.get('usable_for_preview', False)} (requires coordinator publication)"
+                )
         metadata = row.get("curated_metadata")
         if metadata:
             context = metadata["payload"]["annotations"]["cybersecurity"]

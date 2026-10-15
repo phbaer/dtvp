@@ -314,6 +314,18 @@ current independent team reviews and explicit publication. Importing a result
 never creates an assessment, review or published score. Provider identity remains
 caller-asserted; hashes verify artifact consistency only.
 
+### Imported DT documentation
+
+Native v3 workspaces, bundles and CLI retain previous DTVP-tagged DT team
+assessments and metadata-free legacy documentation from `dtvp:dt-analysis`.
+Readable records include team-labelled history, rationale, comments, justification,
+claimed assessor/reviewer, source state and legacy scoring claims. Missing identity
+metadata and conflicting conclusions remain explicit. Imported names never grant
+roles or establish authenticated human approval. Scores are source proposals;
+matching a supported original Base/vector can make them usable for a coordinator
+preview, never automatically published. Oversized/malformed legacy text remains
+available in original source evidence with an explicit interpretation limit.
+
 ### VDR/VEX intake and application
 
 `GET /api/v3/projects/{id}/evidence` returns bounded document summaries, current
