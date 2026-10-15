@@ -258,6 +258,10 @@ capture, retries use exactly that capture and expected head, never a fresh upstr
 fetch or implicit rebase. CAS conflicts require resolving the target explicitly;
 unknown publication outcomes replay the original receipt. SQL job checkpoints
 require operational backup. No DT writeback is implemented by this path.
+The Knowledge workspace includes a collapsed source panel for the selected version:
+explicit management binding, build/time intake, safe job refresh and backend-allowed
+retry/cancel. Inputs survive conflicts and uncertain responses. New-version and
+constituent intake remain available through the HTTP CLI/API.
 
 ### Withdraw an incorrect baseline
 
