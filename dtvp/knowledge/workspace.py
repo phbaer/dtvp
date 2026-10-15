@@ -328,6 +328,11 @@ def load_workspace(
         "state": state,
         "project_id": revision.project_id,
         "version": revision.version,
+        **(
+            {"baseline_status": "withdrawn"}
+            if inventory.get("baseline", {}).get("withdrawn")
+            else {}
+        ),
         "items": items[offset : offset + limit] if paginate else items,
         "next_offset": offset + limit if paginate and offset + limit < len(items) else None,
         "statistics": statistics,

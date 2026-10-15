@@ -36,7 +36,7 @@ export type KnowledgeFinding = {
   scoring_proposals?: KnowledgeProposal[]
   capabilities: string[]; evidence?: unknown[]; [key: string]: unknown
 }
-export type KnowledgeWorkspace = { state: string; project_id: string; version: string; items: KnowledgeFinding[]; next_offset: number | null; statistics: { totals: { context_findings: number; unique_vulnerabilities: number }; by_status: Record<string, number>; by_team: Record<string, { context_findings: number; recorded?: number; approved?: number } | number>; severity: Record<string, number>; recorded: number; submitted: number; approved: number } }
+export type KnowledgeWorkspace = { baseline_status?: 'withdrawn'; state: string; project_id: string; version: string; items: KnowledgeFinding[]; next_offset: number | null; statistics: { retained_absent_assessments?: number; totals: { context_findings: number; unique_vulnerabilities: number }; by_status: Record<string, number>; by_team: Record<string, { context_findings: number; recorded?: number; approved?: number } | number>; severity: Record<string, number>; recorded: number; submitted: number; approved: number } }
 export type KnowledgeScoreInput = {
   request_id: string
   expected_versions: Record<string, string>

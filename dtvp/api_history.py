@@ -49,3 +49,26 @@ def comparison(
 ):
     project_for(db, actor, project_id)
     return compare_states(request.app.state.knowledge, project_id, before, after, offset, limit)
+
+
+@router.get("/projects/{project_id}/states/{state}/retained-assessments")
+def retained(
+    project_id: str,
+    state: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    absent_only: bool = True,
+    team_id: Name | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=200),
+):
+    from dtvp.api_knowledge import require_state
+    from dtvp.knowledge.retained import retained_assessments
+
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    return retained_assessments(
+        journal, state, absent_only=absent_only, team_id=team_id, offset=offset, limit=limit
+    )

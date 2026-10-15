@@ -208,6 +208,23 @@ Displayed totals always come from the server's complete filtered selection.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Withdraw an incorrect baseline
+
+`POST /api/v3/projects/{id}/versions/{version}/withdrawal` takes `request_id`,
+expected current head and a reason. It withdraws the active single-source
+inventory selection, creating an empty current view while retaining assessments,
+metadata, reports, original bytes and immutable release tags. Nothing is physically
+deleted. The workspace explicitly marks withdrawal; it is not a clean vulnerability
+result. Withdrawn states cannot be release-tagged. Corrected intake keeps the same
+source/scope authority and requires a newer build number. Reappearing identical
+contexts recheck retained coverage. Assemblies use explicit part withdrawal instead.
+
+`GET .../states/{state}/retained-assessments` lists retained assessment revisions
+for absent findings by default, with optional recorded `team_id`, `absent_only`,
+`offset` and `limit`. The Knowledge workspace offers a collapsed history list.
+Recorded team labels/targets are preserved across reassignment; these records are
+historical evidence, not current approvals or proof of remediation.
+
 ### Curated component metadata
 
 `PUT /api/v3/projects/{id}/versions/{version}/metadata` explicitly replaces

@@ -175,6 +175,18 @@ def resolve_ownership(sections, *, version, policy_state=None, config=None):
     mapping = {rule["selector"]: [rule["team_id"], *rule.get("aliases", [])] for rule in rules}
     inventory = sections["inventory"]
     baseline = inventory.get("baseline", {})
+    if baseline.get("withdrawn"):
+        sections["ownership"] = {
+            "policy": {"state": policy_state, **config},
+            "summary": {
+                "roots": [],
+                "contexts": 0,
+                "topology_status": "withdrawn",
+                "outside_selected_roots": [],
+                "identity_basis": "source_local_refs",
+            },
+        }
+        return
     part_graphs = {
         part["part_id"]: part.get("baseline", {}).get("dependency_graph", "not_reported")
         for part in inventory.get("assembly", {}).get("parts", [])

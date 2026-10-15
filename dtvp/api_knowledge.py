@@ -15,6 +15,7 @@ from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
 from dtvp.knowledge.ownership import OwnershipInput, policy_ref, product_heads, update_policy
 from dtvp.knowledge.projection import catch_up, heads, records
 from dtvp.knowledge.service import create_tag, import_inventory, part_ref, validate_time
+from dtvp.knowledge.withdrawal import WithdrawalInput, withdraw_inventory
 from dtvp.models import Workspace
 from dtvp.schemas import RequestModel
 
@@ -64,6 +65,26 @@ def projected_response(request, receipt):
         logger.exception("Committed knowledge publication %s awaits projection", sha)
         return JSONResponse({**result, "projection": "pending"}, status_code=202)
     return {**result, "projection": "current", "projected_sequence": position["sequence"]}
+
+
+@router.post("/projects/{project_id}/versions/{version}/withdrawal", status_code=201)
+def withdraw(
+    project_id: str, version: Name, data: WithdrawalInput, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id, "write")
+    try:
+        receipt = withdraw_inventory(
+            request.app.state.knowledge,
+            project_id=project_id,
+            version=version,
+            actor_id=actor.user.id,
+            data=data,
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except CommitUncertain as error:
+        return uncertain_response(error, data.request_id)
+    return projected_response(request, receipt)
 
 
 @router.post("/projects/{project_id}/versions/{version}/imports", status_code=201)

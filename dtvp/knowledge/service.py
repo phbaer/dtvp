@@ -192,7 +192,7 @@ def import_inventory(
 def create_tag(journal, *, project_id, actor_id, name, state, request_id):
     inventory = journal.records(state, "inventory")
     baseline = journal.load(inventory["baseline"]) if "baseline" in inventory else {}
-    if not baseline:
+    if not baseline or baseline.get("withdrawn"):
         raise Conflict("Release tags require an accepted product inventory")
     if (
         baseline.get("kind") == "assembly"
