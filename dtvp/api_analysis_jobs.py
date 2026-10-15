@@ -13,7 +13,7 @@ from dtvp.knowledge.analysis_jobs import (
     job_view,
     retry_analysis,
 )
-from dtvp.knowledge.journal import Conflict, Name, Sha
+from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 from dtvp.models import Job
 
 router = APIRouter(prefix="/api/v3")
@@ -76,6 +76,10 @@ def enqueue(
         raise HTTPException(409, str(error)) from error
     except PermissionError as error:
         raise HTTPException(403, str(error)) from error
+    except CommitUncertain as error:
+        raise HTTPException(
+            503, "Input issuance uncertain; retry the identical analysis request"
+        ) from error
 
 
 @router.get("/projects/{project_id}/versions/{version}/analysis-jobs")

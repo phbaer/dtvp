@@ -590,6 +590,12 @@ retries preserve the capture and expected head. Export/finding observations rema
 independent, including contradictions and full legacy DT documentation. Remote
 reads remain nontransactional, not a verified coherent snapshot.
 
+Issued native exports now retain exact serializer-versioned bundle/manifest/input
+bytes and unchanged consumer receipts in a sharded per-project journal index.
+Preparation reuses issued selectors before recomputing; returned evidence resolves
+issued inputs first and fails closed on corruption. Product heads remain unchanged.
+Legacy unissued receipt compatibility and consumer cutover qualification remain gates.
+
 Native bundles retain exact source/context/proposal/approval distinctions. CPE
 has an internal offline policy/proposal module; VScorer has explicit focused inputs
 and returned bound proposals. Producer-qualified Agentyzer inputs and returned

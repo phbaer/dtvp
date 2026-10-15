@@ -55,8 +55,14 @@ Native follow-ups, complete CPE migration/refresh and semantic identity
 reconciliation, full legal qualification and architecture approval remain planned.
 Production acceptance also requires machine authorization, archived reproducible
 inputs, failure/retry handling and controlled consumer fixture qualification.
-The optional source receipt is a consistency contract; versioned serializer
-compatibility across future upgrades remains a pre-cutover requirement.
+Newly issued input receipts resolve retained bytes instead of rerunning current
+serializers. Explicit `POST .../states/{state}/exports/bundle` creates a frozen
+bundle issuance; authorized file URLs preserve bytes across upgrades. Specialist
+preparation returns optional issuance metadata while native receipts remain unchanged.
+Older unissued receipts retain reproduction compatibility limits. Generator’s
+current isolated adapter still uses direct state bundle reads; adopting issuance
+and controlled output qualification remain cutover work. Source receipts establish
+consistency, not provider authenticity or human approval.
 
 Native Dependency-Track intake uses per-version bindings and durable GET-only
 collection jobs. Frozen captures retain original export/finding/analysis responses,

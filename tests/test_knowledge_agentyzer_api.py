@@ -31,7 +31,6 @@ def test_analysis_recipe_requires_qualified_source_and_preserves_pinned_scope(an
             },
         ),
     )
-    publication = app.state.knowledge.head()
     recipe = analyst.post(url(project_id, f"/states/{current}/agentyzer-input"), json=payload)
     assert recipe.status_code == 200, recipe.text
     recipe = recipe.json()
@@ -43,4 +42,10 @@ def test_analysis_recipe_requires_qualified_source_and_preserves_pinned_scope(an
     assert recipe["coverage"]["repository_authorization"] == "not_checked"
     assert recipe["coverage"]["artifact_binding_verified"] is False
     assert workspace(analyst, project_id)["state"] == current
+    assert recipe["issuance"]["source_state"] == current
+    publication = app.state.knowledge.head()
+    assert (
+        analyst.post(url(project_id, f"/states/{current}/agentyzer-input"), json=payload).json()
+        == recipe
+    )
     assert app.state.knowledge.head() == publication

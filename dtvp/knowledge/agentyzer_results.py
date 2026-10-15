@@ -175,8 +175,17 @@ def import_agentyzer_result(journal, *, project_id, version, actor_id, data):
         raise ValueError("Agentyzer receipt belongs to another product version")
     if not journal.objects.path(receipt["state"]).is_file():
         raise ValueError("Agentyzer pinned input state is unavailable")
-    derived = derive_analysis_input(
-        journal, receipt["state"], receipt["context_id"], receipt["vulnerability_id"]
+    from dtvp.knowledge.issued_exports import resolve_issued_export
+
+    issued = resolve_issued_export(
+        journal, project_id, digest(canonical(receipt)), kind="agentyzer-input"
+    )
+    derived = (
+        issued["payload"]
+        if issued
+        else derive_analysis_input(
+            journal, receipt["state"], receipt["context_id"], receipt["vulnerability_id"]
+        )
     )
     if derived["receipt"] != receipt:
         raise ValueError("Agentyzer input receipt differs from reproduced pinned inputs")

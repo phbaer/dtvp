@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import Field
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_issued_exports import project_issuance
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.cpe import (
     DiscoveryInput,
@@ -11,6 +12,7 @@ from dtvp.knowledge.cpe import (
     import_discovery_policy,
     propose_for_component,
 )
+from dtvp.knowledge.issued_exports import find_issued_export, issue_export
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Sha
 from dtvp.schemas import RequestModel
 from dtvp.storage import canonical
@@ -92,15 +94,49 @@ def vscorer_inputs(
     project_for(db, actor, project_id, "snapshot")
     journal = request.app.state.knowledge
     require_state(journal, state, project_id)
-    result = derive_context_inputs(
-        journal, state, data.context_id, data.component_ref, data.base_selections
+    selector = data.model_dump(mode="json")
+    issued = find_issued_export(
+        journal, project_id, state=state, kind="vscorer-input", selector=selector
     )
+    result = (
+        issued["payload"]
+        if issued
+        else derive_context_inputs(
+            journal, state, data.context_id, data.component_ref, data.base_selections
+        )
+    )
+    if issued is None and result["dtvp_source"] is not None:
+        try:
+            issued = issue_export(
+                journal,
+                project_id=project_id,
+                actor_id=actor.user.id,
+                state=state,
+                kind="vscorer-input",
+                payload=result,
+                selector=selector,
+            )
+        except Conflict as error:
+            raise HTTPException(409, str(error)) from error
+        except CommitUncertain as error:
+            raise HTTPException(
+                503, "Export issuance uncertain; retry the identical input selection"
+            ) from error
     return {
         **result,
+        **({"issuance": project_issuance(request, issued)} if issued else {}),
         "files": {
-            "sbom.cdx.json": canonical(result["sbom"]).decode(),
-            "cves.json": canonical(result["cves"]).decode(),
-            "dtvp-source.json": canonical(result["dtvp_source"]).decode(),
+            "sbom.cdx.json": journal.objects.read(issued["files"]["sbom.json"]["sha256"]).decode()
+            if issued
+            else canonical(result["sbom"]).decode(),
+            "cves.json": journal.objects.read(issued["files"]["cves.json"]["sha256"]).decode()
+            if issued
+            else canonical(result["cves"]).decode(),
+            "dtvp-source.json": journal.objects.read(
+                issued["files"]["receipt.json"]["sha256"]
+            ).decode()
+            if issued
+            else canonical(result["dtvp_source"]).decode(),
         },
     }
 
@@ -119,4 +155,26 @@ def agentyzer_inputs(
     project_for(db, actor, project_id, "snapshot")
     journal = request.app.state.knowledge
     require_state(journal, state, project_id)
-    return derive_analysis_input(journal, state, data.context_id, data.vulnerability_id)
+    selector = data.model_dump(mode="json")
+    issued = find_issued_export(
+        journal, project_id, state=state, kind="agentyzer-input", selector=selector
+    )
+    if issued is None:
+        result = derive_analysis_input(journal, state, data.context_id, data.vulnerability_id)
+        try:
+            issued = issue_export(
+                journal,
+                project_id=project_id,
+                actor_id=actor.user.id,
+                state=state,
+                kind="agentyzer-input",
+                payload=result,
+                selector=selector,
+            )
+        except Conflict as error:
+            raise HTTPException(409, str(error)) from error
+        except CommitUncertain as error:
+            raise HTTPException(
+                503, "Export issuance uncertain; retry the identical input selection"
+            ) from error
+    return {**issued["payload"], "issuance": project_issuance(request, issued)}

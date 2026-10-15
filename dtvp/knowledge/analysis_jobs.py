@@ -94,7 +94,17 @@ def enqueue_analysis(db, journal, settings, *, project_id, version, actor, data)
         return existing
     if _head(journal, project_id, version) != data.expected:
         raise Conflict("Product version changed; reload before requesting analysis")
-    derived = derive_analysis_input(journal, data.expected, data.context_id, data.vulnerability_id)
+    from dtvp.knowledge.issued_exports import find_issued_export, issue_export
+
+    selector = {"context_id": data.context_id, "vulnerability_id": data.vulnerability_id}
+    issued = find_issued_export(
+        journal, project_id, state=data.expected, kind="agentyzer-input", selector=selector
+    )
+    derived = (
+        issued["payload"]
+        if issued
+        else derive_analysis_input(journal, data.expected, data.context_id, data.vulnerability_id)
+    )
     if derived["receipt"]["project_id"] != project_id or derived["receipt"]["version"] != version:
         raise ValueError("Analysis receipt belongs to another product version")
     if not derived["ready_to_submit"]:
@@ -102,6 +112,16 @@ def enqueue_analysis(db, journal, settings, *, project_id, version, actor, data)
     request = dict(derived["request"])
     if _repository(project) != request["component_name"]:
         raise PermissionError("Repository is not authorized by the project's Agentyzer binding")
+    if issued is None:
+        issue_export(
+            journal,
+            project_id=project_id,
+            actor_id=actor.user.id,
+            state=data.expected,
+            kind="agentyzer-input",
+            payload=derived,
+            selector=selector,
+        )
     if data.user_guidance:
         request["user_guidance"] = data.user_guidance
     job = Job(

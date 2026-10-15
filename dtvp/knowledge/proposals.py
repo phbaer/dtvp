@@ -65,12 +65,21 @@ def _binding(journal, project_id, version, data):
     source = journal.verify_state(receipt.get("state"))
     if source.project_id != project_id or source.version != version:
         raise ValueError("VScorer pinned state belongs to another product version")
-    derived = derive_context_inputs(
-        journal,
-        receipt["state"],
-        receipt.get("context_id"),
-        receipt.get("component_ref"),
-        {identifier: value["vector"] for identifier, value in selected.items()},
+    from dtvp.knowledge.issued_exports import resolve_issued_export
+
+    issued = resolve_issued_export(
+        journal, project_id, binding["receipt_sha256"], kind="vscorer-input"
+    )
+    derived = (
+        issued["payload"]
+        if issued
+        else derive_context_inputs(
+            journal,
+            receipt["state"],
+            receipt.get("context_id"),
+            receipt.get("component_ref"),
+            {identifier: value["vector"] for identifier, value in selected.items()},
+        )
     )
     if derived["dtvp_source"] != receipt:
         raise ValueError("VScorer source receipt differs from DTVP's pinned derived inputs")
@@ -161,7 +170,9 @@ def import_vscorer_proposal(journal, *, project_id, version, actor_id, data):
         journal.objects.put(canonical(derived["sbom"])),
         journal.objects.put(canonical(derived["cves"])),
     }
-    proposal_id = digest(canonical(["vscorer", data.source_label, report_sha, actor_id, request_id]))
+    proposal_id = digest(
+        canonical(["vscorer", data.source_label, report_sha, actor_id, request_id])
+    )
     sections = load_sections(journal, data.expected)
     sections["scoring"]["proposal:" + proposal_id] = {
         "format": "dtvp.scoring-proposal/1",

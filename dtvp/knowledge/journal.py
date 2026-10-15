@@ -298,6 +298,12 @@ class Journal:
                     raise Conflict("Branch changed; reload and reconcile")
                 if update.ref.kind == "tag" and existing is not None:
                     raise Conflict("Release tags are immutable")
+                if (
+                    update.ref.kind == "evidence"
+                    and update.ref.name.startswith("consumer-export/")
+                    and existing is not None
+                ):
+                    raise Conflict("Issued consumer exports are immutable")
                 state = self.verify_state(update.target)
                 if state.project_id != update.ref.project_id:
                     raise ValueError("Reference must stay within its product line")
