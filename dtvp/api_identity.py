@@ -94,3 +94,20 @@ def vscorer_inputs(
     return derive_context_inputs(
         journal, state, data.context_id, data.component_ref, data.base_selections
     )
+
+
+class AgentyzerInput(RequestModel):
+    context_id: Sha
+    vulnerability_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/projects/{project_id}/states/{state}/agentyzer-input")
+def agentyzer_inputs(
+    project_id: str, state: Sha, data: AgentyzerInput, request: Request, db: DB, actor: Auth
+):
+    from dtvp.knowledge.agentyzer import derive_analysis_input
+
+    project_for(db, actor, project_id, "snapshot")
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    return derive_analysis_input(journal, state, data.context_id, data.vulnerability_id)

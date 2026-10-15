@@ -367,6 +367,21 @@ current independent team reviews and explicit publication. Importing a result
 never creates an assessment, review or published score. Provider identity remains
 caller-asserted; hashes verify artifact consistency only.
 
+### Qualified Agentyzer inputs
+
+SBOM intake optionally accepts `context.analysis_source` with a repository name
+and exact 40-hex Git commit. This is an explicit producer declaration; unqualified
+`source_revision`, tags and branch names never establish an analysis source.
+`POST /api/v3/projects/{id}/states/{state}/agentyzer-input` takes `context_id` and
+`vulnerability_id` under snapshot permission. It derives a native request plus
+`dtvp.agentyzer-source/1` receipt pinning consuming context, focal package/version,
+source SBOM, constituent selection, declared subject digest and material fingerprint.
+Missing, inconsistent or unavailable source information returns explicit not-ready
+coverage. The endpoint contacts no service and creates no job or human approval.
+An external orchestrator still authorizes the repository; a source commit does not
+verify a built binary/container. Native durable job orchestration and returned
+Agentyzer evidence remain subsequent work. The existing v2 connector stays separate.
+
 ### Imported DT documentation
 
 Native v3 workspaces, bundles and CLI retain previous DTVP-tagged DT team

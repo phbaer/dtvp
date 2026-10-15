@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from dtvp.knowledge.journal import Name
 from dtvp.schemas import RequestModel
@@ -10,6 +10,24 @@ from dtvp.schemas import RequestModel
 Coverage = Literal["unknown", "partial", "reported_complete"]
 ArtifactDigest = Annotated[str, Field(pattern=r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$")]
 NORMALIZER_VERSION = "dtvp.composition/1"
+
+
+class AnalysisSource(RequestModel):
+    repository_name: Name
+    source_commit: Annotated[str, Field(pattern=r"^[a-fA-F0-9]{40}$")]
+
+    @field_validator("repository_name")
+    @classmethod
+    def normalized_repository(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Repository name must contain non-whitespace characters")
+        return value
+
+    @field_validator("source_commit")
+    @classmethod
+    def normalized_commit(cls, value):
+        return value.lower()
 
 
 class CollectionContext(RequestModel):
@@ -21,6 +39,9 @@ class CollectionContext(RequestModel):
     platform: Name | None = None
     configuration: Name | None = None
     source_revision: Name | None = None
+    analysis_source: AnalysisSource | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     pipeline_run: Name | None = None
     collector: Name | None = None
     collector_version: Name | None = None
