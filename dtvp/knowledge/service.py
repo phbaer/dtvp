@@ -2,6 +2,12 @@
 
 from datetime import datetime
 
+from dtvp.knowledge.composition import (
+    CollectionContext,
+    collection_summary,
+    dependency_edges,
+    relationships,
+)
 from dtvp.knowledge.journal import SECTIONS, Conflict, Ref, Update
 from dtvp.parsers import parse
 from dtvp.storage import canonical, digest
@@ -22,7 +28,9 @@ def import_inventory(
     source,
     build_number,
     occurred_at,
-    sbom,
+    sbom=None,
+    raw=None,
+    context=None,
     predecessor=None,
 ):
     """Replace a complete baseline, preserving all other knowledge sections.
@@ -31,6 +39,8 @@ def import_inventory(
     Changing that source needs a future authority-policy operation; this slice
     rejects it instead of silently accepting an incompatible build ordering.
     """
+    if (sbom is None) == (raw is None):
+        raise ValueError("Provide exactly one SBOM object or original file")
     operation = dict(
         operation="inventory.import/1",
         project_id=project_id,
@@ -40,9 +50,19 @@ def import_inventory(
         source=source,
         build_number=build_number,
         occurred_at=occurred_at,
-        sbom=sbom,
         predecessor=predecessor,
     )
+    if raw is None:
+        operation["sbom"] = sbom
+        raw = canonical(sbom)
+        representation = "canonical_json"
+    else:
+        operation["input_artifact_sha"] = digest(raw)
+        representation = "original_bytes"
+    # Preserve receipt compatibility for earlier JSON requests without context.
+    if context is not None:
+        operation["context"] = context
+    collection = CollectionContext.model_validate(context or {})
     fingerprint = digest(canonical(operation))
     scoped_request = digest(canonical([project_id, actor_id, request_id]))
     # Replay before checking the head: a successful retry may name an old parent.
@@ -69,10 +89,16 @@ def import_inventory(
             baseline = sections["inventory"]["baseline"]
             if baseline["source"] != source:
                 raise Conflict("Changing inventory authority requires an explicit policy")
+            before = CollectionContext.model_validate(baseline.get("collection", {}))
+            if before.boundary() != collection.boundary():
+                raise Conflict(
+                    "Different collection scope cannot replace this baseline; "
+                    "use an explicit assembly or configuration reconciliation"
+                )
             if build_number <= baseline["build_number"]:
                 raise Conflict("Build is not newer than the accepted baseline")
-    raw = canonical(sbom)
     document = parse(raw)
+    relations = relationships(document)
     # Source-local keys are deliberate in the first slice; identity reconciliation
     # and context-aware assessment carryover are not implemented by this importer.
     sections["inventory"] = {
@@ -84,9 +110,12 @@ def import_inventory(
             parser=document["parser"],
             format=document["format"],
             losses=document["losses"],
+            representation=representation,
+            **collection_summary(document, collection),
         ),
         **{component_key(c["bom-ref"]): c for c in document["components"]},
-        "dependencies": {"edges": document["bom"].get("dependencies", [])},
+        "dependencies": {"edges": dependency_edges(document, relations)},
+        "relationships": {"items": relations},
         "root": document["bom"].get("metadata", {}).get("component", {}),
     }
     # Source claims remain separate from future human assessments.

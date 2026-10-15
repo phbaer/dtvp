@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8900")
+    parser.add_argument(
+        "--files", action="store_true", help="Upload and verify original SBOM files"
+    )
     args = parser.parse_args()
     bom = json.loads((ROOT / "playground/fixtures/release.cdx.json").read_text())
     changed = copy.deepcopy(bom)
@@ -42,25 +45,38 @@ def main():
                 current.raise_for_status()
                 previous = current.json()["state"]
                 build = current.json()["baseline"]["build_number"] + 1
-            response = client.post(
-                f"{path}/imports",
-                json={
-                    "request_id": str(uuid4()),
-                    "expected": previous,
-                    "source": "playground/knowledge",
-                    "build_number": build,
-                    "occurred_at": datetime.now(UTC).isoformat(),
-                    "completeness": "complete",
-                    "sbom": document,
-                    "predecessor": states[0] if previous is None and states else None,
-                },
-            )
+            metadata = {
+                "request_id": str(uuid4()),
+                "expected": previous,
+                "source": "playground/knowledge",
+                "build_number": build,
+                "occurred_at": datetime.now(UTC).isoformat(),
+                "completeness": "complete",
+                "sbom": document,
+                "predecessor": states[0] if previous is None and states else None,
+            }
+            if args.files:
+                metadata.pop("sbom")
+                raw = (json.dumps(document, indent=2) + "\n").encode()
+                response = client.post(
+                    f"{path}/files",
+                    data={"metadata": json.dumps(metadata)},
+                    files={"file": ("demo.cdx.json", raw, "application/json")},
+                )
+            else:
+                response = client.post(f"{path}/imports", json=metadata)
             response.raise_for_status()
             result = response.json()
             if result["projection"] != "current":
                 raise RuntimeError("Import committed; projection is pending. Check API logs.")
             states.append(result["updates"][0]["target"])
             print(f"{version}: build {build}, state {states[-1]}")
+            if args.files:
+                original = client.get(f"/api/v3/projects/{project_id}/states/{states[-1]}/source")
+                original.raise_for_status()
+                if original.content != raw:
+                    raise RuntimeError("Original-byte verification failed")
+                print(f"  Original bytes verified: {original.headers['x-content-sha256']}")
         response = client.post(
             f"/api/v3/projects/{project_id}/tags",
             json={

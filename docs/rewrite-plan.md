@@ -512,14 +512,21 @@ API conformance runs on SQLite and, when an explicitly disposable
 startup checks also run against PostgreSQL. This verifies fault boundaries with
 injected exceptions; physical power-loss testing remains separate.
 
+The next increment preserves original file bytes, exposes authorized pinned-source
+retrieval and records declared collection scope/provenance/coverage. It prevents
+ordinary replacement across incompatible declared scopes and retains typed SPDX
+relations without promoting containment into dependency topology. Coverage remains
+producer-declared, never inferred as verified by successful import.
+
 Not yet implemented: new UI/CLI workspaces, stable cross-import/context identity,
 recursive ownership parity, shared reviewed range coverage, evidence synthesis,
 VDR/VEX adapters, cascading synchronization, cached semantic comparisons, journal
 retention/GC, operational-state recovery and v2/legacy migration. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain
 source-local references; no implicit assessment inheritance or scope approval
-is inferred from them. The API currently accepts SBOM JSON objects, storing their
-canonical representation, rather than preserving upload bytes. These limitations
+is inferred from them. JSON-object imports retain their canonical representation;
+multipart file intake retains original bytes. Full multi-part assembly and
+byte-preserving normalized export round trips remain separate work. These limitations
 must be resolved in subsequent slices before replacing v2 or declaring cutover.
 
 ## Historical plan and refactoring record (superseded)

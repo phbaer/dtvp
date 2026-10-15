@@ -59,9 +59,28 @@ The new inventories are API-only until the new workspace is implemented.
 request ID, expected head (null to create), source, monotonic source build number,
 timezone-aware observation time, `completeness: complete` and an SBOM object.
 Optional `predecessor` branches a new version from an existing product state.
-This first slice rejects authority changes and stale builds rather than guessing
-ordering across pipelines. JSON request data is retained as canonical JSON;
-byte-preserving file intake is a subsequent adapter operation.
+The API rejects authority changes and stale builds rather than guessing ordering
+across pipelines. JSON request data is retained as canonical JSON. For byte-exact
+CycloneDX JSON/XML or SPDX 2.3 JSON intake, post multipart `file` plus JSON
+`metadata` (the import fields without `sbom`) to `.../versions/{version}/files`.
+`GET .../states/{state}/source` returns that pinned original with its SHA-256 and
+representation headers; project permissions apply to downloads too.
+
+Optional import `context` records subject kind/digest, target, platform,
+configuration, source revision, pipeline run, collector/version/method, limitations
+and separately declared package/dependency/license coverage. Missing coverage
+stays unknown; `complete` is snapshot replacement within scope, not verified
+product completeness. Ordinary imports cannot change declared scope and silently
+overwrite another target/platform/configuration. Native multi-SBOM assembly is
+planned; legacy combined input can be retained but cannot recover lost provenance.
+V3 retains source relationship kinds; SPDX containment is not treated as dependency
+topology. V2 retains its earlier conversion behavior until migration.
+
+Exercise file intake and exact-byte retrieval with:
+
+```bash
+uv run python scripts/knowledge_demo.py --files
+```
 
 Read paginated inventory at `GET .../versions/{version}/inventory`; pass its
 `state` as `expected` on later pages to detect changes. Create protected tags

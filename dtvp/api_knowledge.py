@@ -3,12 +3,13 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import Field, field_validator
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.knowledge.composition import CollectionContext
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
 from dtvp.knowledge.projection import catch_up, heads, records
 from dtvp.knowledge.service import create_tag, import_inventory, validate_time
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/v3")
 logger = logging.getLogger(__name__)
 
 
-class InventoryInput(RequestModel):
+class InventoryMetadata(RequestModel):
     request_id: Name
     expected: Sha | None
     source: Name
@@ -26,12 +27,16 @@ class InventoryInput(RequestModel):
     occurred_at: str
     completeness: Literal["complete"]
     predecessor: Sha | None = None
-    sbom: dict
+    context: CollectionContext | None = None
 
     @field_validator("occurred_at")
     @classmethod
     def aware_time(cls, value):
         return validate_time(value)
+
+
+class InventoryInput(InventoryMetadata):
+    sbom: dict
 
 
 class TagInput(RequestModel):
@@ -69,6 +74,38 @@ def import_version(
             project_id=project_id,
             version=version,
             actor_id=actor.user.id,
+            **data.model_dump(exclude={"completeness"}),
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except CommitUncertain as error:
+        return uncertain_response(error, data.request_id)
+    return projected_response(request, receipt)
+
+
+@router.post("/projects/{project_id}/versions/{version}/files", status_code=201)
+def import_file(
+    project_id: str,
+    version: str,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    file: UploadFile = File(),
+    metadata: str = Form(max_length=65536),
+):
+    project_for(db, actor, project_id, "write")
+    data = InventoryMetadata.model_validate_json(metadata)
+    maximum = request.app.state.settings.max_upload_bytes
+    raw = file.file.read(maximum + 1)
+    if len(raw) > maximum:
+        raise HTTPException(413, "SBOM file exceeds upload limit")
+    try:
+        receipt = import_inventory(
+            request.app.state.knowledge,
+            project_id=project_id,
+            version=version,
+            actor_id=actor.user.id,
+            raw=raw,
             **data.model_dump(exclude={"completeness"}),
         )
     except Conflict as error:
@@ -117,6 +154,26 @@ def require_state(journal, sha, project_id):
     if state.project_id != project_id:
         raise HTTPException(404, "State unavailable in this product line")
     return state
+
+
+@router.get("/projects/{project_id}/states/{state}/source")
+def source_document(project_id: str, state: Sha, request: Request, db: DB, actor: Auth):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    inventory = journal.records(state, "inventory")
+    if "baseline" not in inventory:
+        raise HTTPException(404, "State has no source SBOM")
+    baseline = journal.load(inventory["baseline"])
+    return Response(
+        journal.objects.read(baseline["artifact_sha"]),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": 'attachment; filename="source-sbom"',
+            "X-Content-SHA256": baseline["artifact_sha"],
+            "X-DTVP-Representation": baseline.get("representation", "canonical_json"),
+        },
+    )
 
 
 @router.get("/projects/{project_id}/versions/{version}/inventory")
