@@ -266,6 +266,7 @@ def publish(
     *,
     branch_heads=None,
     artifacts=(),
+    publication_checks=(),
 ):
     updates = []
     for version, parent in sorted(expected.items()):
@@ -285,18 +286,36 @@ def publish(
         request_id=request_id,
         fingerprint=fingerprint,
         updates=updates,
+        checks=publication_checks,
         branch_heads={project_id: branch_heads} if branch_heads is not None else None,
     )
 
 
-def save_assessment(journal, *, project_id, actor_id, assessment_id, data, submit, authorize):
+def save_assessment(
+    journal,
+    *,
+    project_id,
+    actor_id,
+    assessment_id,
+    data,
+    submit,
+    authorize,
+    publication_checks=(),
+):
     """Save a draft or explicitly submit; never create a human approval."""
+    publication_checks = tuple(publication_checks)
+    operation = {**data.model_dump(mode="json"), "assessment_id": assessment_id, "submit": submit}
+    if publication_checks:
+        operation["publication_checks"] = [
+            {"ref": ref.model_dump(mode="json"), "expected": expected}
+            for ref, expected in publication_checks
+        ]
     request_id, fingerprint, receipt = prepare(
         journal,
         project_id,
         actor_id,
         "assessment.save/1",
-        {**data.model_dump(mode="json"), "assessment_id": assessment_id, "submit": submit},
+        operation,
     )
     if receipt:
         return receipt
@@ -390,6 +409,7 @@ def save_assessment(journal, *, project_id, actor_id, assessment_id, data, submi
         "Submit contextual assessment" if submit else "Save contextual assessment draft",
         branch_heads=project_heads,
         artifacts=[revision],
+        publication_checks=publication_checks,
     )
 
 

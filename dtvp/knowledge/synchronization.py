@@ -153,7 +153,16 @@ def _classify(
 
 
 def synchronization_preview(
-    journal, project_id, source, target, basis=None, context_mapping=None, offset=0, limit=50
+    journal,
+    project_id,
+    source,
+    target,
+    basis=None,
+    context_mapping=None,
+    offset=0,
+    limit=50,
+    *,
+    row_id=None,
 ):
     """Propose content only; knowledge ancestry never proves a software merge."""
     page([], offset, limit)
@@ -293,8 +302,10 @@ def synchronization_preview(
             "Knowledge ancestry is not evidence of a source-code merge or fix propagation.",
             "Target inventory remains authoritative; no SBOM union, review or score copying occurs.",
             "Identity uses exact source-local references and vulnerability identifiers; aliases are not merged and mappings do not prove equivalence. Absent findings do not prove remediation; extended coverage needs independent review.",
-            "No automatic synchronization or application is implemented.",
+            "No automatic synchronization is implemented. Explicit source-author draft extension requires new target review.",
         ],
     }
     preview["preview_digest"] = digest(canonical([preview, rows]))
+    if row_id is not None:
+        preview["selected_row"] = next((row for row in rows if row["id"] == row_id), None)
     return {**preview, **page(rows, offset, limit)}

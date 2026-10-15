@@ -327,8 +327,14 @@ already-covered targets, required review, conflicting edits, absent applicabilit
 and unresolved scope. Exact source-local references/material evidence govern
 matching; explicit maps cannot collapse different contexts or establish equivalence.
 Target inventory, reviews and published scores remain unchanged. Knowledge ancestry
-never proves a software merge. Applying synchronization and verified pipeline merge
-provenance remain planned; extensions still use explicit assessment/review workflows.
+never proves a software merge. Verified pipeline merge provenance and automatic synchronization remain planned.
+`POST .../synchronization/drafts` explicitly extends one source assessment's logical
+ID into a target-only draft. It requires the source author, current source/target
+heads, exact preview/revision, explicit target conditions and a reason. Any existing
+target assessment or review blocks overwrite. Atomic publication guards the source
+head and preserves its approval; source approvals and scores never transfer.
+Successful retries replay the same receipt even after either branch advances.
+The draft must still be submitted and independently reviewed for its new scope.
 
 The comparison panel offers a collapsed reuse preview between selected states.
 CLI: `knowledge synchronization --project ID --source SHA --target SHA`, optionally

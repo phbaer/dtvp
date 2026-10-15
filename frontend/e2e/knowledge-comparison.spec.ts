@@ -1,8 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const before = 'a'.repeat(64), after = 'b'.repeat(64), historic = 'c'.repeat(64)
-async function fixture(page: Page) {
+const sourceContext = 'e'.repeat(64), targetContext = 'f'.repeat(64), assessmentRevision = '1'.repeat(64), updatedAfter = '2'.repeat(64)
+async function fixture(page: Page, options: { draftAllowed?: boolean; draftResponses?: number[] } = {}) {
   const requests: URLSearchParams[] = [], historyRequests: URLSearchParams[] = [], mutations: string[] = []
+  const drafts: Record<string, unknown>[] = []
+  let created = false
   let fail = false
   await page.route('**/api/**', async route => {
     const request = route.request(), target = new URL(request.url()), path = target.pathname
@@ -10,7 +13,14 @@ async function fixture(page: Page) {
       mutations.push(path)
       const body = request.postDataJSON(), next = target.searchParams.get('offset') === '20'
       expect(body).toEqual({ source: before, target: after })
-      return route.fulfill({ json: { preview_digest: 'd'.repeat(64), mode: 'two_state', total: 31, next_offset: next ? null : 20, items: [{ id: next ? 'two' : 'one', vulnerability_id: 'CVE-2099-1234', category: 'reusable_content', reasons: ['new_target_review_required'], requires_new_target_review: true }], limitations: ['No software merge is verified.'] } })
+      return route.fulfill({ json: { source: before, target: after, basis: null, preview_digest: 'd'.repeat(64), mode: 'two_state', total: 31, next_offset: next ? null : 20, items: [{ id: next ? 'two' : 'one', vulnerability_id: 'CVE-2099-1234', source_context_id: sourceContext, target_context_id: targetContext, source: { assessment_revision: assessmentRevision }, draft_allowed: options.draftAllowed || false, category: 'reusable_content', reasons: ['new_target_review_required'], requires_new_target_review: true }], limitations: ['No software merge is verified.'] } })
+    }
+    if (path.endsWith('/synchronization/drafts')) {
+      mutations.push(path); drafts.push(request.postDataJSON())
+      const status = options.draftResponses?.[drafts.length - 1] || 201
+      if (status !== 201) return route.fulfill({ status, json: { detail: status === 409 ? 'Target changed; reload the preview' : 'Publication uncertain; retry the same request' } })
+      created = true
+      return route.fulfill({ status, json: { updates: [{ target: updatedAfter }] } })
     }
     if (request.method() !== 'GET') { mutations.push(path); return route.fulfill({ json: {} }) }
     let result: unknown = { items: [], next_cursor: null }
@@ -18,7 +28,7 @@ async function fixture(page: Page) {
     else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'comparison-project', name: 'Comparison product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: after }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: after, project_id: 'comparison-project', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
-    else if (path.endsWith('/refs')) result = { items: [{ kind: 'branch', name: '7.1.1', version: '7.1.1', state: before }, { kind: 'branch', name: '7.1.2', version: '7.1.2', state: after }, { kind: 'tag', name: 'released-7.1.1', version: '7.1.1', state: historic }], next_offset: null }
+    else if (path.endsWith('/refs')) result = { items: [{ kind: 'branch', name: '7.1.1', version: '7.1.1', state: before }, { kind: 'branch', name: '7.1.2', version: '7.1.2', state: created ? updatedAfter : after }, { kind: 'tag', name: 'released-7.1.1', version: '7.1.1', state: historic }], next_offset: null }
     else if (path.endsWith('/history')) {
       historyRequests.push(new URLSearchParams(target.search))
       result = { items: [{ state: historic, version: '7.1.1', created_at: '2026-10-14T12:00:00Z', reason: 'Import nightly 41', actor_id: 'pipeline', parents: [] }], next_offset: null }
@@ -40,7 +50,7 @@ async function fixture(page: Page) {
   await page.goto('/?page=Knowledge')
   await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
   await page.getByRole('option', { name: 'Comparison product' }).click()
-  return { requests, historyRequests, mutations, fail: () => { fail = true } }
+  return { requests, historyRequests, mutations, drafts, fail: () => { fail = true } }
 }
 
 test('comparison stays collapsed and renders backend totals with pinned bounded pages', async ({ page }) => {
@@ -119,4 +129,67 @@ test('assessment reuse is a pinned read-only preview with new target review requ
   await expect(page.getByRole('button', { name: 'Next candidates', exact: true })).toBeDisabled()
   expect(state.mutations).toEqual(['/api/v3/projects/comparison-project/synchronization/preview', '/api/v3/projects/comparison-project/synchronization/preview'])
   await expect(page.getByRole('button', { name: /apply|merge|approve/i })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Create target draft', exact: true })).toHaveCount(0)
+})
+
+async function openDraft(page: Page) {
+  await page.getByText('Compare versions and history', { exact: true }).click()
+  await page.getByText('Assessment reuse between selected states', { exact: true }).click()
+  await page.getByRole('button', { name: 'Preview assessment reuse', exact: true }).click()
+  await page.getByText('CVE-2099-1234 · reusable content', { exact: true }).click()
+  await page.getByRole('button', { name: 'Create target draft', exact: true }).click()
+  return page.getByRole('form', { name: 'Target assessment draft', exact: true })
+}
+
+test('eligible source author creates only a pinned target draft with explicit conditions and reason', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const state = await fixture(page, { draftAllowed: true })
+  const form = await openDraft(page)
+  const create = form.getByRole('button', { name: 'Create target draft', exact: true })
+  await expect(create).toBeDisabled()
+  await form.getByLabel('Target conditions', { exact: true }).fill('Target parser remains unreachable.')
+  await expect(create).toBeDisabled()
+  await form.getByLabel('Reason for extending coverage', { exact: true }).fill('Same maintained configuration; independent target review follows.')
+  const bounds = await form.boundingBox()
+  expect(bounds?.width).toBeLessThanOrEqual(390)
+  await create.click()
+  await expect(page.getByRole('status').filter({ hasText: 'Target draft created.' })).toContainText('Independent target review is still required.')
+  await expect(page.getByRole('region', { name: 'Assessment reuse preview', exact: true })).toHaveCount(0)
+  expect(state.drafts).toHaveLength(1)
+  expect(state.drafts[0]).toEqual({ source: before, target: after, basis: null, preview_digest: 'd'.repeat(64), source_context_id: sourceContext, target_context_id: targetContext, vulnerability_id: 'CVE-2099-1234', source_assessment_revision: assessmentRevision, context_mapping: {}, conditions: 'Target parser remains unreachable.', reason: 'Same maintained configuration; independent target review follows.', request_id: expect.stringMatching(/^[0-9a-f-]{36}$/) })
+  expect(state.mutations).toEqual(['/api/v3/projects/comparison-project/synchronization/preview', '/api/v3/projects/comparison-project/synchronization/drafts'])
+  await page.getByRole('button', { name: 'Refresh version references', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: 'After state', exact: true })).toHaveValue(`branch:7.1.2:${updatedAfter}`)
+  await expect(page.getByRole('button', { name: /approve|publish score|merge/i })).toHaveCount(0)
+})
+
+for (const status of [409, 503]) {
+  test(`draft ${status} preserves authored fields and retries with exactly the same idempotency payload`, async ({ page }) => {
+    const state = await fixture(page, { draftAllowed: true, draftResponses: [status, 201] })
+    const form = await openDraft(page)
+    await form.getByLabel('Target conditions', { exact: true }).fill('Applicable target conditions')
+    await form.getByLabel('Reason for extending coverage', { exact: true }).fill('Explicit target reuse rationale')
+    await form.getByRole('button', { name: 'Create target draft', exact: true }).click()
+    await expect(form.getByRole('alert')).toHaveText(status === 409 ? 'Target changed; reload the preview' : 'Publication uncertain; retry the same request')
+    await expect(form.getByLabel('Target conditions', { exact: true })).toHaveValue('Applicable target conditions')
+    await expect(form.getByLabel('Reason for extending coverage', { exact: true })).toHaveValue('Explicit target reuse rationale')
+    await form.getByRole('button', { name: 'Create target draft', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Target draft created.' })).toBeVisible()
+    expect(state.drafts).toHaveLength(2)
+    expect(state.drafts[1]).toEqual(state.drafts[0])
+  })
+}
+
+test('changing draft content after an uncertain response uses a new request identity', async ({ page }) => {
+  const state = await fixture(page, { draftAllowed: true, draftResponses: [503, 201] })
+  const form = await openDraft(page)
+  await form.getByLabel('Target conditions', { exact: true }).fill('Applicable target conditions')
+  await form.getByLabel('Reason for extending coverage', { exact: true }).fill('Original rationale')
+  await form.getByRole('button', { name: 'Create target draft', exact: true }).click()
+  await expect(form.getByRole('alert')).toBeVisible()
+  await form.getByLabel('Reason for extending coverage', { exact: true }).fill('Revised rationale')
+  await form.getByRole('button', { name: 'Create target draft', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Target draft created.' })).toBeVisible()
+  expect(state.drafts[1]?.request_id).not.toBe(state.drafts[0]?.request_id)
+  expect(state.drafts[1]?.reason).toBe('Revised rationale')
 })

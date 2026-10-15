@@ -8,8 +8,11 @@ type Revision = { state: string; version: string; created_at: string; reason: st
 type Choice = { id: string; state: string; label: string }
 type Change = { category: string; key: string | string[]; change: string; classifications: string[]; before: Record<string, unknown> | null; after: Record<string, unknown> | null }
 type Comparison = { before: string; after: string; before_version: string; after_version: string; items: Change[]; total: number; next_offset: number | null; summary: { by_category: Record<string, number>; by_classification: Record<string, number> }; retention: { before: { retained_assessments: number; retained_absent_assessments: number }; after: { retained_assessments: number; retained_absent_assessments: number } }; limitations: string[] }
-type SyncPreview = { preview_digest: string; mode: string; total: number; next_offset: number | null; items: { id: string; category: string; vulnerability_id?: string; reasons: string[]; requires_new_target_review: boolean; [key: string]: unknown }[]; limitations: string[] }
+type SyncRow = { id: string; category: string; vulnerability_id?: string; source_context_id?: string; target_context_id?: string; source?: { assessment_revision?: string }; draft_allowed?: boolean; reasons: string[]; requires_new_target_review: boolean; [key: string]: unknown }
+type SyncPreview = { source: string; target: string; basis: string | null; preview_digest: string; mode: string; total: number; next_offset: number | null; items: SyncRow[]; limitations: string[] }
 const synchronization = ref<SyncPreview | null>(null), syncBusy = ref(false), syncOffset = ref(0), syncPrevious = ref<number[]>([])
+const draftRow = ref(''), draftConditions = ref(''), draftReason = ref(''), draftBusy = ref(false), draftError = ref(''), draftNotice = ref('')
+let draftAttempt: { signature: string; requestId: string } | null = null
 let syncSequence = 0
 const props = defineProps<{ project: string }>()
 const expanded = ref(false), references = ref<Reference[]>([]), referencesNext = ref<number | null>(null)
@@ -25,7 +28,10 @@ const beforeState = computed(() => choices.value.find(item => item.id === before
 const afterState = computed(() => choices.value.find(item => item.id === after.value)?.state || '')
 const endpoint = () => `/projects/${encodeURIComponent(props.project)}`
 function failure(err: unknown) { error.value = err instanceof Error ? err.message : 'Comparison request failed' }
-function changed() { ++syncSequence; synchronization.value = null; syncOffset.value = 0; syncPrevious.value = []; syncBusy.value = false; ++comparisonSequence; result.value = null; offset.value = 0; previous.value = []; compareBusy.value = false; error.value = '' }
+function changed() { ++syncSequence; synchronization.value = null; syncOffset.value = 0; syncPrevious.value = []; syncBusy.value = false; clearDraft(); draftNotice.value = ''; ++comparisonSequence; result.value = null; offset.value = 0; previous.value = []; compareBusy.value = false; error.value = '' }
+function clearDraft() { draftRow.value = ''; draftConditions.value = ''; draftReason.value = ''; draftBusy.value = false; draftError.value = ''; draftAttempt = null }
+function openDraft(row: SyncRow) { if (draftRow.value !== row.id) { clearDraft(); draftRow.value = row.id } }
+async function refreshReferences() { changed(); before.value = ''; after.value = ''; await loadReferences() }
 async function loadReferences(append = false) {
   if (!props.project || refsBusy.value) return
   const scope = projectSequence
@@ -79,14 +85,33 @@ async function compare(reset = true) {
   finally { if (scope === projectSequence && request === comparisonSequence) compareBusy.value = false }
 }
 async function previewSynchronization(nextOffset = 0) {
-  if (!beforeState.value || !afterState.value) return
+  if (!beforeState.value || !afterState.value || draftBusy.value) return
   const scope = projectSequence, request = ++syncSequence
   syncBusy.value = true; error.value = ''
   try {
     const data = await knowledgeApi<SyncPreview>(`${endpoint()}/synchronization/preview?offset=${nextOffset}&limit=20`, send({ source: beforeState.value, target: afterState.value }))
-    if (scope === projectSequence && request === syncSequence) { synchronization.value = data; syncOffset.value = nextOffset }
+    if (scope === projectSequence && request === syncSequence) { synchronization.value = data; syncOffset.value = nextOffset; clearDraft(); draftNotice.value = '' }
   } catch (err) { if (scope === projectSequence && request === syncSequence) failure(err) }
   finally { if (scope === projectSequence && request === syncSequence) syncBusy.value = false }
+}
+async function createTargetDraft(row: SyncRow) {
+  const preview = synchronization.value
+  if (!preview || !row.draft_allowed || draftBusy.value) return
+  const conditions = draftConditions.value.trim(), reason = draftReason.value.trim()
+  if (!conditions || !reason) { draftError.value = 'Target conditions and a reason are required.'; return }
+  if (!row.source_context_id || !row.target_context_id || !row.vulnerability_id || !row.source?.assessment_revision) { draftError.value = 'The source pin is incomplete. Reload the reuse preview.'; return }
+  const body = { source: preview.source, target: preview.target, basis: preview.basis ?? null, preview_digest: preview.preview_digest, source_context_id: row.source_context_id, target_context_id: row.target_context_id, vulnerability_id: row.vulnerability_id, source_assessment_revision: row.source.assessment_revision, context_mapping: {}, conditions, reason }
+  const signature = JSON.stringify(body)
+  if (!draftAttempt || draftAttempt.signature !== signature) draftAttempt = { signature, requestId: crypto.randomUUID() }
+  const scope = projectSequence, sequence = syncSequence
+  draftBusy.value = true; draftError.value = ''
+  try {
+    await knowledgeApi(`${endpoint()}/synchronization/drafts`, send({ ...body, request_id: draftAttempt.requestId }))
+    if (scope !== projectSequence || sequence !== syncSequence) return
+    synchronization.value = null; clearDraft()
+    draftNotice.value = 'Target draft created. Independent target review is still required. Refresh version references to select the current target state.'
+  } catch (err) { if (scope === projectSequence && sequence === syncSequence) draftError.value = err instanceof Error ? err.message : 'Target draft request failed' }
+  finally { if (scope === projectSequence && sequence === syncSequence) draftBusy.value = false }
 }
 async function syncPage(forward: boolean) {
   if (!synchronization.value || syncBusy.value) return
@@ -120,9 +145,9 @@ onBeforeUnmount(() => { ++syncSequence; ++projectSequence; ++comparisonSequence;
     <summary>Compare versions and history</summary>
     <section aria-label="Historical state comparison" :aria-busy="compareBusy">
       <div class="comparison-controls">
-        <label>Before state<select v-model="before" :disabled="refsBusy || compareBusy" @change="changed"><option value="" disabled>Select a state</option><option v-for="choice in choices" :key="choice.id" :value="choice.id">{{ choice.label }}</option></select></label>
+        <label>Before state<select v-model="before" :disabled="refsBusy || compareBusy || draftBusy" @change="changed"><option value="" disabled>Select a state</option><option v-for="choice in choices" :key="choice.id" :value="choice.id">{{ choice.label }}</option></select></label>
         <span class="comparison-arrow" aria-hidden="true">→</span>
-        <label>After state<select v-model="after" :disabled="refsBusy || compareBusy" @change="changed"><option value="" disabled>Select a state</option><option v-for="choice in choices" :key="choice.id" :value="choice.id">{{ choice.label }}</option></select></label>
+        <label>After state<select v-model="after" :disabled="refsBusy || compareBusy || draftBusy" @change="changed"><option value="" disabled>Select a state</option><option v-for="choice in choices" :key="choice.id" :value="choice.id">{{ choice.label }}</option></select></label>
         <button :disabled="refsBusy || compareBusy || !beforeState || !afterState" @click="compare()">{{ compareBusy ? 'Comparing…' : 'Compare states' }}</button>
       </div>
       <div v-if="refsBusy || referencesNext !== null" class="comparison-reference-tools"><small v-if="refsBusy" role="status">Loading version references…</small><button v-if="referencesNext !== null" :disabled="refsBusy" @click="loadReferences(true)">More version references</button></div>
@@ -136,7 +161,35 @@ onBeforeUnmount(() => { ++syncSequence; ++projectSequence; ++comparisonSequence;
         <ul class="comparison-history-list"><li v-for="revision in history" :key="revision.state"><span><strong>{{ revision.version }}</strong> · {{ revision.reason }}<small>{{ revision.created_at }} · {{ revision.state.slice(0, 12) }}</small></span><button @click="chooseHistorical(revision, 'before')" :aria-label="`Use ${revision.version} ${revision.reason} as before`">Before</button><button @click="chooseHistorical(revision, 'after')" :aria-label="`Use ${revision.version} ${revision.reason} as after`">After</button></li></ul>
         <div class="comparison-page"><button v-if="historyNext !== null" :disabled="historyBusy" @click="loadHistory(true)">Next history page</button><button v-if="historyLoaded && history.length > 0" :disabled="historyBusy" @click="loadHistory()">Newest history</button></div>
       </details>
-      <details class="comparison-scope"><summary>Assessment reuse between selected states</summary><p class="hint">Before is the source; After is the target. This preview compares content without confirming a software merge or changing inventory, assessments or approvals.</p><button :disabled="syncBusy || refsBusy || !beforeState || !afterState" @click="syncPrevious = []; previewSynchronization()">Preview assessment reuse</button><p v-if="syncBusy" role="status">Preparing reuse preview…</p><section v-if="synchronization" aria-label="Assessment reuse preview"><strong>{{ synchronization.total }} candidates · {{ human(synchronization.mode) }}</strong><details v-for="row in synchronization.items" :key="row.id" class="comparison-row"><summary>{{ row.vulnerability_id || 'Unknown scope' }} · {{ human(row.category) }}</summary><p>{{ row.reasons.map(human).join(' · ') }}</p><p v-if="row.requires_new_target_review" class="hint">New target coverage requires independent review.</p><pre>{{ JSON.stringify(row, null, 2) }}</pre></details><nav class="comparison-page" aria-label="Assessment reuse pages"><button :disabled="syncBusy || !syncPrevious.length" @click="syncPage(false)">Previous candidates</button><button :disabled="syncBusy || synchronization.next_offset === null" @click="syncPage(true)">Next candidates</button></nav><details><summary>Reuse limitations and preview pin</summary><code>{{ synchronization.preview_digest }}</code><ul><li v-for="limit in synchronization.limitations" :key="limit">{{ limit }}</li></ul></details></section></details>
+      <details class="comparison-scope">
+        <summary>Assessment reuse between selected states</summary>
+        <p class="hint">Before is the source; After is the target. The preview changes no data and does not confirm a software merge. Eligible content can become an explicit target draft for independent review.</p>
+        <button :disabled="syncBusy || draftBusy || refsBusy || !beforeState || !afterState" @click="syncPrevious = []; previewSynchronization()">Preview assessment reuse</button>
+        <button :disabled="syncBusy || draftBusy || refsBusy" @click="refreshReferences">Refresh version references</button>
+        <p v-if="syncBusy" role="status">Preparing reuse preview…</p>
+        <p v-if="draftNotice" class="draft-notice" role="status">{{ draftNotice }}</p>
+        <section v-if="synchronization" aria-label="Assessment reuse preview">
+          <strong>{{ synchronization.total }} candidates · {{ human(synchronization.mode) }}</strong>
+          <details v-for="row in synchronization.items" :key="row.id" class="comparison-row">
+            <summary>{{ row.vulnerability_id || 'Unknown scope' }} · {{ human(row.category) }}</summary>
+            <p>{{ row.reasons.map(human).join(' · ') }}</p>
+            <p v-if="row.requires_new_target_review" class="hint">New target coverage requires independent review.</p>
+            <template v-if="row.draft_allowed">
+              <button v-if="draftRow !== row.id" :disabled="draftBusy || syncBusy" @click="openDraft(row)">Create target draft</button>
+              <form v-else class="synchronization-draft" aria-label="Target assessment draft" @submit.prevent="createTargetDraft(row)">
+                <p class="hint">Reuse the source rationale as a draft. Describe why it applies to the target; approval and scoring follow their separate review workflows.</p>
+                <label>Target conditions<textarea v-model="draftConditions" required maxlength="6000" rows="3" :disabled="draftBusy" /></label>
+                <label>Reason for extending coverage<textarea v-model="draftReason" required maxlength="6000" rows="2" :disabled="draftBusy" /></label>
+                <p v-if="draftError" role="alert">{{ draftError }}</p>
+                <div class="comparison-page"><button :disabled="draftBusy || syncBusy || !draftConditions.trim() || !draftReason.trim()">{{ draftBusy ? 'Creating draft…' : 'Create target draft' }}</button><button type="button" :disabled="draftBusy" @click="clearDraft">Cancel</button></div>
+              </form>
+            </template>
+            <details><summary>Source, target and provenance</summary><pre>{{ JSON.stringify(row, null, 2) }}</pre></details>
+          </details>
+          <nav class="comparison-page" aria-label="Assessment reuse pages"><button :disabled="syncBusy || draftBusy || !syncPrevious.length" @click="syncPage(false)">Previous candidates</button><button :disabled="syncBusy || draftBusy || synchronization.next_offset === null" @click="syncPage(true)">Next candidates</button></nav>
+          <details><summary>Reuse limitations and preview pin</summary><code>{{ synchronization.preview_digest }}</code><ul><li v-for="limit in synchronization.limitations" :key="limit">{{ limit }}</li></ul></details>
+        </section>
+      </details>
       <template v-if="result">
         <div class="comparison-summary" aria-label="Comparison totals"><strong>{{ result.total }} changes</strong><span v-for="(count, category) in result.summary.by_category" :key="category">{{ human(String(category)) }}: {{ count }}</span></div>
         <p v-if="result.total === 0" role="status">No differences between these pinned states.</p>
@@ -182,5 +235,10 @@ onBeforeUnmount(() => { ++syncSequence; ++projectSequence; ++comparisonSequence;
 .comparison-values pre { max-height: 20rem; overflow: auto; font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comparison-scope { font-size: .85rem; margin-top: .6rem; }
 .comparison-pins { overflow-wrap: anywhere; }
+.synchronization-draft { display: grid; gap: .55rem; max-width: 48rem; }
+.synchronization-draft label { display: grid; gap: .25rem; }
+.synchronization-draft textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; }
+.comparison-row pre { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.draft-notice { margin-block: .6rem; }
 @media (max-width: 650px) { .comparison-controls { grid-template-columns: minmax(0, 1fr); } .comparison-arrow { display: none; } .comparison-values { grid-template-columns: minmax(0, 1fr); } .comparison-row small { display: block; margin-top: .25rem; } }
 </style>
