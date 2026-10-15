@@ -143,6 +143,59 @@ Explore a repeatable two-part nightly update against the running playground:
 uv run python scripts/assembly_demo.py
 ```
 
+### Versioned ownership and consuming contexts
+
+`GET /api/v3/projects/{id}/ownership` returns the current policy and exact active
+version heads. A product manager can `PUT` the same resource with `request_id`,
+`expected_policy`, `expected_versions`, `rules` and optional `context_roots`.
+Rules contain `selector`, an existing workspace `team_id`, optional descriptive
+`aliases`, and optional `versions` (exact product-version names). Rules span all
+versions by default; PURL selectors separately support exact package versions.
+Duplicate selectors require disjoint product-version scopes.
+
+Policy changes atomically publish the policy and recomputed contexts for every
+active product version. Supply the complete `expected_versions` map to prevent
+concurrent nightly builds or newly created versions being missed. Imports and
+assembly publication automatically capture the current policy; a concurrent policy
+change makes stale publication fail. Team mappings never grant data access.
+
+Contexts have one record per consuming root and component occurrence. Explicit
+owners delegate recursively; a mapped child shadows its ancestor even through
+bypass paths. Several paths within one tree share a context and retain graph
+edges. Different consuming trees retain separate contexts. Sibling owner conflicts
+and rootless cycles remain explicit; wildcard ownership applies only after
+inheritance fails. Primary team and alias labels are not separate required reviews.
+
+By default consuming roots use declared SBOM/part roots and uncovered graph roots.
+`context_roots` can select exact source-local refs per product version when an
+aggregate root would hide separate applications. Excluded aggregate nodes are
+reported in `outside_selected_roots`; disconnected trees remain visible. Missing
+dependency information stays `topology_unknown`, even when an explicit owner is
+known. Removing a configured root requires explicit policy reconciliation.
+
+`GET .../versions/{version}/contexts` provides bounded pages with optional
+`team_id`, `offset`, `limit` and pinned `expected` state. Conflicts appear for each
+candidate team. `include_delegated=true` additionally shows that team's consuming
+trees with delegated work. Responses identify the policy revision, projection
+freshness, matched selectors, owner boundaries and graph provenance. Historical
+context details remain available at
+`GET .../states/{state}/contexts/{context_id}` under current project permissions.
+Context expansion is capped at 100,000 records per state; exceeding it fails publication
+without changing the baseline.
+
+Reassignment and inventory changes preserve existing assessment/review records
+and immutable tagged states. Current contexts are recomputed, not silently
+treated as renewed approvals. Context IDs remain based on source-local refs;
+cross-import semantic identity and verified assessment coverage remain planned.
+The new context workspace is API-only. Run the isolated interactive scenario:
+
+```bash
+uv run python scripts/ownership_demo.py
+```
+
+It uses a dedicated project, two versions, shared dependencies, bypass delegation
+and a team reassignment; it leaves other project policies untouched.
+
 Read paginated inventory at `GET .../versions/{version}/inventory`; pass its
 `state` as `expected` on later pages to detect changes. Create protected tags
 with `POST .../tags` and compare pinned revisions with

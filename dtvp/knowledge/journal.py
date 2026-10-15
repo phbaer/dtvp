@@ -66,7 +66,7 @@ class Revision(Record):
 
 
 class Ref(Record):
-    kind: Literal["branch", "tag", "source"] = "branch"
+    kind: Literal["branch", "tag", "source", "policy"] = "branch"
     project_id: Name
     name: Name
 
@@ -271,7 +271,7 @@ class Journal:
             raise Conflict("Request ID already belongs to different input")
         return receipt
 
-    def publish(self, *, request_id, fingerprint, updates):
+    def publish(self, *, request_id, fingerprint, updates, checks=(), branch_heads=None):
         if not updates or len({u.ref.key for u in updates}) != len(updates):
             raise ValueError("Publish at least one distinct reference")
         with self.writer():
@@ -280,6 +280,18 @@ class Journal:
             previous = self.head()
             before = self.load(previous, Publication) if previous else None
             refs = dict(before.refs) if before else {}
+            for ref, expected in checks:
+                if refs.get(ref.key) != expected:
+                    raise Conflict("Referenced policy changed; retry against current state")
+            for project_id, expected in (branch_heads or {}).items():
+                actual = {
+                    ref.name: sha
+                    for key, sha in refs.items()
+                    if (ref := Ref.model_validate_json(key)).project_id == project_id
+                    and ref.kind == "branch"
+                }
+                if actual != expected:
+                    raise Conflict("Product versions changed; reload ownership configuration")
             for update in updates:
                 existing = refs.get(update.ref.key)
                 if existing != update.expected:
@@ -293,7 +305,7 @@ class Journal:
                     raise ValueError("Branch and state versions disagree")
                 if (
                     existing
-                    and update.ref.kind in {"branch", "source"}
+                    and update.ref.kind in {"branch", "source", "policy"}
                     and existing not in state.parents
                 ):
                     raise ValueError("Branch update must retain its current head as a parent")

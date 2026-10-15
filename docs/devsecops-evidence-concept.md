@@ -497,6 +497,16 @@ or unverified coherence prevent release tags. Producer-declared coherence is
 attributed evidence, not verified compatibility or approval of the whole release.
 The API-only demo covers replacing one part while reusing another unchanged.
 
+The next foundation implements versioned team selectors and recursive ownership
+in consuming-tree contexts. Product-wide policies apply across versions by
+default, with optional version scopes, and publish all affected version states
+atomically. Imports capture the current policy. Separate trees keep separate
+contexts; multiple paths within a tree do not multiply work. Explicit child
+owners, fallback rules, conflicts and unknown topology remain distinguishable.
+Reassignment changes current responsibility without deleting assessment records
+or rewriting tagged history. This is context derivation and API presentation,
+not yet a journal-backed assessment/review workspace or verified range coverage.
+
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,
 new review workspace/range coverage, evidence synthesis, VDR/VEX application,

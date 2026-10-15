@@ -152,12 +152,21 @@ def import_inventory(
         **({f"inventory:{parent}": {"state": parent}} if old_inventory else {}),
     }
     # All raw imports referenced by retained history stay reachable via parents.
+    policy_state, policy_checks = None, []
+    if part_id is None:
+        from dtvp.knowledge.ownership import current_policy, policy_ref, resolve_ownership
+
+        policy_state, config = current_policy(journal, project_id)
+        resolve_ownership(sections, version=version, policy_state=policy_state, config=config)
+        policy_checks = [(policy_ref(project_id), policy_state)]
     state = journal.snapshot(
         project_id=project_id,
         version=version,
         actor_id=actor_id,
         reason=f"Import build {build_number}"[:200],
-        parents=[parent] if parent else [],
+        parents=list(
+            dict.fromkeys(([parent] if parent else []) + ([policy_state] if policy_state else []))
+        ),
         sections=sections,
         artifacts=[sections["inventory"]["baseline"]["artifact_sha"]],
     )
@@ -165,6 +174,7 @@ def import_inventory(
         request_id=scoped_request,
         fingerprint=fingerprint,
         updates=[Update(ref=ref, expected=expected, target=state)],
+        checks=policy_checks,
     )
 
 

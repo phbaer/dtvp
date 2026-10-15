@@ -254,6 +254,12 @@ def publish_assembly(journal, *, project_id, version, actor_id, data):
     parents = list(
         dict.fromkeys(([parent] if parent else []) + [p.state for p in data.parts if p.state])
     )
+    from dtvp.knowledge.ownership import current_policy, policy_ref, resolve_ownership
+
+    policy_state, config = current_policy(journal, project_id)
+    resolve_ownership(sections, version=version, policy_state=policy_state, config=config)
+    if policy_state and policy_state not in parents:
+        parents.append(policy_state)
     state = journal.snapshot(
         project_id=project_id,
         version=version,
@@ -267,4 +273,5 @@ def publish_assembly(journal, *, project_id, version, actor_id, data):
         request_id=scoped_request,
         fingerprint=fingerprint,
         updates=[Update(ref=ref, expected=data.expected, target=state)],
+        checks=[(policy_ref(project_id), policy_state)],
     )

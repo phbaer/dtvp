@@ -531,8 +531,22 @@ selection changes; `scripts/assembly_demo.py` exercises a two-part update.
 Initial limits: delivery parts only, same-version source inputs, no overlapping
 evidence-view reconciliation, nested assembly or cross-part relationship mapping.
 
+Ownership now has a product policy reference and derived consuming contexts in
+each complete version state. V1 selectors retain namespace/case/PURL specificity,
+known-empty handling, aliases and wildcard fallback. Rules default across product
+versions with optional exact-version scopes. Updating a policy conditionally
+publishes all current version heads atomically; inventory/assembly writes guard
+against policy changes during publication. Source intake remains separate.
+Recursive delegation shadows ancestor owners across bypasses; sibling conflicts
+and cycles remain visible. SCC/bitset propagation preserves all relevant graph
+edges without enumerating paths. Explicit roots distinguish consuming trees from
+aggregate SBOM roots. Context pagination/team filters use the SQL projection;
+reassignment/removal preserves assessment records and historical tags. Context
+IDs are still source-local, not proof of cross-import equivalence or approval.
+`scripts/ownership_demo.py` exercises two versions and contextual reassignment.
+
 Not yet implemented: new UI/CLI workspaces, stable cross-import/context identity,
-recursive ownership parity, shared reviewed range coverage, evidence synthesis,
+shared reviewed range coverage, evidence synthesis,
 VDR/VEX adapters, cascading synchronization, cached semantic comparisons, journal
 retention/GC, operational-state recovery and v2/legacy migration. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain

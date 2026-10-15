@@ -6,14 +6,16 @@ from typing import Literal
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from dtvp.api import DB, Auth, project_for
 from dtvp.knowledge.assembly import AssemblyInput, publish_assembly
 from dtvp.knowledge.composition import CollectionContext
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
+from dtvp.knowledge.ownership import OwnershipInput, policy_ref, product_heads, update_policy
 from dtvp.knowledge.projection import catch_up, heads, records
 from dtvp.knowledge.service import create_tag, import_inventory, part_ref, validate_time
+from dtvp.models import Workspace
 from dtvp.schemas import RequestModel
 
 router = APIRouter(prefix="/api/v3")
@@ -204,6 +206,118 @@ def assembly_manifest(project_id: str, state: Sha, request: Request, db: DB, act
     if "assembly" not in inventory:
         raise HTTPException(404, "State has no assembly manifest")
     return {"state": state, "manifest": journal.load(inventory["assembly"])}
+
+
+@router.get("/projects/{project_id}/ownership")
+def ownership_configuration(project_id: str, request: Request, db: DB, actor: Auth):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    refs = journal.references()
+    state = refs.get(policy_ref(project_id).key)
+    config = (
+        journal.load(journal.records(state, "ownership")["configuration"])
+        if state
+        else {"rules": [], "context_roots": {}}
+    )
+    return {"policy_state": state, "policy": config, "versions": product_heads(refs, project_id)}
+
+
+@router.put("/projects/{project_id}/ownership", status_code=201)
+def configure_ownership(
+    project_id: str, data: OwnershipInput, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id, "manage")
+    team_ids = {rule.team_id for rule in data.rules}
+    existing = set(db.scalars(select(Workspace.id).where(Workspace.id.in_(team_ids))))
+    if team_ids - existing:
+        raise HTTPException(422, "Ownership rules must reference existing teams")
+    try:
+        receipt = update_policy(
+            request.app.state.knowledge, project_id=project_id, actor_id=actor.user.id, data=data
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except CommitUncertain as error:
+        return uncertain_response(error, data.request_id)
+    return projected_response(request, receipt)
+
+
+@router.get("/projects/{project_id}/versions/{version}/contexts")
+def current_contexts(
+    project_id: str,
+    version: Name,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    expected: Sha | None = None,
+    team_id: Name | None = None,
+    include_delegated: bool = False,
+):
+    project_for(db, actor, project_id)
+    ref = Ref(project_id=project_id, name=version)
+    with request.app.state.engine.connect() as connection:
+        if connection.dialect.name == "postgresql":
+            connection = connection.execution_options(isolation_level="REPEATABLE READ")
+        head = connection.execute(select(heads).where(heads.c.ref_key == ref.key)).first()
+        if not head:
+            raise HTTPException(404, "Version has no projected contexts")
+        if expected and expected != head.state_sha:
+            raise HTTPException(409, "Contexts changed; restart pagination")
+        query = select(records.c.data).where(
+            records.c.ref_key == ref.key,
+            records.c.section == "ownership",
+            records.c.record_key.startswith("context:", autoescape=True),
+        )
+        if team_id:
+            scope = records.c.data["team_scope"][team_id].as_boolean().is_(True)
+            if include_delegated:
+                scope = or_(scope, records.c.data["root_team_id"].as_string() == team_id)
+            query = query.where(scope)
+        rows = (
+            connection.execute(query.order_by(records.c.record_key).offset(offset).limit(limit + 1))
+            .scalars()
+            .all()
+        )
+        metadata = dict(
+            connection.execute(
+                select(records.c.record_key, records.c.data).where(
+                    records.c.ref_key == ref.key,
+                    records.c.section == "ownership",
+                    records.c.record_key.in_(["policy", "summary"]),
+                )
+            ).all()
+        )
+        current = request.app.state.knowledge.resolve(ref)
+        return {
+            "state": head.state_sha,
+            "reference_state": current,
+            "projection_current": current == head.state_sha,
+            "policy_state": metadata.get("policy", {}).get("state"),
+            "summary": metadata.get("summary", {}),
+            "items": rows[:limit],
+            "next_offset": offset + limit if len(rows) > limit else None,
+        }
+
+
+@router.get("/projects/{project_id}/states/{state}/contexts/{context_id}")
+def pinned_context(
+    project_id: str, state: Sha, context_id: Sha, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    ownership = journal.records(state, "ownership")
+    key = "context:" + context_id
+    if key not in ownership:
+        raise HTTPException(404, "Context unavailable in this state")
+    policy = journal.load(ownership["policy"]) if "policy" in ownership else {}
+    return {
+        "state": state,
+        "policy_state": policy.get("state"),
+        "item": journal.load(ownership[key]),
+    }
 
 
 @router.post("/projects/{project_id}/tags", status_code=201)
