@@ -62,6 +62,18 @@ def configure(parser):
     request.add_argument("method", choices=["GET", "POST", "PUT"])
     request.add_argument("path", help="Absolute /api/v3/ path; query parameters supported")
     request.add_argument("--body", help="JSON filename, or - for standard input")
+    upload = commands.add_parser(
+        "import-file", help="Import original SBOM bytes with explicit metadata"
+    )
+    upload.add_argument("--project", required=True)
+    upload.add_argument("--version", required=True)
+    upload.add_argument(
+        "--part", help="Import a constituent without advancing the product baseline"
+    )
+    upload.add_argument("--file", required=True)
+    upload.add_argument(
+        "--metadata", required=True, help="JSON metadata file with request ID and expected head"
+    )
 
 
 def read_response(response):
@@ -142,6 +154,25 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "import-file":
+            from urllib.parse import quote
+
+            metadata = json.loads(Path(args.metadata).read_text())
+            if not isinstance(metadata, dict):
+                raise ValueError("Import metadata must be a JSON object")
+            path = f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}"
+            if args.part:
+                path += f"/parts/{quote(args.part, safe='')}"
+            with Path(args.file).open("rb") as source:
+                result = read_response(
+                    client.post(
+                        path + "/files",
+                        data={"metadata": json.dumps(metadata)},
+                        files={"file": (Path(args.file).name, source, "application/octet-stream")},
+                    )
+                )
+            print(json.dumps(result, indent=2))
+            return
         if args.knowledge_command == "synchronization":
             from urllib.parse import quote
 

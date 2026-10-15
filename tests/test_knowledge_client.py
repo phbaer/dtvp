@@ -2,9 +2,63 @@ import json
 import sys
 
 import httpx
+import pytest
 import respx
 
 from dtvp.cli import main
+
+
+@pytest.mark.parametrize("part", [None, "supplier part"])
+@respx.mock
+def test_pipeline_cli_uploads_original_bytes_and_explicit_retry_metadata(
+    monkeypatch, tmp_path, capsys, part
+):
+    from email import policy
+    from email.parser import BytesParser
+
+    raw = b'\xef\xbb\xbf<?xml version="1.0"?>\r\n<bom>original bytes</bom>\r\n'
+    source = tmp_path / "supplier.xml"
+    source.write_bytes(raw)
+    metadata = {"request_id": "pipeline-run-42", "expected": None, "build_number": 42}
+    metadata_file = tmp_path / "metadata.json"
+    metadata_file.write_text(json.dumps(metadata))
+    argv = [
+        "dtvp",
+        "knowledge",
+        "--url",
+        "http://dtvp.test",
+        "import-file",
+        "--project",
+        "project",
+        "--version",
+        "7.1.1",
+        "--file",
+        str(source),
+        "--metadata",
+        str(metadata_file),
+    ]
+    if part:
+        argv.extend(["--part", part])
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    path = "http://dtvp.test/api/v3/projects/project/versions/7.1.1"
+    if part:
+        path += "/parts/supplier%20part"
+    route = respx.post(path + "/files").mock(
+        return_value=httpx.Response(201, json={"committed": True})
+    )
+    main()
+    request = route.calls[0].request
+    message = BytesParser(policy=policy.default).parsebytes(
+        ("Content-Type: " + request.headers["content-type"] + "\r\n\r\n").encode() + request.content
+    )
+    fields = {
+        item.get_param("name", header="content-disposition"): item for item in message.iter_parts()
+    }
+    assert fields["file"].get_payload(decode=True) == raw
+    assert fields["file"].get_filename() == "supplier.xml"
+    assert json.loads(fields["metadata"].get_payload(decode=True)) == metadata
+    assert json.loads(capsys.readouterr().out) == {"committed": True}
 
 
 @respx.mock

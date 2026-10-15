@@ -81,6 +81,17 @@ CycloneDX JSON/XML or SPDX 2.3 JSON intake, post multipart `file` plus JSON
 `metadata` (the import fields without `sbom`) to `.../versions/{version}/files`.
 `GET .../states/{state}/source` returns that pinned original with its SHA-256 and
 representation headers; project permissions apply to downloads too.
+The HTTP CLI preserves file bytes too:
+
+```bash
+uv run dtvp knowledge --url http://127.0.0.1:8900 import-file \
+  --project PROJECT_ID --version 7.1.2 --file bom.json --metadata import.json
+```
+
+`import.json` contains the same explicit import metadata, request ID and expected
+head. Reuse it unchanged after uncertain responses; the CLI never invents retry
+identities or replaces concurrency pins. Add `--part PART_ID` for constituent
+intake; product assembly remains a separate explicit publication.
 
 Optional import `context` records subject kind/digest, target, platform,
 configuration, source revision, pipeline run, collector/version/method, limitations
