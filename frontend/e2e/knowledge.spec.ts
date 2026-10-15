@@ -1,11 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 
 // Isolated transport/UI contract checks; backend workflow tests cover authority.
-async function fixture(page: Page, reviewer = false, coordinator = false, playground = false) {
+async function fixture(page: Page, reviewer = false, coordinator = false, playground = false, displayTeam?: { id: string; labels: Record<string, string> }) {
   const row = {
     id: 'ctx-vuln', context_id: 'ctx', vulnerability_id: 'CVE-2099-1234',
     component: { name: 'Shared TLS', version: '2.0', purl: 'pkg:generic/tls@2.0' },
-    context: { root_ref: 'server', team_id: 'security', status: 'assigned', dependencies: ['tls'] },
+    context: { root_ref: 'server', team_id: displayTeam?.id || 'security', status: 'assigned', dependencies: ['tls'] },
     description: 'A long vulnerability description. '.repeat(100),
     source_ratings: [{ source: 'Upstream', method: 'CVSSv31', score: 9.8, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
     coverage: { status: reviewer ? 'submitted' : 'unassessed', assessment: reviewer ? { revision: 'assessment-sha', stage: 'submitted', payload: { assessment_id: 'assessment-one', author_id: 'analyst', state: 'not_affected', justification: 'code_not_reachable', rationale: 'Reviewed deployment evidence excludes the path.', targets: [{ version: '7.1.2', context_id: 'ctx', vulnerability_id: 'CVE-2099-1234' }], evidence: [] } } : null },
@@ -32,10 +32,14 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
     let result: unknown = { items: [], next_cursor: null }
     if (path === '/api/v2/me') result = { id: reviewer ? 'reviewer' : 'analyst', name: 'Test user', org_admin: false, playground, agentyzer: { enabled: false, mode: 'disabled' }, vscorer_url: '', workspaces: [{ id: 'security', name: 'Security', capabilities: ['read', reviewer ? 'approve' : 'assess'] }] }
     else if (path === '/api/v2/playground/personas') result = []
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'p', name: 'Test Product', workspace_id: 'security', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'p', name: 'Test Product', workspace_id: 'security', capabilities: ['read'] }, ...(displayTeam ? [{ id: 'other', name: 'Other Product', workspace_id: 'security', capabilities: ['read'] }] : [])], next_cursor: null }
     else if (path === '/api/v2/projects/p') result = { id: 'p', name: 'Test Product', workspace_id: 'security', capabilities: ['read'] }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: 'baseline-sha' }] }
-    else if (path.endsWith('/workspace')) { workspaceQueries.push(new URLSearchParams(url.search)); result = { state: 'baseline-sha', project_id: 'p', version: '7.1.2', items: [row], next_offset: url.searchParams.get('offset') === '0' ? 30 : null, statistics: { totals: { context_findings: url.searchParams.get('source_severity') ? 79 : 31, unique_vulnerabilities: 12 }, by_status: { submitted: 2 }, by_team: { security: 31 }, severity: { high: 31 }, recorded: 4, submitted: 2, approved: 1 } } }
+    else if (path.endsWith('/workspace')) {
+      workspaceQueries.push(new URLSearchParams(url.search))
+      const empty = displayTeam && (url.searchParams.get('q') === 'no matching findings' || path.includes('/projects/other/'))
+      result = { state: 'baseline-sha', project_id: 'p', version: '7.1.2', items: empty ? [] : [row], team_labels: empty ? {} : displayTeam?.labels, next_offset: url.searchParams.get('offset') === '0' ? 30 : null, statistics: { totals: { context_findings: empty ? 0 : url.searchParams.get('source_severity') ? 79 : 31, unique_vulnerabilities: empty ? 0 : 12 }, by_status: empty ? {} : { submitted: 2 }, by_team: empty ? {} : { [displayTeam?.id || 'security']: 31 }, severity: empty ? {} : { high: 31 }, recorded: 4, submitted: 2, approved: 1 } }
+    }
     else if (path.includes('/workspace/')) result = { ...row, state: 'baseline-sha' }
     await route.fulfill({ json: result })
   })
@@ -65,6 +69,31 @@ test('knowledge queue shows full-scope statistics and keeps assessment evidence 
   await expect(page.getByRole('status')).toContainText('Assessment submitted')
   expect(writes[0]?.body).toMatchObject({ expected_versions: { '7.1.2': 'baseline-sha' }, expected_revision: null, state: 'not_affected', justification: 'code_not_reachable', targets: [{ version: '7.1.2', context_id: 'ctx', vulnerability_id: 'CVE-2099-1234' }] })
   await expect(detail.getByRole('button', { name: /rescor/i })).toHaveCount(0)
+})
+
+test('server-scoped team labels display and filter without adding memberships and reset across projects', async ({ page }) => {
+  const team = { id: 'outside-membership-team', labels: { 'outside-membership-team': 'Product cybersecurity' } }
+  const { writes, workspaceQueries } = await fixture(page, false, false, false, team)
+  const queue = page.getByLabel('Context finding queue', { exact: true })
+  await expect(queue).toContainText('Product cybersecurity')
+  await expect(queue).not.toContainText('outside-membership-team')
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  await expect(page.getByLabel('Context finding detail', { exact: true })).toContainText('Product cybersecurity')
+  const statistics = page.getByLabel('Filtered workspace statistics', { exact: true })
+  await statistics.getByText('Breakdown', { exact: true }).click()
+  await expect(statistics).toContainText('Product cybersecurity')
+  const teams = page.getByRole('combobox', { name: 'Responsible team', exact: true })
+  await teams.selectOption(team.id)
+  await expect.poll(() => workspaceQueries.at(-1)?.get('team_id')).toBe(team.id)
+  await page.getByRole('searchbox', { name: 'Search', exact: true }).fill('no matching findings')
+  await expect(queue).toContainText('No context findings match this scope.')
+  await expect(teams).toHaveValue(team.id)
+  await expect(teams.getByRole('option', { name: 'Product cybersecurity', exact: true })).toHaveCount(1)
+  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.getByRole('option', { name: 'Other Product', exact: true }).click()
+  await expect(teams).toHaveValue('')
+  await expect(teams.getByRole('option', { name: 'Product cybersecurity', exact: true })).toHaveCount(0)
+  expect(writes).toHaveLength(0)
 })
 
 test('independent review pins exact assessment and blocks a stale publication', async ({ page }) => {

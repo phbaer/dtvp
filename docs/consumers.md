@@ -41,7 +41,14 @@ roles. Hashes establish consistency, not publisher identity or human approval.
   metadata changes require revalidation. These are organization decisions, not
   inferred legal clearance.
 
-V3 Agentyzer orchestration, complete CPE migration/refresh, semantic identity
+- `POST .../states/{state}/agentyzer-input` derives an exact producer-qualified
+  repository/commit request and contextual receipt. Return the receipt plus a
+  completed native job/report envelope to `.../versions/{version}/proposals/agentyzer`.
+  DTVP retains raw reports and checks structured request/package/CVE/commit
+  consistency. Missing bindings remain ineligible evidence. UI/CLI compare
+  analysis and optional validated scoring proposals; imports never approve them.
+
+V3 durable Agentyzer orchestration, complete CPE migration/refresh, semantic identity
 reconciliation, full legal qualification and architecture approval remain planned.
 Production acceptance also requires machine authorization, archived reproducible
 inputs, failure/retry handling and controlled consumer fixture qualification.

@@ -8,6 +8,7 @@ import SearchSelect from './SearchSelect.vue'
 import KnowledgeComparison from './KnowledgeComparison.vue'
 import KnowledgeRetained from './KnowledgeRetained.vue'
 import KnowledgeLicenses from './KnowledgeLicenses.vue'
+import KnowledgeAnalysisEvidence from './KnowledgeAnalysisEvidence.vue'
 const props = defineProps<{ me: Me }>()
 const project = ref(''), projectName = ref(''), version = ref(''), team = ref(''), lifecycle = ref(''), query = ref('')
 const filterLabels: Record<string, string> = { source_severity: 'Source severity', contextual_severity: 'Published severity', applicability: 'Applicability', scoring_status: 'Scoring status', team_review: 'Team assessment', provider: 'Evidence provider', cvss_version: 'Source CVSS version', dependency: 'Dependency relationship', source_conflict: 'Source discrepancies', component: 'Component' }
@@ -22,6 +23,12 @@ const versions = ref<{ version: string; state: string }[]>([])
 const versionMenu = ref(false), versionQuery = ref(''), versionNext = ref<number | null>(null), versionBusy = ref(false)
 let versionSequence = 0, versionTimer: ReturnType<typeof setTimeout> | undefined
 const workspace = ref<KnowledgeWorkspace | null>(null), selected = ref<KnowledgeFinding | null>(null)
+const knownTeamLabels = ref<Record<string, string>>({})
+let teamLabelProject = ''
+const teamOptions = computed(() => {
+  const labels = Object.fromEntries(props.me.workspaces.map(item => [item.id, item.name]))
+  return Object.entries({ ...labels, ...knownTeamLabels.value }).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+})
 const offset = ref(0), previous = ref<number[]>([]), busy = ref(false), error = ref(''), notice = ref('')
 const tab = ref<'evidence' | 'assessment' | 'review' | 'scoring'>('evidence')
 const applicability = ref('under_investigation'), justification = ref(''), rationale = ref(''), conditions = ref('')
@@ -35,7 +42,7 @@ let sequence = 0, timer: ReturnType<typeof setTimeout> | undefined
 const scope = computed(() => `/projects/${encodeURIComponent(project.value)}/versions/${encodeURIComponent(version.value)}`)
 const assessment = computed(() => selected.value?.coverage.assessment)
 const label = (value: string) => value.replaceAll('_', ' ')
-const teamName = (id?: string) => props.me.workspaces.find(item => item.id === id)?.name || id || 'Unassigned'
+const teamName = (id?: string) => (id ? workspace.value?.team_labels?.[id] : undefined) || props.me.workspaces.find(item => item.id === id)?.name || id || 'Unassigned'
 const can = (capability: string) => Boolean(selected.value?.capabilities.includes(capability))
 const ratingSource = (rating: KnowledgeFinding['source_ratings'][number]) => (typeof rating.source === 'string' ? rating.source : rating.source?.name || rating.source?.url) || rating.observed_source || 'Unattributed source'
 const sourceScore = (row: KnowledgeFinding) => row.source_ratings.filter(r => r.score != null).map(r => r.score!.toFixed(1)).join(' / ') || (typeof row.source_severity === 'string' ? label(row.source_severity) : 'Unknown')
@@ -52,11 +59,12 @@ async function load(reset = true, keep = false) {
     const params = new URLSearchParams({ offset: String(offset.value), limit: '30', q: query.value, team_id: team.value, lifecycle: lifecycle.value, ...Object.fromEntries(Object.entries(filters.value).filter(([, value]) => value !== '')) })
     if (!reset && workspace.value?.state) params.set('expected', workspace.value.state)
     const result = await knowledgeApi<KnowledgeWorkspace>(`${scope.value}/workspace?${params}`)
-    if (current === sequence) { workspace.value = result; syncViewUrl() }
+    if (current === sequence) { workspace.value = result; knownTeamLabels.value = { ...knownTeamLabels.value, ...result.team_labels }; syncViewUrl() }
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
 }
 async function chooseProject(option: { id: string; name?: string }, preferredVersion = '') {
+  if (teamLabelProject !== option.id) { knownTeamLabels.value = {}; teamLabelProject = option.id; if (!restoring) team.value = '' }
   const current = ++sequence; ++versionSequence; projectName.value = option.name || option.id; versions.value = []; version.value = ''; versionQuery.value = ''; versionMenu.value = false; workspace.value = null; close()
   busy.value = true; error.value = ''; notice.value = ''
   try {
@@ -196,6 +204,7 @@ async function copyView() {
   try { await navigator.clipboard.writeText(location.href); notice.value = 'View link copied.' } catch { error.value = 'Clipboard unavailable. Copy this page address instead.' }
 }
 watch([team, lifecycle], () => { if (!restoring) void load() })
+watch(() => props.me.id, () => { knownTeamLabels.value = {}; team.value = ''; workspace.value = null; close(); void load() })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
 onMounted(() => {
   try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
@@ -209,7 +218,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
     <form class="knowledge-filters" @submit.prevent="load()">
       <SearchSelect v-model="project" label="Knowledge product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy" @select="chooseProject" />
       <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>
-      <label>Responsible team<select v-model="team" :disabled="busy"><option value="">All accessible teams</option><option v-for="item in me.workspaces" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+      <label>Responsible team<select v-model="team" :disabled="busy"><option value="">All accessible teams</option><option v-for="item in teamOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
       <label>Review status<select v-model="lifecycle" :disabled="busy"><option value="">All statuses</option><option v-for="status in ['unassessed', 'draft', 'submitted', 'approved', 'reassessment_needed', 'historically_absent']" :key="status" :value="status">{{ label(status) }}</option></select></label>
       <label class="knowledge-search">Search<input v-model="query" :disabled="busy" type="search" placeholder="Vulnerability, component or description"></label>
     </form>
@@ -242,6 +251,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
         <section v-if="selected" class="knowledge-detail" aria-label="Context finding detail">
           <header><div><h2>{{ selected.vulnerability_id }}</h2><p>{{ selected.component.name }} {{ selected.component.version }}</p></div><button aria-label="Close context finding" :disabled="busy" @click="close()">×</button></header><p class="hint">{{ teamName(selected.context.team_id) }} · {{ label(selected.coverage.status) }}</p>
           <div class="knowledge-score-pair"><span>Source <strong>{{ sourceScore(selected) }}</strong></span><span>Published <strong>{{ selected.published_score?.score.toFixed(1) ?? 'Not published' }}</strong><small v-if="selected.published_score?.current === false"> · Outdated</small></span></div>
+          <KnowledgeAnalysisEvidence v-if="selected.code_analysis?.length" :items="selected.code_analysis" />
           <details v-if="selected.scoring_proposals?.length" class="knowledge-pane"><summary>External scoring proposals ({{ selected.scoring_proposals.length }})</summary><div class="table-wrap"><table aria-label="External scoring comparison"><thead><tr><th>Provider</th><th>Source Base</th><th>Proposed</th><th>Status</th><th v-if="can('rescore')">Action</th></tr></thead><tbody><tr v-for="proposal in selected.scoring_proposals" :key="proposal.id"><td>{{ proposal.source_label }}<small>{{ proposal.provider }}</small></td><td>{{ proposal.proposal?.base_score.toFixed(1) ?? 'Unknown' }}</td><td>{{ proposal.proposal?.score.toFixed(1) ?? 'Withheld' }}</td><td>{{ proposal.eligible ? 'Ready for coordinator preview' : proposal.ineligibility_reasons.map(label).join(' · ') }}<small>{{ proposal.current ? 'Current evidence' : 'Historical evidence' }}</small></td><td v-if="can('rescore')"><button :disabled="busy || !proposal.eligible" @click="useProposal(proposal)">Use proposal</button></td></tr></tbody></table></div><p class="hint">External proposals do not approve assessments or publish scores. Artifact consistency does not verify provider identity.</p><details><summary>Proposal vectors and provenance</summary><pre>{{ JSON.stringify(selected.scoring_proposals, null, 2) }}</pre></details></details>
           <details v-if="selected.curated_metadata" class="knowledge-pane"><summary>Curated component context · {{ label(selected.curated_metadata.status) }}</summary><p v-if="!selected.curated_metadata.applicable" class="warning">Historical annotations require reconciliation with this component/version before use.</p><dl><dt>Criticality / exposure</dt><dd>{{ label(selected.curated_metadata.payload.annotations.cybersecurity.criticality) }} · {{ label(selected.curated_metadata.payload.annotations.cybersecurity.exposure) }}</dd><dt>Deployment</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.environment || 'Unknown' }}</dd><dt>Usage</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.usage || 'Unknown' }}</dd><dt>Support</dt><dd>{{ label(selected.curated_metadata.payload.annotations.support.status) }}</dd><dt>Source</dt><dd>{{ selected.curated_metadata.payload.provenance.source }} · {{ selected.curated_metadata.payload.provenance.reference }}</dd></dl><p>{{ selected.curated_metadata.payload.rationale }}</p><details><summary>Mitigations, testing and supporting details</summary><pre>{{ JSON.stringify(selected.curated_metadata.payload.annotations, null, 2) }}</pre></details></details>
           <details v-if="selected.legacy_evidence?.length" class="knowledge-pane"><summary>Imported DT assessment history</summary><p class="hint">Historical team and author labels are source claims. These records do not establish current DTVP approval.</p><article v-for="claim in selected.legacy_evidence" :key="claim.id"><h3>{{ claim.source }} · {{ label(claim.status) }}</h3><p v-if="claim.conflicting" class="warning">Conflicting imported team conclusions require reconciliation.</p><div v-for="(record, index) in claim.current_records" :key="index"><strong>{{ record.team }} · {{ label(record.state || 'unknown') }}</strong><p>{{ record.rationale }}</p><p v-if="record.justification">{{ justificationLabel(record.justification) }}</p><small>Historical assessor: {{ record.assessor || 'Unknown' }} · reviewer: {{ record.reviewer || 'Unknown' }}</small></div><p v-if="!claim.current_records.length">{{ claim.raw_text || claim.raw_excerpt || 'No interpretable assessment text.' }}</p><ul v-if="claim.errors.length"><li v-for="issue in claim.errors" :key="issue">{{ issue }}</li></ul><details><summary>Complete imported history, comments and score claims</summary><pre>{{ JSON.stringify(claim, null, 2) }}</pre></details></article></details>

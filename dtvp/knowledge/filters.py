@@ -171,7 +171,7 @@ def provider_names(row):
     for fact in row.get("sourcefacts", []):
         add(fact.get("source"))
         add(fact.get("advisory", {}).get("source"))
-    for proposal in row.get("scoring_proposals", []):
+    for proposal in [*row.get("scoring_proposals", []), *row.get("code_analysis", [])]:
         add(proposal.get("provider"))
         add(proposal.get("source_label"))
     for claim in row.get("legacy_evidence", []):

@@ -91,6 +91,7 @@ def test_machine_workspace_cli_uses_http_without_opening_database(monkeypatch, c
             200,
             json={
                 "state": "a" * 64,
+                "team_labels": {"team": "Shared Libraries"},
                 "statistics": {"totals": {"context_findings": 1}, "approved": 1, "submitted": 1},
                 "items": [
                     {
@@ -100,6 +101,19 @@ def test_machine_workspace_cli_uses_http_without_opening_database(monkeypatch, c
                         "coverage": {"status": "approved"},
                         "source_ratings": [{"score": 9.8}],
                         "published_score": {"score": 0, "current": True},
+                        "code_analysis": [
+                            {
+                                "id": "analysis-one",
+                                "provider": "agentyzer",
+                                "current": True,
+                                "verdict": "not_affected",
+                                "application_eligible": False,
+                                "rescoring_eligible": False,
+                                "ineligibility_reasons": [
+                                    "native_vulnerability_request_binding_missing"
+                                ],
+                            }
+                        ],
                     }
                 ],
                 "next_offset": None,
@@ -110,6 +124,9 @@ def test_machine_workspace_cli_uses_http_without_opening_database(monkeypatch, c
     assert route.calls[0].request.headers["authorization"] == "Bearer machine-test-token"
     output = capsys.readouterr().out
     assert "source=9.8 contextual=0" in output
+    assert "team=Shared Libraries" in output
+    assert "analysis=analysis-one provider=agentyzer" in output
+    assert "native_vulnerability_request_binding_missing" in output
     assert "machine-test-token" not in output
 
 

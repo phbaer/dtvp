@@ -1,6 +1,7 @@
 """Presentation adapters for shared journal-backed assessment workflows."""
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
@@ -17,6 +18,7 @@ from dtvp.knowledge.scoring import (
     published_score,
 )
 from dtvp.knowledge.workspace import load_sections, load_workspace
+from dtvp.models import Workspace
 
 router = APIRouter(prefix="/api/v3")
 
@@ -95,6 +97,20 @@ def state_for(request, project_id, version, expected=None):
     if expected and expected != state:
         raise HTTPException(409, "Workspace changed; refresh before continuing")
     return state
+
+
+def team_labels(db, statistics):
+    """Current display names only for teams in this authorized, complete selection."""
+    identifiers = set(statistics.get("by_team", {}))
+    if not identifiers:
+        return {}
+    return dict(
+        db.execute(
+            select(Workspace.id, Workspace.name)
+            .where(Workspace.id.in_(identifiers))
+            .order_by(Workspace.id)
+        ).all()
+    )
 
 
 def with_capabilities(db, actor, project, row):
@@ -192,6 +208,7 @@ def workspace(
     )
     for row in result["items"]:
         with_capabilities(db, actor, project, row)
+    result["team_labels"] = team_labels(db, result["statistics"])
     return result
 
 
@@ -228,7 +245,11 @@ def workspace_detail(
     row["published_score"] = published_score(
         journal, load_sections(journal, state), version, context_id, vulnerability_id
     )
-    return {"state": state, **with_capabilities(db, actor, project, row)}
+    return {
+        "state": state,
+        **with_capabilities(db, actor, project, row),
+        "team_labels": team_labels(db, result["statistics"]),
+    }
 
 
 def save(project_id, assessment_id, data, request, db, actor, *, submit):

@@ -130,6 +130,7 @@ def load_workspace(
         raise ValueError("Invalid workspace page bounds")
     revision = journal.state(state)
     sections = load_sections(journal, state)
+    has_code_analysis = any(key.startswith("code-analysis:") for key in sections["history"])
     inventory = sections["inventory"]
     components = {
         item["bom-ref"]: item
@@ -217,6 +218,7 @@ def load_workspace(
                         connected[root_ref] = reachable(complete_graph, root_ref)
                     if ref in connected[root_ref]:
                         dependency_relation = "transitive"
+            from dtvp.knowledge.agentyzer_results import list_agentyzer_results
             from dtvp.knowledge.legacy import legacy_claims
             from dtvp.knowledge.metadata import get_metadata
             from dtvp.knowledge.proposals import list_proposals
@@ -225,6 +227,13 @@ def load_workspace(
             metadata = get_metadata(journal, sections, revision.version, ref)
             proposals = list_proposals(
                 journal, sections, revision.version, context["id"], identifier
+            )
+            code_analysis = (
+                list_agentyzer_results(
+                    journal, sections, revision.version, context["id"], identifier
+                )
+                if has_code_analysis
+                else []
             )
             item = {
                 "id": digest(canonical([context["id"], identifier])),
@@ -246,6 +255,7 @@ def load_workspace(
                     journal, sections, revision.version, context["id"], identifier, gate=gate
                 ),
                 **({"scoring_proposals": proposals} if proposals else {}),
+                **({"code_analysis": code_analysis} if code_analysis else {}),
                 **({"curated_metadata": metadata} if metadata else {}),
                 **({"legacy_evidence": legacy} if legacy else {}),
                 "evidence": [

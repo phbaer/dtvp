@@ -574,9 +574,16 @@ uses the same backend contracts. A populated isolated workflow demo preserves
 interactive edits. Product refs/history and bounded semantic comparisons use
 immutable journal states; current-intelligence comparison caches remain planned.
 
+Explicit synchronization now extends source-author content into target-only drafts
+under exact source/target/preview pins. Existing target decisions cannot be overwritten;
+new scope requires independent review. Read-only retention diagnostics protect
+active branches and tags. Offline full-journal verification supports recovery.
+
 Native bundles retain exact source/context/proposal/approval distinctions. CPE
 has an internal offline policy/proposal module; VScorer has explicit focused inputs
-and returned bound proposals. Generator's independently reviewed isolated native
+and returned bound proposals. Producer-qualified Agentyzer inputs and returned
+job/report evidence retain exact scope checks, stale coverage and optional scoring
+proposals without human approval. Durable orchestration remains separate. Generator's independently reviewed isolated native
 adapter preserves its renderer and disables mutable enrichment, with controlled
 parity still required. Assembly forests and explicit native UI state selection
 are implemented on that isolated sibling branch. SPDX/CycloneDX license declarations

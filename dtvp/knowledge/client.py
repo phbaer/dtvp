@@ -108,7 +108,7 @@ def display_workspace(result):
         print(
             f"{row['vulnerability_id']}  {component.get('name') or component['bom-ref']} "
             f"{component.get('version') or ''}  root={row['context']['root_ref']} "
-            f"team={row['context'].get('team_id') or 'unresolved'} "
+            f"team={result.get('team_labels', {}).get(row['context'].get('team_id'), row['context'].get('team_id') or 'unresolved')} "
             f"state={row['coverage']['status']}  source={source_text} contextual={score_text}"
         )
         for claim in row.get("legacy_evidence", []):
@@ -136,6 +136,15 @@ def display_workspace(result):
                 f"  proposal={proposal['id']} provider={proposal['provider']} "
                 f"base={value.get('base_score', 'unknown')} score={value.get('score', 'unknown')} "
                 f"status={status} (requires coordinator publication)"
+            )
+        for analysis in row.get("code_analysis", []):
+            print(
+                f"  analysis={analysis['id']} provider={analysis['provider']} "
+                f"current={analysis['current']} verdict={json.dumps(analysis.get('verdict'))} "
+                f"assessment_proposal={analysis['application_eligible']} "
+                f"scoring_proposal={analysis['rescoring_eligible']} "
+                f"blockers={json.dumps(analysis.get('ineligibility_reasons', []))} "
+                "(evidence, requires human assessment)"
             )
     if result.get("next_offset") is not None:
         print(f"Next offset: {result['next_offset']} (pin --expected {result['state']})")

@@ -20,6 +20,17 @@ export type KnowledgeProposal = {
   proposal: { base_score: number; score: number; base_vector: string; vector: string } | null
   score_input: { base_vector: string; vector: string } | null
 }
+export type KnowledgeCodeAnalysis = {
+  id: string; provider: string; source_label: string; current: boolean
+  application_eligible: boolean; rescoring_eligible: boolean; proposal_state: string | null
+  summary: string; rationale: string; confidence: string; verdict: string
+  ineligibility_reasons: string[]; scoring_blockers: string[]
+  report_sha256: string; receipt_sha256: string
+  provider_claim?: Record<string, unknown>
+  provider_authenticity?: string; job_report_association?: string; repository_authorization?: string
+  source_receipt?: { state?: string; context_id?: string; assessment_fingerprint?: string }
+  source_proof: { target_claim_consistent: boolean; source_commit_consistent: boolean; consistency_only: boolean; source_binding: { status?: string; expected_commit?: string; requested_commit?: string; resolved_commit?: string; reason?: string } }
+}
 export type KnowledgeFinding = {
   id: string; context_id: string; vulnerability_id: string; state?: string
   component: { name: string; version?: string; purl?: string }
@@ -34,9 +45,10 @@ export type KnowledgeFinding = {
     annotations: { cybersecurity: { criticality: string; exposure: string; mitigations: string[]; testing_evidence: string[] }; deployment: { environment: string; usage: string; configuration: string }; support: { status: string; supplier: string; support_until: string | null; end_of_life: string | null }; notes: string; properties: Record<string, string> }
   } }
   scoring_proposals?: KnowledgeProposal[]
+  code_analysis?: KnowledgeCodeAnalysis[]
   capabilities: string[]; evidence?: unknown[]; [key: string]: unknown
 }
-export type KnowledgeWorkspace = { baseline_status?: 'withdrawn'; state: string; project_id: string; version: string; items: KnowledgeFinding[]; next_offset: number | null; statistics: { retained_absent_assessments?: number; totals: { context_findings: number; unique_vulnerabilities: number }; by_status: Record<string, number>; by_team: Record<string, { context_findings: number; recorded?: number; approved?: number } | number>; severity: Record<string, number>; recorded: number; submitted: number; approved: number } }
+export type KnowledgeWorkspace = { team_labels?: Record<string, string>; baseline_status?: 'withdrawn'; state: string; project_id: string; version: string; items: KnowledgeFinding[]; next_offset: number | null; statistics: { retained_absent_assessments?: number; totals: { context_findings: number; unique_vulnerabilities: number }; by_status: Record<string, number>; by_team: Record<string, { context_findings: number; recorded?: number; approved?: number } | number>; severity: Record<string, number>; recorded: number; submitted: number; approved: number } }
 export type KnowledgeScoreInput = {
   request_id: string
   expected_versions: Record<string, string>

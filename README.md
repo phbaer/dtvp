@@ -221,6 +221,8 @@ Production CLI calls read a bearer credential from `DTVP_API_TOKEN` (or the name
 Workspace flags mirror advanced server filters with hyphens, for example
 `--source-severity critical --team-review approved --dependency transitive`.
 Displayed totals always come from the server's complete filtered selection.
+Team labels come from that authorized selection, including teams outside the
+viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
@@ -426,8 +428,22 @@ source SBOM, constituent selection, declared subject digest and material fingerp
 Missing, inconsistent or unavailable source information returns explicit not-ready
 coverage. The endpoint contacts no service and creates no job or human approval.
 An external orchestrator still authorizes the repository; a source commit does not
-verify a built binary/container. Native durable job orchestration and returned
-Agentyzer evidence remain subsequent work. The existing v2 connector stays separate.
+verify a built binary/container. Native durable job orchestration remains subsequent
+work. The existing v2 connector stays separate.
+
+`POST .../versions/{version}/proposals/agentyzer` imports `request_id`, expected
+head, the exact `input_receipt`, `raw_report` and optional `source_label` under
+project evidence permission. For eligible native scope binding, wrap the completed
+job and report as `{"format":"dtvp.agentyzer-result-envelope/1","job":JOB,"report":REPORT}`.
+DTVP reproduces the pinned request and checks structured advisory/package/source
+commit consistency. Bare, incomplete or inconsistent reports remain attributed
+ineligible evidence; free text never establishes vulnerability identity. Provider
+identity and echoed job claims remain caller assertions, not authenticated proof.
+Original reports are retained and project-authorized downloads are available at
+`.../states/{state}/proposals/agentyzer/{id}/report`. Workspace, CLI and UI expose
+current/stale analysis, reasons and optional locally recalculated scoring proposals.
+Results never create human assessments, reviews or published scores. Separate
+imports preserve each actor’s attribution; identical retries reuse their receipt.
 
 ### Imported DT documentation
 
