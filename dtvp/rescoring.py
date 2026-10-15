@@ -158,6 +158,12 @@ def evidence_candidate(db, finding, evidence_id, detail):
             or job.result.get("report_sha256") != assertion.get("report_sha256")
         ):
             reason = "No verified Agentyzer run exists for this occurrence"
+        if assertion.get("source_verified") is not True and not (
+            job
+            and job.payload.get("mode") == "synthetic"
+            and assertion.get("synthetic") is True
+        ):
+            reason = "Agentyzer did not verify the requested source commit"
         if not reason:
             report = json.loads(Artifacts(db.info["artifact_dir"]).read(assertion["report_sha256"]))
             adjusted = report.get("assessment", {}).get("adjusted_cvss") or {}

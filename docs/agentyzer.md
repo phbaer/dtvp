@@ -16,6 +16,15 @@ with `{"component_name":"logical-repository-name"}`. This name resolves through
 Agentyzer's repository configuration. Analysts cannot select another product's
 repository mapping. Deployment endpoint/token configuration remains server-side.
 
+For external proposal eligibility, SBOM import `context.analysis_source` must
+contain `component_name` matching that connector and a full 40-hex `source_commit`.
+All current occurrence observations must agree. Generic product commit metadata
+does not identify an analyzer repository. DTVP sends the qualified commit and
+requires returned `source_input.binding: verified_git_commit` with matching
+requested/resolved commits. Changing this import context invalidates earlier
+evidence. Missing or conflicting bindings remain visible, ineligible evidence.
+This verifies source checkout identity, not delivered binaries, submodules or LFS.
+
 `POST /api/v2/findings/{id}/analyses` accepts `expected_version`, optional
 `guidance`, and optional `parent_job_id` plus `question` for a follow-up.
 DTVP sends the vulnerability ID, bound repository name, project/release hints,
@@ -37,7 +46,8 @@ remote IDs, including follow-up parents. Already imported DTVP reports survive.
 
 DTVP preserves complete reports plus a compact evidence summary, exact occurrence
 coordinates and input evidence revision. Proposal eligibility requires a literal
-`application_eligible=true`, an exact package name and detected-version match,
+`application_eligible=true`, verified qualified source binding, an exact package
+name and detected-version match,
 and consistent affectedness/analysis state. `not_affected` also requires literal
 `code_coverage.permits_exclusion=true`. Missing fields, mismatches and incomplete
 coverage remain evidence without an applicable proposal. Current proposals only
@@ -49,7 +59,9 @@ job and occurrence, validates the vector against original Base facts, and requir
 an explicit preview, submission and independent approval. No automatic copying
 occurs.
 
-The playground runs deterministic eligible, inconclusive and failed scenarios
+The playground explicitly labels its source binding synthetic and unverified;
+its eligible scenarios are an offline workflow exception. It runs deterministic
+eligible, inconclusive and failed scenarios
 through the same durable workflow without external calls. Contract tests cover
 submission, restart/poll recovery, follow-ups, cancellation during completion,
 revoked credentials, stale evidence, scope isolation and strict proposal gates.

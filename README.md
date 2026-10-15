@@ -263,6 +263,11 @@ Agentyzer submission, durable polling, follow-ups and immutable report retrieval
 are available from each finding. Set `DTVP_AGENTYZER_ENABLED=true` and
 `DTVP_AGENTYZER_URL` on the API and worker; optionally set a gateway bearer token.
 A product administrator binds its Agentyzer repository name in Products.
+External proposals also require qualified import `context.analysis_source` with
+that `component_name` and a full 40-hex `source_commit`; returned checkout binding
+must match. Generic product commits are insufficient. Unverified reports remain
+visible but ineligible; changing qualified source invalidates previous evidence.
+See [Agentyzer source binding](docs/agentyzer.md).
 The playground uses the same workflow with clearly marked offline results,
 incomplete coverage and simulated failures; no Agentyzer service is bundled.
 

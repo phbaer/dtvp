@@ -407,3 +407,53 @@ def test_native_agentyzer_score_is_correlated_and_generic_evidence_cannot_impers
     assert not analyst.get(f"/api/v2/findings/{finding['id']}/rescoring/proposals").json()["items"][
         0
     ]["eligible"]
+
+
+@respx.mock
+def test_stored_external_agentyzer_score_without_source_verification_is_ineligible(
+    analyst, release_id
+):
+    import httpx
+
+    from dtvp.models import Evidence, Job
+    from tests.test_analysis import external, report, run_worker
+    from tests.test_analysis import submit as analyse
+
+    finding = external(analyst, release_id)
+    respx.post("http://agentyzer.test/assess").mock(
+        return_value=httpx.Response(200, json={"job_id": "historical-score"})
+    )
+    respx.get("http://agentyzer.test/jobs/historical-score").mock(
+        return_value=httpx.Response(200, json={"status": "completed"})
+    )
+    respx.get("http://agentyzer.test/jobs/historical-score/result").mock(
+        return_value=httpx.Response(
+            200,
+            json=report(
+                rescoring_eligible=True,
+                adjusted_cvss={
+                    "original_vector": BASE,
+                    "adjusted_vector": VECTOR,
+                    "adjusted_score": 0,
+                },
+            ),
+        )
+    )
+    job_id = analyse(analyst, finding).json()["id"]
+    assert run_worker(analyst)
+    proposals_url = f"/api/v2/findings/{finding['id']}/rescoring/proposals"
+    assert analyst.get(proposals_url).json()["items"][0]["eligible"]
+    # Model an already stored report from the earlier runtime; preserve the report bytes.
+    with analyst.app.state.sessions.begin() as db:
+        job = db.get(Job, job_id)
+        evidence = db.get(Evidence, job.result["evidence_id"])
+        evidence.assertion = {
+            key: value for key, value in evidence.assertion.items() if key != "source_verified"
+        }
+        job.result = {key: value for key, value in job.result.items() if key != "source_verified"}
+    proposals = analyst.get(proposals_url).json()["items"]
+    assert not proposals[0]["eligible"]
+    assert "source" in proposals[0]["reason"].lower()
+    history = analyst.get(f"/api/v2/findings/{finding['id']}/analyses").json()["items"]
+    assert not history[0]["result"]["application_eligible"]
+    assert analyst.get(f"/api/v2/analyses/{job_id}/report").status_code == 200

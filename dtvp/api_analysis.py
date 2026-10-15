@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import Field
 from sqlalchemy import select
 
-from dtvp.analysis import enabled, mode
+from dtvp.analysis import enabled, mode, source_binding
 from dtvp.api import DB, Auth, finding_for, project_for
 from dtvp.domain import audit, lock_release
 from dtvp.jobs import enqueue
@@ -87,6 +87,10 @@ def submit(finding_id: str, data: AnalysisInput, db: DB, actor: Auth, request: R
         "assessment_scope": "repository",
         "user_guidance": data.guidance,
     }
+    qualified_source = source_binding(db, finding, binding)
+    target["source_binding"] = qualified_source
+    if mode(settings) == "external" and qualified_source["status"] == "known":
+        outbound["source_commit"] = qualified_source["source_commit"]
     parent_remote_id = None
     if data.parent_job_id:
         parent = db.get(Job, data.parent_job_id)
@@ -102,6 +106,7 @@ def submit(finding_id: str, data: AnalysisInput, db: DB, actor: Auth, request: R
             or parent.payload.get("endpoint_digest") != digest(settings.agentyzer_url.encode())
             or parent.payload.get("mode") != mode(settings)
             or parent.payload["request"]["component_name"] != outbound["component_name"]
+            or parent.payload["target"].get("source_binding") != qualified_source
         ):
             raise HTTPException(409, "Parent analysis is stale; start a new analysis")
         if not data.question.strip():
@@ -153,12 +158,25 @@ def submit(finding_id: str, data: AnalysisInput, db: DB, actor: Auth, request: R
 
 
 def representation(job, finding):
+    result = dict(job.result)
+    if (
+        job.status == "succeeded"
+        and job.payload.get("mode") == "external"
+        and result.get("source_verified") is not True
+    ):
+        result.update(
+            application_eligible=False,
+            rescoring_eligible=False,
+            proposal_state=None,
+            ineligibility_reasons=result.get("ineligibility_reasons")
+            or ["Historical external report has no verified analysis source binding"],
+        )
     return {
         "id": job.id,
         "kind": job.kind,
         "status": job.status,
         "error": job.error,
-        "result": job.result,
+        "result": result,
         "created_at": job.created_at.isoformat(),
         "parent_job_id": job.payload.get("parent_job_id"),
         "current": job.result.get("evidence_revision") == finding.evidence_revision,

@@ -1,14 +1,15 @@
 """External Agentyzer client; checkpoint every poll, never replay an ambiguous POST."""
 
+import re
 from datetime import timedelta
 from urllib.parse import quote
 
 from sqlalchemy import select
 
 from dtvp.auth import aware
-from dtvp.domain import import_evidence, lock_release
+from dtvp.domain import current_observations, import_evidence, lock_release
 from dtvp.jobs import actor_for
-from dtvp.models import Finding, Job, Project, now
+from dtvp.models import Finding, Job, Project, Revision, now
 from dtvp.providers import client, read_json
 from dtvp.storage import canonical, digest
 
@@ -23,7 +24,45 @@ def mode(settings):
     return "synthetic" if settings.playground and not settings.agentyzer_enabled else "external"
 
 
-def normalize(report, target):
+def source_binding(db, finding, component_name):
+    """Only producer-qualified source for this configured repository can pin a run."""
+    revision_ids = sorted(
+        {
+            row.revision_id
+            for row in current_observations(db, finding.release_id)
+            if row.finding_id == finding.id
+        }
+    )
+    result = {
+        "component_name": component_name,
+        "revision_ids": revision_ids,
+        "source_commit": None,
+        "status": "unknown",
+        "reason": "Imports do not establish qualified analysis source",
+    }
+    commits = set()
+    for revision_id in revision_ids:
+        revision = db.get(Revision, revision_id)
+        qualified = revision.context.get("analysis_source") if revision else None
+        if not isinstance(qualified, dict) or qualified.get("component_name") != component_name:
+            return result
+        commit = qualified.get("source_commit")
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+            result["reason"] = "Qualified analysis source has no immutable Git commit"
+            return result
+        commits.add(commit.lower())
+    if len(commits) > 1:
+        return {
+            **result,
+            "status": "conflicting",
+            "reason": "Current imports disagree on the analysis source commit",
+        }
+    if commits:
+        return {**result, "source_commit": commits.pop(), "status": "known", "reason": ""}
+    return result
+
+
+def normalize(report, target, *, synthetic=False):
     assessment = report.get("assessment")
     if not isinstance(assessment, dict):
         raise ValueError("Agentyzer returned no assessment")
@@ -35,7 +74,30 @@ def normalize(report, target):
         and version.get("detected_version") == target["version"]
         and bool(target["version"])
     )
-    application = assessment.get("application_eligible") is True and target_verified
+    expected = target.get("source_binding", {})
+    source = report.get("source_input")
+    source = source if isinstance(source, dict) else {}
+    commit = expected.get("source_commit")
+    source_verified = (
+        expected.get("status") == "known"
+        and isinstance(commit, str)
+        and re.fullmatch(r"[0-9a-f]{40}", commit) is not None
+        and source.get("binding") == "verified_git_commit"
+        and source.get("requested_commit") == commit
+        and source.get("resolved_commit") == commit
+    )
+    source_reason = (
+        "Synthetic playground result; source identity is unverified"
+        if synthetic
+        else ""
+        if source_verified
+        else expected.get("reason") or "Agentyzer did not verify the requested source commit"
+    )
+    application = (
+        assessment.get("application_eligible") is True
+        and target_verified
+        and (source_verified or synthetic)
+    )
     rescoring = assessment.get("rescoring_eligible") is True and application
     affected = assessment.get("affected")
     coverage = assessment.get("code_coverage") or {}
@@ -54,6 +116,25 @@ def normalize(report, target):
         "kind": "code-analysis",
         "application_eligible": application,
         "target_verified": target_verified,
+        "source_verified": source_verified and not synthetic,
+        "source_binding": {
+            "status": "synthetic_unverified"
+            if synthetic
+            else "verified"
+            if source_verified
+            else "unverified",
+            "expected_commit": commit,
+            "requested_commit": str(source.get("requested_commit") or "")[:100],
+            "resolved_commit": str(source.get("resolved_commit") or "")[:100],
+            "reason": source_reason,
+        },
+        "ineligibility_reasons": ([source_reason] if not synthetic and not source_verified else [])
+        + (["Package/version evidence does not match the finding"] if not target_verified else [])
+        + (
+            ["Provider did not mark this result application-eligible"]
+            if assessment.get("application_eligible") is not True
+            else []
+        ),
         "rescoring_eligible": rescoring,
         "proposal_state": proposal,
         "summary": str(assessment.get("summary") or "No summary supplied")[:2000],
@@ -69,6 +150,7 @@ def synthetic_report(outcome, target):
         raise ValueError("Simulated Agentyzer failure; existing decisions remain unchanged")
     eligible = outcome == "eligible"
     return {
+        "source_input": {"binding": "synthetic_unverified", "artifact_verified": False},
         "assessment": {
             "application_eligible": eligible,
             "rescoring_eligible": False,
@@ -110,6 +192,10 @@ def validate_job(db, job, settings):
         or finding.evidence_revision != job.payload["evidence_revision"]
     ):
         raise ValueError("Finding evidence changed; submit a new analysis")
+    if job.payload["mode"] == "external" and source_binding(db, finding, binding) != job.payload[
+        "target"
+    ].get("source_binding"):
+        raise ValueError("Analysis source binding changed; submit a new analysis")
     return actor, finding
 
 
@@ -149,6 +235,11 @@ def execute(factory, artifacts, settings, job_id, token):
                     {
                         "question": payload["question"],
                         "user_guidance": payload["request"]["user_guidance"],
+                        **(
+                            {"source_commit": payload["request"]["source_commit"]}
+                            if "source_commit" in payload["request"]
+                            else {}
+                        ),
                     }
                     if parent
                     else payload["request"]
@@ -183,7 +274,7 @@ def execute(factory, artifacts, settings, job_id, token):
                     "Agentyzer run failed or disappeared; retry explicitly. Existing decisions are preserved"
                 )
             report = read_json(http, "GET", remote_path + "/result", headers=headers)
-    assertion = normalize(report, payload["target"])
+    assertion = normalize(report, payload["target"], synthetic=payload["mode"] == "synthetic")
     report_sha = artifacts.put(canonical(report))
     with factory.begin() as db:
         # Match lock ordering used by decisions/imports before taking the job lock.

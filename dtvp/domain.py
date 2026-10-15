@@ -160,7 +160,14 @@ def import_sbom(
         }
         assertion["scope"] = {
             key: context[key]
-            for key in ("commit", "branch", "artifact_digest", "environment", "detector_version")
+            for key in (
+                "commit",
+                "branch",
+                "artifact_digest",
+                "environment",
+                "detector_version",
+                "analysis_source",
+            )
             if key in context
         }
         legacy = decode_legacy(item["advisory"])
