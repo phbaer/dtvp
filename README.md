@@ -160,10 +160,18 @@ adapters use this engine rather than implementing separate approval logic.
 
 `GET /api/v3/projects/{id}/versions` lists current product branches.
 `GET .../versions/{version}/workspace` returns contextual findings and full filtered
-statistics; filters are `team_id`, `q` and `lifecycle`, with bounded `offset`/`limit`
+statistics; basic filters are `team_id`, `q` and `lifecycle`, with bounded `offset`/`limit`
 and an optional pinned `expected` state. Detail is available at
 `.../workspace/{context_id}/{vulnerability_id}`. Source assertions, original ratings,
 current/pending coverage and published contextual scores remain separate.
+Advanced filters cover `source_severity`, `contextual_severity`, `applicability`,
+`scoring_status`, `team_review`, `provider`, `cvss_version`, `dependency`,
+`source_conflict` and `component`. They apply before statistics and pagination.
+Missing evidence stays unknown; outdated contextual scores do not match current
+severity. Provider attribution does not prove independent corroboration. Dependency
+filters use reported topology, and contradictory source ratings compare like CVSS
+versions. The Knowledge tab collapses these options by default, with explicit
+Apply/Reset, shareable scoped URLs and user-local saved views.
 
 `POST .../assessments/{assessment_id}/draft` or `.../submit` requires `request_id`,
 exact `expected_versions`, `expected_revision` (null for a new assessment),

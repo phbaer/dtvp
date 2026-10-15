@@ -72,7 +72,7 @@ async function loadCatalog(append = false) {
 }
 function filterParams() { return new URLSearchParams({ q: search.value, lifecycle: lifecycle.value, project_id: reviewProject.value, workspace_id: reviewTeam.value, owner: ownerSearch.value, owner_match: ownerMatch.value, sort: order.value }) }
 function viewQuery() { return new URLSearchParams({ q: search.value, status: lifecycle.value, project: reviewProject.value, team: reviewTeam.value, owner: ownerSearch.value, owner_match: ownerMatch.value, sort: order.value }).toString() }
-function updateUrl() { history.replaceState(null, '', `${location.pathname}?${viewQuery()}&page=${page.value}`) }
+function updateUrl() { const query = new URLSearchParams(viewQuery()); if (page.value === 'Knowledge') new URLSearchParams(location.search).forEach((value, key) => { if (key.startsWith('k_')) query.set(key, value) }); query.set('page', page.value); history.replaceState(null, '', `${location.pathname}?${query}`) }
 function resetReviewFilters() {
   search.value = ''; lifecycle.value = ''; reviewProject.value = ''; reviewProjectLabel.value = ''; reviewTeam.value = ''; reviewTeamLabel.value = ''; ownerSearch.value = ''; ownerMatch.value = 'contains'; order.value = 'identifier'
 }

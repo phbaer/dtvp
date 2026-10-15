@@ -6,6 +6,7 @@ from dtvp.api import DB, Auth, project_for
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.assessments import AssessmentInput, ReviewInput, create_review, save_assessment
 from dtvp.knowledge.exports import build_vscorer_worklist, export_bytes
+from dtvp.knowledge.filters import KnowledgeFilters
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
 from dtvp.knowledge.ownership import product_heads
 from dtvp.knowledge.scoring import (
@@ -126,9 +127,34 @@ def workspace(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     expected: Sha | None = None,
+    source_severity: str = "",
+    contextual_severity: str = "",
+    applicability: str = "",
+    scoring_status: str = "",
+    team_review: str = "",
+    provider: str = "",
+    cvss_version: str = "",
+    dependency: str = "",
+    source_conflict: str = "",
+    component: str = "",
 ):
     project = project_for(db, actor, project_id)
     state = state_for(request, project_id, version, expected)
+    try:
+        filters = KnowledgeFilters(
+            source_severity=source_severity,
+            contextual_severity=contextual_severity,
+            applicability=applicability,
+            scoring_status=scoring_status,
+            team_review=team_review,
+            provider=provider,
+            cvss_version=cvss_version,
+            dependency=dependency,
+            source_conflict=source_conflict,
+            component=component,
+        )
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
     result = load_workspace(
         request.app.state.knowledge,
         state,
@@ -137,6 +163,7 @@ def workspace(
         lifecycle=lifecycle,
         offset=offset,
         limit=limit,
+        filters=filters,
     )
     for row in result["items"]:
         with_capabilities(db, actor, project, row)

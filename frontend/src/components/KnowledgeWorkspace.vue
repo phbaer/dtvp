@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ApiError, send } from '../api'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { api, ApiError, send } from '../api'
 import { justifications, justificationLabel } from '../assessmentReasons'
 import { knowledgeApi, type KnowledgeFinding, type KnowledgeWorkspace, type KnowledgeScoreInput, type KnowledgeScorePreview } from '../knowledgeApi'
 import type { Me } from '../types'
 import SearchSelect from './SearchSelect.vue'
 const props = defineProps<{ me: Me }>()
 const project = ref(''), projectName = ref(''), version = ref(''), team = ref(''), lifecycle = ref(''), query = ref('')
+const filterLabels: Record<string, string> = { source_severity: 'Source severity', contextual_severity: 'Published severity', applicability: 'Applicability', scoring_status: 'Scoring status', team_review: 'Team assessment', provider: 'Evidence provider', cvss_version: 'Source CVSS version', dependency: 'Dependency relationship', source_conflict: 'Source discrepancies', component: 'Component' }
+const emptyFilters = () => Object.fromEntries(Object.keys(filterLabels).map(key => [key, '']))
+const filters = ref(emptyFilters()), filterDraft = ref(emptyFilters())
+const activeFilterCount = computed(() => Object.values(filters.value).filter(Boolean).length)
+const severityBands = ['critical', 'high', 'medium', 'low', 'none', 'unknown']
+const savedViews = ref<{ name: string; query: string }[]>([]), viewName = ref('')
+const initialView = new URLSearchParams(location.search)
+let restoring = false
 const versions = ref<{ version: string; state: string }[]>([])
 const versionMenu = ref(false), versionQuery = ref(''), versionNext = ref<number | null>(null), versionBusy = ref(false)
 let versionSequence = 0, versionTimer: ReturnType<typeof setTimeout> | undefined
@@ -38,20 +46,20 @@ async function load(reset = true, keep = false) {
   if (reset) { offset.value = 0; previous.value = [] }
   if (!keep) close()
   try {
-    const params = new URLSearchParams({ offset: String(offset.value), limit: '30', q: query.value, team_id: team.value, lifecycle: lifecycle.value })
+    const params = new URLSearchParams({ offset: String(offset.value), limit: '30', q: query.value, team_id: team.value, lifecycle: lifecycle.value, ...Object.fromEntries(Object.entries(filters.value).filter(([, value]) => value !== '')) })
     if (!reset && workspace.value?.state) params.set('expected', workspace.value.state)
     const result = await knowledgeApi<KnowledgeWorkspace>(`${scope.value}/workspace?${params}`)
-    if (current === sequence) workspace.value = result
+    if (current === sequence) { workspace.value = result; syncViewUrl() }
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
 }
-async function chooseProject(option: { id: string; name?: string }) {
+async function chooseProject(option: { id: string; name?: string }, preferredVersion = '') {
   const current = ++sequence; ++versionSequence; projectName.value = option.name || option.id; versions.value = []; version.value = ''; versionQuery.value = ''; versionMenu.value = false; workspace.value = null; close()
   busy.value = true; error.value = ''; notice.value = ''
   try {
     const result = await knowledgeApi<{ items: { version: string; state: string }[]; next_offset: number | null }>(`/projects/${encodeURIComponent(option.id)}/versions?limit=25`)
     if (current !== sequence) return
-    versions.value = result.items; versionNext.value = result.next_offset; version.value = result.items[0]?.version || ''; await load()
+    versions.value = result.items; versionNext.value = result.next_offset; version.value = preferredVersion || result.items[0]?.version || ''; await load()
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
 }
@@ -139,8 +147,51 @@ async function publishScore() {
   finally { busy.value = false }
 }
 watch([scoreBase, scoreVector, scoreRationale], () => { scorePreview.value = null }, { flush: 'sync' })
-watch([team, lifecycle], () => { void load() })
-watch(query, () => { clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
+function viewParams() {
+  const params = new URLSearchParams()
+  const values = { project: project.value, version: version.value, team: team.value, lifecycle: lifecycle.value, q: query.value, ...filters.value }
+  for (const [key, value] of Object.entries(values)) if (value) params.set(`k_${key}`, value)
+  return params
+}
+function syncViewUrl() {
+  const params = new URLSearchParams(location.search)
+  for (const key of [...params.keys()]) if (key.startsWith('k_')) params.delete(key)
+  for (const [key, value] of viewParams()) params.set(key, value)
+  params.set('page', 'Knowledge')
+  history.replaceState(null, '', `${location.pathname}?${params}`)
+}
+async function applyFilters() { filters.value = { ...filterDraft.value }; await load() }
+async function resetFilters() { filterDraft.value = emptyFilters(); filters.value = emptyFilters(); await load() }
+function persistViews() { localStorage.setItem(`dtvp.knowledge.views:${props.me.id}`, JSON.stringify(savedViews.value)) }
+function saveView() {
+  const name = viewName.value.trim().slice(0, 100)
+  if (!name) return
+  savedViews.value = [...savedViews.value.filter(item => item.name !== name), { name, query: viewParams().toString() }].slice(-20)
+  try { persistViews(); viewName.value = ''; notice.value = 'View saved in this browser for your user.' } catch { error.value = 'Browser storage is unavailable.' }
+}
+function removeView(name: string) { savedViews.value = savedViews.value.filter(item => item.name !== name); try { persistViews() } catch { error.value = 'Browser storage is unavailable.' } }
+async function restoreView(value: string) {
+  if (busy.value) return
+  const params = new URLSearchParams(value), id = params.get('k_project') || ''
+  restoring = true; busy.value = true; error.value = ''
+  try {
+    team.value = params.get('k_team') || ''; lifecycle.value = params.get('k_lifecycle') || ''; query.value = params.get('k_q') || ''
+    filters.value = Object.fromEntries(Object.keys(filterLabels).map(key => [key, params.get(`k_${key}`) || ''])); filterDraft.value = { ...filters.value }
+    if (id) { const result = await api<{ id: string; name: string }>(`/projects/${encodeURIComponent(id)}`); project.value = result.id; await chooseProject(result, params.get('k_version') || '') }
+    else await load()
+  } catch (err) { fail(err) }
+  finally { restoring = false; busy.value = false }
+}
+async function copyView() {
+  syncViewUrl()
+  try { await navigator.clipboard.writeText(location.href); notice.value = 'View link copied.' } catch { error.value = 'Clipboard unavailable. Copy this page address instead.' }
+}
+watch([team, lifecycle], () => { if (!restoring) void load() })
+watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
+onMounted(() => {
+  try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
+  if (initialView.has('k_project')) void restoreView(initialView.toString())
+})
 onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer) })
 </script>
 <template>
@@ -153,6 +204,22 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <label>Review status<select v-model="lifecycle" :disabled="busy"><option value="">All statuses</option><option v-for="status in ['unassessed', 'draft', 'submitted', 'approved', 'reassessment_needed', 'historically_absent']" :key="status" :value="status">{{ label(status) }}</option></select></label>
       <label class="knowledge-search">Search<input v-model="query" :disabled="busy" type="search" placeholder="Vulnerability, component or description"></label>
     </form>
+    <details class="knowledge-advanced"><summary>More filters<span v-if="activeFilterCount"> · {{ activeFilterCount }} applied</span></summary>
+      <form @submit.prevent="applyFilters"><fieldset :disabled="busy"><div class="knowledge-filter-grid">
+        <label>Source severity<select v-model="filterDraft.source_severity"><option value="">Any source severity</option><option v-for="band in severityBands" :key="band" :value="band">{{ label(band) }}</option></select></label>
+        <label>Published severity<select v-model="filterDraft.contextual_severity"><option value="">Any published severity</option><option v-for="band in severityBands" :key="band" :value="band">{{ label(band) }}</option></select></label>
+        <label>Context applicability<select v-model="filterDraft.applicability"><option value="">Any applicability</option><option v-for="value in ['affected', 'not_affected', 'fixed', 'under_investigation', 'unassessed', 'unknown']" :key="value" :value="value">{{ label(value) }}</option></select></label>
+        <label>Scoring status<select v-model="filterDraft.scoring_status"><option value="">Any scoring status</option><option v-for="value in ['published', 'outdated', 'not_published', 'unknown']" :key="value" :value="value">{{ label(value) }}</option></select></label>
+        <label>Team assessment<select v-model="filterDraft.team_review"><option value="">Any team assessment</option><option v-for="value in ['missing', 'recorded', 'current', 'draft', 'submitted', 'pending', 'approved', 'needs_revalidation', 'changes_requested']" :key="value" :value="value">{{ label(value) }}</option></select></label>
+        <label>Evidence provider<input v-model="filterDraft.provider" maxlength="200" placeholder="Exact attributed source"></label>
+        <label>Source CVSS version<select v-model="filterDraft.cvss_version"><option value="">Any CVSS version</option><option v-for="value in ['2.0', '3.0', '3.1', '4.0', 'unknown']" :key="value" :value="value">{{ value }}</option></select></label>
+        <label>Dependency relationship<select v-model="filterDraft.dependency"><option value="">Any relationship</option><option v-for="value in ['root', 'direct', 'transitive', 'unknown']" :key="value" :value="value">{{ label(value) }}</option></select></label>
+        <label>Source discrepancies<select v-model="filterDraft.source_conflict"><option value="">Any source discrepancies</option><option value="yes">Reported discrepancy</option><option value="no">No comparable discrepancy observed</option><option value="unknown">Unknown</option></select></label>
+        <label>Component<input v-model="filterDraft.component" maxlength="500" placeholder="Name, namespace or package URL"></label>
+      </div><div class="knowledge-actions"><button type="button" @click="resetFilters">Reset advanced filters</button><button class="primary">Apply filters</button></div></fieldset></form>
+      <p class="hint">Filters and counts use the full server result. Unknown evidence stays unknown; outdated scores are excluded from published severity.</p>
+    </details>
+    <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
     <p v-if="error" role="alert" class="message">{{ error }}</p><p v-if="notice" role="status" class="message">{{ notice }}</p><p v-if="busy" role="status">Loading…</p>
     <p v-if="project && !busy && !version && !versions.length" class="empty">No journal-backed versions. Import a baseline to start.</p><p v-else-if="!project" class="empty">Select a product to review its versioned knowledge.</p>
     <template v-if="workspace">
@@ -188,6 +255,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
   </section>
 </template>
 <style scoped>
+.knowledge-advanced,.knowledge-views { margin:12px 0; font-size:.85rem }.knowledge-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px 14px; margin-top:12px }.knowledge-advanced fieldset { border:0; margin:0; padding:0; min-width:0 }.knowledge-views ul { list-style:none; padding:0; display:flex; gap:8px; flex-wrap:wrap }.knowledge-views li { display:flex; gap:4px }.knowledge-views .knowledge-actions { justify-content:flex-start }.knowledge-views label { margin:8px 0 0; min-width:160px }
 .knowledge-heading,.knowledge-detail header,.knowledge-pagination,.knowledge-actions,.knowledge-score-pair,.knowledge-statistics { display:flex; align-items:center; gap:12px; flex-wrap:wrap }.knowledge-heading { justify-content:space-between; margin-bottom:16px }.knowledge-heading h1 { margin:0 }.knowledge-heading p { margin:4px 0 }.knowledge-filters { display:grid; grid-template-columns:minmax(160px,1.2fr) minmax(100px,.65fr) minmax(140px,1fr) minmax(140px,1fr) minmax(180px,1.5fr); gap:12px; align-items:end }.knowledge-filters label { margin:0 }.knowledge-statistics { margin:16px 0; font-size:.85rem; border-block:1px solid var(--line); padding:12px 0 }.knowledge-statistics details { margin-left:auto }.knowledge-statistics dl { position:absolute; z-index:2; background:var(--surface); padding:16px; border:1px solid var(--line); box-shadow:var(--shadow); right:24px; min-width:220px }.knowledge-columns { display:grid; gap:20px }.knowledge-columns.has-detail { grid-template-columns:minmax(380px,1fr) minmax(360px,1fr) }.knowledge-queue,.knowledge-detail { min-width:0 }.knowledge-queue small { display:block; color:var(--muted); margin-top:4px }.knowledge-queue .selected { background:var(--accent-soft) }.knowledge-queue th { font-size:.8rem; white-space:nowrap }.knowledge-queue td { font-size:.85rem; vertical-align:top }.knowledge-detail { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:18px; align-self:start }.knowledge-detail header { justify-content:space-between; align-items:flex-start }.knowledge-detail h2 { margin:0; font-size:1.15rem }.knowledge-detail header p { margin:4px 0 }.knowledge-detail h3 { font-size:1rem }.knowledge-detail > .hint { margin:8px 0 }.knowledge-score-pair { font-size:.8rem; gap:22px; padding:10px 0 }.knowledge-tabs { display:flex; gap:6px; border-bottom:1px solid var(--line); padding-bottom:8px }.knowledge-tabs button { border:0; padding:5px 10px; text-transform:capitalize }.knowledge-tabs button[aria-pressed=true] { background:var(--accent-soft); color:var(--accent) }.knowledge-pane { padding-top:12px }.knowledge-pane fieldset { border:0; padding:0; margin:0; min-width:0 }.knowledge-pane details { margin:12px 0 }.knowledge-pane dl,.knowledge-statistics dl { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:.8rem }.knowledge-pane dd,.knowledge-statistics dd { margin:0; overflow-wrap:anywhere }.knowledge-pane dt { color:var(--muted) }.knowledge-description { white-space:pre-wrap; overflow-wrap:anywhere; max-height:38vh; overflow:auto; line-height:1.6; font-size:.9rem; margin-top:0 }.knowledge-rationale { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6 }.knowledge-pane pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto; font-size:.75rem; background:var(--bg); padding:10px }.knowledge-pane code { display:block; overflow-wrap:anywhere; font-size:.75rem }.knowledge-confirm { display:flex; align-items:flex-start; gap:8px; font-size:.85rem }.knowledge-confirm input { width:auto; margin-top:3px }.knowledge-actions { justify-content:flex-end; margin-top:12px }.knowledge-pagination { justify-content:space-between; margin-top:12px; font-size:.8rem }.knowledge-state { margin-top:16px; font-size:.75rem; color:var(--muted) }.knowledge-state code { overflow-wrap:anywhere }
 @media(max-width:1100px) { .knowledge-filters { grid-template-columns:repeat(2,minmax(0,1fr)) }.knowledge-search { grid-column:1/-1 }.knowledge-columns.has-detail { grid-template-columns:1fr } }@media(max-width:550px) { .knowledge-filters { grid-template-columns:1fr }.knowledge-statistics { gap:8px 16px }.knowledge-detail { padding:12px }.knowledge-queue th,.knowledge-queue td { padding:8px 5px } }
 </style>

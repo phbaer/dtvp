@@ -114,6 +114,7 @@ def load_workspace(
     context_id=None,
     vulnerability_id=None,
     paginate=True,
+    filters=None,
 ):
     """Synthesize attributed claims and contextual coverage; never query providers.
 
@@ -148,6 +149,11 @@ def load_workspace(
                 {"observation_id": key, **finding}
             )
     claims_by_ref = {}
+    graph = {
+        edge["ref"]: set(edge.get("dependsOn", []))
+        for edge in inventory.get("dependencies", {}).get("edges", [])
+    }
+    connected = {}
     for (ref, identifier), observations in sorted(claims.items()):
         claims_by_ref.setdefault(ref, []).append((identifier, observations))
     items, represented, active_scopes, score_gates = [], set(), set(), {}
@@ -196,6 +202,21 @@ def load_workspace(
                         journal, sections, revision.version, identifier
                     )
                 gate = score_gates[identifier]
+            dependency_relation = "unknown"
+            root_ref = context["root_ref"]
+            if root_ref == ref:
+                dependency_relation = "root"
+            elif context.get("dependency_graph") == "reported":
+                if ref in graph.get(root_ref, set()):
+                    dependency_relation = "direct"
+                else:
+                    if root_ref not in connected:
+                        from dtvp.knowledge.ownership import reachable
+
+                        complete_graph = {key: graph.get(key, set()) for key in components}
+                        connected[root_ref] = reachable(complete_graph, root_ref)
+                    if ref in connected[root_ref]:
+                        dependency_relation = "transitive"
             item = {
                 "id": digest(canonical([context["id"], identifier])),
                 "context_id": context["id"],
@@ -205,6 +226,7 @@ def load_workspace(
                     components.get(context["root_ref"], {"bom-ref": context["root_ref"]})
                 ),
                 "context": context,
+                "dependency_relation": dependency_relation,
                 "sourcefacts": observations,
                 "source_ratings": ratings,
                 "source_severity": source_severity(ratings),
@@ -243,6 +265,10 @@ def load_workspace(
                 not q or q.casefold() in search
             ):
                 items.append(item)
+    if filters is not None:
+        from dtvp.knowledge.filters import filter_rows
+
+        items = filter_rows(items, filters)
     items.sort(
         key=lambda item: (
             item["vulnerability_id"],

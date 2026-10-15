@@ -13,6 +13,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
   }
   let conflict = false, uncertain = false, scoreReady = false
   const writes: { path: string; body: Record<string, unknown> }[] = []
+  const workspaceQueries: URLSearchParams[] = []
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
     if (route.request().method() === 'POST') {
@@ -29,8 +30,9 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
     if (path === '/api/v2/me') result = { id: reviewer ? 'reviewer' : 'analyst', name: 'Test user', org_admin: false, playground, agentyzer: { enabled: false, mode: 'disabled' }, vscorer_url: '', workspaces: [{ id: 'security', name: 'Security', capabilities: ['read', reviewer ? 'approve' : 'assess'] }] }
     else if (path === '/api/v2/playground/personas') result = []
     else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'p', name: 'Test Product', workspace_id: 'security', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v2/projects/p') result = { id: 'p', name: 'Test Product', workspace_id: 'security', capabilities: ['read'] }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: 'baseline-sha' }] }
-    else if (path.endsWith('/workspace')) result = { state: 'baseline-sha', project_id: 'p', version: '7.1.2', items: [row], next_offset: null, statistics: { totals: { context_findings: 31, unique_vulnerabilities: 12 }, by_status: { submitted: 2 }, by_team: { security: 31 }, severity: { high: 31 }, recorded: 4, submitted: 2, approved: 1 } }
+    else if (path.endsWith('/workspace')) { workspaceQueries.push(new URLSearchParams(url.search)); result = { state: 'baseline-sha', project_id: 'p', version: '7.1.2', items: [row], next_offset: url.searchParams.get('offset') === '0' ? 30 : null, statistics: { totals: { context_findings: url.searchParams.get('source_severity') ? 79 : 31, unique_vulnerabilities: 12 }, by_status: { submitted: 2 }, by_team: { security: 31 }, severity: { high: 31 }, recorded: 4, submitted: 2, approved: 1 } } }
     else if (path.includes('/workspace/')) result = { ...row, state: 'baseline-sha' }
     await route.fulfill({ json: result })
   })
@@ -38,7 +40,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
   await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
   await page.getByRole('option', { name: 'Test Product' }).click()
   await expect(page.getByRole('button', { name: 'CVE-2099-1234', exact: true })).toBeVisible()
-  return { writes, conflict: () => { conflict = true }, uncertain: () => { uncertain = true }, ready: () => { scoreReady = true } }
+  return { writes, workspaceQueries, conflict: () => { conflict = true }, uncertain: () => { uncertain = true }, ready: () => { scoreReady = true } }
 }
 
 test('knowledge queue shows full-scope statistics and keeps assessment evidence available', async ({ page }) => {
@@ -136,4 +138,36 @@ test('playground explicitly loads an isolated populated workflow demo', async ({
   await expect(page.getByRole('button', { name: 'CVE-2099-1234', exact: true })).toBeVisible()
   expect(fixtureState.writes).toHaveLength(1)
   expect(fixtureState.writes[0]).toMatchObject({ path: '/api/v3/playground/knowledge/seed', body: {} })
+})
+
+
+test('advanced filters reset pagination and forward the full scope to server statistics', async ({ page }) => {
+  const state = await fixture(page)
+  await page.getByRole('button', { name: 'Next page', exact: true }).click()
+  await expect.poll(() => state.workspaceQueries.at(-1)?.get('offset')).toBe('30')
+  await page.getByText('More filters', { exact: true }).click()
+  await page.getByRole('combobox', { name: 'Source severity', exact: true }).selectOption('critical')
+  await page.getByRole('combobox', { name: 'Published severity', exact: true }).selectOption('none')
+  await page.getByRole('combobox', { name: 'Context applicability', exact: true }).selectOption('not_affected')
+  await page.getByRole('combobox', { name: 'Scoring status', exact: true }).selectOption('published')
+  await page.getByRole('combobox', { name: 'Team assessment', exact: true }).selectOption('pending')
+  await page.getByRole('textbox', { name: 'Evidence provider', exact: true }).fill('Upstream')
+  await page.getByRole('combobox', { name: 'Source CVSS version', exact: true }).selectOption('3.1')
+  await page.getByRole('combobox', { name: 'Dependency relationship', exact: true }).selectOption('transitive')
+  await page.getByRole('combobox', { name: 'Source discrepancies', exact: true }).selectOption('no')
+  await page.getByRole('textbox', { name: 'Component', exact: true }).fill('Shared TLS')
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
+  await expect(page.getByLabel('Filtered workspace statistics')).toContainText('79 context findings')
+  expect(Object.fromEntries(state.workspaceQueries.at(-1)!)).toMatchObject({ offset: '0', source_severity: 'critical', contextual_severity: 'none', applicability: 'not_affected', scoring_status: 'published', team_review: 'pending', provider: 'Upstream', cvss_version: '3.1', dependency: 'transitive', source_conflict: 'no', component: 'Shared TLS' })
+  await expect(page.getByLabel('Context finding queue').locator('tbody tr')).toHaveCount(1)
+  await expect(page).toHaveURL(/k_source_severity=critical/)
+  await page.getByText('Saved views and sharing', { exact: true }).click()
+  await page.getByRole('textbox', { name: 'View name', exact: true }).fill('Critical shared dependencies')
+  await page.getByRole('button', { name: 'Save view', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('View saved')
+  await page.getByRole('button', { name: 'Reset advanced filters', exact: true }).click()
+  await expect(page.getByLabel('Filtered workspace statistics')).toContainText('31 context findings')
+  await page.getByRole('button', { name: 'Critical shared dependencies', exact: true }).click()
+  await expect(page.getByLabel('Filtered workspace statistics')).toContainText('79 context findings')
+  await expect(page.getByRole('combobox', { name: 'Source severity', exact: true })).toHaveValue('critical')
 })
