@@ -243,6 +243,22 @@ and a reason; originals and prior human decisions remain retained. Matching clai
 appear in the combined workspace as attributed evidence. Supplier not-affected
 statements do not become internal assessments, approvals or contextual scores.
 
+### Pinned consumer bundles
+
+Authorized consumers can read `GET /api/v3/projects/{id}/states/{state}/bundle`,
+`.../manifest` and `.../vscorer-worklist`. The manifest pins product/version/state,
+section/source hashes, byte length and SHA-256 of canonical bundle bytes. Full
+exports include every contextual finding rather than one UI page, original
+component metadata/graphs, current and historical assessments, unresolved source
+findings and separate original versus contextual scores. Digests establish
+integrity, not publisher authenticity or approval.
+
+These are explicit native contracts (`dtvp.knowledge-bundle/1` and
+`dtvp.knowledge-vscorer-worklist/1`), not silent substitutes for v2 snapshots or
+VScorer's legacy strict CVE upload. Consumer cutover needs its corresponding
+adapter and controlled output verification. Current project permissions apply to
+every pinned download, including after access revocation.
+
 `GET /api/v3/projects/{id}/ownership` returns the current policy and exact active
 version heads. A product manager can `PUT` the same resource with `request_id`,
 `expected_policy`, `expected_versions`, `rules` and optional `context_roots`.

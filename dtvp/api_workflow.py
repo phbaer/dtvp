@@ -1,10 +1,11 @@
 """Presentation adapters for shared journal-backed assessment workflows."""
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from dtvp.api import DB, Auth, project_for
-from dtvp.api_knowledge import projected_response, uncertain_response
+from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.assessments import AssessmentInput, ReviewInput, create_review, save_assessment
+from dtvp.knowledge.exports import build_vscorer_worklist, export_bytes
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
 from dtvp.knowledge.ownership import product_heads
 from dtvp.knowledge.scoring import (
@@ -17,6 +18,38 @@ from dtvp.knowledge.scoring import (
 from dtvp.knowledge.workspace import load_sections, load_workspace
 
 router = APIRouter(prefix="/api/v3")
+
+
+@router.get("/projects/{project_id}/states/{state}/bundle")
+def consumer_bundle(project_id: str, state: Sha, request: Request, db: DB, actor: Auth):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    raw, manifest = export_bytes(journal, state)
+    return Response(
+        raw,
+        media_type="application/json",
+        headers={
+            "X-Content-SHA256": manifest["bundle_sha256"],
+            "Content-Disposition": 'attachment; filename="dtvp-knowledge-bundle.json"',
+        },
+    )
+
+
+@router.get("/projects/{project_id}/states/{state}/manifest")
+def consumer_manifest(project_id: str, state: Sha, request: Request, db: DB, actor: Auth):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    return export_bytes(journal, state)[1]
+
+
+@router.get("/projects/{project_id}/states/{state}/vscorer-worklist")
+def vscorer_worklist(project_id: str, state: Sha, request: Request, db: DB, actor: Auth):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    return build_vscorer_worklist(journal, state)
 
 
 def authorize_team(db, actor, project_id):
