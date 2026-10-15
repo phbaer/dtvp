@@ -67,7 +67,7 @@ uv run python scripts/knowledge_demo.py
 The scenario imports independent `7.1.1`/`7.1.2` inventories into the synthetic
 Platform project, tags a state and prints their delta. It is repeatable and does
 not reset existing playground work. Use `--url` for another playground address.
-The new inventories are API-only until the new workspace is implemented.
+Open the Knowledge tab to browse these inventories.
 
 `POST /api/v3/projects/{id}/versions/{version}/imports` requires an idempotency
 request ID, expected head (null to create), source, monotonic source build number,
@@ -138,7 +138,7 @@ evidence views, nested assemblies or cross-part relationship mapping. Each new
 product version needs its own constituent imports; cross-version source reuse
 and semantic identity reconciliation remain planned. Unresolved relationship
 endpoints fail assembly; external-document references need explicit reconciliation.
-The new core remains API-only.
+The Knowledge tab shows assembled findings and their consuming contexts.
 Explore a repeatable two-part nightly update against the running playground:
 
 ```bash
@@ -215,6 +215,29 @@ draft, submitted, approved and stale coverage plus a historical tag. Repeated
 loads preserve interactive work and other project policies. Seeding uses the real
 domain services and publishes the complete fixture atomically. The seed endpoint
 is absent in production; no third-party service is contacted.
+
+### Internal CPE proposals and VScorer inputs
+
+CPE discovery now has an internal offline module. `GET/PUT
+/api/v3/projects/{id}/cpe` reads or explicitly replaces versioned catalog/rule
+inputs; writes require project-management permission and an expected policy head.
+`GET .../states/{state}/cpe?component_ref=REF&policy=POLICY_SHA` returns pinned,
+attributed candidates. Omitting `policy` selects current configuration. Reviewed
+aliases and explicit CPE/PURL mappings are supported; package versions,
+qualifiers and subpaths are retained. Candidates do not establish vulnerability
+applicability or change component identity. Live feeds, fuzzy ranking and complete
+standalone CPE-service migration remain planned.
+
+`POST .../states/{state}/vscorer-input` takes `context_id`, `component_ref` and
+explicit `base_selections` keyed by CVE. It derives a schema-validated CycloneDX
+consuming tree, strict focused CVE input, coverage limitations and an exact
+`dtvp.vscorer-source/1` receipt. Non-CVE identifiers and unsupported/missing Base
+vectors remain excluded explicitly. The source Base is never replaced by a
+contextual vector. This requires snapshot permission and makes no remote call.
+VScorer's separate `feat/dtvp-context-binding` branch accepts this optional receipt
+and retains it in proposals; commit `3994254` passed independent Python and
+architecture reviews. It is not merged into the sibling checkout. Receipt hashes
+establish artifact consistency, not remote publisher authenticity or DTVP approval.
 
 ### VDR/VEX intake and application
 
