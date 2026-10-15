@@ -19,7 +19,8 @@ Implementation has started on `rewrite/knowledge-journal`. The first slice adds
 immutable complete-state manifests, atomic multi-branch publication, immutable
 tags, a rebuildable SQL projection and journal-backed inventory import/comparison
 under `/api/v3`, with contextual assessment/review and coordinator-scoring APIs.
-The existing review UI uses `/api/v2`; VDR/VEX ingestion and merge synchronization remain
+The Review tab retains `/api/v2`; the Knowledge tab uses the journal-backed workspace.
+VDR/VEX ingestion and merge synchronization remain
 planned. Existing v2 data is not migrated or made journal-authoritative implicitly.
 Reuse decisions compare original v1 on local
 `main` (`bdc7ba4`), committed refactoring and uncommitted work separately; see the
@@ -194,6 +195,25 @@ Production CLI calls read a bearer credential from `DTVP_API_TOKEN` (or the name
 `--token-env` variable); `--persona` works only against an enabled playground.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
+
+### Knowledge workspace and interactive demo
+
+The Knowledge tab provides searchable product/version selectors, team/state/text
+filters, bounded finding lists and full filtered workload statistics. Its compact
+list/detail view keeps source and published severity visible, with readable long
+descriptions and expandable evidence. Assessment, independent review and coordinator
+scoring share the backend contracts; analyst controls do not expose rescoring.
+Scoring compares Original/Published/Proposed values and requires a current preview
+before explicit publication. Conflicts and uncertain writes retain the user's
+input; unchanged retries reuse the original idempotency key. Light/dark themes
+use the existing application tokens.
+
+In the isolated playground, open Knowledge and choose **Load workflow demo**.
+It creates a dedicated synthetic project with two versions/teams, unassessed,
+draft, submitted, approved and stale coverage plus a historical tag. Repeated
+loads preserve interactive work and other project policies. Seeding uses the real
+domain services and publishes the complete fixture atomically. The seed endpoint
+is absent in production; no third-party service is contacted.
 
 `GET /api/v3/projects/{id}/ownership` returns the current policy and exact active
 version heads. A product manager can `PUT` the same resource with `request_id`,

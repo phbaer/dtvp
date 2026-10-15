@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { justificationLabel } from './assessmentReasons'
 import { api, ApiError, send } from './api'
 import SearchSelect from './components/SearchSelect.vue'
+import KnowledgeWorkspace from './components/KnowledgeWorkspace.vue'
 import ReviewWorkspace from './components/ReviewWorkspace.vue'
 import StatisticsView from './components/StatisticsView.vue'
 import RescorePolicyEditor from './components/RescorePolicyEditor.vue'
@@ -95,7 +96,7 @@ function saveView() {
   localStorage.setItem(`dtvp.views:${me.value.id}`, JSON.stringify(savedViews.value)); viewName.value = ''
 }
 function removeView(name: string) { savedViews.value = savedViews.value.filter(view => view.name !== name); localStorage.setItem(`dtvp.views:${me.value!.id}`, JSON.stringify(savedViews.value)) }
-function restoreLocation() { const params = new URLSearchParams(location.search); page.value = ['Review', 'Statistics', 'Products', 'Activity', 'Access'].includes(params.get('page') || '') ? params.get('page')! : 'Review'; applyView(params.toString()) }
+function restoreLocation() { const params = new URLSearchParams(location.search); page.value = ['Review', 'Knowledge', 'Statistics', 'Products', 'Activity', 'Access'].includes(params.get('page') || '') ? params.get('page')! : 'Review'; applyView(params.toString()) }
 async function moveFinding(delta: number) {
   const target = reviewIndex.value >= 0 ? reviewIndex.value + delta : delta > 0 ? Math.min(queueAnchor.value, rows.value.length) : queueAnchor.value - 1
   if (target >= rows.value.length && nextCursor.value) await loadFindings(true)
@@ -343,7 +344,7 @@ onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); 
     <header :inert="modalOpen">
       <a class="brand" href="/">DTVP <span>Security review</span></a>
       <nav v-if="me" aria-label="Main navigation">
-        <button v-for="item in ['Review', 'Statistics', 'Products', 'Activity', ...(access ? ['Access'] : [])]" :key="item" :class="{ current: page === item }" :disabled="busy" @click="page = item">{{ item }}</button>
+        <button v-for="item in ['Review', 'Knowledge', 'Statistics', 'Products', 'Activity', ...(access ? ['Access'] : [])]" :key="item" :class="{ current: page === item }" :disabled="busy" @click="page = item">{{ item }}</button>
       </nav>
       <div class="preferences">
         <label>Theme <select v-model="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
@@ -365,6 +366,7 @@ onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); 
       <a v-else class="button primary" href="/auth/login">Sign in with SSO</a>
     </main>
     <main v-else :inert="modalOpen" :class="{ 'review-main': page === 'Review' }">
+      <KnowledgeWorkspace v-if="page === 'Knowledge'" :key="me.id" :me="me" />
       <template v-if="page === 'Review'">
         <div class="page-title"><div><p class="eyebrow">{{ me.name }}</p><h1>Review workspace</h1><p>What needs your attention, across your accessible teams and releases.</p></div><label class="toggle"><input v-model="power" type="checkbox"> Technical details</label></div>
         <form class="review-searchbar" @submit.prevent="action(() => loadFindings())">

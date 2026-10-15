@@ -66,6 +66,9 @@ def create_app(settings=None):
     app.include_router(rescoring_router)
     app.include_router(workflow_router)
     if settings.playground:
+        from dtvp.api_playground_knowledge import router as knowledge_playground_router
+
+        app.include_router(knowledge_playground_router)
         app.include_router(playground_router)
 
     @app.middleware("http")
