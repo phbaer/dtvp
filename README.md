@@ -391,6 +391,12 @@ aliases and explicit CPE/PURL mappings are supported; package versions,
 qualifiers and subpaths are retained. Candidates do not establish vulnerability
 applicability or change component identity. Live feeds, fuzzy ranking and complete
 standalone CPE-service migration remain planned.
+The Knowledge detail offers an on-demand specialist panel: attributed CPE
+candidates with explicit refresh, VScorer input preparation after original Base
+selection, and qualified Agentyzer request downloads. Preparation contacts no
+external analysis service and never adopts a candidate. VScorer downloads use
+server-generated canonical file bytes, checked against receipt hashes before
+being offered; browser JSON serialization cannot alter the bound artifacts.
 
 `POST .../states/{state}/vscorer-input` takes `context_id`, `component_ref` and
 explicit `base_selections` keyed by CVE. It derives a schema-validated CycloneDX

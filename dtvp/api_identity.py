@@ -13,6 +13,7 @@ from dtvp.knowledge.cpe import (
 )
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Sha
 from dtvp.schemas import RequestModel
+from dtvp.storage import canonical
 
 router = APIRouter(prefix="/api/v3")
 
@@ -91,9 +92,17 @@ def vscorer_inputs(
     project_for(db, actor, project_id, "snapshot")
     journal = request.app.state.knowledge
     require_state(journal, state, project_id)
-    return derive_context_inputs(
+    result = derive_context_inputs(
         journal, state, data.context_id, data.component_ref, data.base_selections
     )
+    return {
+        **result,
+        "files": {
+            "sbom.cdx.json": canonical(result["sbom"]).decode(),
+            "cves.json": canonical(result["cves"]).decode(),
+            "dtvp-source.json": canonical(result["dtvp_source"]).decode(),
+        },
+    }
 
 
 class AgentyzerInput(RequestModel):

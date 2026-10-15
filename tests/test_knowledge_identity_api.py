@@ -59,6 +59,16 @@ def test_vscorer_native_inputs_require_explicit_original_base_and_snapshot_acces
     assert result.status_code == 200, result.text
     result = result.json()
     assert result["eligible"] is True
+    from dtvp.storage import digest
+
+    assert (
+        digest(result["files"]["sbom.cdx.json"].encode())
+        == result["dtvp_source"]["artifacts"]["sbom_sha256"]
+    )
+    assert (
+        digest(result["files"]["cves.json"].encode())
+        == result["dtvp_source"]["artifacts"]["cves_sha256"]
+    )
     assert result["dtvp_source"]["state"] == current["state"]
     assert result["dtvp_source"]["context_id"] == row["context_id"]
     assert result["cves"]["cves"][0]["component_refs"] == [row["context"]["component_ref"]]
