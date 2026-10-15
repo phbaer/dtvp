@@ -1,5 +1,6 @@
 """PostgreSQL leases and atomic publication. External writes are never retried implicitly."""
 
+import logging
 import time
 from datetime import timedelta
 
@@ -11,6 +12,8 @@ from dtvp.domain import import_evidence, import_sbom, inventory, lock_release
 from dtvp.models import Credential, Finding, Job, Membership, Project, Release, User, now, uid
 from dtvp.providers import ADVISORY_PROVIDERS, MATCHERS, client, import_dt
 from dtvp.storage import canonical, digest
+
+logger = logging.getLogger(__name__)
 
 
 def enqueue(db, actor, release, kind, payload):
@@ -78,10 +81,29 @@ def actor_for(db, job):
 
 def execute(factory, artifacts, settings, job_id, token):
     with factory() as db:
-        if db.get(Job, job_id).kind == "analyse":
-            from dtvp.analysis import execute as execute_analysis
+        kind, engine = db.get(Job, job_id).kind, db.get_bind()
+    if kind == "analyse-native":
+        from dtvp.knowledge.journal import Journal
+        from dtvp.knowledge.projection import catch_up
 
-            return execute_analysis(factory, artifacts, settings, job_id, token)
+        journal = Journal(artifacts.root / "knowledge")
+        from dtvp.knowledge.analysis_jobs import execute_analysis as execute_native
+        execute_native(factory, journal, settings, job_id, token)
+        try:
+            catch_up(engine, journal)
+            projection = "current"
+        except Exception:
+            logger.exception("Native job knowledge projection awaits recovery")
+            projection = "pending"
+        with factory.begin() as completed:
+            job = completed.scalar(select(Job).where(Job.id == job_id).with_for_update())
+            if job.status == "succeeded":
+                job.result = {**job.result, "projection": projection}
+        return
+    if kind == "analyse":
+        from dtvp.analysis import execute as execute_analysis
+
+        return execute_analysis(factory, artifacts, settings, job_id, token)
     with factory() as db:
         job = db.get(Job, job_id)
         actor = actor_for(db, job)

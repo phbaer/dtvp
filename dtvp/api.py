@@ -1213,6 +1213,9 @@ def retry_job(job_id: str, db: DB, actor: Auth):
     old = db.get(Job, job_id)
     if not old:
         raise HTTPException(404, "Job unavailable")
+    if old.kind in {"analyse-native", "import-dt-native"}:
+        project_for(db, actor, old.project_id)
+        raise HTTPException(409, "Use the native job retry endpoint")
     project_for(
         db, actor, old.project_id, "evidence" if old.kind in {"enrich", "analyse"} else "write"
     )

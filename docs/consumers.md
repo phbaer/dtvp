@@ -48,7 +48,10 @@ roles. Hashes establish consistency, not publisher identity or human approval.
   consistency. Missing bindings remain ineligible evidence. UI/CLI compare
   analysis and optional validated scoring proposals; imports never approve them.
 
-V3 durable Agentyzer orchestration, complete CPE migration/refresh, semantic identity
+Native Agentyzer jobs now persist submission/poll/report checkpoints in operational
+SQL and publish bound evidence through the journal. Unknown POST outcomes never
+automatically repeat; lost in-memory remote jobs still require explicit reconciliation.
+Native follow-ups, complete CPE migration/refresh and semantic identity
 reconciliation, full legal qualification and architecture approval remain planned.
 Production acceptance also requires machine authorization, archived reproducible
 inputs, failure/retry handling and controlled consumer fixture qualification.

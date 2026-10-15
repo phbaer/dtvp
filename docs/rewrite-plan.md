@@ -583,7 +583,8 @@ Native bundles retain exact source/context/proposal/approval distinctions. CPE
 has an internal offline policy/proposal module; VScorer has explicit focused inputs
 and returned bound proposals. Producer-qualified Agentyzer inputs and returned
 job/report evidence retain exact scope checks, stale coverage and optional scoring
-proposals without human approval. Durable orchestration remains separate. Generator's independently reviewed isolated native
+proposals without human approval. Native operational jobs checkpoint remote submission,
+polling and report publication; unknown POST outcomes never automatically repeat. Generator's independently reviewed isolated native
 adapter preserves its renderer and disables mutable enrichment, with controlled
 parity still required. Assembly forests and explicit native UI state selection
 are implemented on that isolated sibling branch. SPDX/CycloneDX license declarations
@@ -597,7 +598,7 @@ Not yet implemented: remaining native management/integration UI, stable cross-im
 range/exclusion expressions beyond explicit reviewed version targets, extended evidence synthesis,
 advanced VDR/VEX scope/schema/signature support, cascading synchronization, cached semantic comparisons, journal
 retention/GC, operational-state recovery and v2/legacy migration. Native Agentyzer
-orchestration, full CPE refresh/migration, extended license qualification and architecture-approval
+follow-up orchestration and authenticated remote-ID reconciliation, full CPE refresh/migration, extended license qualification and architecture-approval
 workflows, consumer serializer upgrade compatibility and controlled-document
 qualification remain cutover gates. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain

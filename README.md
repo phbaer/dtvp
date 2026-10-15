@@ -426,6 +426,31 @@ current independent team reviews and explicit publication. Importing a result
 never creates an assessment, review or published score. Provider identity remains
 caller-asserted; hashes verify artifact consistency only.
 
+### Native analysis jobs
+
+`PUT /api/v3/projects/{id}/connectors/agentyzer` binds an administrator-approved
+repository name. With external Agentyzer configured, `POST
+.../versions/{version}/analysis-jobs` accepts `request_id`, expected head,
+`context_id`, `vulnerability_id` and optional `user_guidance`. It requires read,
+snapshot and evidence permissions, qualified source inputs and the exact repository
+binding. The SQL worker uses the native receipt; no v2 release/finding is created.
+
+Jobs checkpoint submission intent before POST and the remote ID/report before
+continuing. Agentyzer currently offers no submission idempotency guarantee: an
+ambiguous submission becomes `submission_unknown`, with no automatic resubmission.
+Known-job polling is safe to retry; completed reports survive baseline drift as
+stale evidence. The worker rechecks credentials, permissions, endpoint and repository
+binding at each step. Exact publication retries resolve existing journal receipts.
+Projection failures report pending recovery without discarding committed evidence.
+
+`GET .../versions/{version}/analysis-jobs` supports exact context/vulnerability
+filters and bounded paging. `GET .../analysis-jobs/{id}` shows safe status; explicit
+`POST .../{id}/retry` or `/cancel` requires the submitting actor and current
+permissions. Cancel stops local work, not a claimed remote cancellation. Unknown
+submissions need reconciliation or a deliberately new request. Operational SQL
+backups remain necessary for jobs. Authenticated remote-ID reconciliation and
+native follow-up conversations remain planned.
+
 ### Qualified Agentyzer inputs
 
 SBOM intake optionally accepts `context.analysis_source` with a repository name
@@ -438,8 +463,7 @@ source SBOM, constituent selection, declared subject digest and material fingerp
 Missing, inconsistent or unavailable source information returns explicit not-ready
 coverage. The endpoint contacts no service and creates no job or human approval.
 An external orchestrator still authorizes the repository; a source commit does not
-verify a built binary/container. Native durable job orchestration remains subsequent
-work. The existing v2 connector stays separate.
+verify a built binary/container. The existing v2 connector stays separate.
 
 `POST .../versions/{version}/proposals/agentyzer` imports `request_id`, expected
 head, the exact `input_receipt`, `raw_report` and optional `source_label` under

@@ -9,6 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from dtvp.api import router
 from dtvp.api_agentyzer_results import router as agentyzer_results_router
 from dtvp.api_analysis import router as analysis_router
+from dtvp.api_analysis_jobs import router as analysis_jobs_router
 from dtvp.api_evidence import router as evidence_router
 from dtvp.api_history import router as history_router
 from dtvp.api_identity import router as identity_router
@@ -70,6 +71,7 @@ def create_app(settings=None):
     app.include_router(inventory_router)
     app.include_router(knowledge_router)
     app.include_router(analysis_router)
+    app.include_router(analysis_jobs_router)
     app.include_router(agentyzer_results_router)
     app.include_router(statistics_router)
     app.include_router(rescoring_router)
