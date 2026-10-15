@@ -254,6 +254,25 @@ describe('StatsSidebar team filter', () => {
         expect(wrapper.find('[data-testid="per-team-statistics"]').exists()).toBe(false)
     })
 
+    it('charts a single selectable team/group using filtered counts and keeps tables', async () => {
+        const wrapper = mountSidebar()
+        await wrapper.findAll('button').find(button => button.text().trim() === 'Results')!.trigger('click')
+        const chart = wrapper.get('[data-testid="team-assessment-chart"]')
+        await chart.get('select').setValue('team:3rd Party')
+        expect(chart.get('svg > title').text()).toBe('Team: 3rd Party assessment: 3 vulnerabilities')
+        expect(chart.findAll('[data-testid="donut-legend-row"]').map(row => row.text())).toEqual(['Open133.3%', 'Assessed266.7%'])
+        await chart.get('select').setValue('group:Core-MUC')
+        expect(chart.get('svg > title').text()).toContain('9 vulnerabilities')
+        await wrapper.setProps({ resultCounts: { ...resultCounts, team_groups: { 'Core-MUC': { open: 0, assessed: 2 } } } })
+        expect(chart.get('svg > title').text()).toContain('2 vulnerabilities')
+        expect(chart.get('[data-testid="donut-slice"]').attributes('stroke-dasharray')).toBe('100 0')
+        expect(wrapper.find('[data-testid="per-group-statistics"]').exists()).toBe(true)
+        await wrapper.setProps({ countsUpdating: true })
+        expect(chart.find('svg').exists()).toBe(false)
+        expect(chart.get('select').attributes('disabled')).toBeDefined()
+        wrapper.unmount()
+    })
+
     it('emits explicit multiple canonical teams and supports clearing', async () => {
         const wrapper = mountSidebar()
         const menu = wrapper.get('[data-testid="team-filter-select"]')

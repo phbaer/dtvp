@@ -60,7 +60,7 @@ import {
 import { deriveVulnListFacetsFromTaskCounts } from '../lib/vulnListFacets'
 import { INCONSISTENCY_REASON_OPTIONS } from '../lib/inconsistency'
 import { resolveTeamTerm } from '../lib/teamSelection'
-import { buildTeamAliasGroups } from '../lib/team-mapping'
+import { buildTeamAliasGroups, resolveCanonicalTeamName } from '../lib/team-mapping'
 import {
     AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
     AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
@@ -904,7 +904,11 @@ const taskListStatusMessage = computed(() => {
 })
 
 const localVisibleResultCounts = computed(() =>
-    deriveVulnListResultCounts(listView.value.matchingItems)
+    deriveVulnListResultCounts(listView.value.matchingItems, {
+        versions: versionFilterList.value,
+        terms: parsedSmartSearch.value.versionTerms,
+        teams: teamFilters.value.map(team => resolveCanonicalTeamName(teamMapping.value, team)),
+    })
 )
 
 const visibleResultCounts = computed<TaskVulnGroupListCounts>(() =>
@@ -1858,7 +1862,7 @@ watch(currentUserRole, (role) => {
                             </div>
                         </div>
                         <div v-else-if="statsError" class="text-red-500 text-center py-16">{{ statsError }}</div>
-                        <ProjectStatistics v-else-if="stats" :stats="stats" :projectName="($route.params.name as string)" />
+                        <ProjectStatistics v-else-if="stats" :stats="stats" :projectName="($route.params.name as string)" :distribution-counts="visibleResultCounts" :distributions-updating="resultCountsUpdating" />
                     </div>
                 </div>
             </div>

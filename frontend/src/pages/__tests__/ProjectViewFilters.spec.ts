@@ -558,6 +558,33 @@ describe('ProjectView Filters', () => {
         expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V9')
     })
 
+    it('combines the team dropdown with a version search in the same release', async () => {
+        const group = (id: string, firstTeam: string) => ({
+            id, tags: ['Security', 'Platform'], cvss_score: 5,
+            affected_versions: [
+                { project_version: '1.0', components: [{ component_name: 'lib', tags: [firstTeam], analysis_state: 'NOT_SET', analysis_details: '' }] },
+                { project_version: '2.0', components: [{ component_name: 'lib', tags: ['Security'], analysis_state: 'NOT_SET', analysis_details: '' }] },
+            ],
+        })
+        vi.mocked(getGroupedVulns).mockResolvedValue([group('crossed', 'Platform'), group('matching', 'Security')] as any)
+        const wrapper = await mountProjectViewRoute()
+        await flushPromises()
+        const teams = wrapper.get('[data-testid="team-filter-select"]')
+        await teams.findAll('label').find((label: any) => label.text().trim() === 'Security')!.get('input').setValue(true)
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-card')).toHaveLength(2)
+        const search = wrapper.get('input[placeholder^="Search CVE"]')
+        await search.setValue('version:1.0')
+        ;(wrapper.vm as any).flushSmartSearchFilter()
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-card').map((card: any) => card.attributes('data-id'))).toEqual(['matching'])
+        await search.setValue('version:2.0')
+        ;(wrapper.vm as any).flushSmartSearchFilter()
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-card')).toHaveLength(2)
+        wrapper.unmount()
+    })
+
     it('matches the complete selected team name instead of similarly named teams', async () => {
         const mockData = [
             {

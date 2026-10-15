@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GroupedVuln, TMRescoreProposal } from '../../types'
+import { summarizeGroupForList } from '../vulnListSummary'
 import {
     automaticAssessmentStatusForGroup,
     buildVulnListItem,
@@ -73,6 +74,27 @@ const makeProposal = (overrides: Partial<TMRescoreProposal>): TMRescoreProposal 
 })
 
 describe('vulnListIndex', () => {
+    it('joins dropdown team selections to explicit and searched versions for full and summary groups', () => {
+        const mapping = { lib: ['Security', 'Sec'] }
+        const group = (firstTags: string[]) => makeGroup({
+            tags: ['Security', 'Platform'],
+            affected_versions: [
+                { project_version: '1.0', components: [{ component_name: 'lib', tags: firstTags }] },
+                { project_version: '2.0', components: [{ component_name: 'lib', tags: ['Security'] }] },
+            ] as any,
+        })
+        for (const full of [group(['Platform']), group(['SEC']), group([])]) {
+            for (const g of [full, summarizeGroupForList(full, mapping)]) {
+                const item = buildVulnListItem(g, mapping)
+                const filters = { teamFilters: ['Security'], dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'] as const,
+                    tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'] as const }
+                const expected = full.affected_versions[0]!.components[0]!.tags!.includes('SEC')
+                expect(matchesListFilters(item, { ...filters, versionFilterList: ['1.0'] })).toBe(expected)
+                expect(matchesListFilters(item, { ...filters, smartSearch: 'version:1.0' })).toBe(expected)
+                expect(matchesListFilters(item, { ...filters, versionFilterList: ['1.0', '2.0'] })).toBe(true)
+            }
+        }
+    })
     it('filters original severity independently of rescoring and combines SSVC', () => {
         const item = buildVulnListItem(makeGroup({ cvss_score: 9.8, rescored_cvss: 0, severity: 'INFO', ssvc_summary: { status: 'IMMEDIATE', assessed: 1, missing: 0, invalid: 0, record: null } }), {})
         const filters = { dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'] as const, tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'] as const }

@@ -480,7 +480,7 @@ def _build_group_list_metadata(
     )
     # Pending review is not done, even when all currently visible team blocks
     # are populated. Lifecycle filters still keep NEEDS_APPROVAL separate from
-    # OPEN; this flag drives the two-way team open/assessed counters.
+    # OPEN; team counters use assessed_teams independently of this flag.
     is_open = lifecycle == "OPEN" or summary["is_pending_review"]
     is_approval_ready = (
         summary["is_pending_review"] and lifecycle == "NEEDS_APPROVAL"

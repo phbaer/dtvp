@@ -1,9 +1,5 @@
 /**
- * Centralized group classification for lifecycle state, filter counts, and team statistics.
- *
- * This module is the single source of truth for determining whether a vulnerability
- * group counts as "open" or "assessed" for both lifecycle filter chips and per-team
- * statistics. All classification decisions flow through classifyGroup().
+ * Group lifecycle classification and counters for recorded team assessments.
  */
 
 import type { GroupedVuln } from '../types'
@@ -12,6 +8,7 @@ import {
     isPendingReview,
     getGroupTechnicalState,
     normalizeTags,
+    getAssessedTeams,
     matchesFilters,
 } from './assessment-helpers'
 
@@ -30,7 +27,7 @@ export interface GroupClassification {
 
 /**
  * Single authoritative classification of a vulnerability group.
- * Both filter counts and team statistics MUST use this function.
+ * Lifecycle filter counts use this function.
  */
 export function classifyGroup(
     group: GroupedVuln,
@@ -128,10 +125,22 @@ export interface TeamCounts {
     assessed: number
 }
 
+export function addTeamCounts(
+    counts: Record<string, TeamCounts>,
+    teams: readonly string[],
+    assessedTeams: Iterable<string>,
+    closed = false,
+): void {
+    const assessed = new Set(Array.from(assessedTeams, team => team.toLowerCase()))
+    for (const team of new Set(teams)) {
+        const entry = counts[team] ||= { open: 0, assessed: 0 }
+        if (closed || assessed.has(team.toLowerCase())) entry.assessed++
+        else entry.open++
+    }
+}
+
 /**
- * Compute per-team open/assessed counts from the full (unfiltered) group list.
- * Pending review can still contain open team work, independently of its
- * displayed lifecycle category.
+ * Compute per-team counts from the supplied groups, using recorded team coverage.
  */
 export function computeTeamCounts(
     groups: GroupedVuln[],
@@ -143,16 +152,11 @@ export function computeTeamCounts(
         const teams = normalizeTags(g.tags || [], teamMapping)
         if (!teams.length) continue
 
-        const c = classifyGroup(g, teamMapping)
-
-        for (const team of teams) {
-            if (!counts[team]) counts[team] = { open: 0, assessed: 0 }
-            if (c.isOpen) {
-                counts[team].open++
-            } else {
-                counts[team].assessed++
-            }
-        }
+        const assessed = g.list_metadata?.assessed_teams ?? Array.from(getAssessedTeams(g))
+        const lifecycle = g.list_metadata?.lifecycle ?? classifyGroup(g, teamMapping).lifecycle
+        const closed = ['ASSESSED', 'ASSESSED_LEGACY'].includes(lifecycle)
+            && !(g.list_metadata?.is_pending ?? isPendingReview(g))
+        addTeamCounts(counts, teams, normalizeTags(assessed, teamMapping), closed)
     }
 
     return counts

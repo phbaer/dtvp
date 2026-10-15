@@ -13,10 +13,11 @@ from .severity_services import SEVERITIES, group_original_severity
 from .ssvc_services import FILTER_VALUES as SSVC_FILTER_VALUES
 from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
 from .evidence_services import evidence_sources, evidence_counts
+from .logic import _parse_assessment_blocks
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 13
+TASK_GROUP_QUERY_INDEX_VERSION = 16
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -120,6 +121,23 @@ def _versions_for_group(group: dict[str, Any]) -> list[str]:
     )
 
 
+def _team_tags_by_version(group: dict[str, Any]) -> dict[str, set[str]] | None:
+    """Retain release ownership instead of joining independent group unions."""
+    by_version: dict[str, set[str]] = {}
+    has_ownership = False
+    for version in group.get("affected_versions") or []:
+        label = _lower(version.get("project_version") or version.get("version"))
+        if not label:
+            continue
+        tags = by_version.setdefault(label, set())
+        for component in version.get("components") or []:
+            if "tags" in component:
+                has_ownership = True
+            tags.update(_lower(tag) for tag in _string_list(component.get("tags")))
+    # Older summaries may contain only group ownership; preserve their fallback.
+    return by_version if has_ownership else None
+
+
 def _attributed_on_ms_values(group: dict[str, Any]) -> list[int]:
     metadata = group.get("list_metadata") or {}
     values = metadata.get("attributed_on_ms_values")
@@ -182,6 +200,18 @@ def _score_value(score: Any) -> float:
 
 def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
     metadata = group.get("list_metadata") or {}
+    assessed_teams = metadata.get("assessed_teams")
+    if not isinstance(assessed_teams, list):
+        assessed_teams = [
+            block["team"]
+            for component in _components_for_group(group)
+            for block in _parse_assessment_blocks(
+                component.get("analysis_details") or component.get("analysisDetails") or ""
+            )[1]
+            if block.get("team") and _lower(block["team"]) != "general"
+            and not block.get("historical")
+            and block.get("state") and block["state"] != "NOT_SET"
+        ]
     tags = _string_list(group.get("tags") or [])
     aliases = _string_list(group.get("aliases") or [])
     aliases_lower = [_lower(value) for value in aliases]
@@ -249,11 +279,12 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "assignees": assignees,
         "assignees_lower": [_lower(value) for value in assignees],
         "assessed_teams_lower": {
-            _lower(value) for value in _string_list(metadata.get("assessed_teams"))
+            _lower(value) for value in _string_list(assessed_teams)
         },
         "versions": versions,
         "versions_lower": versions_lower,
         "versions_lower_set": set(versions_lower),
+        "team_tags_by_version": _team_tags_by_version(group),
         "searchable_text": searchable_text,
         "lifecycle": str(metadata.get("lifecycle") or "OPEN"),
         "inconsistency_reasons": inconsistency_reasons,
@@ -500,6 +531,12 @@ def _matches_task_group_fields(
         return False
     if not _matches_versions(fields["versions_lower_set"], versions):
         return False
+    if scope and versions and fields["team_tags_by_version"] is not None:
+        version_tags = set().union(*(
+            fields["team_tags_by_version"].get(version, set()) for version in versions
+        ))
+        if not _selected_group_teams({"tags": version_tags}, scope, team_aliases or {}):
+            return False
     if cvss_mismatch and not fields["cvss_version_mismatch"]:
         return False
     if not _matches_attribution_age(
@@ -757,7 +794,6 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     tags: dict[str, int] = {}
     assignees: dict[str, int] = {}
     components: dict[str, int] = {}
-    team_tags: dict[str, dict[str, int]] = {}
     cvss_version_mismatch = 0
     assessment_restore_counts = _empty_assessment_restore_counts()
     inconsistency_reason_counts = _empty_inconsistency_reason_counts()
@@ -810,12 +846,6 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             _increment(versions, version)
         for tag in fields["tags"]:
             _increment(tags, tag)
-            if tag not in team_tags:
-                team_tags[tag] = {"open": 0, "assessed": 0}
-            if fields["is_open"]:
-                team_tags[tag]["open"] += 1
-            else:
-                team_tags[tag]["assessed"] += 1
         for assignee in fields["assignees"]:
             _increment(assignees, assignee)
         for component in fields["component_names"]:
@@ -834,40 +864,72 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "tags": tags,
         "assignees": assignees,
         "components": components,
-        "team_tags": team_tags,
+        "team_tags": _team_tag_counts(rows),
         "assessment_restore": assessment_restore_counts,
         "inconsistency_reason": inconsistency_reason_counts,
     }
 
 
-def _canonical_team_tag_counts(
-    rows: list[dict[str, Any]],
-    team_aliases: dict[str, str],
-) -> dict[str, dict[str, int]]:
-    if not team_aliases:
-        return {
-            team: dict(values)
-            for team, values in _build_counts(rows)["team_tags"].items()
-        }
+def _canonical_assessed_teams(
+    fields: dict[str, Any], team_aliases: dict[str, str],
+) -> set[str]:
+    # Closure applies to every owner without inventing team documentation.
+    closed = fields["lifecycle"] in {"ASSESSED", "ASSESSED_LEGACY"} and not fields["is_pending"]
+    teams = set(fields["assessed_teams_lower"])
+    if closed:
+        teams.update(_lower(team) for team in fields["tags"])
+    return {
+        _lower(team_aliases.get(team, team))
+        for team in teams
+    }
 
+
+def _team_count_rows(
+    rows: list[dict[str, Any]], versions: set[str],
+    selected: set[str], aliases: dict[str, str],
+) -> list[dict[str, Any]]:
+    selected = {_lower(aliases.get(team, team)) for team in selected}
+    scoped = []
+    for row in rows:
+        fields = row["fields"]
+        ownership = fields["team_tags_by_version"]
+        tags = (
+            set().union(*(ownership.get(version, set()) for version in versions))
+            if versions and ownership is not None else set(fields["tags_lower"])
+        )
+        scoped.append({**row, "fields": {
+            **fields, "tags": [
+                tag for tag in fields["tags"] if _lower(tag) in tags
+                and (not selected or _lower(aliases.get(_lower(tag), tag)) in selected)
+            ],
+        }})
+    return scoped
+
+
+def _team_tag_counts(
+    rows: list[dict[str, Any]],
+    team_aliases: dict[str, str] | None = None,
+    *,
+    canonical: bool = False,
+) -> dict[str, dict[str, int]]:
+    aliases = team_aliases or {}
     counts: dict[str, dict[str, int]] = {}
     for row in rows:
         fields = row["fields"]
+        assessed = _canonical_assessed_teams(fields, aliases)
         seen: set[str] = set()
         for team in fields["tags"]:
-            canonical = team_aliases.get(_lower(team), team)
-            normalized = _lower(canonical)
-            if not normalized or normalized in seen:
+            canonical_team = aliases.get(_lower(team), team)
+            key = canonical_team if canonical else team
+            if not key or _lower(key) in seen:
                 continue
-            seen.add(normalized)
+            seen.add(_lower(key))
             team_counts = counts.setdefault(
-                canonical,
+                key,
                 {"open": 0, "assessed": 0},
             )
-            if fields["is_open"]:
-                team_counts["open"] += 1
-            else:
-                team_counts["assessed"] += 1
+            count_key = "assessed" if _lower(canonical_team) in assessed else "open"
+            team_counts[count_key] += 1
     return counts
 
 
@@ -896,9 +958,11 @@ def _team_group_counts(
         }
         if not canonical_teams:
             continue
-        count_key = "open" if fields["is_open"] else "assessed"
+        assessed = _canonical_assessed_teams(fields, team_aliases)
         for group, members in member_sets.items():
-            if not canonical_teams.isdisjoint(members):
+            responsible = canonical_teams.intersection(members)
+            if responsible:
+                count_key = "open" if responsible - assessed else "assessed"
                 counts[group][count_key] += 1
     return counts
 
@@ -957,6 +1021,8 @@ def _add_dynamic_counts(
     attributed_before_days: int | None,
     attribution_mode: str,
     now_ms: int,
+    team_versions: set[str] | None = None,
+    selected_teams: set[str] | None = None,
 ) -> dict[str, Any]:
     result = _copy_counts(counts)
     tmrescore_counts = _empty_tmrescore_counts()
@@ -968,25 +1034,44 @@ def _add_dynamic_counts(
         _empty_automatic_assessment_rescore_counts()
     )
     attribution_age_count = 0
+    team_rows = (
+        _team_count_rows(rows, team_versions or set(), selected_teams or set(), team_aliases)
+        if team_versions or selected_teams else rows
+    )
+    if team_aliases or team_versions or selected_teams:
+        result["team_tags"] = _team_tag_counts(team_rows, team_aliases)
     result["canonical_team_tags"] = (
         {
             team: dict(values)
             for team, values in (result.get("team_tags") or {}).items()
         }
         if not team_aliases
-        else _canonical_team_tag_counts(rows, team_aliases)
+        else _team_tag_counts(team_rows, team_aliases, canonical=True)
     )
     result["team_groups"] = _team_group_counts(
-        rows,
+        team_rows,
         team_aliases,
         team_groups,
     )
+    selected_canonical = {_lower(team_aliases.get(team, team)) for team in selected_teams or set()}
+    visible_groups = {
+        group for group, members in team_groups.items()
+        if not selected_canonical or selected_canonical.intersection(members)
+    }
+    if selected_canonical:
+        result["team_groups"] = {
+            group: values for group, values in result["team_groups"].items()
+            if group in visible_groups
+        }
     result["team_group_structure"] = {
         group: {
-            "teams": list(definition["teams"]),
-            "groups": list(definition["groups"]),
+            "teams": [team for team in definition["teams"]
+                      if not selected_canonical or _lower(team_aliases.get(_lower(team), team)) in selected_canonical],
+            "groups": [child for child in definition["groups"]
+                       if not selected_canonical or child in visible_groups],
         }
         for group, definition in team_group_structure.items()
+        if not selected_canonical or group in visible_groups
     }
 
     if (
@@ -1591,7 +1676,7 @@ def query_task_groups(
                     attribution_mode=normalized_mode,
                     now_ms=now_ms,
                 )
-                if len(filtered_indices) == len(rows):
+                if len(filtered_indices) == len(rows) and not version_set and not selected_teams:
                     filtered_counts = all_counts
                 else:
                     filtered_rows = [rows[index] for index in filtered_indices]
@@ -1609,6 +1694,8 @@ def query_task_groups(
                         attributed_before_days=attributed_before_days,
                         attribution_mode=normalized_mode,
                         now_ms=now_ms,
+                        team_versions=version_set,
+                        selected_teams=selected_teams,
                     )
                 for target, count_rows in [
                     (all_counts, rows),

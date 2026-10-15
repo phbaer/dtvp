@@ -436,6 +436,7 @@ def test_team_alias_counts_are_grouped_without_duplicate_vulnerabilities():
     alias_only_assessed = _group(2)
     alias_only_assessed["tags"] = ["Platform"]
     alias_only_assessed["list_metadata"]["is_open"] = False
+    alias_only_assessed["list_metadata"]["assessed_teams"] = ["Platform Security"]
     other_team = _group(3)
     other_team["tags"] = ["Runtime"]
     query_index = query_services.build_task_group_query_index(
@@ -469,6 +470,7 @@ def test_team_group_counts_include_subteams_without_duplicate_vulnerabilities():
     subteam_assessed = _group(2)
     subteam_assessed["tags"] = ["3rd Party"]
     subteam_assessed["list_metadata"]["is_open"] = False
+    subteam_assessed["list_metadata"]["assessed_teams"] = ["Third Party Legacy"]
     runtime = _group(3)
     runtime["tags"] = ["Runtime"]
     query_index = query_services.build_task_group_query_index(
@@ -519,6 +521,74 @@ def test_team_group_counts_include_subteams_without_duplicate_vulnerabilities():
         "3rd Party": {"open": 1, "assessed": 1},
         "Runtime": {"open": 1, "assessed": 0},
     }
+
+
+def test_filtered_team_statistics_use_coverage_and_reviewer_closure_across_all_pages():
+    partial, complete, approved, unrelated = [_group(i) for i in range(4)]
+    for group in [partial, complete]:
+        group["title"] = "Chosen finding"
+        group["tags"] = ["Security", "Sec", "Platform"]
+        group["list_metadata"].update(is_open=True, is_pending=True)
+    partial["list_metadata"].update(lifecycle="INCOMPLETE", assessed_teams=["Sec"])
+    complete["list_metadata"].update(
+        lifecycle="NEEDS_APPROVAL", is_approval_ready=True,
+        assessed_teams=["Security", "Platform"],
+    )
+    approved["title"] = "Chosen finding"
+    approved["tags"] = ["Platform"]
+    approved["list_metadata"].update(lifecycle="ASSESSED", is_open=False, assessed_teams=[])
+    unrelated["tags"] = ["Runtime"]
+    index = query_services.build_task_group_query_index([partial, complete, approved, unrelated])
+    options = dict(q="chosen", limit=1, team_aliases={"sec": "Security"},
+                   team_groups={"Security only": ["Security"], "Engineering": ["Security", "Platform"]})
+
+    result = _query(index, **options)
+    assert result["filtered"] == 3
+    assert len(result["items"]) == 1
+    assert result["counts"]["filtered"]["canonical_team_tags"] == {
+        "Security": {"open": 0, "assessed": 2},
+        "Platform": {"open": 1, "assessed": 2},
+    }
+    assert result["counts"]["filtered"]["team_groups"] == {
+        "Security only": {"open": 0, "assessed": 2},
+        "Engineering": {"open": 1, "assessed": 2},
+    }
+    pending = _query(index, **options, lifecycle=["READY_FOR_APPROVAL"])
+    assert pending["counts"]["filtered"]["team_groups"]["Engineering"] == {"open": 0, "assessed": 1}
+    missing = _query(index, **options, team="Platform", team_assessment="MISSING")
+    # Missing documentation still selects the approved finding, but closure
+    # makes it assessed in the statistics.
+    assert missing["filtered"] == 2
+    assert missing["counts"]["filtered"]["canonical_team_tags"]["Platform"] == {"open": 1, "assessed": 1}
+
+
+def test_team_and_version_filters_require_ownership_in_the_same_release():
+    from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
+
+    groups = [_group(i) for i in range(4)]
+    for group, first_tags in zip(groups, [["Platform"], ["SEC"], ["Security", "Platform"], []]):
+        group["tags"] = ["Security", "Platform"]
+        group["affected_versions"] = [
+            {"project_version": "1.0", "components": [{"component_name": "lib", "tags": first_tags}]},
+            {"project_version": "2.0", "components": [{"component_name": "lib", "tags": ["Security"]}]},
+        ]
+    groups = summarize_grouped_vulnerabilities(groups, {"lib": ["Security", "Sec"]})
+    index = query_services.build_task_group_query_index(groups)
+    aliases = {"sec": "Security"}
+    result = _query(index, q="", teams=["Security"], versions=["1.0"], team_aliases=aliases, limit=1)
+    assert result["filtered"] == 2
+    assert result["counts"]["filtered"]["total"] == 2
+    assert result["items"][0]["id"] == groups[1]["id"]
+    next_page = _query(index, q="", teams=["Security"], versions=["1.0"], team_aliases=aliases,
+                       cursor=result["next_cursor"], limit=1)
+    assert next_page["items"][0]["id"] == groups[2]["id"]
+    assert _query(index, q="", teams=["Security"], versions=["1.0", "2.0"], team_aliases=aliases)["filtered"] == 4
+    assert _query(index, q="", teams=["Security", "Platform"], versions=["1.0"], team_aliases=aliases)["filtered"] == 3
+    bulk = general_api_routes._filter_bulk_workflow_groups(
+        index, general_api_routes.BulkWorkflowFilters(teams=["Security"], versions=["1.0"]),
+        team_aliases=aliases,
+    )
+    assert [group["id"] for group in bulk] == [groups[1]["id"], groups[2]["id"]]
 
 
 def test_group_window_query_enforces_task_ownership_and_returns_local_items():

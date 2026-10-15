@@ -8,6 +8,5 @@
         "**/.git/objects/**": true,
         "**/.git/subtree-cache/**": true,
         "**/node_modules/*/**": true
-    },
-    "python.defaultInterpreterPath": "/home/phbaer/src/dtvp/.venv/bin/python"
+    }
 }
