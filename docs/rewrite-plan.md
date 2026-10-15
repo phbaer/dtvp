@@ -545,8 +545,19 @@ reassignment/removal preserves assessment records and historical tags. Context
 IDs are still source-local, not proof of cross-import equivalence or approval.
 `scripts/ownership_demo.py` exercises two versions and contextual reassignment.
 
-Not yet implemented: new UI/CLI workspaces, stable cross-import/context identity,
-shared reviewed range coverage, evidence synthesis,
+The journal-backed assessment engine now saves immutable draft/submitted
+revisions, exact contextual/version coverage and independent review decisions.
+Multi-version targets publish atomically; accepted prior coverage remains pinned
+during extensions. Semantic fingerprints retain relevant source revisions,
+artifact/usage/advisory facts and ignore only upload bookkeeping and owner changes.
+Coordinator score preview/publication gates all contexts for a vulnerability in
+each selected version, retains original Base metrics and exposes outdated scores.
+The shared workspace synthesizes attributed facts, current/pending approvals and
+full filtered statistics. HTTP CLI operations use these same application services;
+they do not access PostgreSQL directly or duplicate workflow rules.
+
+Not yet implemented: the complete new UI workspace, stable cross-import/context identity,
+range/exclusion expressions beyond explicit reviewed version targets, extended evidence synthesis,
 VDR/VEX adapters, cascading synchronization, cached semantic comparisons, journal
 retention/GC, operational-state recovery and v2/legacy migration. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain

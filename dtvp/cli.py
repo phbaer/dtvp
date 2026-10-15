@@ -19,11 +19,22 @@ def main():
     sub.add_parser("worker")
     sub.add_parser("migrate")
     sub.add_parser("rebuild-knowledge", help="Rebuild only v3 projections from the local journal")
+    from dtvp.knowledge.client import configure
+
+    configure(sub)
     bootstrap = sub.add_parser("bootstrap")
     bootstrap.add_argument("--issuer", required=True)
     bootstrap.add_argument("--subject", required=True)
     bootstrap.add_argument("--name", required=True)
     args = parser.parse_args()
+    if args.command == "knowledge":
+        from dtvp.knowledge.client import run as knowledge_client
+
+        try:
+            knowledge_client(args)
+        except (ValueError, OSError) as error:
+            parser.exit(1, f"{error}\n")
+        return
     if args.command == "serve":
         uvicorn.run("dtvp.main:create_app", factory=True, host=args.host, port=args.port)
         return

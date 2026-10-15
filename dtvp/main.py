@@ -11,6 +11,7 @@ from dtvp.api_analysis import router as analysis_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_rescoring import router as rescoring_router
+from dtvp.api_workflow import router as workflow_router
 from dtvp.auth import authenticate, issue
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready, sessions
@@ -63,6 +64,7 @@ def create_app(settings=None):
     app.include_router(analysis_router)
     app.include_router(statistics_router)
     app.include_router(rescoring_router)
+    app.include_router(workflow_router)
     if settings.playground:
         app.include_router(playground_router)
 

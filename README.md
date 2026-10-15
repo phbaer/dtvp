@@ -18,8 +18,8 @@ using pipeline provenance and target inventory, with explicit coverage review.
 Implementation has started on `rewrite/knowledge-journal`. The first slice adds
 immutable complete-state manifests, atomic multi-branch publication, immutable
 tags, a rebuildable SQL projection and journal-backed inventory import/comparison
-under `/api/v3`. The current UI still uses the earlier `/api/v2` runtime; assessment
-coverage, evidence synthesis, VDR/VEX ingestion and merge synchronization remain
+under `/api/v3`, with contextual assessment/review and coordinator-scoring APIs.
+The existing review UI uses `/api/v2`; VDR/VEX ingestion and merge synchronization remain
 planned. Existing v2 data is not migrated or made journal-authoritative implicitly.
 Reuse decisions compare original v1 on local
 `main` (`bdc7ba4`), committed refactoring and uncommitted work separately; see the
@@ -153,6 +153,47 @@ source, artifact, graph or advisory changes require reassessment; identical inpu
 and ownership-only changes retain coverage. Not-affected submission requires a
 specific justification. Historical absent assessments remain retained. API/UI
 adapters use this engine rather than implementing separate approval logic.
+
+### Assessment API and CLI
+
+`GET /api/v3/projects/{id}/versions` lists current product branches.
+`GET .../versions/{version}/workspace` returns contextual findings and full filtered
+statistics; filters are `team_id`, `q` and `lifecycle`, with bounded `offset`/`limit`
+and an optional pinned `expected` state. Detail is available at
+`.../workspace/{context_id}/{vulnerability_id}`. Source assertions, original ratings,
+current/pending coverage and published contextual scores remain separate.
+
+`POST .../assessments/{assessment_id}/draft` or `.../submit` requires `request_id`,
+exact `expected_versions`, `expected_revision` (null for a new assessment),
+`targets` (`version`, `context_id`, `vulnerability_id`), applicability `state`,
+`rationale`, optional `justification`, `conditions` and `evidence`. Targets must
+share a vulnerability and compatible component lineage. Weak local references
+need explicit supporting conditions; coverage is never extended automatically.
+`POST .../reviews` pins `assessment_id`, `assessment_revision`, exact `targets` and
+version heads, with `action: approve|request_changes` and a review rationale.
+Assessor/reviewer authority requires both project access and the responsible
+team's role; authors cannot approve their own revisions. Admin alone grants
+neither assessment, review nor rescoring authority.
+
+Coordinators use `POST .../scoring/preview`, then explicit `.../publish` with the
+returned `preview` hash. Inputs include `request_id`, `expected_versions`,
+`targets`, original `base_vector`, contextual `vector` and `rationale`. Publication
+requires current approved coverage for every context of that vulnerability in
+each selected version. Unrelated findings/versions do not block it. Original Base
+metrics stay unchanged; pending drafts do not revoke valid approved score inputs.
+Material changes make old coverage/scores visibly outdated rather than deleting them.
+
+The CLI uses the same HTTP contracts without opening the application database:
+
+```bash
+uv run python -m dtvp.cli knowledge --persona analyst workspace --project PROJECT_ID --version 7.1.1
+uv run python -m dtvp.cli knowledge --persona reviewer request POST /api/v3/projects/PROJECT_ID/reviews --body review.json
+```
+
+Production CLI calls read a bearer credential from `DTVP_API_TOKEN` (or the named
+`--token-env` variable); `--persona` works only against an enabled playground.
+Use workspace `--json` for complete machine-readable rows and evidence. Mutations
+forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
 `GET /api/v3/projects/{id}/ownership` returns the current policy and exact active
 version heads. A product manager can `PUT` the same resource with `request_id`,
