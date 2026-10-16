@@ -18,6 +18,10 @@ WORKSPACE_FILTERS = (
     "dependency",
     "source_conflict",
     "component",
+    "criticality",
+    "exposure",
+    "support_status",
+    "metadata_status",
 )
 
 

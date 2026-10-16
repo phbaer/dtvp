@@ -255,6 +255,14 @@ def test_workspace_cli_forwards_advanced_filters_and_keeps_server_totals(monkeyp
             "transitive",
             "--provider",
             "Supplier",
+            "--criticality",
+            "critical",
+            "--exposure",
+            "external",
+            "--support-status",
+            "unsupported",
+            "--metadata-status",
+            "current",
         ],
     )
     route = respx.get("http://dtvp.test/api/v3/projects/p/versions/7.1.2/workspace").mock(
@@ -276,6 +284,8 @@ def test_workspace_cli_forwards_advanced_filters_and_keeps_server_totals(monkeyp
     assert params["source_conflict"] == "yes"
     assert params["dependency"] == "transitive"
     assert params["provider"] == "Supplier"
+    assert params["criticality"] == "critical" and params["exposure"] == "external"
+    assert params["support_status"] == "unsupported" and params["metadata_status"] == "current"
     assert "Context findings: 79" in capsys.readouterr().out
 
 
@@ -403,6 +413,14 @@ def test_portfolio_cli_forwards_selected_heads_filters_and_displays_server_count
         "none",
         "--team-review",
         "approved",
+        "--criticality",
+        "critical",
+        "--exposure",
+        "external",
+        "--support-status",
+        "unsupported",
+        "--metadata-status",
+        "current",
     ]
     monkeypatch.setattr(sys, "argv", args + (["--json"] if as_json else []))
     group = {
@@ -447,6 +465,8 @@ def test_portfolio_cli_forwards_selected_heads_filters_and_displays_server_count
     assert params["team_id"] == "team" and params["q"] == "tls"
     assert params["lifecycle"] == "approved" and params["source_severity"] == "critical"
     assert params["contextual_severity"] == "none" and params["team_review"] == "approved"
+    assert params["criticality"] == "critical" and params["exposure"] == "external"
+    assert params["support_status"] == "unsupported" and params["metadata_status"] == "current"
     output = capsys.readouterr().out
     if as_json:
         assert json.loads(output) == result

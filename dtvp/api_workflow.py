@@ -178,6 +178,10 @@ def workspace(
     dependency: str = "",
     source_conflict: str = "",
     component: str = "",
+    criticality: str = "",
+    exposure: str = "",
+    support_status: str = "",
+    metadata_status: str = "",
 ):
     project = project_for(db, actor, project_id)
     state = state_for(request, project_id, version, expected)
@@ -193,6 +197,10 @@ def workspace(
             dependency=dependency,
             source_conflict=source_conflict,
             component=component,
+            criticality=criticality,
+            exposure=exposure,
+            support_status=support_status,
+            metadata_status=metadata_status,
         )
     except ValueError as error:
         raise HTTPException(422, str(error)) from error

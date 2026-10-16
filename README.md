@@ -683,6 +683,15 @@ request GET /api/v3/projects/ID/maintenance/retention-preview`. This dry run wri
 nothing and makes no physical storage estimate. Archival/application, retention
 policy and journal garbage collection remain planned; history is not deleted.
 
+Advanced queue and portfolio filters include authored cybersecurity `criticality`,
+`exposure`, `support_status` and `metadata_status`. UI saved views and the HTTP CLI
+(`--criticality`, `--exposure`, `--support-status`, `--metadata-status`) retain the
+same backend scope. Only current, applicable curated annotations supply these
+facts. Missing, stale or out-of-scope annotations yield unknown context values;
+their original records remain visible. Source claims and support dates do not
+infer authored criticality, exposure or support status. Filtering neither changes
+applicability nor publishes a score, and full statistics precede pagination.
+
 ### Curated component metadata
 
 Native component context and annotations are available from each Knowledge finding's

@@ -206,6 +206,23 @@ def team_review_matches(row, value):
     return status == value
 
 
+def metadata_status(row):
+    record = row.get("curated_metadata")
+    if not record:
+        return "missing"
+    status = record.get("status")
+    return status if status in {"current", "stale", "absent", "out_of_scope"} else "unknown"
+
+
+def current_annotation(row, section, field, values):
+    """Only an applicable annotation supplies a current fact; no date inference."""
+    record = row.get("curated_metadata") or {}
+    if metadata_status(row) != "current" or record.get("applicable") is not True:
+        return "unknown"
+    value = record.get("payload", {}).get("annotations", {}).get(section, {}).get(field)
+    return value if value in values else "unknown"
+
+
 class KnowledgeFilters(RequestModel):
     source_severity: Band = ""
     contextual_severity: Band = ""
@@ -230,6 +247,12 @@ class KnowledgeFilters(RequestModel):
     dependency: Literal["", "direct", "transitive", "root", "unknown"] = ""
     source_conflict: Literal["", "yes", "no", "unknown"] = ""
     component: str = Field(default="", max_length=500)
+    criticality: Literal["", "unknown", "low", "moderate", "high", "critical"] = ""
+    exposure: Literal["", "unknown", "not_exposed", "internal", "external"] = ""
+    support_status: Literal["", "unknown", "supported", "unsupported", "internally_maintained"] = ""
+    metadata_status: Literal[
+        "", "missing", "current", "stale", "absent", "out_of_scope", "unknown"
+    ] = ""
 
     @field_validator("dependency", mode="before")
     @classmethod
@@ -237,6 +260,25 @@ class KnowledgeFilters(RequestModel):
         return "direct" if value == "known_direct" else value
 
     def matches(self, row):
+        if self.metadata_status and metadata_status(row) != self.metadata_status:
+            return False
+        for value, section, field, allowed in (
+            (
+                self.criticality,
+                "cybersecurity",
+                "criticality",
+                {"low", "moderate", "high", "critical"},
+            ),
+            (self.exposure, "cybersecurity", "exposure", {"not_exposed", "internal", "external"}),
+            (
+                self.support_status,
+                "support",
+                "status",
+                {"supported", "unsupported", "internally_maintained"},
+            ),
+        ):
+            if value and current_annotation(row, section, field, allowed) != value:
+                return False
         if self.source_severity and source_severity(row) != self.source_severity:
             return False
         current = row.get("published_score")

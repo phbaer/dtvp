@@ -198,9 +198,13 @@ test('advanced filters reset pagination and forward the full scope to server sta
   await page.getByRole('combobox', { name: 'Dependency relationship', exact: true }).selectOption('transitive')
   await page.getByRole('combobox', { name: 'Source discrepancies', exact: true }).selectOption('no')
   await page.getByRole('textbox', { name: 'Component', exact: true }).fill('Shared TLS')
+  await page.getByRole('combobox', { name: 'Cybersecurity criticality', exact: true }).selectOption('critical')
+  await page.getByRole('combobox', { name: 'Exposure', exact: true }).selectOption('external')
+  await page.getByRole('combobox', { name: 'Support status', exact: true }).selectOption('unsupported')
+  await page.getByRole('combobox', { name: 'Annotation status', exact: true }).selectOption('current')
   await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
   await expect(page.getByLabel('Filtered workspace statistics')).toContainText('79 context findings')
-  expect(Object.fromEntries(state.workspaceQueries.at(-1)!)).toMatchObject({ offset: '0', source_severity: 'critical', contextual_severity: 'none', applicability: 'not_affected', scoring_status: 'published', team_review: 'pending', provider: 'Upstream', cvss_version: '3.1', dependency: 'transitive', source_conflict: 'no', component: 'Shared TLS' })
+  expect(Object.fromEntries(state.workspaceQueries.at(-1)!)).toMatchObject({ offset: '0', source_severity: 'critical', contextual_severity: 'none', applicability: 'not_affected', scoring_status: 'published', team_review: 'pending', provider: 'Upstream', cvss_version: '3.1', dependency: 'transitive', source_conflict: 'no', component: 'Shared TLS', criticality: 'critical', exposure: 'external', support_status: 'unsupported', metadata_status: 'current' })
   await expect(page.getByLabel('Context finding queue').locator('tbody tr')).toHaveCount(1)
   await expect(page).toHaveURL(/k_source_severity=critical/)
   await page.getByText('Saved views and sharing', { exact: true }).click()
@@ -212,6 +216,8 @@ test('advanced filters reset pagination and forward the full scope to server sta
   await page.getByRole('button', { name: 'Critical shared dependencies', exact: true }).click()
   await expect(page.getByLabel('Filtered workspace statistics')).toContainText('79 context findings')
   await expect(page.getByRole('combobox', { name: 'Source severity', exact: true })).toHaveValue('critical')
+  await expect(page.getByRole('combobox', { name: 'Cybersecurity criticality', exact: true })).toHaveValue('critical')
+  await expect(page).toHaveURL(/k_support_status=unsupported/)
 })
 
 

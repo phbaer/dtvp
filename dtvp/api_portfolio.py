@@ -32,6 +32,10 @@ def portfolio(
     dependency: str = "",
     source_conflict: str = "",
     component: str = "",
+    criticality: str = "",
+    exposure: str = "",
+    support_status: str = "",
+    metadata_status: str = "",
 ):
     project_for(db, actor, project_id)
     filters = KnowledgeFilters(
@@ -45,6 +49,10 @@ def portfolio(
         dependency=dependency,
         source_conflict=source_conflict,
         component=component,
+        criticality=criticality,
+        exposure=exposure,
+        support_status=support_status,
+        metadata_status=metadata_status,
     )
     result = load_portfolio(
         request.app.state.knowledge,
