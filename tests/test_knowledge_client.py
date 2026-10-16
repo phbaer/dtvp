@@ -369,3 +369,92 @@ def test_synchronization_cli_displays_server_preview_without_applying(monkeypatc
     assert "Total: 31" in output
     assert "needs_review CVE-test s -> t" in output
     assert "Read-only" in output
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@respx.mock
+def test_portfolio_cli_forwards_selected_heads_filters_and_displays_server_counts(
+    monkeypatch, capsys, as_json
+):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    args = [
+        "dtvp",
+        "knowledge",
+        "--url",
+        "http://dtvp.test",
+        "portfolio",
+        "--project",
+        "p",
+        "--version",
+        "7.1.1",
+        "--version",
+        "7.1.2",
+        "--expected-heads",
+        "a" * 64,
+        "--team",
+        "team",
+        "--q",
+        "tls",
+        "--lifecycle",
+        "approved",
+        "--source-severity",
+        "critical",
+        "--contextual-severity",
+        "none",
+        "--team-review",
+        "approved",
+    ]
+    monkeypatch.setattr(sys, "argv", args + (["--json"] if as_json else []))
+    group = {
+        "context_findings": 79,
+        "unique_vulnerabilities": 31,
+        "unique_latest_logical_assessments": 12,
+        "unique_approved_logical_assessments": 8,
+        "reviewed_covered_targets": 50,
+        "required_context_review_workload": {
+            "required_targets": 79,
+            "approved_targets": 50,
+            "remaining_targets": 29,
+            "not_assessable_targets": 2,
+        },
+    }
+    result = {
+        "heads_digest": "a" * 64,
+        "heads": {"7.1.1": "b" * 64, "7.1.2": "c" * 64},
+        "statistics": group,
+        "by_version": {"7.1.1": group},
+        "by_team": {"team": group},
+        "team_labels": {"team": "Platform"},
+        "state_evidence": {
+            "7.1.1": {
+                "baseline_status": "active",
+                "collection_coverage": {
+                    "package_coverage": "unknown",
+                    "dependency_coverage": "partial",
+                    "license_coverage": "unknown",
+                },
+            }
+        },
+        "limitations": ["Counts do not verify complete software coverage."],
+    }
+    route = respx.get("http://dtvp.test/api/v3/projects/p/portfolio").mock(
+        return_value=httpx.Response(200, json=result)
+    )
+    main()
+    params = route.calls[0].request.url.params
+    assert params.get_list("version") == ["7.1.1", "7.1.2"]
+    assert params["expected_heads"] == "a" * 64
+    assert params["team_id"] == "team" and params["q"] == "tls"
+    assert params["lifecycle"] == "approved" and params["source_severity"] == "critical"
+    assert params["contextual_severity"] == "none" and params["team_review"] == "approved"
+    output = capsys.readouterr().out
+    if as_json:
+        assert json.loads(output) == result
+    else:
+        assert "Context findings: 79" in output
+        assert "Unique vulnerabilities: 31" in output
+        assert "Latest logical assessments: 12" in output
+        assert "Approved logical assessments: 8" in output
+        assert "approved targets=50/79" in output and "not assessable=2" in output
+        assert "team=Platform" in output
+        assert "packages=unknown" in output and "state unfiltered" in output

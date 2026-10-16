@@ -37,6 +37,19 @@ def configure(parser):
     workspace.add_argument("--offset", type=int, default=0)
     workspace.add_argument("--limit", type=int, default=50)
     workspace.add_argument("--json", action="store_true")
+    portfolio = commands.add_parser(
+        "portfolio", help="Show project statistics across current versions"
+    )
+    portfolio.add_argument("--project", required=True)
+    portfolio.add_argument(
+        "--version", action="append", help="Select version; repeat for multiple versions"
+    )
+    portfolio.add_argument("--expected-heads")
+    for option in ("team", "q", "lifecycle"):
+        portfolio.add_argument("--" + option, default="")
+    for option in WORKSPACE_FILTERS:
+        portfolio.add_argument("--" + option.replace("_", "-"), default="")
+    portfolio.add_argument("--json", action="store_true")
     for name in ("refs", "history", "compare"):
         resource = commands.add_parser(name, help="Read pinned product " + name)
         resource.add_argument("--project", required=True)
@@ -172,6 +185,52 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "portfolio":
+            from urllib.parse import quote
+
+            params = {"q": args.q, "lifecycle": args.lifecycle}
+            params.update(
+                {name: getattr(args, name) for name in WORKSPACE_FILTERS if getattr(args, name)}
+            )
+            if args.version:
+                params["version"] = args.version
+            if args.team:
+                params["team_id"] = args.team
+            if args.expected_heads:
+                params["expected_heads"] = args.expected_heads
+            result = read_response(
+                client.get(
+                    f"/api/v3/projects/{quote(args.project, safe='')}/portfolio", params=params
+                )
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                counts = result["statistics"]
+                print(f"Heads: {result['heads_digest']} · Versions: {len(result['heads'])}")
+                print(
+                    f"Context findings: {counts['context_findings']} · Unique vulnerabilities: {counts['unique_vulnerabilities']}"
+                )
+                print(
+                    f"Latest logical assessments: {counts['unique_latest_logical_assessments']} · Approved logical assessments: {counts['unique_approved_logical_assessments']}"
+                )
+                for version, group in result["by_version"].items():
+                    work = group["required_context_review_workload"]
+                    print(
+                        f"{version}  findings={group['context_findings']}  approved targets={work['approved_targets']}/{work['required_targets']}  remaining={work['remaining_targets']}  not assessable={work['not_assessable_targets']}"
+                    )
+                for team, group in result.get("by_team", {}).items():
+                    print(
+                        f"team={result.get('team_labels', {}).get(team, team)}  findings={group['context_findings']}  approved targets={group['reviewed_covered_targets']}"
+                    )
+                for version, facts in result.get("state_evidence", {}).items():
+                    coverage = facts["collection_coverage"]
+                    print(
+                        f"{version}  baseline={facts['baseline_status']}  declared coverage: packages={coverage['package_coverage']}, dependencies={coverage['dependency_coverage']}, licenses={coverage['license_coverage']} (state unfiltered)"
+                    )
+                for limitation in result.get("limitations", []):
+                    print("Limit: " + limitation)
+            return
         if args.knowledge_command == "coverage":
             from urllib.parse import quote
 

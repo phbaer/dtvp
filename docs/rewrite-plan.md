@@ -603,6 +603,13 @@ Preparation reuses issued selectors before recomputing; returned evidence resolv
 issued inputs first and fails closed on corruption. Product heads remain unchanged.
 Legacy unissued receipt compatibility and consumer cutover qualification remain gates.
 
+Native project portfolio statistics now aggregate a pinned set of current version
+heads, with shared logical decisions distinct from per-version/context work.
+Filters scope all decision counts; unfiltered collection/history evidence remains
+separate. Source/current published severity and outdated scores stay distinct.
+The authorized API and CLI share this read model; broader cross-project portfolio
+views and large-inventory performance qualification remain planned.
+
 Native bundles retain exact source/context/proposal/approval distinctions. CPE
 has an internal offline policy/proposal module; VScorer has explicit focused inputs
 and returned bound proposals. Producer-qualified Agentyzer inputs and returned

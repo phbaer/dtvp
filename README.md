@@ -252,6 +252,21 @@ actor capabilities without granting access from team ownership. The HTTP CLI use
 with `--json` for the complete server response. Review and score publication stay
 separate from selecting assessment coverage.
 
+### Current-version portfolio statistics
+
+`GET /api/v3/projects/{id}/portfolio` aggregates authorized current version heads
+from one reference snapshot. Repeat `version` to select branches; optional
+`expected_heads` rejects changed selection with 409. Workspace filters apply before
+counts. Team groups may overlap when ownership conflicts; state-level collection
+coverage and retained-history counts are explicitly unfiltered.
+
+Counts distinguish contextual findings, unique vulnerability IDs, latest logical
+assessments, independently approved logical assessments and the actual remaining
+version/context review workload. Only current published scores contribute
+contextual severity. Unknown coverage, unassigned targets and withdrawn inventory
+remain explicit. CLI: `knowledge portfolio --project ID [--version VERSION]`
+with the workspace filter flags and `--json` for the complete server response.
+
 ### Native Dependency-Track intake
 
 An administrator binds each product version independently using `PUT
