@@ -1,4 +1,4 @@
-export type Me = { id: string; name: string; org_admin: boolean; playground: boolean; agentyzer: { enabled: boolean; mode: string }; vscorer_url: string; workspaces: { id: string; name: string; capabilities: string[] }[] }
+export type Me = { id: string; name: string; org_admin: boolean; playground: boolean; legacy_review_enabled?: boolean; agentyzer: { enabled: boolean; mode: string }; vscorer_url: string; workspaces: { id: string; name: string; capabilities: string[] }[] }
 export type Project = { id: string; name: string; workspace_id: string; capabilities: string[]; workspace?: string; release_count?: number; finding_count?: number }
 export type Release = { id: string; version: string; generation: number }
 export type Decision = { id: string; state: string; rationale: string; author_id: string; workspace_id: string; evidence_revision: number; status: string; created_at: string; author_name?: string; details: { justification?: string; rescoring?: RescoreProposal } }

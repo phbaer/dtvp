@@ -103,7 +103,7 @@ function saveView() {
   localStorage.setItem(`dtvp.views:${me.value.id}`, JSON.stringify(savedViews.value)); viewName.value = ''
 }
 function removeView(name: string) { savedViews.value = savedViews.value.filter(view => view.name !== name); localStorage.setItem(`dtvp.views:${me.value!.id}`, JSON.stringify(savedViews.value)) }
-function restoreLocation() { const params = new URLSearchParams(location.search); page.value = pageFromLocation(params); applyView(params.toString(), page.value === 'Review') }
+function restoreLocation() { const params = new URLSearchParams(location.search); page.value = pageFromLocation(params); normalizePage(); applyView(params.toString(), page.value === 'Review') }
 async function moveFinding(delta: number) {
   const target = reviewIndex.value >= 0 ? reviewIndex.value + delta : delta > 0 ? Math.min(queueAnchor.value, rows.value.length) : queueAnchor.value - 1
   if (target >= rows.value.length && nextCursor.value) await loadFindings(true)
@@ -193,6 +193,12 @@ const canManage = computed(() => selectedProject.value?.capabilities.includes('m
 const latestDecision = computed(() => detail.value?.latest_decision)
 const canApprove = computed(() => detail.value?.capabilities.includes('approve') && detail.value.review_lifecycle === 'ready' && latestDecision.value?.author_id !== me.value?.id)
 const access = computed(() => me.value?.org_admin || me.value?.workspaces.some(w => w.capabilities.includes('manage')))
+const legacyReviewEnabled = computed(() => me.value?.legacy_review_enabled !== false)
+const navigationPages = computed(() => ['Knowledge', ...(legacyReviewEnabled.value ? ['Review', 'Statistics', 'Products'] : []), 'Activity', ...(access.value ? ['Access'] : [])])
+function normalizePage() {
+  if (!legacyReviewEnabled.value && ['Review', 'Statistics', 'Products'].includes(page.value)) page.value = 'Knowledge'
+}
+
 const draftKey = computed(() => `dtvp.draft:${me.value?.id}:${detail.value?.id}:${detail.value?.review_workspace_id}`)
 const names: Record<string, string> = { open: 'Needs analysis', ready: 'Ready for approval', approved: 'Approved', needs_revalidation: 'Evidence changed', changes_requested: 'Changes requested', legacy_assessed: 'Legacy assessment', legacy_pending: 'Legacy review pending', legacy_conflicting: 'Legacy conflict', legacy_documented: 'Legacy documentation' }
 const label = (value: string) => names[value] || value.replaceAll('_', ' ')
@@ -210,6 +216,7 @@ async function action(callback: () => Promise<unknown>) {
 }
 
 async function loadPageData() {
+  normalizePage()
   if (page.value === 'Review') await loadFindings()
   else if (page.value === 'Statistics' && reviewProject.value && !reviewProjectLabel.value) reviewProjectLabel.value = (await api<Project>(`/projects/${reviewProject.value}`)).name
   else if (page.value === 'Products') await loadProjects()
@@ -360,7 +367,7 @@ onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); 
     <header :inert="modalOpen">
       <a class="brand" href="/">DTVP <span>Security review</span></a>
       <nav v-if="me" aria-label="Main navigation">
-        <button v-for="item in ['Knowledge', 'Review', 'Statistics', 'Products', 'Activity', ...(access ? ['Access'] : [])]" :key="item" :class="{ current: page === item }" :disabled="busy || nativeLocked" @click="page = item">{{ item }}</button>
+        <button v-for="item in navigationPages" :key="item" :class="{ current: page === item }" :disabled="busy || nativeLocked" @click="page = item">{{ item }}</button>
       </nav>
       <div class="preferences">
         <label>Theme <select v-model="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
@@ -370,7 +377,7 @@ onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); 
     <div v-if="me?.playground" class="playground-bar" :inert="modalOpen">
       <span><strong>Playground</strong> · Synthetic data · External services disabled by default</span>
       <label>Persona <select :value="personas.find(p => p.name === me?.name)?.id" :disabled="busy" @change="login(($event.target as HTMLSelectElement).value)"><option v-for="p in personas" :key="p.id" :value="p.id">{{ p.name }}</option></select></label>
-      <details><summary>Replay events</summary><div class="menu"><button :disabled="busy" @click="replay('release-change')">Changed evidence</button><button :disabled="busy" @click="replay('conflict')">Conflicting source</button><button :disabled="busy" @click="replay('partial')">Partial scan</button><button v-if="me.org_admin" :disabled="busy" @click="action(async () => { await api('/playground/scale', send({})); await loadProjects(); await loadFindings(); notice = 'Loaded 100 synthetic projects with 20 findings each.' })">Load large inventory</button><button v-if="me.org_admin" :disabled="busy" @click="action(async () => { await api('/playground/reset', send({})); me = null; detail = null; token = ''; resetReviewFilters(); updateUrl() })">Reset playground</button></div></details>
+      <details v-if="legacyReviewEnabled"><summary>Replay events</summary><div class="menu"><button :disabled="busy" @click="replay('release-change')">Changed evidence</button><button :disabled="busy" @click="replay('conflict')">Conflicting source</button><button :disabled="busy" @click="replay('partial')">Partial scan</button><button v-if="me.org_admin" :disabled="busy" @click="action(async () => { await api('/playground/scale', send({})); await loadProjects(); await loadFindings(); notice = 'Loaded 100 synthetic projects with 20 findings each.' })">Load large inventory</button><button v-if="me.org_admin" :disabled="busy" @click="action(async () => { await api('/playground/reset', send({})); me = null; detail = null; token = ''; resetReviewFilters(); updateUrl() })">Reset playground</button></div></details>
     </div>
     <div v-if="error" class="message error" role="alert" :inert="modalOpen">{{ error }} <button @click="error = ''" aria-label="Dismiss error">×</button></div>
     <div v-if="notice" class="message success" role="status" :inert="modalOpen">{{ notice }}</div>

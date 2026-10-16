@@ -1859,7 +1859,8 @@ matching; explicit maps cannot collapse different contexts or establish equivale
 Target inventory, reviews and published scores remain unchanged. Knowledge ancestry
 never proves a software merge. Explicit integration events retain software/artifact
 pins and optionally verify supplied Git parent paths; this establishes object
-consistency, not repository/build authenticity. Automatic synchronization remains deferred.
+consistency, not repository/build authenticity. Configured relationships now
+automatically schedule proposals; draft adoption and target reviews stay explicit.
 `POST .../synchronization/drafts` explicitly extends one source assessment's logical
 ID into a target-only draft. It requires the source author, current source/target
 heads, exact preview/revision, explicit target conditions and a reason. Any existing
@@ -2320,8 +2321,9 @@ reference heads and an applied-publication checkpoint; tags store only reference
 They are an initial general projection, not the final indexed finding/context
 schema. The basic comparison reports changed record keys; historical semantic
 comparison adds bounded classified details and a process-local cache. Explicit
-occurrence correspondence is available, while automatic semantic identity reuse
-remains deferred. Normal application commands must use the API; local reconstruction
+occurrence correspondence, stable lineage matching and proven same-version
+reference continuity are available. Ambiguous identity or new-context approval
+reuse is never inferred. Normal application commands must use the API; local reconstruction
 is an administrative operation.
 
 ## Existing refactoring runtime
@@ -2533,6 +2535,24 @@ unchanged. Original/effective severity sorting is available in Review. Frozen
 consumer findings include required team reviews, scoring history and the proposed/adopted score, vector, rationale and rule
 configuration; VScorer worklists keep original Base inputs. See
 [statistics and rescoring API](docs/statistics-rescoring.md).
+
+## Native-only runtime cutover
+
+Set `DTVP_LEGACY_REVIEW_ENABLED=false` on both API and worker after the selected
+projects and consumers have migrated to the native journal workflows. Compatibility
+review, statistics, release ingestion, snapshot export and legacy analysis/scoring
+routes are omitted from OpenAPI and return unavailable. The UI hides their navigation
+and redirects old Review/Statistics/Products links into Knowledge. Default `true`
+preserves compatibility during staged migration.
+
+Shared authentication, teams, project catalogs, credentials, job inspection/cancel,
+CVSS metrics, product scoring policies and Agentyzer repository bindings remain
+available, including their existing `/api/v2` URLs. Native `/api/v3` workflows,
+legacy archive inspection/publication and v2-to-native migration remain available.
+The worker fails retained legacy jobs before external calls when this mode is set;
+shared retry never converts native jobs into legacy execution. Existing SQL history,
+artifacts and issued inputs are retained. This deployment switch does not attest
+migration completeness or delete the compatibility implementation.
 
 ## Production deployment
 
@@ -3110,3 +3130,19 @@ Verification: 71 core CPE/source/ranking checks, 13 source/refresh HTTP checks,
 seven CPE browser checks, frontend typecheck/build and Ruff passed. These mocked
 provider fixtures qualify acquisition controls; no live NVD availability, customer
 mapping correctness or full standalone-service parity is claimed.
+
+Knowledge offers a collapsed **Add product** form for users with a writable team.
+Creation uses the shared authenticated project API and selects the new product,
+so its first SBOM can be imported directly without entering the compatibility
+Products screen. Eligible teams come from current server capabilities; server
+permissions remain authoritative. Drafts lock navigation and competing composition
+changes. Actor changes invalidate late responses.
+
+Project creation has no idempotent request contract. An unconfirmed response is
+therefore never retried automatically: the captured name/team remain visible,
+with read-only, scoped and paginated catalog inspection to open an existing
+result. A user can explicitly discard the attempt, but catalog absence does not
+prove a delayed request failed. Duplicate names remain constrained per owning
+team by the database. Five focused browser checks and frontend typecheck/build
+verify native creation, uncertain-result recovery, draft/mobile behavior,
+read-only access and actor roundtrips.

@@ -32,6 +32,7 @@ from dtvp.schemas import RequestModel, RescoreInput
 from dtvp.team_reviews import require_ready
 
 router = APIRouter(prefix="/api/v2")
+legacy_router = APIRouter(prefix="/api/v2")
 
 
 class Preview(RequestModel):
@@ -126,7 +127,7 @@ def save_policy(project_id: str, data: PolicyInput, db: DB, actor: Auth):
     return policy(db, project_id)
 
 
-@router.post("/findings/{finding_id}/rescoring/preview")
+@legacy_router.post("/findings/{finding_id}/rescoring/preview")
 def preview(finding_id: str, data: Preview, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "rescore")
     lock_release(db, finding.release_id)
@@ -146,7 +147,7 @@ def preview(finding_id: str, data: Preview, db: DB, actor: Auth):
     }
 
 
-@router.get("/findings/{finding_id}/rescoring/proposals")
+@legacy_router.get("/findings/{finding_id}/rescoring/proposals")
 def proposals(finding_id: str, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id)
     detail = finding_detail(db, finding)
@@ -174,7 +175,7 @@ class ReviewTeamsInput(RequestModel):
     workspace_ids: list[str] = Field(min_length=1, max_length=100)
 
 
-@router.get("/findings/{finding_id}/review-teams")
+@legacy_router.get("/findings/{finding_id}/review-teams")
 def review_teams(finding_id: str, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "manage")
     project = db.get(Project, db.get(Release, finding.release_id).project_id)
@@ -192,7 +193,7 @@ def review_teams(finding_id: str, db: DB, actor: Auth):
     }
 
 
-@router.put("/findings/{finding_id}/review-teams")
+@legacy_router.put("/findings/{finding_id}/review-teams")
 def set_review_teams(finding_id: str, data: ReviewTeamsInput, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "manage")
     release = lock_release(db, finding.release_id)
@@ -231,7 +232,7 @@ def set_review_teams(finding_id: str, data: ReviewTeamsInput, db: DB, actor: Aut
     return finding_detail(db, finding)["review_coverage"]
 
 
-@router.post("/findings/{finding_id}/rescoring", status_code=201)
+@legacy_router.post("/findings/{finding_id}/rescoring", status_code=201)
 def publish_rescoring(finding_id: str, data: Preview, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "rescore")
     release = lock_release(db, finding.release_id)

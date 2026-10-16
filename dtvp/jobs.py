@@ -16,6 +16,14 @@ from dtvp.storage import canonical, digest
 
 logger = logging.getLogger(__name__)
 
+NATIVE_JOB_KINDS = frozenset({
+    "analyse-native",
+    "import-dt-native",
+    "refresh-advisories-native",
+    "match-osv-native",
+    "propose-sync-native",
+})
+
 
 def enqueue(db, actor, release, kind, payload):
     job = Job(
@@ -83,13 +91,7 @@ def actor_for(db, job):
 def execute(factory, artifacts, settings, job_id, token):
     with factory() as db:
         kind, engine = db.get(Job, job_id).kind, db.get_bind()
-    if kind in {
-        "analyse-native",
-        "import-dt-native",
-        "refresh-advisories-native",
-        "match-osv-native",
-        "propose-sync-native",
-    }:
+    if kind in NATIVE_JOB_KINDS:
         from dtvp.knowledge.journal import Journal
         from dtvp.knowledge.projection import catch_up
 
@@ -116,6 +118,8 @@ def execute(factory, artifacts, settings, job_id, token):
             if job.status == "succeeded":
                 job.result = {**job.result, "projection": projection}
         return
+    if not settings.legacy_review_enabled:
+        raise ValueError("Legacy review is disabled; queued legacy jobs cannot execute")
     if kind == "analyse":
         from dtvp.analysis import execute as execute_analysis
 

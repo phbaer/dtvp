@@ -16,6 +16,7 @@ from dtvp.schemas import RequestModel
 from dtvp.storage import canonical, digest
 
 router = APIRouter(prefix="/api/v2")
+legacy_router = APIRouter(prefix="/api/v2")
 
 
 class AnalysisBinding(RequestModel):
@@ -47,7 +48,7 @@ def bind(project_id: str, data: AnalysisBinding, db: DB, actor: Auth):
     return project.metadata_json["connectors"]["agentyzer"]
 
 
-@router.post("/findings/{finding_id}/analyses", status_code=202)
+@legacy_router.post("/findings/{finding_id}/analyses", status_code=202)
 def submit(finding_id: str, data: AnalysisInput, db: DB, actor: Auth, request: Request):
     finding = finding_for(db, actor, finding_id, "evidence")
     release = lock_release(db, finding.release_id)
@@ -184,7 +185,7 @@ def representation(job, finding):
     }
 
 
-@router.get("/findings/{finding_id}/analyses")
+@legacy_router.get("/findings/{finding_id}/analyses")
 def history(
     finding_id: str, db: DB, actor: Auth, cursor: str = "", limit: int = Query(20, ge=1, le=100)
 ):
@@ -215,7 +216,7 @@ def history(
     }
 
 
-@router.get("/analyses/{job_id}/report")
+@legacy_router.get("/analyses/{job_id}/report")
 def report(job_id: str, db: DB, actor: Auth, request: Request):
     job = db.get(Job, job_id)
     if not job or job.kind != "analyse":

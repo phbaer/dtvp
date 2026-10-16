@@ -15,6 +15,7 @@ from dtvp.storage import canonical
 
 FIXTURES = Path(__file__).resolve().parent.parent / "playground" / "fixtures"
 router = APIRouter(prefix="/api/v2/playground")
+legacy_router = APIRouter(prefix="/api/v2/playground")
 PERSONAS = {
     "analyst": ("Platform analyst", ["analyst"], "Platform"),
     "reviewer": ("Platform reviewer", ["reviewer"], "Platform"),
@@ -204,7 +205,7 @@ def reset(request: Request, db: DB, actor: Auth):
     return {"status": "reset", "sign_in_required": True}
 
 
-@router.post("/replay/{scenario}")
+@legacy_router.post("/replay/{scenario}")
 def replay(scenario: str, request: Request, db: DB, actor: Auth):
     if not request.app.state.settings.playground:
         raise HTTPException(404)
@@ -243,7 +244,7 @@ class ScaleInput(BaseModel):
     findings_per_project: int = Field(default=20, ge=1, le=100)
 
 
-@router.post("/scale")
+@legacy_router.post("/scale")
 def scale(data: ScaleInput, request: Request, db: DB, actor: Auth):
     if not request.app.state.settings.playground:
         raise HTTPException(404)

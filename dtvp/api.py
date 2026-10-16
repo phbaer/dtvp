@@ -33,7 +33,7 @@ from dtvp.domain import (
     lock_release,
     submit_decision,
 )
-from dtvp.jobs import enqueue
+from dtvp.jobs import NATIVE_JOB_KINDS, enqueue
 from dtvp.models import (
     Audit,
     Component,
@@ -74,6 +74,7 @@ from dtvp.storage import canonical, digest
 from dtvp.team_reviews import actor_detail
 
 router = APIRouter(prefix="/api/v2")
+legacy_router = APIRouter(prefix="/api/v2")
 
 
 def database(request: Request):
@@ -208,7 +209,7 @@ def project_catalog(
     }
 
 
-@router.get("/catalog/projects/{project_id}/releases")
+@legacy_router.get("/catalog/projects/{project_id}/releases")
 def release_catalog(
     project_id: str,
     db: DB,
@@ -280,6 +281,7 @@ def me(db: DB, actor: Auth, request: Request):
         "name": actor.user.name,
         "org_admin": actor.user.org_admin and actor.credential.kind == "session",
         "playground": request.app.state.settings.playground,
+        "legacy_review_enabled": request.app.state.settings.legacy_review_enabled,
         "vscorer_url": request.app.state.settings.vscorer_url,
         "agentyzer": {
             "enabled": request.app.state.settings.playground
@@ -508,7 +510,7 @@ def share_project(project_id: str, data: ShareInput, db: DB, actor: Auth):
     return data.model_dump()
 
 
-@router.get("/projects/{project_id}/releases")
+@legacy_router.get("/projects/{project_id}/releases")
 def releases(project_id: str, db: DB, actor: Auth):
     project_for(db, actor, project_id)
     return [
@@ -521,7 +523,7 @@ def releases(project_id: str, db: DB, actor: Auth):
     ]
 
 
-@router.post("/projects/{project_id}/releases", status_code=201)
+@legacy_router.post("/projects/{project_id}/releases", status_code=201)
 def create_release(project_id: str, data: ReleaseInput, db: DB, actor: Auth):
     project_for(db, actor, project_id, "write")
     release = Release(project_id=project_id, version=data.version)
@@ -531,7 +533,7 @@ def create_release(project_id: str, data: ReleaseInput, db: DB, actor: Auth):
     return {"id": release.id, "version": release.version}
 
 
-@router.get("/releases/{release_id}/components")
+@legacy_router.get("/releases/{release_id}/components")
 def components(
     release_id: str,
     db: DB,
@@ -577,7 +579,7 @@ def components(
     }
 
 
-@router.put("/components/{component_id}/metadata")
+@legacy_router.put("/components/{component_id}/metadata")
 def component_metadata(component_id: str, data: MetadataInput, db: DB, actor: Auth):
     component = db.get(Component, component_id)
     if not component:
@@ -598,7 +600,7 @@ def component_metadata(component_id: str, data: MetadataInput, db: DB, actor: Au
     return {"metadata": component.metadata_json, "metadata_version": component.metadata_version}
 
 
-@router.get("/releases/{release_id}/revisions")
+@legacy_router.get("/releases/{release_id}/revisions")
 def release_revisions(release_id: str, db: DB, actor: Auth):
     release_for(db, actor, release_id)
     return [
@@ -620,7 +622,7 @@ def release_revisions(release_id: str, db: DB, actor: Auth):
     ]
 
 
-@router.get("/revisions/{revision_id}/artifact")
+@legacy_router.get("/revisions/{revision_id}/artifact")
 def original_artifact(revision_id: str, db: DB, actor: Auth, request: Request):
     revision = db.get(Revision, revision_id)
     if not revision:
@@ -633,7 +635,7 @@ def original_artifact(revision_id: str, db: DB, actor: Auth, request: Request):
     )
 
 
-@router.post("/releases/{release_id}/ingestions", status_code=201)
+@legacy_router.post("/releases/{release_id}/ingestions", status_code=201)
 def ingest(release_id: str, data: ImportInput, db: DB, actor: Auth, request: Request):
     release = release_for(db, actor, release_id, "write")
     bounded_metadata(data.context)
@@ -656,7 +658,7 @@ def ingest(release_id: str, data: ImportInput, db: DB, actor: Auth, request: Req
     }
 
 
-@router.post("/releases/{release_id}/uploads", status_code=201)
+@legacy_router.post("/releases/{release_id}/uploads", status_code=201)
 def upload(
     release_id: str,
     db: DB,
@@ -697,7 +699,7 @@ def upload(
     return {"id": revision.id, "sha256": revision.artifact_sha}
 
 
-@router.get("/findings")
+@legacy_router.get("/findings")
 def findings(
     db: DB,
     actor: Auth,
@@ -887,7 +889,7 @@ def findings(
     }
 
 
-@router.get("/findings/{finding_id}")
+@legacy_router.get("/findings/{finding_id}")
 def finding(finding_id: str, db: DB, actor: Auth, workspace_id: str | None = None):
     stored = finding_for(db, actor, finding_id)
     detail = finding_detail(db, stored)
@@ -905,7 +907,7 @@ def finding(finding_id: str, db: DB, actor: Auth, workspace_id: str | None = Non
     return actor_detail(db, actor, project, detail, workspace_id)
 
 
-@router.post("/findings/{finding_id}/decisions", status_code=201)
+@legacy_router.post("/findings/{finding_id}/decisions", status_code=201)
 def decision(finding_id: str, data: DecisionInput, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "assess")
     bounded_metadata(data.details)
@@ -933,7 +935,7 @@ def decision(finding_id: str, data: DecisionInput, db: DB, actor: Auth):
     return {"id": result.id, "state_version": finding.state_version}
 
 
-@router.post("/findings/{finding_id}/approvals")
+@legacy_router.post("/findings/{finding_id}/approvals")
 def approval(finding_id: str, data: ApprovalInput, db: DB, actor: Auth):
     stored = finding_for(db, actor, finding_id, "approve")
     approve_decision(
@@ -947,7 +949,7 @@ def approval(finding_id: str, data: ApprovalInput, db: DB, actor: Auth):
     return {"state_version": stored.state_version}
 
 
-@router.post("/approvals/preview")
+@legacy_router.post("/approvals/preview")
 def bulk_preview(data: BulkInput, db: DB, actor: Auth):
     for item in data.items:
         stored = finding_for(db, actor, item.finding_id, "approve")
@@ -972,7 +974,7 @@ def bulk_preview(data: BulkInput, db: DB, actor: Auth):
     return {"count": len(data.items), "preview_digest": digest(canonical(data.model_dump()))}
 
 
-@router.post("/approvals/apply")
+@legacy_router.post("/approvals/apply")
 def bulk_apply(data: BulkApply, db: DB, actor: Auth):
     if data.preview_digest != digest(
         canonical({"items": [item.model_dump() for item in data.items]})
@@ -986,7 +988,7 @@ def bulk_apply(data: BulkApply, db: DB, actor: Auth):
     return {"approved": len(stored)}
 
 
-@router.post("/findings/{finding_id}/evidence", status_code=201)
+@legacy_router.post("/findings/{finding_id}/evidence", status_code=201)
 def evidence(finding_id: str, data: EvidenceInput, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "evidence")
     bounded_metadata(data.assertion)
@@ -1044,20 +1046,20 @@ def evidence(finding_id: str, data: EvidenceInput, db: DB, actor: Auth):
     return {"id": result.id, "state_version": finding.state_version}
 
 
-@router.post("/snapshots", status_code=201)
+@legacy_router.post("/snapshots", status_code=201)
 def snapshot(data: SnapshotInput, db: DB, actor: Auth, request: Request):
     release = release_for(db, actor, data.release_id, "snapshot")
     result = create_snapshot(db, request.app.state.artifacts, actor, release, data.revision_id)
     return {"id": result.id, **result.manifest}
 
 
-@router.get("/snapshots/{snapshot_id}")
+@legacy_router.get("/snapshots/{snapshot_id}")
 def manifest(snapshot_id: str, db: DB, actor: Auth):
     result = snapshot_for(db, actor, snapshot_id)
     return {"id": result.id, **result.manifest}
 
 
-@router.get("/snapshots/{snapshot_id}/bundle")
+@legacy_router.get("/snapshots/{snapshot_id}/bundle")
 def snapshot_bundle(snapshot_id: str, db: DB, actor: Auth, request: Request):
     stored = snapshot_for(db, actor, snapshot_id)
     return Response(
@@ -1070,7 +1072,7 @@ def snapshot_bundle(snapshot_id: str, db: DB, actor: Auth, request: Request):
     )
 
 
-@router.get("/snapshots/{snapshot_id}/sbom")
+@legacy_router.get("/snapshots/{snapshot_id}/sbom")
 def snapshot_sbom(snapshot_id: str, db: DB, actor: Auth, request: Request):
     stored = snapshot_for(db, actor, snapshot_id)
     payload = json.loads(request.app.state.artifacts.read(stored.sha))
@@ -1079,7 +1081,7 @@ def snapshot_sbom(snapshot_id: str, db: DB, actor: Auth, request: Request):
     )
 
 
-@router.get("/snapshots/{snapshot_id}/vulnerabilities")
+@legacy_router.get("/snapshots/{snapshot_id}/vulnerabilities")
 def snapshot_vulnerabilities(
     snapshot_id: str,
     db: DB,
@@ -1099,7 +1101,7 @@ def snapshot_vulnerabilities(
     }
 
 
-@router.get("/snapshots/{snapshot_id}/exports/vscorer")
+@legacy_router.get("/snapshots/{snapshot_id}/exports/vscorer")
 def vscorer_export(snapshot_id: str, db: DB, actor: Auth, request: Request):
     stored = snapshot_for(db, actor, snapshot_id)
     payload = json.loads(request.app.state.artifacts.read(stored.sha))
@@ -1119,7 +1121,7 @@ def vscorer_export(snapshot_id: str, db: DB, actor: Auth, request: Request):
     }
 
 
-@router.get("/snapshots/{snapshot_id}/exports/vscorer/worklist")
+@legacy_router.get("/snapshots/{snapshot_id}/exports/vscorer/worklist")
 def vscorer_worklist(snapshot_id: str, db: DB, actor: Auth, request: Request):
     stored = snapshot_for(db, actor, snapshot_id)
     payload = json.loads(request.app.state.artifacts.read(stored.sha))
@@ -1128,7 +1130,7 @@ def vscorer_worklist(snapshot_id: str, db: DB, actor: Auth, request: Request):
     )
 
 
-@router.get("/providers")
+@legacy_router.get("/providers")
 def providers(actor: Auth, request: Request):
     enabled = request.app.state.settings.providers_enabled
     return [
@@ -1138,7 +1140,7 @@ def providers(actor: Auth, request: Request):
     ]
 
 
-@router.post("/jobs", status_code=202)
+@legacy_router.post("/jobs", status_code=202)
 def new_job(data: JobInput, db: DB, actor: Auth, request: Request):
     settings = request.app.state.settings
     release = release_for(
@@ -1209,16 +1211,18 @@ def cancel_job(job_id: str, db: DB, actor: Auth):
 
 
 @router.post("/jobs/{job_id}/retry", status_code=202)
-def retry_job(job_id: str, db: DB, actor: Auth):
+def retry_job(job_id: str, db: DB, actor: Auth, request: Request):
     old = db.get(Job, job_id)
     if not old:
         raise HTTPException(404, "Job unavailable")
-    if old.kind in {"analyse-native", "import-dt-native"}:
+    if old.kind in NATIVE_JOB_KINDS:
         project_for(db, actor, old.project_id)
         raise HTTPException(409, "Use the native job retry endpoint")
     project_for(
         db, actor, old.project_id, "evidence" if old.kind in {"enrich", "analyse"} else "write"
     )
+    if not request.app.state.settings.legacy_review_enabled:
+        raise HTTPException(410, "Legacy review is disabled; use a native source or analysis job")
     if old.status not in {"failed", "cancelled"}:
         raise HTTPException(409, "Only failed or cancelled jobs can be retried")
     if old.kind == "analyse":

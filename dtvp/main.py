@@ -8,9 +8,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
-from dtvp.api import router
+from dtvp.api import legacy_router, router
 from dtvp.api_advisory_jobs import router as advisory_jobs_router
 from dtvp.api_agentyzer_results import router as agentyzer_results_router
+from dtvp.api_analysis import legacy_router as legacy_analysis_router
 from dtvp.api_analysis import router as analysis_router
 from dtvp.api_analysis_jobs import router as analysis_jobs_router
 from dtvp.api_assembly_editor import router as assembly_editor_router
@@ -30,6 +31,7 @@ from dtvp.api_input_quality import router as input_quality_router
 from dtvp.api_intake import router as intake_router
 from dtvp.api_integration_events import router as integration_events_router
 from dtvp.api_intelligence_comparison import router as intelligence_comparison_router
+from dtvp.api_inventory import legacy_router as legacy_inventory_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_issued_exports import router as issued_exports_router
 from dtvp.api_knowledge import router as knowledge_router
@@ -48,6 +50,7 @@ from dtvp.api_portfolio import router as portfolio_router
 from dtvp.api_proposals import router as proposal_router
 from dtvp.api_reconciliation import router as reconciliation_router
 from dtvp.api_reconciliation_catalog import router as reconciliation_catalog_router
+from dtvp.api_rescoring import legacy_router as legacy_rescoring_router
 from dtvp.api_rescoring import router as rescoring_router
 from dtvp.api_source_jobs import router as source_jobs_router
 from dtvp.api_sync_jobs import router as sync_jobs_router
@@ -60,6 +63,7 @@ from dtvp.knowledge.journal import Journal
 from dtvp.knowledge.maintenance_lock import RuntimeLease
 from dtvp.knowledge.projection import catch_up, is_current
 from dtvp.models import User
+from dtvp.playground import legacy_router as legacy_playground_router
 from dtvp.playground import router as playground_router
 from dtvp.playground import seed
 from dtvp.statistics import router as statistics_router
@@ -143,7 +147,9 @@ def _create_app(settings, lease):
     app.include_router(cpe_sources_router)
     app.include_router(documents_router)
     app.include_router(agentyzer_results_router)
-    app.include_router(statistics_router)
+    if settings.legacy_review_enabled:
+        for legacy in (legacy_router, legacy_analysis_router, legacy_inventory_router, legacy_rescoring_router, statistics_router):
+            app.include_router(legacy)
     app.include_router(rescoring_router)
     app.include_router(reconciliation_router)
     app.include_router(reconciliation_catalog_router)
@@ -174,6 +180,8 @@ def _create_app(settings, lease):
 
         app.include_router(knowledge_playground_router)
         app.include_router(playground_router)
+        if settings.legacy_review_enabled:
+            app.include_router(legacy_playground_router)
 
     @app.middleware("http")
     async def protect(request, call_next):

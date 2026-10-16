@@ -5,6 +5,7 @@ import { justifications, justificationLabel } from '../assessmentReasons'
 import { knowledgeApi, type KnowledgeFinding, type KnowledgeProposal, type KnowledgeWorkspace, type KnowledgeScoreInput, type KnowledgeScorePreview } from '../knowledgeApi'
 import type { Me } from '../types'
 import SearchSelect from './SearchSelect.vue'
+import KnowledgeCreateProduct from './KnowledgeCreateProduct.vue'
 import KnowledgeComparison from './KnowledgeComparison.vue'
 import KnowledgeRetained from './KnowledgeRetained.vue'
 import KnowledgeLicenses from './KnowledgeLicenses.vue'
@@ -32,9 +33,11 @@ import KnowledgeSyncAutomation from './KnowledgeSyncAutomation.vue'
 import KnowledgeObservations from './KnowledgeObservations.vue'
 const props = defineProps<{ me: Me }>()
 const emit = defineEmits<{ locked: [boolean] }>()
+const productCreationLocked = ref(false)
 const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false), cpeLocked = ref(false), advisoryLocked = ref(false)
 const pipelineConfigurationLocked = ref(false), syncAutomationLocked = ref(false), observationsLocked = ref(false)
-const baseIntakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value || advisoryLocked.value)
+const otherIntakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value || advisoryLocked.value)
+const baseIntakeLocked = computed(() => productCreationLocked.value || otherIntakeLocked.value)
 const intakeLocked = computed(() => baseIntakeLocked.value || pipelineConfigurationLocked.value || syncAutomationLocked.value || observationsLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
@@ -142,6 +145,9 @@ async function chooseProject(option: { id: string; name?: string }, preferredVer
     versions.value = result.items; versionNext.value = result.next_offset; version.value = preferredVersion || result.items[0]?.version || ''; await load()
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
+}
+async function onProductCreated(value: { id: string; name: string; workspace_id: string }) {
+  productCreationLocked.value = false; project.value = value.id; await chooseProject(value)
 }
 async function metadataChanged() {
   const row = selected.value
@@ -343,7 +349,7 @@ async function copyView() {
 }
 watch(() => [project.value, version.value, workspace.value?.state, team.value, lifecycle.value, query.value, JSON.stringify(filters.value), props.me.id], () => { bulkSelection.value = {} })
 watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
-watch(() => props.me.id, () => { analysisFollowUpLocked.value = false; pipelineConfigurationLocked.value = false; syncAutomationLocked.value = false; ++actorGeneration; ++scoreSequence; pendingRequest.value = null; pendingScore.value = null; scorePreview.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
+watch(() => props.me.id, () => { productCreationLocked.value = false; analysisFollowUpLocked.value = false; pipelineConfigurationLocked.value = false; syncAutomationLocked.value = false; ++actorGeneration; ++scoreSequence; pendingRequest.value = null; pendingScore.value = null; scorePreview.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
 watch(() => Boolean(busy.value || intakeLocked.value || bulkLocked.value || pendingRequest.value || pendingScore.value), value => emit('locked', value), { immediate: true })
 onMounted(() => {
@@ -354,8 +360,9 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
 </script>
 <template>
   <section class="knowledge-workspace" aria-label="Knowledge workspace">
-    <header class="knowledge-heading"><div><h1>Contextual review</h1><p class="hint">Product version · consuming context · responsible team</p></div><div class="knowledge-actions"><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo()">Load workflow demo</button><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo('specialists')">Load specialist demo</button><button :disabled="busy || !version" @click="load()">Refresh workspace</button></div></header>
+    <header class="knowledge-heading"><div><h1>Contextual review</h1><p class="hint">Product version · consuming context · responsible team</p></div><div class="knowledge-actions"><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo()">Load workflow demo</button><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo('specialists')">Load specialist demo</button><button :disabled="busy || intakeLocked || !version" @click="load()">Refresh workspace</button></div></header>
     <KnowledgeOrganizationPortfolio :key="me.id" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
+    <KnowledgeCreateProduct :key="me.id" :actor="me.id" :teams="me.workspaces" :disabled="busy || otherIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="productCreationLocked = $event" @created="onProductCreated" />
     <form class="knowledge-filters" @submit.prevent="load()">
       <SearchSelect v-model="project" label="Knowledge product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy || intakeLocked" @select="chooseProject" />
       <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || intakeLocked || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>
@@ -385,10 +392,10 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
     </details>
     <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy || intakeLocked" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
     <div class="knowledge-tools" role="group" aria-label="Product tools">
-      <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="intakeBusy || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
-      <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
+      <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || intakeBusy || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
+      <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
       <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
-      <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
+      <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
       <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" @locked="cpeLocked = $event" />
       <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
       <KnowledgePipelineConfiguration class="knowledge-tool-group" v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :state="workspace?.state || ''" :disabled="busy || baseIntakeLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="pipelineConfigurationLocked = $event" @refresh="load(true, true)" />

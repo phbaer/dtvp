@@ -14,6 +14,7 @@ from dtvp.models import Finding, now
 from dtvp.schemas import MetadataInput, RequestModel
 
 router = APIRouter(prefix="/api/v2")
+legacy_router = APIRouter(prefix="/api/v2")
 
 
 class DTBinding(RequestModel):
@@ -43,7 +44,7 @@ def bind_dt(project_id: str, data: DTBinding, db: DB, actor: Auth):
     return connectors["dependency-track"]
 
 
-@router.get("/releases/{release_id}/dependencies")
+@legacy_router.get("/releases/{release_id}/dependencies")
 def dependencies(release_id: str, db: DB, actor: Auth):
     release = release_for(db, actor, release_id)
     effective, _, _ = inventory(db, release)
@@ -59,7 +60,7 @@ def dependencies(release_id: str, db: DB, actor: Auth):
     ]
 
 
-@router.put("/releases/{release_id}/metadata")
+@legacy_router.put("/releases/{release_id}/metadata")
 def release_metadata(release_id: str, data: MetadataInput, db: DB, actor: Auth):
     release_for(db, actor, release_id, "write")
     release = lock_release(db, release_id)
@@ -77,7 +78,7 @@ def release_metadata(release_id: str, data: MetadataInput, db: DB, actor: Auth):
     return {"metadata": release.metadata_json, "metadata_version": release.metadata_version}
 
 
-@router.post("/releases/{release_id}/attachments", status_code=201)
+@legacy_router.post("/releases/{release_id}/attachments", status_code=201)
 def upload_attachment(
     release_id: str,
     request: Request,
@@ -116,7 +117,7 @@ def upload_attachment(
     return {"sha256": sha, "kind": kind}
 
 
-@router.get("/releases/{release_id}/attachments/{sha}")
+@legacy_router.get("/releases/{release_id}/attachments/{sha}")
 def attachment(release_id: str, sha: str, request: Request, db: DB, actor: Auth):
     release = release_for(db, actor, release_id)
     if not any(a["sha256"] == sha for a in release.metadata_json.get("attachments", [])):
@@ -128,7 +129,7 @@ def attachment(release_id: str, sha: str, request: Request, db: DB, actor: Auth)
     )
 
 
-@router.get("/snapshots/{snapshot_id}/exports/vex")
+@legacy_router.get("/snapshots/{snapshot_id}/exports/vex")
 def vex_export(snapshot_id: str, db: DB, actor: Auth, request: Request):
     stored = snapshot_for(db, actor, snapshot_id)
     payload = json.loads(request.app.state.artifacts.read(stored.sha))
