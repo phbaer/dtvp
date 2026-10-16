@@ -26,7 +26,7 @@ def score_key(context_id, vulnerability_id):
     return "score:" + digest(canonical([context_id, vulnerability_id]))
 
 
-def review_gate(journal, sections, version, vulnerability_id):
+def review_gate(journal, sections, version, vulnerability_id, *, fingerprint_resolver=None):
     findings = [
         item
         for item in sections["vulnerabilities"].values()
@@ -41,7 +41,14 @@ def review_gate(journal, sections, version, vulnerability_id):
     missing_refs = refs - {item["component_ref"] for item in contexts}
     missing, pins = [], []
     for context in sorted(contexts, key=lambda item: item["id"]):
-        coverage = coverage_status(journal, sections, version, context["id"], vulnerability_id)
+        coverage = coverage_status(
+            journal,
+            sections,
+            version,
+            context["id"],
+            vulnerability_id,
+            fingerprint_resolver=fingerprint_resolver,
+        )
         if coverage["status"] != "approved" or context["status"] != "resolved":
             missing.append(
                 {

@@ -212,9 +212,15 @@ def import_vscorer_proposal(journal, *, project_id, version, actor_id, data):
     )
 
 
-def list_proposals(journal, sections, version, context_id, vulnerability_id):
+def list_proposals(
+    journal, sections, version, context_id, vulnerability_id, *, fingerprint_resolver=None
+):
     """Compare normalized proposals; eligibility never bypasses coordinator gates."""
-    fingerprint = target_fingerprint(sections, version, context_id, vulnerability_id)
+    fingerprint = (
+        fingerprint_resolver(context_id, vulnerability_id)
+        if fingerprint_resolver
+        else target_fingerprint(sections, version, context_id, vulnerability_id)
+    )
     items = []
     for key, record in sorted(sections["scoring"].items()):
         if not key.startswith("proposal:") or record.get("format") != "dtvp.scoring-proposal/1":

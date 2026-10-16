@@ -301,10 +301,16 @@ def import_agentyzer_result(journal, *, project_id, version, actor_id, data):
     )
 
 
-def list_agentyzer_results(journal, sections, version, context_id, vulnerability_id):
+def list_agentyzer_results(
+    journal, sections, version, context_id, vulnerability_id, *, fingerprint_resolver=None
+):
     """Return comparable attributed proposals; stale evidence is always retained."""
     target = {"version": version, "context_id": context_id, "vulnerability_id": vulnerability_id}
-    fingerprint = target_fingerprint(sections, version, context_id, vulnerability_id)
+    fingerprint = (
+        fingerprint_resolver(context_id, vulnerability_id)
+        if fingerprint_resolver
+        else target_fingerprint(sections, version, context_id, vulnerability_id)
+    )
     items = []
     for key, record in sorted(sections["history"].items()):
         if (

@@ -174,6 +174,17 @@ Explore a repeatable two-part nightly update against the running playground:
 uv run python scripts/assembly_demo.py
 ```
 
+### Assessment read performance
+
+Native workspaces reuse a request-local dependency/evidence fingerprint builder.
+Canonical root encodings use a bounded 32 MiB cache; the conservative
+`dtvp.assessment-target/1` hashes remain unchanged. No permissions, approvals or
+mutable state are cached between requests. Six pre-optimization fixtures guard
+hash compatibility. A synthetic local 1,000-component/250-finding check improved
+from roughly 7.7 seconds to 0.5 seconds for the first workspace read, with
+subsequent reads around 0.13 seconds; these are workload-specific measurements,
+not deployment guarantees.
+
 ### Interactive composition intake
 
 **Import composition** in Knowledge works before the first baseline exists.

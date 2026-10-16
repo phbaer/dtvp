@@ -108,89 +108,10 @@ def collection_scope(baseline):
 
 
 def target_fingerprint(sections, version, context_id, vulnerability_id):
-    """Semantic equality is conservative and limited to identical source-local refs.
+    """Conservative assessment-target/1 equality; no cross-request caching."""
+    from dtvp.knowledge.target_fingerprints import TargetFingerprintBuilder
 
-    Team reassignment and nightly bookkeeping do not renew or invalidate evidence.
-    The entire consuming tree is included: changed use may affect reachability or
-    protective assumptions even when the vulnerable package itself is unchanged.
-    """
-    context = sections["ownership"].get("context:" + context_id)
-    if not context:
-        return None
-    inventory = sections["inventory"]
-    components = {
-        item["bom-ref"]: item
-        for key, item in inventory.items()
-        if key.startswith("component:") and item.get("bom-ref")
-    }
-    root = inventory.get("root", {})
-    if root.get("bom-ref"):
-        components.setdefault(root["bom-ref"], root)
-    graph = {ref: set() for ref in components}
-    for edge in inventory.get("dependencies", {}).get("edges", []):
-        if edge["ref"] in graph:
-            graph[edge["ref"]].update(edge.get("dependsOn", []))
-    if context["root_ref"] not in graph or context["component_ref"] not in graph:
-        return None
-    seen, pending = set(), [context["root_ref"]]
-    while pending:
-        ref = pending.pop()
-        if ref in seen:
-            continue
-        seen.add(ref)
-        pending.extend(graph.get(ref, set()) - seen)
-    claims = [
-        semantic(item)
-        for item in sections["vulnerabilities"].values()
-        if item.get("identifier") == vulnerability_id
-        and item.get("ref") == context["component_ref"]
-    ]
-    if not claims:
-        return None
-    parts = [
-        {"part_id": part["part_id"], "scope": collection_scope(part.get("baseline", {}))}
-        for part in inventory.get("assembly", {}).get("parts", [])
-        if part.get("part_id")
-        in {components.get(ref, {}).get("dtvp_origin", {}).get("part_id") for ref in seen}
-    ]
-    payload = {
-        "format": "dtvp.assessment-target/1",
-        "context_id": context_id,
-        "component_ref": context["component_ref"],
-        "root_ref": context["root_ref"],
-        "root_basis": context["root_basis"],
-        "dependency_graph": context["dependency_graph"],
-        "components": {ref: semantic(components.get(ref, {})) for ref in sorted(seen)},
-        "edges": {ref: sorted(graph.get(ref, set())) for ref in sorted(seen)},
-        "relationships": sorted(
-            [
-                semantic(item)
-                for item in inventory.get("relationships", {}).get("items", [])
-                if item.get("from") in seen or item.get("to") in seen
-            ],
-            key=canonical,
-        ),
-        "claims": sorted(claims, key=canonical),
-        "scope": collection_scope(inventory.get("baseline", {})),
-        "parts": sorted(parts, key=canonical),
-    }
-    # Preserve existing fingerprints when no authored metadata applies. New
-    # annotations are review evidence across this consuming tree, never approvals.
-    from dtvp.knowledge.metadata import FORMAT, identity_fingerprint, metadata_key
-
-    curated = {}
-    for ref in sorted(seen):
-        record = sections["history"].get(metadata_key(ref), {})
-        metadata = record.get("payload", {})
-        if (
-            record.get("format") == FORMAT
-            and metadata.get("version") == version
-            and metadata.get("identity_fingerprint") == identity_fingerprint(components.get(ref))
-        ):
-            curated[ref] = {key: metadata[key] for key in ("annotations", "provenance")}
-    if curated:
-        payload["curated_metadata"] = curated
-    return digest(canonical(payload))
+    return TargetFingerprintBuilder(sections, version).fingerprint(context_id, vulnerability_id)
 
 
 def component_lineage(sections, context):
@@ -469,9 +390,15 @@ def create_review(journal, *, project_id, actor_id, data, authorize):
     )
 
 
-def coverage_status(journal, sections, version, context_id, vulnerability_id):
+def coverage_status(
+    journal, sections, version, context_id, vulnerability_id, *, fingerprint_resolver=None
+):
     target = Target(version=version, context_id=context_id, vulnerability_id=vulnerability_id)
-    fingerprint = target_fingerprint(sections, version, context_id, vulnerability_id)
+    fingerprint = (
+        fingerprint_resolver(context_id, vulnerability_id)
+        if fingerprint_resolver
+        else target_fingerprint(sections, version, context_id, vulnerability_id)
+    )
     context = sections["ownership"].get("context:" + context_id)
     result = {
         "status": "unassessed",

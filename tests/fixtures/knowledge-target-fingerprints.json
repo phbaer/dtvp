@@ -1,0 +1,929 @@
+{
+  "format": "dtvp.assessment-target/1",
+  "captured_from": "pre-optimization target_fingerprint implementation",
+  "cases": [
+    {
+      "name": "baseline",
+      "sections": {
+        "inventory": {
+          "baseline": {
+            "build_number": 1,
+            "collection": {
+              "pipeline_run": "1",
+              "target": "linux"
+            },
+            "dependency_graph": "reported",
+            "source": "pipeline"
+          },
+          "component:lib": {
+            "bom-ref": "lib",
+            "dtvp_origin": {
+              "ref": "lib",
+              "state": "old"
+            },
+            "name": "lib",
+            "purl": "pkg:generic/lib@1",
+            "version": "1"
+          },
+          "dependencies": {
+            "edges": [
+              {
+                "dependsOn": [
+                  "lib"
+                ],
+                "ref": "app"
+              },
+              {
+                "dependsOn": [],
+                "ref": "lib"
+              }
+            ]
+          },
+          "relationships": {
+            "items": []
+          },
+          "root": {
+            "bom-ref": "app",
+            "name": "app",
+            "version": "1"
+          }
+        },
+        "ownership": {
+          "context:15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "55b60afb313d7f5de15fa0b133a2048a63f9b65e3ccb00d51d63be84a565766d",
+            "component_ref": "lib",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [
+              "app"
+            ],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "context:54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "7b99a9e452d48dcdd2572fa56dc17879ed16400f974886509253a840875ec8e0",
+            "component_ref": "app",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "policy": {
+            "context_roots": {},
+            "rules": [
+              {
+                "selector": "*",
+                "team_id": "A"
+              }
+            ],
+            "state": null
+          },
+          "summary": {
+            "contexts": 2,
+            "identity_basis": "source_local_refs",
+            "outside_selected_roots": [],
+            "path_representation": "dependency_graph",
+            "roots": {
+              "app": "declared"
+            },
+            "topology_status": "reported"
+          }
+        },
+        "vulnerabilities": {
+          "claim": {
+            "advisory": {
+              "description": "A defect"
+            },
+            "identifier": "CVE-2026-0001",
+            "ref": "lib",
+            "source": "supplier"
+          }
+        },
+        "assessments": {},
+        "reviews": {},
+        "scoring": {},
+        "history": {}
+      },
+      "version": "7.1.1",
+      "context_id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+      "vulnerability_id": "CVE-2026-0001",
+      "fingerprint": "8ca6aad8fd37611671276eae1bcbe0b83e26d59c7340a015f00cb3735e891926"
+    },
+    {
+      "name": "unicode_cycle_relationships",
+      "sections": {
+        "inventory": {
+          "baseline": {
+            "build_number": 1,
+            "collection": {
+              "pipeline_run": "1",
+              "target": "linux"
+            },
+            "dependency_graph": "reported",
+            "source": "pipeline"
+          },
+          "component:lib": {
+            "bom-ref": "lib",
+            "dtvp_origin": {
+              "ref": "lib",
+              "state": "old"
+            },
+            "name": "libé",
+            "purl": "pkg:generic/lib@1",
+            "version": "1",
+            "group": "组织"
+          },
+          "dependencies": {
+            "edges": [
+              {
+                "dependsOn": [
+                  "lib"
+                ],
+                "ref": "app"
+              },
+              {
+                "dependsOn": [
+                  "app"
+                ],
+                "ref": "lib"
+              }
+            ]
+          },
+          "relationships": {
+            "items": [
+              {
+                "from": "lib",
+                "to": "app",
+                "kind": "USES",
+                "label": "ä"
+              }
+            ]
+          },
+          "root": {
+            "bom-ref": "app",
+            "name": "app",
+            "version": "1"
+          }
+        },
+        "ownership": {
+          "context:15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "55b60afb313d7f5de15fa0b133a2048a63f9b65e3ccb00d51d63be84a565766d",
+            "component_ref": "lib",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [
+              "app"
+            ],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "context:54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "7b99a9e452d48dcdd2572fa56dc17879ed16400f974886509253a840875ec8e0",
+            "component_ref": "app",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "policy": {
+            "context_roots": {},
+            "rules": [
+              {
+                "selector": "*",
+                "team_id": "A"
+              }
+            ],
+            "state": null
+          },
+          "summary": {
+            "contexts": 2,
+            "identity_basis": "source_local_refs",
+            "outside_selected_roots": [],
+            "path_representation": "dependency_graph",
+            "roots": {
+              "app": "declared"
+            },
+            "topology_status": "reported"
+          }
+        },
+        "vulnerabilities": {
+          "claim": {
+            "advisory": {
+              "description": "A defect"
+            },
+            "identifier": "CVE-2026-0001",
+            "ref": "lib",
+            "source": "supplier"
+          }
+        },
+        "assessments": {},
+        "reviews": {},
+        "scoring": {},
+        "history": {}
+      },
+      "version": "7.1.1",
+      "context_id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+      "vulnerability_id": "CVE-2026-0001",
+      "fingerprint": "7a4cf3cb8440b2798c2685e3dd7fff11166aff90683f23d55f4060d101418fd6"
+    },
+    {
+      "name": "curated_metadata",
+      "sections": {
+        "inventory": {
+          "baseline": {
+            "build_number": 1,
+            "collection": {
+              "pipeline_run": "1",
+              "target": "linux"
+            },
+            "dependency_graph": "reported",
+            "source": "pipeline"
+          },
+          "component:lib": {
+            "bom-ref": "lib",
+            "dtvp_origin": {
+              "ref": "lib",
+              "state": "old"
+            },
+            "name": "lib",
+            "purl": "pkg:generic/lib@1",
+            "version": "1"
+          },
+          "dependencies": {
+            "edges": [
+              {
+                "dependsOn": [
+                  "lib"
+                ],
+                "ref": "app"
+              },
+              {
+                "dependsOn": [],
+                "ref": "lib"
+              }
+            ]
+          },
+          "relationships": {
+            "items": []
+          },
+          "root": {
+            "bom-ref": "app",
+            "name": "app",
+            "version": "1"
+          }
+        },
+        "ownership": {
+          "context:15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "55b60afb313d7f5de15fa0b133a2048a63f9b65e3ccb00d51d63be84a565766d",
+            "component_ref": "lib",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [
+              "app"
+            ],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "context:54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "7b99a9e452d48dcdd2572fa56dc17879ed16400f974886509253a840875ec8e0",
+            "component_ref": "app",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "policy": {
+            "context_roots": {},
+            "rules": [
+              {
+                "selector": "*",
+                "team_id": "A"
+              }
+            ],
+            "state": null
+          },
+          "summary": {
+            "contexts": 2,
+            "identity_basis": "source_local_refs",
+            "outside_selected_roots": [],
+            "path_representation": "dependency_graph",
+            "roots": {
+              "app": "declared"
+            },
+            "topology_status": "reported"
+          }
+        },
+        "vulnerabilities": {
+          "claim": {
+            "advisory": {
+              "description": "A defect"
+            },
+            "identifier": "CVE-2026-0001",
+            "ref": "lib",
+            "source": "supplier"
+          }
+        },
+        "assessments": {},
+        "reviews": {},
+        "scoring": {},
+        "history": {
+          "metadata:5a090a50cb27380dffdb7d90013b6d229ed098892336266912fe224a27aa4786": {
+            "format": "dtvp.component-metadata/1",
+            "payload": {
+              "version": "7.1.1",
+              "identity_fingerprint": "dc544858a8ea623c7cd7fdad89cc0fc755756c6f170c5de966aed31686428d80",
+              "annotations": {
+                "notes": "Owned evidence",
+                "cybersecurity": {
+                  "exposure": "internal"
+                }
+              },
+              "provenance": {
+                "source": "owner",
+                "reference": "DESIGN-42"
+              }
+            }
+          }
+        }
+      },
+      "version": "7.1.1",
+      "context_id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+      "vulnerability_id": "CVE-2026-0001",
+      "fingerprint": "785f1f5ceb3f6620c9c252db620dea7be6cac18c5684ef059c45a83ea595a9c4"
+    },
+    {
+      "name": "selected_part_scope",
+      "sections": {
+        "inventory": {
+          "baseline": {
+            "build_number": 1,
+            "collection": {
+              "pipeline_run": "1",
+              "target": "linux"
+            },
+            "dependency_graph": "reported",
+            "source": "pipeline"
+          },
+          "component:lib": {
+            "bom-ref": "lib",
+            "dtvp_origin": {
+              "ref": "lib",
+              "state": "old",
+              "part_id": "supplier"
+            },
+            "name": "lib",
+            "purl": "pkg:generic/lib@1",
+            "version": "1"
+          },
+          "dependencies": {
+            "edges": [
+              {
+                "dependsOn": [
+                  "lib"
+                ],
+                "ref": "app"
+              },
+              {
+                "dependsOn": [],
+                "ref": "lib"
+              }
+            ]
+          },
+          "relationships": {
+            "items": []
+          },
+          "root": {
+            "bom-ref": "app",
+            "name": "app",
+            "version": "1"
+          },
+          "assembly": {
+            "parts": [
+              {
+                "part_id": "supplier",
+                "baseline": {
+                  "collection": {
+                    "subject_kind": "binary",
+                    "platform": "linux",
+                    "package_coverage": "partial"
+                  },
+                  "dependency_graph": "reported"
+                }
+              }
+            ]
+          }
+        },
+        "ownership": {
+          "context:15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "55b60afb313d7f5de15fa0b133a2048a63f9b65e3ccb00d51d63be84a565766d",
+            "component_ref": "lib",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [
+              "app"
+            ],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "context:54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "7b99a9e452d48dcdd2572fa56dc17879ed16400f974886509253a840875ec8e0",
+            "component_ref": "app",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "policy": {
+            "context_roots": {},
+            "rules": [
+              {
+                "selector": "*",
+                "team_id": "A"
+              }
+            ],
+            "state": null
+          },
+          "summary": {
+            "contexts": 2,
+            "identity_basis": "source_local_refs",
+            "outside_selected_roots": [],
+            "path_representation": "dependency_graph",
+            "roots": {
+              "app": "declared"
+            },
+            "topology_status": "reported"
+          }
+        },
+        "vulnerabilities": {
+          "claim": {
+            "advisory": {
+              "description": "A defect"
+            },
+            "identifier": "CVE-2026-0001",
+            "ref": "lib",
+            "source": "supplier"
+          }
+        },
+        "assessments": {},
+        "reviews": {},
+        "scoring": {},
+        "history": {}
+      },
+      "version": "7.1.1",
+      "context_id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+      "vulnerability_id": "CVE-2026-0001",
+      "fingerprint": "3ad04be16d041b9d425c849c5743c88012c2981a2e3c78731daf22ea8d919f5e"
+    },
+    {
+      "name": "dangling_historical_endpoint",
+      "sections": {
+        "inventory": {
+          "baseline": {
+            "build_number": 1,
+            "collection": {
+              "pipeline_run": "1",
+              "target": "linux"
+            },
+            "dependency_graph": "reported",
+            "source": "pipeline"
+          },
+          "component:lib": {
+            "bom-ref": "lib",
+            "dtvp_origin": {
+              "ref": "lib",
+              "state": "old"
+            },
+            "name": "lib",
+            "purl": "pkg:generic/lib@1",
+            "version": "1"
+          },
+          "dependencies": {
+            "edges": [
+              {
+                "dependsOn": [
+                  "lib"
+                ],
+                "ref": "app"
+              },
+              {
+                "dependsOn": [
+                  "missing"
+                ],
+                "ref": "lib"
+              }
+            ]
+          },
+          "relationships": {
+            "items": []
+          },
+          "root": {
+            "bom-ref": "app",
+            "name": "app",
+            "version": "1"
+          }
+        },
+        "ownership": {
+          "context:15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "55b60afb313d7f5de15fa0b133a2048a63f9b65e3ccb00d51d63be84a565766d",
+            "component_ref": "lib",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [
+              "app"
+            ],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "context:54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "7b99a9e452d48dcdd2572fa56dc17879ed16400f974886509253a840875ec8e0",
+            "component_ref": "app",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "policy": {
+            "context_roots": {},
+            "rules": [
+              {
+                "selector": "*",
+                "team_id": "A"
+              }
+            ],
+            "state": null
+          },
+          "summary": {
+            "contexts": 2,
+            "identity_basis": "source_local_refs",
+            "outside_selected_roots": [],
+            "path_representation": "dependency_graph",
+            "roots": {
+              "app": "declared"
+            },
+            "topology_status": "reported"
+          }
+        },
+        "vulnerabilities": {
+          "claim": {
+            "advisory": {
+              "description": "A defect"
+            },
+            "identifier": "CVE-2026-0001",
+            "ref": "lib",
+            "source": "supplier"
+          }
+        },
+        "assessments": {},
+        "reviews": {},
+        "scoring": {},
+        "history": {}
+      },
+      "version": "7.1.1",
+      "context_id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+      "vulnerability_id": "CVE-2026-0001",
+      "fingerprint": "dad1ce36a257be10298547d352c298e11f8e97a5747ef0dc4d6a64cb2777b2a9"
+    },
+    {
+      "name": "multiple_source_claims",
+      "sections": {
+        "inventory": {
+          "baseline": {
+            "build_number": 1,
+            "collection": {
+              "pipeline_run": "1",
+              "target": "linux"
+            },
+            "dependency_graph": "reported",
+            "source": "pipeline"
+          },
+          "component:lib": {
+            "bom-ref": "lib",
+            "dtvp_origin": {
+              "ref": "lib",
+              "state": "old"
+            },
+            "name": "lib",
+            "purl": "pkg:generic/lib@1",
+            "version": "1"
+          },
+          "dependencies": {
+            "edges": [
+              {
+                "dependsOn": [
+                  "lib"
+                ],
+                "ref": "app"
+              },
+              {
+                "dependsOn": [],
+                "ref": "lib"
+              }
+            ]
+          },
+          "relationships": {
+            "items": []
+          },
+          "root": {
+            "bom-ref": "app",
+            "name": "app",
+            "version": "1"
+          }
+        },
+        "ownership": {
+          "context:15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "55b60afb313d7f5de15fa0b133a2048a63f9b65e3ccb00d51d63be84a565766d",
+            "component_ref": "lib",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [
+              "app"
+            ],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "context:54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5": {
+            "aliases": [],
+            "assignment": "fallback",
+            "candidate_teams": [
+              "A"
+            ],
+            "component_fingerprint": "7b99a9e452d48dcdd2572fa56dc17879ed16400f974886509253a840875ec8e0",
+            "component_ref": "app",
+            "coverage_verification": "not_verified",
+            "delegated": false,
+            "dependency_graph": "reported",
+            "id": "54e14f852e9634eb481399286ad9698d3e39c3244c9a3a023846f9885dc58af5",
+            "identity_basis": "source_local_refs",
+            "incoming_refs": [],
+            "matched_rules": [
+              "*"
+            ],
+            "owner_boundaries": [],
+            "root_basis": "declared",
+            "root_ref": "app",
+            "root_team_id": "A",
+            "status": "resolved",
+            "team_id": "A",
+            "team_scope": {
+              "A": true
+            }
+          },
+          "policy": {
+            "context_roots": {},
+            "rules": [
+              {
+                "selector": "*",
+                "team_id": "A"
+              }
+            ],
+            "state": null
+          },
+          "summary": {
+            "contexts": 2,
+            "identity_basis": "source_local_refs",
+            "outside_selected_roots": [],
+            "path_representation": "dependency_graph",
+            "roots": {
+              "app": "declared"
+            },
+            "topology_status": "reported"
+          }
+        },
+        "vulnerabilities": {
+          "claim": {
+            "advisory": {
+              "description": "A defect"
+            },
+            "identifier": "CVE-2026-0001",
+            "ref": "lib",
+            "source": "supplier"
+          },
+          "other": {
+            "identifier": "CVE-2026-0001",
+            "ref": "lib",
+            "source": "other",
+            "advisory": {
+              "description": "Conflicting source",
+              "score": 7.2
+            },
+            "dtvp_origin": {
+              "state": "ignored",
+              "part_id": "supplier"
+            }
+          }
+        },
+        "assessments": {},
+        "reviews": {},
+        "scoring": {},
+        "history": {}
+      },
+      "version": "7.1.1",
+      "context_id": "15ab95deb317176cc8418f4b3499caf6e95fc0b9f92e82d06704534ca4b2a067",
+      "vulnerability_id": "CVE-2026-0001",
+      "fingerprint": "10d6c459c62724f41cd1cd45de99906825b10480b0d0839268b90291ae91ac8c"
+    }
+  ]
+}

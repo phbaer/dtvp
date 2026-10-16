@@ -130,6 +130,9 @@ def load_workspace(
         raise ValueError("Invalid workspace page bounds")
     revision = journal.state(state)
     sections = load_sections(journal, state)
+    from dtvp.knowledge.target_fingerprints import TargetFingerprintBuilder
+
+    fingerprints = TargetFingerprintBuilder(sections, revision.version)
     has_code_analysis = any(key.startswith("code-analysis:") for key in sections["history"])
     inventory = sections["inventory"]
     components = {
@@ -176,7 +179,12 @@ def load_workspace(
             ):
                 continue
             coverage = coverage_status(
-                journal, sections, revision.version, context["id"], identifier
+                journal,
+                sections,
+                revision.version,
+                context["id"],
+                identifier,
+                fingerprint_resolver=fingerprints.fingerprint,
             )
             ratings = [
                 {
@@ -200,7 +208,11 @@ def load_workspace(
             if score_key(context["id"], identifier) in sections["scoring"]:
                 if identifier not in score_gates:
                     score_gates[identifier] = review_gate(
-                        journal, sections, revision.version, identifier
+                        journal,
+                        sections,
+                        revision.version,
+                        identifier,
+                        fingerprint_resolver=fingerprints.fingerprint,
                     )
                 gate = score_gates[identifier]
             dependency_relation = "unknown"
@@ -226,11 +238,21 @@ def load_workspace(
             legacy = legacy_claims(observations)
             metadata = get_metadata(journal, sections, revision.version, ref)
             proposals = list_proposals(
-                journal, sections, revision.version, context["id"], identifier
+                journal,
+                sections,
+                revision.version,
+                context["id"],
+                identifier,
+                fingerprint_resolver=fingerprints.fingerprint,
             )
             code_analysis = (
                 list_agentyzer_results(
-                    journal, sections, revision.version, context["id"], identifier
+                    journal,
+                    sections,
+                    revision.version,
+                    context["id"],
+                    identifier,
+                    fingerprint_resolver=fingerprints.fingerprint,
                 )
                 if has_code_analysis
                 else []

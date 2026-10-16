@@ -652,6 +652,13 @@ separate. Source/current published severity and outdated scores stay distinct.
 The authorized API and CLI share this read model; broader cross-project portfolio
 views and large-inventory performance qualification remain planned.
 
+Native workspace fingerprint construction now indexes each immutable read once
+and reuses bounded canonical dependency-root encodings. Pre-optimization golden
+hashes and independent assessment/workspace regressions preserve existing review
+validity; no cross-request state or permission cache is introduced. Initial
+synthetic large-workspace measurements improved substantially; broader topology,
+concurrency and operational performance qualification remains required.
+
 Controlled document registration now archives exact artifacts, issued inputs,
 renderer/configuration provenance and independent exact-revision review with
 dedicated documentation permissions. Pending changes retain approved pins;
