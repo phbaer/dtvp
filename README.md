@@ -3287,3 +3287,18 @@ upgrade, human approval, product applicability or regulatory/legal conclusion.
 The separate official-schema report continues to mark signature verification as
 `not_performed`; callers must deliberately retain and assess the signature report
 alongside their exact source bytes.
+
+The evidence-source panel now provides a closed **Optional schema and signature
+checks** tool for users with evidence-import permission. It reads local files and
+calls only the read-only validation APIs. Official schema checks show a compact
+result and bounded diagnostics; JWS checks load the project's deployment trust
+policy and pin its hash, configured signer and both exact uploaded files.
+No signer keys can be supplied through this UI.
+
+Inputs freeze for repeatable checks until explicitly discarded. Cancel discards
+late results and restores source controls; changing project/state or actor clears
+captured validation and ignores prior responses. Concurrent evidence-source
+mutations are disabled while validation runs. Schema reports distinguish the
+server-canonical JSON digest from the displayed original local-file SHA-256.
+Complete pins/reports remain collapsed; passing checks never import evidence,
+change retained trust or grant an approval. The tool stays usable on narrow screens.
