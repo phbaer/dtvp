@@ -597,6 +597,13 @@ complete preview digest across pages. Shared draft/submission targets are explic
 reviews and publication never inherit across versions. Continuous applicability
 ranges and semantic cross-import identity reconciliation remain planned.
 
+The native ownership editor now preserves v1 namespace/name/case/PURL matching
+through backend selector encoding, lossless raw selectors and full policy previews.
+Rules default across versions and can limit their version scope. Atomic policy
+publication pins every current branch and retains historical assessment scope;
+alias labels do not grant ownership or permissions. Explicit consuming-root
+configuration remains preserved; broader topology editing stays separate.
+
 Native guided file intake now bootstraps empty product versions and isolated
 source parts through exact-byte multipart imports. Read-only target inspection
 exposes authority, scope and permissions; retries freeze the complete input and

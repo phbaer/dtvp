@@ -191,6 +191,26 @@ and ownership-only changes retain coverage. Not-affected submission requires a
 specific justification. Historical absent assessments remain retained. API/UI
 adapters use this engine rather than implementing separate approval logic.
 
+### Ownership editor
+
+The collapsed **Component ownership** panel retains v1 selector semantics with
+separate component name and namespace controls, case sensitivity, PURL selectors
+and fallback ownership. Namespace absence and unknown namespace remain distinct;
+bare-name matching honestly covers unknown or known-empty namespaces. The backend
+encodes selectors through the existing matcher. Unfamiliar raw selectors remain
+unchanged unless explicitly replaced. Rules default to all versions, with optional
+explicit version scopes. Alias labels never add owners, reviewers or permissions.
+
+`GET /api/v3/projects/{id}/ownership/editor` returns exact policy/head pins,
+selector descriptions, team choices and management capabilities. Managers stage a
+complete policy, call `/ownership/editor/preview`, then explicitly
+`/ownership/editor/apply` with that preview digest. Preview writes no journal objects.
+Apply uses the existing atomic policy workflow; retries of the same policy/request
+return its receipt before checking changed heads. The preview digest is an initial
+admission check, not part of the existing policy idempotency identity.
+Consuming-root configuration and untouched selectors remain preserved. Historical
+team assessments and approvals retain their original scope when ownership changes.
+
 ### Assessment API and CLI
 
 `GET /api/v3/projects/{id}/versions` lists current product branches.
