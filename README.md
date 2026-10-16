@@ -692,6 +692,22 @@ their original records remain visible. Source claims and support dates do not
 infer authored criticality, exposure or support status. Filtering neither changes
 applicability nor publishes a score, and full statistics precede pagination.
 
+The Knowledge workspace's **Component inventory** browses all imported source-local
+component occurrences, including those without vulnerability observations. Search
+identity/PURL/reference, filter pinned ownership/team evidence, page backend totals,
+and choose each distinct consuming context. Component names/PURLs never merge
+occurrences; unknown ownership and delegated contexts remain explicit.
+
+`GET /api/v3/projects/{id}/states/{sha}/components` and its `/contexts?component_ref=...`
+read committed product states only, under current project-read authorization.
+Current and historical states are exact pins; paste a historical SHA from version
+history to inspect it. The existing component annotation editor is available to
+managers at the current head, with the same expected state/revision and frozen
+retry identity. Historical annotations remain read only. Direct imported dependency
+neighbors and raw source facts use the existing context disclosure; this is not
+an editable dependency graph, runtime topology, complete discovery or clearance.
+No-finding components do not receive implicit security/license approval.
+
 ### Curated component metadata
 
 Native component context and annotations are available from each Knowledge finding's

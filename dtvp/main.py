@@ -13,6 +13,7 @@ from dtvp.api_analysis import router as analysis_router
 from dtvp.api_analysis_jobs import router as analysis_jobs_router
 from dtvp.api_assembly_editor import router as assembly_editor_router
 from dtvp.api_bulk_reviews import router as bulk_reviews_router
+from dtvp.api_component_inventory import router as component_inventory_router
 from dtvp.api_coverage import router as coverage_router
 from dtvp.api_cpe_editor import router as cpe_editor_router
 from dtvp.api_cpe_ranking import router as cpe_ranking_router
@@ -116,6 +117,7 @@ def create_app(settings=None):
     app.include_router(history_router)
     app.include_router(metadata_router)
     app.include_router(metadata_editor_router)
+    app.include_router(component_inventory_router)
     app.include_router(synchronization_router)
     app.include_router(source_jobs_router)
     app.include_router(licenses_router)

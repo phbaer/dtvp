@@ -5,7 +5,7 @@ type Annotations = { cybersecurity: { criticality: string; exposure: string; mit
 type RecordData = { revision: string; status: string; applicable: boolean; payload: { annotations: Annotations; provenance: { source: string; reference: string; observed_at?: string | null }; rationale: string; actor_id: string; created_at: string } }
 type Neighbor = { ref: string; name: string; version: string; resolved: boolean }
 type ContextData = { state: string; head: string; version: string; component_ref: string; component: Record<string, unknown>; metadata: RecordData | null; defaults: Annotations; capabilities: string[]; blocked_reasons: string[]; limitations: string[]; topology: { dependency_graph: string; consuming_root: string | null; incoming: Neighbor[]; outgoing: Neighbor[]; incoming_total: number; outgoing_total: number; neighbor_limit: number; limitations: string[] } }
-const props = defineProps<{ project: string; state: string; version: string; componentRef: string; contextId: string; disabled?: boolean }>()
+const props = defineProps<{ project: string; state: string; version: string; componentRef: string; contextId?: string; disabled?: boolean }>()
 const emit = defineEmits<{ locked: [value: boolean]; changed: []; refresh: [] }>()
 const data = ref<ContextData | null>(null), busy = ref(false), error = ref(''), notice = ref(''), expanded = ref(false), editing = ref(false)
 const modal = ref<HTMLDialogElement | null>(null), annotations = ref<Annotations | null>(null), source = ref(''), reference = ref(''), observed = ref(''), rationale = ref(''), acknowledged = ref(false), advanced = ref('')
@@ -19,7 +19,7 @@ async function load() {
   const current = ++sequence
   busy.value = true; error.value = ''
   try {
-    const result = await knowledgeApi<ContextData>(`${endpoint()}/states/${props.state}/component-context?${new URLSearchParams({ component_ref: props.componentRef, context_id: props.contextId })}`)
+    const result = await knowledgeApi<ContextData>(`${endpoint()}/states/${props.state}/component-context?${new URLSearchParams({ component_ref: props.componentRef, ...(props.contextId ? { context_id: props.contextId } : {}) })}`)
     if (current === sequence) data.value = result
   } catch (value) { if (current === sequence) error.value = failure(value) }
   finally { if (current === sequence) busy.value = false }

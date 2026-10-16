@@ -12,6 +12,7 @@ import KnowledgeAnalysisEvidence from './KnowledgeAnalysisEvidence.vue'
 import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
 import KnowledgeComponentMetadata from './KnowledgeComponentMetadata.vue'
+import KnowledgeComponents from './KnowledgeComponents.vue'
 import KnowledgeIntake from './KnowledgeIntake.vue'
 import KnowledgeInputQuality from './KnowledgeInputQuality.vue'
 import KnowledgeAssembly from './KnowledgeAssembly.vue'
@@ -384,6 +385,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
       <p v-if="workspace.baseline_status === 'withdrawn'" role="status" class="message">The current inventory was withdrawn. Historical assessments and release tags remain retained.</p>
       <div class="knowledge-statistics" aria-label="Filtered workspace statistics"><span><strong>{{ workspace.statistics.totals.context_findings }}</strong> context findings</span><span><strong>{{ workspace.statistics.totals.unique_vulnerabilities }}</strong> vulnerabilities</span><span><strong>{{ workspace.statistics.recorded }}</strong> recorded</span><span><strong>{{ workspace.statistics.submitted }}</strong> submitted</span><span><strong>{{ workspace.statistics.approved }}</strong> approved</span><details><summary>Breakdown</summary><dl><template v-for="(count, status) in workspace.statistics.by_status" :key="status"><dt>{{ label(String(status)) }}</dt><dd>{{ count }}</dd></template><template v-for="(count, id) in workspace.statistics.by_team" :key="id"><dt>{{ teamName(String(id)) }}</dt><dd>{{ typeof count === 'number' ? count : count.context_findings }} findings</dd></template><template v-for="(count, severity) in workspace.statistics.severity" :key="severity"><dt>{{ severity }}</dt><dd>{{ count }}</dd></template></dl></details></div>
       <div class="knowledge-tools" role="group" aria-label="Pinned state tools">
+        <KnowledgeComponents :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" />
         <KnowledgeRetained v-if="workspace.statistics.retained_absent_assessments" :project="project" :state="workspace.state" :team="team" />
         <KnowledgeLicenses :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
         <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
