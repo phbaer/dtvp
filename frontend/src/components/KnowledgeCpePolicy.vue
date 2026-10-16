@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
-type Configuration = { algorithm_version: string; catalog: unknown[]; rules: Record<string, unknown> }
+import KnowledgeCpeSources from './KnowledgeCpeSources.vue'
+type Configuration = { algorithm_version: string; catalog: unknown[]; rules: Record<string, unknown>; offline_sources?: Record<string, { source: string; revision: string; occurred_at: string; artifact_sha256: string; records: number; losses: Record<string, number> }> }
 type Editor = { policy_state: string | null; configuration: Configuration; capabilities: string[]; limitations: string[] }
 type Input = { request_id: string; expected: string | null; catalog: unknown[]; rules: Record<string, unknown> }
 type Preview = { committed: false; policy_state: string | null; preview_digest: string; configuration: Configuration; changes: Record<string, number>; limitations: string[] }
 const props = defineProps<{ project: string }>()
+const emit = defineEmits<{ locked: [boolean] }>()
+const sourceLocked = ref(false)
 const opened = ref(false), busy = ref(false), loaded = ref<Editor | null>(null), error = ref(''), notice = ref('')
 const catalog = ref('[]'), rules = ref('{}'), editing = ref(false), expected = ref<string | null>(null)
 const frozen = ref<Input | null>(null), preview = ref<Preview | null>(null), attempted = ref(false), confirmed = ref(false)
 let sequence = 0
+watch(() => sourceLocked.value || busy.value || editing.value, value => emit('locked', value))
 const canConfigure = computed(() => loaded.value?.capabilities.includes('configure') === true)
 const stale = computed(() => Boolean(frozen.value && loaded.value && frozen.value.expected !== loaded.value.policy_state))
 const path = () => `/projects/${encodeURIComponent(props.project)}/cpe`
@@ -23,7 +27,7 @@ async function load() {
 }
 function toggle(event: Event) { opened.value = (event.target as HTMLDetailsElement).open; if (opened.value && !loaded.value) void load() }
 function start() {
-  if (busy.value || !loaded.value || !canConfigure.value) return
+  if (busy.value || sourceLocked.value || !loaded.value || !canConfigure.value) return
   catalog.value = JSON.stringify(loaded.value.configuration.catalog, null, 2); rules.value = JSON.stringify(loaded.value.configuration.rules, null, 2)
   expected.value = loaded.value.policy_state; frozen.value = null; preview.value = null; attempted.value = false; confirmed.value = false; editing.value = true; error.value = ''; notice.value = ''
 }
@@ -57,19 +61,20 @@ async function publish() {
   finally { if (current === sequence) busy.value = false }
   if (!error.value) await load()
 }
+function cancelEditing() { if (busy.value) return; frozen.value = null; preview.value = null; editing.value = false; attempted.value = false; confirmed.value = false; error.value = '' }
 function editCaptured() { if (busy.value) return; frozen.value = null; preview.value = null; attempted.value = false; confirmed.value = false; error.value = '' }
-onBeforeUnmount(() => { ++sequence })
+onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
   <details class="knowledge-cpe-policy" aria-label="CPE discovery policy" @toggle="toggle">
     <summary>CPE discovery policy and reviewed mappings</summary>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <p class="hint">Offline supplied identities and attributed rules. Discovery candidates do not establish vulnerability applicability or approved component identities.</p>
-    <button :disabled="busy" @click="load">Refresh current CPE policy</button>
+    <button :disabled="busy || sourceLocked" @click="load">Refresh current CPE policy</button>
     <template v-if="loaded">
       <p>{{ loaded.configuration.catalog.length }} catalog entries · {{ Object.keys(loaded.configuration.rules).length }} mapping rules</p>
       <details><summary>Current policy, attribution and limits</summary><code>{{ loaded.policy_state || 'No configured policy' }}</code><ul><li v-for="limit in loaded.limitations" :key="limit">{{ limit }}</li></ul><pre>{{ JSON.stringify(loaded.configuration, null, 2) }}</pre></details>
-      <button v-if="canConfigure" :disabled="busy" @click="start">{{ editing ? 'Discard edits and start from loaded policy' : 'Prepare complete policy replacement' }}</button>
+      <button v-if="canConfigure" :disabled="busy || sourceLocked" @click="start">{{ editing ? 'Discard edits and start from loaded policy' : 'Prepare complete policy replacement' }}</button>
       <form v-if="editing && canConfigure" aria-label="Replace CPE discovery policy" @submit.prevent="inspect">
         <p class="hint">This replaces the whole catalog and rule set. Preserve required entries and source attribution; omitted entries are removed from the current policy, with history retained.</p>
         <fieldset :disabled="busy || !!frozen"><label>Supplied CPE catalog JSON<textarea v-model="catalog" rows="6" spellcheck="false" /></label><label>Reviewed mapping rules JSON<textarea v-model="rules" rows="6" spellcheck="false" /></label></fieldset>
@@ -84,6 +89,8 @@ onBeforeUnmount(() => { ++sequence })
         <button :disabled="busy || !confirmed || (stale && !attempted) || !canConfigure" @click="publish">{{ attempted ? 'Retry identical CPE policy publication' : 'Publish previewed CPE policy' }}</button>
       </section>
       <button v-if="frozen" :disabled="busy" @click="editCaptured">Discard captured request and edit original inputs</button>
+      <button v-if="editing" :disabled="busy" @click="cancelEditing">Discard CPE policy edits</button>
+      <KnowledgeCpeSources :project="project" :policy="loaded.policy_state" :sources="loaded.configuration.offline_sources" :can-configure="canConfigure" :disabled="busy || editing" @locked="sourceLocked = $event" @refresh="load" />
     </template>
     <p v-if="busy" role="status">CPE policy request in progress…</p>
   </details>

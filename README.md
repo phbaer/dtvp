@@ -864,6 +864,8 @@ Dictionary input is an explicit JSON array of the existing supplied-ranking `Dic
 
 Exact source bytes and declared provenance are retained in immutable CPE policy states. Replacing one source preserves the other, catalog/rules and prior history. Ordinary catalog/rule edits preserve retained source metadata and artifact pins. Project readers use `GET .../cpe/sources/{policy}/{kind}` with offset/limit to inspect exact retained claims, and `/artifact` to download exact source bytes; every read rechecks current project scope and membership in retained CPE policy history. Ranking against retained inputs is explicit: `POST .../states/{inventory}/cpe/rank-retained` with `component_ref`, exact `policy`, and optional offset/limit. Inventory and policy pins remain separate. Generic native CLI JSON requests use the same backend workflow.
 
+The existing CPE policy panel contains a collapsed Offline curated sources section: file/source/revision capture, normalization preview, explicit confirmation, exact failed/uncertain retries, retained-policy browsing and source downloads. UI draft locks protect context switches; committed-but-pending projection responses remain clearly committed and can refresh the identical receipt.
+
 ### Bounded workload measurements
 
 ```bash

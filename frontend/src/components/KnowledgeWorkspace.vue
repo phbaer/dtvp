@@ -28,8 +28,8 @@ import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
 import KnowledgeAssessmentArchive from './KnowledgeAssessmentArchive.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 const props = defineProps<{ me: Me }>()
-const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false)
-const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value)
+const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false), cpeLocked = ref(false)
+const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
 function bulkEligible(row: KnowledgeFinding) {
@@ -382,7 +382,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
       <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
       <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
       <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
-      <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" />
+      <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" @locked="cpeLocked = $event" />
       <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
       <KnowledgeComparison :project="project" />
     </div>
