@@ -13,6 +13,7 @@ import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
 import KnowledgeComponentMetadata from './KnowledgeComponentMetadata.vue'
 import KnowledgeIntake from './KnowledgeIntake.vue'
+import KnowledgeInputQuality from './KnowledgeInputQuality.vue'
 import KnowledgeAssembly from './KnowledgeAssembly.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
 import KnowledgeDocuments from './KnowledgeDocuments.vue'
@@ -350,7 +351,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
         <KnowledgeLicenses :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
         <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
         <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
-        <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
+        <div class="knowledge-composition-tools"><KnowledgeSources :project="project" :version="version" :state="workspace.state" /><KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" /></div>
         <KnowledgeAdvisories :project="project" :state="workspace.state" />
         <KnowledgeReconciliation :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       </div>
@@ -394,6 +395,9 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
 /* Existing panels stay mounted; only their direct disclosure roots join the toolbar. */
 .knowledge-tools { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr)); align-items:start; gap:8px; margin:12px 0; min-width:0 }
 .knowledge-tools:empty { display:none }
+.knowledge-composition-tools { display:grid; gap:8px; min-width:0 }
+.knowledge-composition-tools:has(> details[open]) { grid-column:1 / -1 }
+.knowledge-composition-tools > :deep(details) { margin:0; min-width:0; background:var(--surface) }
 .knowledge-workspace .knowledge-tools > :deep(details) { margin:0; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface) }
 .knowledge-workspace .knowledge-tools > :deep(details[open]) { grid-column:1 / -1 }
 .knowledge-workspace .knowledge-tools > :deep(details > summary) { font-size:.82rem; line-height:1.4; overflow-wrap:anywhere; cursor:pointer }

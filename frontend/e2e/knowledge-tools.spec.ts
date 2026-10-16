@@ -24,7 +24,8 @@ async function fixture(page: Page, inventory = true) {
 test('closed utilities form compact rows; open panels span width and retain their existing inputs', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { product, state, reads, writes } = await fixture(page)
-  await expect(state.locator(':scope > details')).toHaveCount(7)
+  await expect(state.locator(':scope > details')).toHaveCount(6)
+  await expect(state.locator(':scope > .knowledge-composition-tools > details')).toHaveCount(2)
   const cards = product.locator(':scope > details'), first = (await cards.nth(0).boundingBox())!, second = (await cards.nth(1).boundingBox())!
   expect(first.y).toBe(second.y); expect(second.x).toBeGreaterThan(first.x)
   expect((await product.boundingBox())!.height).toBeLessThan(160)
@@ -45,7 +46,7 @@ test('narrow utility panels stay directly accessible and do not overflow the rev
   await page.setViewportSize({ width: 390, height: 844 })
   const { product, state, writes } = await fixture(page)
   for (const toolbar of [product, state]) {
-    for (const card of await toolbar.locator(':scope > details').all()) {
+    for (const card of await toolbar.locator(':scope > details, :scope > .knowledge-composition-tools > details').all()) {
       await expect(card.locator(':scope > summary')).toBeVisible()
       expect((await card.boundingBox())!.width).toBeLessThanOrEqual(390)
     }

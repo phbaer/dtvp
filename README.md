@@ -205,6 +205,19 @@ uv run python scripts/assembly_demo.py
 
 ### Pinned composition input observations
 
+The Knowledge workspace groups a lazy **Composition input observations** disclosure
+with its existing source-import tools. It reads the selected product inventory only;
+constituent/history states remain available through API/CLI. Source/part declarations,
+full-model component/root/edge counts and exact machine-readable observation classes
+remain separate from vulnerability workflow statistics. Search/class filters and
+bounded pages use the backend report; full counts remain unchanged. Pages keep the
+same inventory SHA, applied filters and full-report digest. A changed derived digest
+retains the previous page until explicit reload; version/state changes clear the old
+report, filters and page cursor, and stale responses cannot replace the new scope.
+Source coverage remains producer-declared and unverified. No quality score, legal
+conclusion, release block, data adoption or external provider request is triggered.
+
+
 `GET /api/v3/projects/{id}/states/{state}/input-quality` provides a read-only,
 source-attributed report for a committed product or constituent input state,
 including retained source history before assembly. Current project read permission
