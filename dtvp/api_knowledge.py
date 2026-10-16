@@ -52,6 +52,7 @@ class InventoryMetadata(RequestModel):
     completeness: Literal["complete"]
     predecessor: Sha | None = None
     context: CollectionContext | None = None
+    expected_configuration: Sha | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("occurred_at")
     @classmethod

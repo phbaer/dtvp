@@ -36,6 +36,7 @@ class AssemblyInput(RequestModel):
     request_id: Name
     expected: Sha | None
     predecessor: Sha | None = None
+    expected_configuration: Sha | None = Field(default=None, exclude_if=lambda value: value is None)
     parts: list[Part] = Field(min_length=1, max_length=200)
     removed_parts: list[Name] = Field(default_factory=list, max_length=200)
     removal_reason: str = Field(default="", max_length=2000)
@@ -311,6 +312,24 @@ def build_assembly_candidate(journal, *, project_id, version, data):
         ),
     }
     sections["vulnerabilities"] = findings
+    from dtvp.knowledge.pipeline_config import current_config, validate_source_role
+
+    configuration_state, configuration = current_config(journal, project_id)
+    if (
+        data.expected_configuration is not None
+        and data.expected_configuration != configuration_state
+    ):
+        raise Conflict("Pipeline configuration changed")
+    if configuration_state:
+        for part in parts:
+            if part.get("state"):
+                validate_source_role(
+                    configuration, part["part_id"], part["baseline"]["source"], "authority"
+                )
+        sections["inventory"]["pipeline_configuration"] = {
+            "state": configuration_state,
+            "configuration": configuration,
+        }
     if parent:
         sections["history"][f"inventory:{parent}"] = {"state": parent}
     # Include selected revisions as parents as well as direct original artifact
@@ -318,7 +337,10 @@ def build_assembly_candidate(journal, *, project_id, version, data):
     parents = list(
         dict.fromkeys(([parent] if parent else []) + [p.state for p in data.parts if p.state])
     )
+    if configuration_state:
+        parents.append(configuration_state)
     return {
+        "configuration_state": configuration_state,
         "sections": sections,
         "parents": parents,
         "artifacts": sorted(
@@ -357,16 +379,25 @@ def build_assembly_candidate(journal, *, project_id, version, data):
     }
 
 
-def publish_assembly(journal, *, project_id, version, actor_id, data):
+_UNSET = object()
+
+
+def publish_assembly(journal, *, project_id, version, actor_id, data, configuration_guard=_UNSET):
     scoped_request, fingerprint = assembly_request_identity(project_id, version, actor_id, data)
     with journal.writer():
         receipt = journal.receipt(scoped_request, fingerprint)
     if receipt:
         return receipt
     candidate = build_assembly_candidate(journal, project_id=project_id, version=version, data=data)
+    if (
+        configuration_guard is not _UNSET
+        and candidate["configuration_state"] != configuration_guard
+    ):
+        raise Conflict("Pipeline configuration changed since assembly preview")
     sections, parents = candidate["sections"], candidate["parents"]
     ref = Ref(project_id=project_id, name=version)
     from dtvp.knowledge.ownership import current_policy, policy_ref, resolve_ownership
+    from dtvp.knowledge.pipeline_config import config_ref
 
     policy_state, config = current_policy(journal, project_id)
     resolve_ownership(sections, version=version, policy_state=policy_state, config=config)
@@ -390,5 +421,12 @@ def publish_assembly(journal, *, project_id, version, actor_id, data):
         request_id=scoped_request,
         fingerprint=fingerprint,
         updates=[Update(ref=ref, expected=data.expected, target=state)],
-        checks=[(policy_ref(project_id), policy_state), (evidence_ref(project_id), evidence_state)],
+        checks=[
+            (policy_ref(project_id), policy_state),
+            (evidence_ref(project_id), evidence_state),
+            (
+                config_ref(project_id),
+                candidate["configuration_state"],
+            ),
+        ],
     )

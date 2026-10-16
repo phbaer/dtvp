@@ -48,6 +48,11 @@ def preview_candidate(journal, project_id, version, data):
         "version": version,
         "input": assembly_payload(data),
         "previous_kind": candidate["previous_kind"],
+        **(
+            {"configuration_state": candidate["configuration_state"]}
+            if candidate["configuration_state"]
+            else {}
+        ),
         "selection": [
             {key: part.get(key) for key in ("part_id", "state", "required", "role", "availability")}
             for part in manifest["parts"]
@@ -175,6 +180,7 @@ def apply(project_id: str, version: Name, data: ApplyInput, request: Request, db
                 version=version,
                 actor_id=actor.user.id,
                 data=data.assembly,
+                configuration_guard=structural.get("configuration_state"),
             )
         return projected_response(request, receipt)
     except Conflict as error:

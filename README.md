@@ -2651,3 +2651,53 @@ automatically as new memberships or approvals.
 This README is the canonical project/agent overview. Update it alongside meaningful
 behavior, API, integration, workflow or structure changes. Trust source and tests
 if they disagree with prose. Agent instructions and skills remain routing hints.
+
+### Versioned pipeline metadata
+
+`GET`/`PUT /api/v3/projects/{id}/pipeline-config` reads and explicitly publishes
+bounded user/CI declarations. The PUT captures `expected_policy` and all
+`expected_versions` (returned by GET); atomic CAS includes newly added branches.
+Only the `pipeline` policy ref changes. Existing product inventories, assessments
+and approvals never change implicitly. Requests are actor-scoped/idempotent, and
+current manager authority is required on every replay.
+
+Each delivery part (including `part_id: null` for a single root baseline) names
+one exact `authority_source` and explicit `observation_sources`. These are source
+IDs, independent of provider products. Models pin `model_id`, `revision`,
+`digest_sha256` and an explicit entity catalog (`entity_id`, `name`, `external`).
+Mappings use existing namespace/case-sensitive/PURL selector grammar separately
+for components and optional consuming-root contexts; many-to-many entity links
+are allowed. Legacy Generator names remain explicit strings, never inferred GUIDs.
+
+`GET /api/v3/projects/{id}/states/{state}/pipeline-context?configuration=SHA`
+resolves a retained configuration against committed product history without
+changing either. Up to 200 rows/page share one report digest. Missing mappings are
+visible as unmapped contexts/unused rules, not an intake-wide failure. Declared
+models and entity mappings remain user/CI assertions, not verified model content
+or evidence of vulnerability applicability. Configurations are bounded to 2 MiB;
+resolution to 2 million selector evaluations and 32 MiB, failing without truncation.
+
+Pinned product states with `inventory.pipeline_configuration.state` now expose a
+`pipeline_context` register in native bundles and VScorer worklists. It resolves
+only the retained configuration named by that product state; later configuration
+edits do not change historical inputs. Legacy states without a pointer retain
+existing emitted bytes. Generator receives this register through its issued
+native bundle; its separate adapter must explicitly consume the added contract.
+
+Focused VScorer derivations additionally emit `pipeline_context`, limited to the
+selected context and its explicitly referenced model catalogs, plus a separately
+issued `pipeline-context.json` whose SHA-256 is bound in the source receipt.
+Missing mappings remain explicit diagnostics and do not silently create model
+placements. Legacy names and entity IDs remain distinct; no implicit SBOM-property
+rewriting, GUID conversion or model-content verification occurs. The separate
+VScorer adapter must explicitly consume the new file for placement decisions.
+
+Issuance validates this file against the pinned bundle and captures exact bytes;
+subsequent retrieval never reruns serializers. New metadata-bearing captures use
+serializer `/3`; existing `/1` and `/2` selectors/receipts remain authoritative.
+
+Authoritative imports and assembly publication validate configured source roles and
+pin the exact configuration in their immutable inventory. Optional
+`expected_configuration` rejects stale CI declarations. Assembly previews include
+the configuration pin; apply rejects changes even between preview verification
+and publication. A configuration edit alone changes no existing product state.

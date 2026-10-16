@@ -3,7 +3,7 @@
 import copy
 import re
 
-from dtvp.knowledge.exports import build_bundle, export_bytes
+from dtvp.knowledge.exports import build_bundle, contextual_pipeline_metadata, export_bytes
 from dtvp.rescoring import base_fact
 from dtvp.storage import canonical, digest
 
@@ -167,7 +167,7 @@ def derive_context_inputs(journal, state, context_id, component_ref, base_select
         if selected
         else None
     )
-    return {
+    result = {
         "sbom": sbom,
         "cves": cves,
         "dtvp_source": receipt,
@@ -183,3 +183,9 @@ def derive_context_inputs(journal, state, context_id, component_ref, base_select
             "remote_authenticity": "not_verified",
         },
     }
+    pipeline_context = contextual_pipeline_metadata(bundle, context_id)
+    if pipeline_context is not None:
+        result["pipeline_context"] = pipeline_context
+        if receipt is not None:
+            receipt["artifacts"]["pipeline_context_sha256"] = digest(canonical(pipeline_context))
+    return result

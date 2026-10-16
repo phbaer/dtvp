@@ -118,6 +118,20 @@ def build_bundle(journal, state):
             "format": "dtvp.component-metadata-register/1",
             **list_metadata(journal, sections, revision.version, paginate=False),
         }
+    if "pipeline_configuration" in sections["inventory"]:
+        from dtvp.knowledge.pipeline_config import resolve_context, retained_config
+
+        configuration = sections["inventory"]["pipeline_configuration"]["state"]
+        bundle["pipeline_context"] = {
+            **resolve_context(
+                journal,
+                project_id=revision.project_id,
+                state=state,
+                configuration=configuration,
+                paginate=False,
+            ),
+            "configuration": retained_config(journal, revision.project_id, configuration),
+        }
     return bundle
 
 
@@ -225,7 +239,7 @@ def build_vscorer_worklist(journal, state):
                 "coverage": finding["coverage"],
             }
         )
-    return {
+    result = {
         "format": WORKLIST_FORMAT,
         "state": state,
         "project_id": bundle["project_id"],
@@ -238,3 +252,33 @@ def build_vscorer_worklist(journal, state):
             "No Base assertion is automatically selected; unsupported ratings remain source evidence.",
         ],
     }
+    if "pipeline_context" in bundle:
+        result["pipeline_context"] = bundle["pipeline_context"]
+    return result
+
+
+def contextual_pipeline_metadata(bundle, context_id):
+    """Exact-context model declarations; external identities are never inferred."""
+    full = bundle.get("pipeline_context")
+    if full is None:
+        return None
+    rows = [row for row in full["rows"] if row["context_id"] == context_id]
+    model_ids = {mapping["model_id"] for row in rows for mapping in row["mappings"]}
+    content = {
+        "format": "dtvp.pipeline-context-input/1",
+        "inventory_state": full["inventory_state"],
+        "configuration_state": full["configuration_state"],
+        "context_id": context_id,
+        "assurance": full["assurance"],
+        "models": [
+            model for model in full["configuration"]["models"] if model["model_id"] in model_ids
+        ],
+        "rows": rows,
+        "unmapped": sum(row["status"] == "unmapped" for row in rows),
+        "limitations": [
+            "Declared model revisions/digests are unverified user/CI assertions.",
+            "Entity IDs and legacy names remain explicit; no name-to-GUID conversion occurs.",
+            "Missing mappings do not establish a safe or unaffected context.",
+        ],
+    }
+    return {**content, "digest": digest(canonical(content))}

@@ -86,6 +86,7 @@ def import_inventory(
     part_id=None,
     source_provenance=None,
     additional_artifacts=(),
+    expected_configuration=None,
 ):
     """Replace a complete baseline, preserving all other knowledge sections.
 
@@ -122,6 +123,8 @@ def import_inventory(
         raise ValueError("Source provenance must be an object")
     if source_provenance:
         operation["source_provenance"] = source_provenance
+    if expected_configuration is not None:
+        operation["expected_configuration"] = expected_configuration
     if not isinstance(additional_artifacts, (list, tuple, set)) or not all(
         isinstance(sha, str) for sha in additional_artifacts
     ):
@@ -222,6 +225,18 @@ def import_inventory(
 
         evidence_state = apply_current_evidence(journal, sections, project_id)
         policy_checks.append((evidence_ref(project_id), evidence_state))
+    from dtvp.knowledge.pipeline_config import config_ref, current_config, validate_source_role
+
+    configuration_state, configuration = current_config(journal, project_id)
+    if expected_configuration is not None and configuration_state != expected_configuration:
+        raise Conflict("Pipeline configuration changed")
+    if configuration_state:
+        validate_source_role(configuration, part_id, source, "authority")
+        sections["inventory"]["pipeline_configuration"] = {
+            "state": configuration_state,
+            "configuration": configuration,
+        }
+    policy_checks.append((config_ref(project_id), configuration_state))
     state = journal.snapshot(
         project_id=project_id,
         version=version,
@@ -232,6 +247,7 @@ def import_inventory(
                 ([parent] if parent else [])
                 + ([policy_state] if policy_state else [])
                 + ([evidence_state] if evidence_state else [])
+                + ([configuration_state] if configuration_state else [])
             )
         ),
         sections=sections,

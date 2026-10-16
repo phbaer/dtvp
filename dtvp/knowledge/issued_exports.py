@@ -125,6 +125,22 @@ def _inputs(kind, payload, bundle, manifest, project_id, version, state):
             if artifacts.get(key + "_sha256") != digest(raw):
                 raise ValueError("VScorer input file differs from its source receipt")
             files[key + ".json"] = raw
+        if "pipeline_context" in payload:
+            from dtvp.knowledge.exports import contextual_pipeline_metadata
+
+            expected_context = contextual_pipeline_metadata(
+                json.loads(bundle), receipt["context_id"]
+            )
+            raw = canonical(payload["pipeline_context"])
+            if payload["pipeline_context"] != expected_context or artifacts.get(
+                "pipeline_context_sha256"
+            ) != digest(raw):
+                raise ValueError(
+                    "VScorer pipeline metadata differs from its pinned bundle or receipt"
+                )
+            files["pipeline-context.json"] = raw
+        elif "pipeline_context_sha256" in artifacts or "pipeline_context" in json.loads(bundle):
+            raise ValueError("VScorer pipeline metadata is missing from its declared source")
     elif kind == "agentyzer-input":
         receipt = payload.get("receipt") if isinstance(payload, dict) else None
         _scope(receipt, project_id, version, state)
@@ -177,6 +193,23 @@ def _verify_capture(journal, record, payload, receipt):
                 key
             ] != read(key + ".json"):
                 raise ValueError("Issued VScorer file differs")
+        if "pipeline_context" in payload:
+            from dtvp.knowledge.exports import contextual_pipeline_metadata
+
+            expected_context = contextual_pipeline_metadata(bundle, receipt["context_id"])
+            if (
+                payload["pipeline_context"] != expected_context
+                or payload["pipeline_context"] != read("pipeline-context.json")
+                or receipt["artifacts"].get("pipeline_context_sha256")
+                != files["pipeline-context.json"]["sha256"]
+            ):
+                raise ValueError("Issued VScorer pipeline metadata differs")
+        elif (
+            "pipeline_context_sha256" in receipt.get("artifacts", {})
+            or "pipeline-context.json" in files
+            or "pipeline_context" in bundle
+        ):
+            raise ValueError("Issued VScorer pipeline metadata binding is missing")
     elif record["kind"] == "agentyzer-input":
         if payload.get("receipt") != receipt or payload.get("request") != read("request.json"):
             raise ValueError("Issued Agentyzer payload differs")
@@ -327,7 +360,9 @@ def issue_export(journal, *, project_id, actor_id, state, kind, payload=None, se
         "selector": selector,
         "selector_sha256": selector_sha,
         "serializer_id": (
-            "dtvp.knowledge-bundle-serializer/2"
+            "dtvp." + kind + "-serializer/3"
+            if "pipeline_context" in json.loads(bundle)
+            else "dtvp.knowledge-bundle-serializer/2"
             if kind == "knowledge-bundle" and "component_metadata" in payload
             else SERIALIZERS[kind]
         ),
