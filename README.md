@@ -71,6 +71,35 @@ Platform project, tags a state and prints their delta. It is repeatable and does
 not reset existing playground work. Use `--url` for another playground address.
 Open the Knowledge tab to browse these inventories.
 
+For a larger native playground dataset, run the API-only seeder against an already
+running isolated playground:
+
+```bash
+uv run python scripts/knowledge_scale_demo.py
+# Smaller/faster or another playground:
+uv run python scripts/knowledge_scale_demo.py --url http://127.0.0.1:8900 --products 1 --packages 30 --vulnerabilities 12
+```
+
+Defaults: three explicitly `[SYNTHETIC]` products, two versions each, 250 dependency
+packages and 50 synthetic CVE-2099 claims per version. The second version
+removes one package/finding, adds a package/finding and changes another package version.
+Each product has explicitly configured Platform/Operations consuming roots;
+Platform owns the shared dependency subtree in both distinct consuming contexts,
+while Operations covers its own other dependencies. Source severity includes zero
+and unknown examples; identity and license facts are deliberately incomplete.
+Discovery/source/build/provider/license coverage remains unknown and no human
+assessments, approvals, scores or real matching results are manufactured.
+
+The script verifies playground mode before resource writes, imports exact original
+CycloneDX JSON bytes via multipart APIs, applies versioned ownership through the
+backend, shares only its newly created products with Operations, and prints scoped
+counts plus workspace URLs. Existing exact fixture project names are skipped
+entirely, including partially seeded products; interactive edits are never reset.
+Use a fresh playground for a complete reseed and run one seeder at a time. Bounds:
+1–20 products, 6–2,000 packages and 1–250 synthetic claims per version.
+It does not touch production or call external analysis/advisory services.
+
+
 `POST /api/v3/projects/{id}/versions/{version}/imports` requires an idempotency
 request ID, expected head (null to create), source, monotonic source build number,
 timezone-aware observation time, `completeness: complete` and an SBOM object.
