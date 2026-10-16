@@ -98,7 +98,7 @@ captures use serializer `/3`; frozen `/1` and `/2` captures remain exact. Consum
 must either handle the additional bound artifact or reject the new receipt;
 ignoring a required artifact pin is not a compatibility fallback.
 
-VScorer's isolated `feat/dtvp-context-binding`, commit `6b481ae`, accepts the
+VScorer's isolated `feat/dtvp-context-binding`, commit `9fd670b`, accepts the
 optional artifact through REST intake. It verifies its exact file hash, focused
 context and uploaded TM7/entity consistency, freezes full declarations once and
 retains compact source facts. Unknown/ambiguous models remain diagnostic. This

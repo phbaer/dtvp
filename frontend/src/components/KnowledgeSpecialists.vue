@@ -6,7 +6,7 @@ import KnowledgeAnalysisJobs from './KnowledgeAnalysisJobs.vue'
 
 type Candidate = { cpe: string; identification_basis: string; basis_verification: string; provenance: Record<string, unknown> }
 type CpeResult = { inventory_state: string; policy_state: string | null; proposal: { algorithm_version: string; content_digest: string; catalog_content_digest: string; rules_content_digest: string; requested_purl: string | null; resolved_purl: string | null; candidates: Candidate[]; rejected_candidates: unknown[]; reviewed_rules: unknown[]; limitations: string[] } }
-type VScorerResult = { eligible: boolean; sbom: unknown; cves: unknown; dtvp_source: { state: string; artifacts: { sbom_sha256: string; cves_sha256: string } } | null; coverage: { included: string[]; excluded: { vulnerability_id: string; reason: string }[]; verification: string; remote_authenticity: string }; files?: Record<string, string> }
+type VScorerResult = { eligible: boolean; sbom: unknown; cves: unknown; dtvp_source: { state: string; artifacts: { sbom_sha256: string; cves_sha256: string; pipeline_context_sha256?: string } } | null; coverage: { included: string[]; excluded: { vulnerability_id: string; reason: string }[]; verification: string; remote_authenticity: string }; files?: Record<string, string> }
 type AgentyzerResult = { ready_to_submit: boolean; request: unknown; receipt: { state: string; request_sha256: string | null }; coverage: { reasons: string[]; limitations: string[]; source_verification: string; repository_authorization: string } }
 const props = defineProps<{ project: string; state: string; version: string; finding: KnowledgeFinding }>()
 const emit = defineEmits<{ locked: [boolean] }>()
@@ -48,7 +48,9 @@ async function prepareVScorer() {
     if (result.eligible) {
       const files = result.files, artifacts = result.dtvp_source?.artifacts
       if (!files || !artifacts || !files['sbom.cdx.json'] || !files['cves.json'] || !files['dtvp-source.json']) throw new Error('Exact artifact files unavailable. The derivation result can be downloaded for inspection.')
-      const valid = await sha256(files['sbom.cdx.json']) === artifacts.sbom_sha256 && await sha256(files['cves.json']) === artifacts.cves_sha256
+      const hasPipelineFile = Object.hasOwn(files, 'pipeline-context.json'), hasPipelinePin = Object.hasOwn(artifacts, 'pipeline_context_sha256')
+      if (hasPipelineFile !== hasPipelinePin || (hasPipelinePin && (typeof artifacts.pipeline_context_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(artifacts.pipeline_context_sha256) || typeof files['pipeline-context.json'] !== 'string' || !files['pipeline-context.json']))) throw new Error('Pipeline metadata file and exact source-receipt pin must both be supplied; file downloads are withheld.')
+      const valid = await sha256(files['sbom.cdx.json']) === artifacts.sbom_sha256 && await sha256(files['cves.json']) === artifacts.cves_sha256 && (!hasPipelinePin || await sha256(files['pipeline-context.json']!) === artifacts.pipeline_context_sha256)
       if (current !== sequence || vector !== vectorSequence) return
       if (!valid) throw new Error('Returned artifact bytes do not match the source receipt; file downloads are withheld.')
       exactFiles.value = true
@@ -105,7 +107,7 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence; emit('locked', false) })
         <p>{{ vscorer.eligible ? 'Focused input prepared; no analysis has been submitted.' : 'No eligible VScorer worklist was produced.' }}</p>
         <p>Included: {{ vscorer.coverage.included.join(', ') || 'None' }}</p><ul v-if="vscorer.coverage.excluded.length"><li v-for="(item, index) in vscorer.coverage.excluded" :key="index">{{ item.vulnerability_id }} · {{ label(item.reason) }}</li></ul>
         <p class="hint">Receipt hashes identify input bytes; remote authenticity and provider identity are not verified.</p>
-        <div v-if="exactFiles && vscorer.files" class="specialist-actions"><button @click="download(vscorer.files['sbom.cdx.json']!, 'sbom.cdx.json')">Download CycloneDX SBOM</button><button @click="download(vscorer.files['cves.json']!, 'cves.json')">Download CVE list</button><button @click="download(vscorer.files['dtvp-source.json']!, 'dtvp-source.json')">Download VScorer source receipt</button></div>
+        <div v-if="exactFiles && vscorer.files" class="specialist-actions"><button @click="download(vscorer.files['sbom.cdx.json']!, 'sbom.cdx.json')">Download CycloneDX SBOM</button><button @click="download(vscorer.files['cves.json']!, 'cves.json')">Download CVE list</button><button @click="download(vscorer.files['dtvp-source.json']!, 'dtvp-source.json')">Download VScorer source receipt</button><button v-if="vscorer.dtvp_source?.artifacts.pipeline_context_sha256" @click="download(vscorer.files['pipeline-context.json']!, 'pipeline-context.json')">Download pipeline context</button></div>
         <button @click="downloadJson(vscorer, 'dtvp-vscorer-input.json')">Download derivation result JSON</button>
       </template>
     </details>

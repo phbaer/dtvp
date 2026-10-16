@@ -7,9 +7,10 @@ const vectorA = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', vectorB = 'CVSS:
 const sbomFile = '{"bomFormat":"CycloneDX","components":[],"specVersion":"1.6","version":1}'
 // Preserve the backend's float spelling; reconstructing JSON would lose it.
 const cvesFile = '{"cves":[{"base_score":10.0,"cve_id":"CVE-2099-1234"}]}'
+const pipelineFile = '{"format":"dtvp.pipeline-context-input/1","declared":true}\n'
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 
-async function fixture(page: Page, options: { denied?: boolean; wrongHash?: boolean; noVectors?: boolean } = {}) {
+async function fixture(page: Page, options: { denied?: boolean; wrongHash?: boolean; noVectors?: boolean; pipeline?: 'valid' | 'missing' | 'tampered' | 'unpinned' } = {}) {
   const calls: { path: string; query: URLSearchParams; body: Record<string, unknown> | null }[] = []
   let state = initialState
   const row = { id: 'finding', context_id: 'e'.repeat(64), vulnerability_id: 'CVE-2099-1234', component: { name: 'Parser', version: '2.0', purl: 'pkg:generic/parser@2.0' }, context: { root_ref: 'application', component_ref: componentRef, team_id: 'team', status: 'resolved' }, description: 'Imported advisory.', source_ratings: options.noVectors ? [] : [{ source: 'Vendor', vector: vectorA, score: 9.8 }, { source: 'Advisory', vector: vectorB, score: 3.1 }], coverage: { status: 'unassessed', assessment: null }, published_score: null, capabilities: ['assess'] }
@@ -20,8 +21,9 @@ async function fixture(page: Page, options: { denied?: boolean; wrongHash?: bool
       if (path.endsWith('/cpe')) return route.fulfill({ json: { inventory_state: state, policy_state: policy, proposal: { algorithm_version: 'dtvp.cpe/1', content_digest: 'd'.repeat(64), catalog_content_digest: '1'.repeat(64), rules_content_digest: '2'.repeat(64), requested_purl: row.component.purl, resolved_purl: row.component.purl, candidates: [{ cpe: 'cpe:2.3:a:vendor:parser:2.0:*:*:*:*:*:*:*', identification_basis: 'dictionary_supported_identity', basis_verification: 'imported_claim_not_verified', provenance: { source: 'Supplier dictionary extract', kind: 'supplied_catalog' } }], rejected_candidates: [], reviewed_rules: [], limitations: ['CPE identity does not establish vulnerability applicability.'] } } })
       if (options.denied) return route.fulfill({ status: 403, json: { detail: 'Snapshot permission is required to prepare specialist inputs' } })
       if (path.endsWith('/vscorer-input')) {
-        const receipt = { format: 'dtvp.vscorer-source/1', state, artifacts: { sbom_sha256: options.wrongHash ? '0'.repeat(64) : sha(sbomFile), cves_sha256: sha(cvesFile) } }
-        return route.fulfill({ json: { eligible: true, sbom: JSON.parse(sbomFile), cves: JSON.parse(cvesFile), dtvp_source: receipt, files: { 'sbom.cdx.json': sbomFile, 'cves.json': cvesFile, 'dtvp-source.json': JSON.stringify(receipt) }, coverage: { included: ['CVE-2099-1234'], excluded: [{ vulnerability_id: 'CVE-2099-5678', reason: 'explicit_base_selection_required' }], verification: 'source_receipt_requires_consumer_artifact_consistency_check', remote_authenticity: 'not_verified' } } })
+        const receipt = { format: 'dtvp.vscorer-source/1', state, artifacts: { sbom_sha256: options.wrongHash ? '0'.repeat(64) : sha(sbomFile), cves_sha256: sha(cvesFile), ...(options.pipeline && options.pipeline !== 'unpinned' ? { pipeline_context_sha256: sha(pipelineFile) } : {}) } }
+        const pipelineFiles = options.pipeline && options.pipeline !== 'missing' ? { 'pipeline-context.json': options.pipeline === 'tampered' ? pipelineFile + ' ' : pipelineFile } : {}
+        return route.fulfill({ json: { eligible: true, sbom: JSON.parse(sbomFile), cves: JSON.parse(cvesFile), dtvp_source: receipt, files: { 'sbom.cdx.json': sbomFile, 'cves.json': cvesFile, 'dtvp-source.json': JSON.stringify(receipt), ...pipelineFiles }, coverage: { included: ['CVE-2099-1234'], excluded: [{ vulnerability_id: 'CVE-2099-5678', reason: 'explicit_base_selection_required' }], verification: 'source_receipt_requires_consumer_artifact_consistency_check', remote_authenticity: 'not_verified' } } })
       }
       return route.fulfill({ json: { format: 'dtvp.agentyzer-input/1', ready_to_submit: false, request: null, receipt: { state, request_sha256: null }, coverage: { reasons: ['qualified_analysis_source_missing_or_invalid'], limitations: ['External orchestrator must authorize the repository.'], source_verification: 'producer_declared_only', repository_authorization: 'not_checked' } } })
     }
@@ -130,3 +132,30 @@ test('missing source qualification stays explicit and a changed state clears der
   await state.panel.getByRole('button', { name: 'Prepare Agentyzer input', exact: true }).click()
   await expect.poll(() => state.calls.at(-1)?.path).toContain(`/states/${nextState}/agentyzer-input`)
 })
+
+
+test('optional pipeline context downloads exact receipt-bound text alongside the existing files', async ({ page }) => {
+  const { panel } = await fixture(page, { pipeline: 'valid' })
+  await openPanel(page); await panel.getByText('VScorer input files', { exact: true }).click()
+  await panel.getByRole('combobox', { name: 'Original source Base', exact: true }).selectOption(vectorA)
+  await panel.getByRole('button', { name: 'Prepare VScorer inputs', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Download CVE list', exact: true })).toBeVisible()
+  const pending = page.waitForEvent('download')
+  await panel.getByRole('button', { name: 'Download pipeline context', exact: true }).click()
+  const result = await pending, stream = await result.createReadStream(), chunks: Buffer[] = []
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk))
+  expect(Buffer.concat(chunks).toString()).toBe(pipelineFile)
+  expect(result.suggestedFilename()).toBe('pipeline-context.json')
+})
+
+for (const kind of ['missing', 'tampered', 'unpinned'] as const) {
+  test(`${kind} pipeline metadata withholds every native specialist file`, async ({ page }) => {
+    const { panel } = await fixture(page, { pipeline: kind })
+    await openPanel(page); await panel.getByText('VScorer input files', { exact: true }).click()
+    await panel.getByRole('combobox', { name: 'Original source Base', exact: true }).selectOption(vectorA)
+    await panel.getByRole('button', { name: 'Prepare VScorer inputs', exact: true }).click()
+    await expect(panel.getByRole('alert')).toContainText('withheld')
+    for (const name of ['Download CycloneDX SBOM', 'Download CVE list', 'Download VScorer source receipt', 'Download pipeline context']) await expect(panel.getByRole('button', { name, exact: true })).toHaveCount(0)
+    await expect(panel.getByRole('button', { name: 'Download derivation result JSON', exact: true })).toBeVisible()
+  })
+}

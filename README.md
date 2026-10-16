@@ -2837,7 +2837,7 @@ the configured authority for every available delivery part.
 
 Latest consumer integration batches are committed in their existing isolated
 worktrees: Generator `feat/dtvp-snapshot-integrity` (`da3cba0`) and VScorer
-`feat/dtvp-context-binding` (`6b481ae`). Both consume actual DTVP-issued metadata;
+`feat/dtvp-context-binding` (`9fd670b`). Both consume actual DTVP-issued metadata;
 Generator emits contextual mapping supplements, while VScorer validates and
 retains declarations without installing mappings or changing scores. They are
 normal branches of the sibling repositories; default checkouts remain untouched.
@@ -2847,3 +2847,8 @@ and remaining customer/document/deployment acceptance limits.
 Pipeline and synchronization tools follow the existing compact closed-card and
 full-width expanded layout, including narrow screens. Unfinished observation
 intake/reconciliation blocks competing baseline imports and assembly edits.
+
+VScorer preparation also exposes the exact optional `pipeline-context.json` file
+in the UI. Both its receipt pin and exact byte hash must match before any native
+input downloads become available; missing, changed or unpinned metadata fails
+closed. Legacy three-file derivations retain their existing behavior.

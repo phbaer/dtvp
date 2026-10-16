@@ -620,7 +620,7 @@ passed. Isolated staged validation also passed, excluding earlier UI experiments
 Latest pipeline metadata increments: Generator `da3cba0` validates the complete
 pinned context/model register and emits sealed mapping supplements while keeping
 legacy labels distinct from entity IDs (757 tests passed, one optional skip).
-VScorer `6b481ae` validates a separately bound metadata artifact against source
+VScorer `9fd670b` validates a separately bound metadata artifact against source
 pins and the uploaded TM7, preserving declared placements and diagnostics without
 installing mappings or changing scores. Final metadata checks: 29 passed;
 architecture/source-manifest checks: 28 passed, with independent Python and
