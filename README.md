@@ -149,6 +149,20 @@ fail closed rather than truncating retained links. It records identity continuit
 only: it does not merge overlapping observations, rewrite references, establish
 context equivalence or carry assessments/approvals across changed targets.
 
+Assembly publication now propagates selected constituent lineage metadata into
+`inventory.identity` (`dtvp.assembled-component-lineages/1`). Inventory rows expose
+the selected source lineage ID with its exact part, source state and local reference;
+source-root aliases share one metadata entry. Identical packages in distinct parts
+remain distinct. Pre-ledger part states bootstrap the same original-artifact/ref IDs
+used by subsequent imports. Removed/withdrawn identities remain tombstones, while
+retained parent states preserve their original metadata. Selecting a historical
+source state explicitly restores that state's recorded identity rather than guessing
+continuity. Aggregate ledgers retain the 100,000 identity/32 MiB bounds.
+
+This is metadata propagation, not overlapping-observation reconciliation. Assembled
+component payloads/origins, namespaced references, dependency graphs and assessment
+target fingerprints remain unchanged; lineage does not extend approval coverage.
+
 ### Read-only global orphan audit
 
 Instance operators can inspect storage reachability across all projects and all

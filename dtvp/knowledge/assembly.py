@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from dtvp.knowledge.assembly_lineages import assemble_lineages
 from dtvp.knowledge.assembly_relationships import CrossPartRelationship, qualify_relationships
 from dtvp.knowledge.journal import SECTIONS, Conflict, Name, Ref, Sha, Update
 from dtvp.knowledge.service import component_key, part_ref
@@ -145,6 +146,7 @@ def build_assembly_candidate(journal, *, project_id, version, data):
             for name in SECTIONS
         }
     old_manifest = sections["inventory"].get("assembly", {})
+    previous_identity = sections["inventory"].get("identity") if old_manifest else None
     old_parts = {part["part_id"]: part for part in old_manifest.get("parts", [])}
     new_parts = {part.part_id: part for part in data.parts}
     removed = old_parts.keys() - new_parts.keys()
@@ -165,13 +167,14 @@ def build_assembly_candidate(journal, *, project_id, version, data):
     if changed_policy and not data.policy_change_reason:
         raise Conflict("Changing part requirements needs a policy change reason")
     inventory, findings, parts, artifacts = {}, {}, [], []
-    edges, relations, selected_occurrences = [], [], {}
+    edges, relations, selected_occurrences, identity_inputs = [], [], {}, []
     for part in sorted(data.parts, key=lambda item: item.part_id):
         selection = part.model_dump(mode="json")
         if not part.state:
             parts.append({**selection, "availability": "missing"})
             continue
         source = selected_inventory(journal, project_id, version, part)
+        identity_inputs.append((part.part_id, part.state, source))
         baseline = source["baseline"]
         parts.append({**selection, "availability": "selected", "baseline": baseline})
         artifacts.append(baseline["artifact_sha"])
@@ -298,6 +301,14 @@ def build_assembly_candidate(journal, *, project_id, version, data):
         },
         "dependencies": {"edges": edges},
         "relationships": {"items": relations},
+        "identity": assemble_lineages(
+            identity_inputs,
+            project_id=project_id,
+            version=version,
+            qualify=namespaced_ref,
+            previous_identity=previous_identity,
+            previous_state=parent,
+        ),
     }
     sections["vulnerabilities"] = findings
     if parent:
