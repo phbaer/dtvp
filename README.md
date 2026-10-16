@@ -505,9 +505,26 @@ uv run python -m dtvp.cli knowledge --persona analyst correspondence-draft \
   --project PROJECT --input apply.json --apply
 ```
 
-The second command explicitly publishes one unsubmitted draft. A dedicated guided UI
-for this new adoption operation remains planned; existing correspondence and ordinary
-synchronization screens retain their current contracts.
+The second command explicitly publishes one unsubmitted draft.
+
+The existing **Occurrence correspondence across imports** panel also offers a
+collapsed **Reuse approved assessment through correspondence** workflow. Select a
+source branch/tag or historical state first. Search its bounded, pinned approved
+source findings, explicitly choose a target consuming context and recorded active
+component/context assertion revisions, then request a server preview. The preview
+shows the original attributed conclusion and complete evidence under a disclosure.
+A new target assessment ID, target conditions, adoption reason and explicit
+confirmation are required to create an unsubmitted linked draft. Source approval,
+scores and identity are never transferred; independent target review is required.
+
+Source, target, ownership policy, source assessment revision and correspondence
+revisions remain pinned. A changed target blocks a first publication. An uncertain
+publication retains the exact endpoint, body, request ID and preview through
+503/409 and pending projection; retry never selects a newer baseline. Discard is
+explicit. Source/candidate/context/assertion reads are bounded and paged; selected
+assertion IDs remain visible across pages. Actor/project teardown invalidates late
+responses, and a retained draft buffer prevents competing product/version and
+correspondence edits. Presentation follows backend authorization and eligibility.
 
 Adopted drafts retain original source evidence by the exact immutable assessment
 revision, plus evidence count and digest. Source evidence is neither duplicated nor

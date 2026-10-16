@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
+import KnowledgeCorrespondenceDraft from './KnowledgeCorrespondenceDraft.vue'
 type Kind = 'component' | 'context'
 type Pair = { kind: Kind; source_id: string; target_id: string }
 type Facts = { name?: string; version?: string; purl?: string; [key: string]: unknown }
@@ -14,7 +15,8 @@ type Preview = { source: string; target: string; preview_digest: string; eligibl
 type Payload = { reconciliation_id: string; source: string; target: string; stage: string; rationale: string; evidence: object[]; preview: Preview; actor_id: string; retraction_reason?: string }
 type Record = { revision: string; payload: Payload; in_version_scope: boolean }
 const props = defineProps<{ project: string; version: string; state: string }>()
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{ changed: []; locked: [boolean] }>()
+const draftLocked = ref(false)
 const expanded = ref(false), busy = ref(false), error = ref(''), notice = ref(''), source = ref(''), target = ref(props.state), advancedSource = ref(''), stale = ref(false)
 const references = ref<Reference[]>([]), refsNext = ref<number | null>(null), history = ref<History[]>([]), historyNext = ref<number | null>(null), historyOffset = ref(0), historyPrevious = ref<number[]>([]), historyVersion = ref('')
 const emptyPane = (): Pane => ({ q: '', data: null, offset: 0, previous: [], selected: '' })
@@ -118,11 +120,13 @@ function applyAdvanced() { if (/^[a-f0-9]{64}$/.test(advancedSource.value)) choo
 watch(kind, () => { panes.value = { source: emptyPane(), target: emptyPane() } })
 watch(() => props.state, () => { if (pending.value || preview.value || pairs.value.length) stale.value = true; else { ++sequence; busy.value = false; registry.value = null; target.value = props.state; if (expanded.value) void loadRegistry() } })
 watch(() => [props.project, props.version], () => { ++sequence; busy.value = false; fresh(); source.value = ''; references.value = []; history.value = []; registry.value = null; refsNext.value = null; historyNext.value = null; historyPrevious.value = []; registryPrevious.value = []; if (expanded.value) void loadRegistry().then(() => loadRefs()) })
-onBeforeUnmount(() => { ++sequence })
+onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
   <details class="knowledge-reconciliation" @toggle="toggle"><summary>Occurrence correspondence across imports</summary>
     <section aria-label="Occurrence correspondence">
+      <KnowledgeCorrespondenceDraft :project="project" :version="version" :state="state" :source="source" :disabled="busy || !!pending" @locked="draftLocked = $event; emit('locked', $event)" @changed="emit('changed')" />
+      <fieldset :disabled="draftLocked" class="correspondence-controls">
       <p class="hint">Record an attributed component or consuming-context correspondence after a producer changes references. These are separate relations, never verified identity or automatic transfer of assessments, ownership, evidence, metadata or approvals.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p><p v-if="stale" class="hint">The workspace target advanced. The current request retains its original pins; start a new assertion to select the new baseline.</p>
       <div class="actions"><button type="button" :disabled="busy" @click="loadRegistry(registryOffset)">Refresh correspondence registry</button><button type="button" :disabled="busy" @click="fresh">New correspondence assertion</button></div>
@@ -139,9 +143,10 @@ onBeforeUnmount(() => { ++sequence })
       <form v-if="writable" aria-label="Record correspondence" @submit.prevent="mutate('confirm')"><label>Correspondence rationale<textarea v-model="rationale" required maxlength="6000" :disabled="busy || Boolean(pending)" /></label><details><summary>Attributed evidence references</summary><label>Correspondence evidence (JSON array)<textarea v-model="evidence" spellcheck="false" :disabled="busy || Boolean(pending)" /></label></details><button :disabled="busy || pending?.action === 'retract' || (!pending && (!preview?.eligible || !rationale.trim() || stale))">{{ pending ? 'Resend identical correspondence request' : 'Record attributed correspondence' }}</button></form>
       <p v-if="registry">{{ registry.total }} retained assertions in this pinned target state</p><article v-for="row in registry?.items" :key="row.revision"><strong>{{ row.payload.reconciliation_id }} · {{ human(row.payload.stage) }}</strong><p>{{ row.payload.rationale }}</p><p v-if="!row.in_version_scope" class="hint">Historical assertion from another version; no current coverage is inferred.</p><details><summary>Recorded correspondence pins and evidence</summary><pre>{{ JSON.stringify(row, null, 2) }}</pre></details><template v-if="writable && row.in_version_scope"><button type="button" :disabled="busy || Boolean(pending)" @click="edit(row)">Supersede assertion {{ row.payload.reconciliation_id }}</button><button v-if="row.payload.stage === 'active'" type="button" :disabled="busy || Boolean(pending)" @click="retractId = row.payload.reconciliation_id; retractReason = ''">Consider retraction {{ row.payload.reconciliation_id }}</button><form v-if="row.payload.stage === 'active' && retractId === row.payload.reconciliation_id" @submit.prevent="mutate('retract', row)"><label>Retraction reason<textarea v-model="retractReason" required maxlength="6000" :disabled="busy || Boolean(pending)" /></label><button :disabled="busy || (pending && (pending.action !== 'retract' || pending.recordId !== row.payload.reconciliation_id)) || (!pending && !retractReason.trim())">{{ pending ? 'Resend identical retraction request' : 'Retract assertion' }}</button></form></template></article>
       <nav class="actions" aria-label="Correspondence registry pages"><button type="button" :disabled="busy || !registryPrevious.length" @click="registryPage(false)">Previous correspondence assertions</button><button type="button" :disabled="busy || registry?.next_offset == null" @click="registryPage(true)">Next correspondence assertions</button></nav>
+      </fieldset>
     </section>
   </details>
 </template>
 <style scoped>
-.knowledge-reconciliation { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; } summary { cursor: pointer; font-weight: 600; } section, article, form, li { min-width: 0; overflow-wrap: anywhere; }.hint, small { font-size: .85rem; color: var(--muted); }.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .6rem; } label { display: grid; gap: .3rem; margin-block: .6rem; } input, select, textarea { width: 100%; min-width: 0; box-sizing: border-box; } textarea { min-height: 4rem; }.selectors { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(250px,100%),1fr)); gap: 1rem; }.choice { display: flex; align-items: flex-start; }.choice input { width: auto; margin-top: .2rem; }.choice small { display: block; font-size: .7rem; }article { border-top: 1px solid var(--line); padding-block: .8rem; }pre { overflow-wrap: anywhere; white-space: pre-wrap; max-height: 18rem; overflow: auto; font-size: .75rem; }code { font-size: .75rem; overflow-wrap: anywhere; }.pairs { padding-left: 1.2rem; }
+.correspondence-controls { border: 0; padding: 0; min-width: 0; } .knowledge-reconciliation { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; } summary { cursor: pointer; font-weight: 600; } section, article, form, li { min-width: 0; overflow-wrap: anywhere; }.hint, small { font-size: .85rem; color: var(--muted); }.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .6rem; } label { display: grid; gap: .3rem; margin-block: .6rem; } input, select, textarea { width: 100%; min-width: 0; box-sizing: border-box; } textarea { min-height: 4rem; }.selectors { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(250px,100%),1fr)); gap: 1rem; }.choice { display: flex; align-items: flex-start; }.choice input { width: auto; margin-top: .2rem; }.choice small { display: block; font-size: .7rem; }article { border-top: 1px solid var(--line); padding-block: .8rem; }pre { overflow-wrap: anywhere; white-space: pre-wrap; max-height: 18rem; overflow: auto; font-size: .75rem; }code { font-size: .75rem; overflow-wrap: anywhere; }.pairs { padding-left: 1.2rem; }
 </style>
