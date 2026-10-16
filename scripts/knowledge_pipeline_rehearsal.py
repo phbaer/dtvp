@@ -75,11 +75,11 @@ def rehearse(client, *, simulate_reviews=False, output=None):
     def workspace():
         return checked(client.get(product + "/workspace", params={"limit": 200}))
 
-    def publication(endpoint, payload):
+    def publication(endpoint, payload, method="POST"):
         # Keep a recoverable exact declaration before a possibly uncertain publication.
-        record(f"request-{len(steps):02d}", {"endpoint": endpoint, "payload": payload})
-        result = checked(client.post(endpoint, json=payload))
-        steps.append({"endpoint": endpoint, "result": result})
+        record(f"request-{len(steps):02d}", {"endpoint": endpoint, "method": method, "payload": payload})
+        result = checked(client.request(method, endpoint, json=payload))
+        steps.append({"endpoint": endpoint, "method": method, "result": result})
         if result.get("committed") is not True or result.get("projection") != "current":
             raise RuntimeError(
                 "Publication uncertain or projection pending; inspect retained project, do not repin/repeat automatically"
@@ -98,6 +98,56 @@ def rehearse(client, *, simulate_reviews=False, output=None):
                 "context_roots": {},
             },
         )
+    )
+    # CI owns these declared source relationships/model entities; no authenticity claim.
+    model = {
+        "model_id": "synthetic-architecture",
+        "revision": "rehearsal-1",
+        "entities": [
+            {"entity_id": "network-stack", "name": "Synthetic network stack", "external": False},
+            {"entity_id": "parser", "name": "Synthetic parser", "external": False},
+        ],
+    }
+    model_raw = (json.dumps(model, sort_keys=True, indent=2) + "\n").encode()
+    retain("synthetic-threat-model.json", model_raw)
+    configuration = publication(
+        path + "/pipeline-config",
+        {
+            "request_id": str(uuid4()),
+            "expected_policy": None,
+            "expected_versions": {},
+            "reason": "Synthetic CI-owned part roles and model mappings; not authenticated model evidence",
+            "parts": [
+                {
+                    "part_id": "application",
+                    "authority_source": "synthetic/application",
+                    "observation_sources": ["synthetic/binary-scan"],
+                },
+                {
+                    "part_id": "container",
+                    "authority_source": "synthetic/container",
+                    "observation_sources": [],
+                },
+            ],
+            "models": [{**model, "digest_sha256": hashlib.sha256(model_raw).hexdigest()}],
+            "mappings": [
+                {
+                    "mapping_id": "http-placement",
+                    "component_selector": "demo-http",
+                    "model_id": model["model_id"],
+                    "entity_ids": ["network-stack"],
+                    "legacy_names": ["Synthetic network stack"],
+                },
+                {
+                    "mapping_id": "parser-placement",
+                    "component_selector": "demo-parser",
+                    "model_id": model["model_id"],
+                    "entity_ids": ["parser"],
+                    "legacy_names": ["Synthetic parser"],
+                },
+            ],
+        },
+        method="PUT",
     )
     document = json.loads((ROOT / "playground/fixtures/release.cdx.json").read_text())
     ancillary = copy.deepcopy(document)
@@ -126,6 +176,7 @@ def rehearse(client, *, simulate_reviews=False, output=None):
             "request_id": str(uuid4()),
             "expected": None,
             "source": "synthetic/" + name,
+            "expected_configuration": configuration,
             "build_number": 1,
             "occurred_at": datetime.now(UTC).isoformat(),
             "completeness": "complete",
@@ -152,6 +203,7 @@ def rehearse(client, *, simulate_reviews=False, output=None):
         "request_id": str(uuid4()),
         "expected": None,
         "parts": parts,
+        "expected_configuration": configuration,
         "coherence": {
             "status": "producer_declared",
             "build_id": "synthetic-integration",
@@ -165,6 +217,124 @@ def rehearse(client, *, simulate_reviews=False, output=None):
         product + "/assembly-apply",
         {"assembly": assembly, "preview_digest": preview["preview_digest"]},
     )
+    authority = initial
+    authority_inventory = checked(
+        client.get(product + "/inventory", params={"expected": authority, "limit": 200})
+    )
+    observed = copy.deepcopy(document)
+    observed["components"][0]["description"] = "Synthetic binary scanner supplemental evidence"
+    observed["components"].append(
+        {
+            "type": "library",
+            "bom-ref": "scanner-only",
+            "name": "Synthetic scanner-only library",
+            "version": "1",
+            "purl": "pkg:generic/scanner-only@1",
+        }
+    )
+    observed["dependencies"][0]["dependsOn"].append("scanner-only")
+    observed["dependencies"].append({"ref": "scanner-only", "dependsOn": []})
+    observation_states, observation_files, selection_states = [], [], []
+    source_state = None
+    selected_head = authority
+    for build in (1, 2):
+        observed["components"][0]["description"] = (
+            f"Synthetic scanner supplemental evidence revision {build}"
+        )
+        raw = (json.dumps(observed, ensure_ascii=False, indent=2) + "\n").encode()
+        name = f"observation-{build}.cdx.json"
+        retain(name, raw)
+        artifact = hashlib.sha256(raw).hexdigest()
+        declaration = {
+            "format": "dtvp.subject-declaration/1",
+            "product_id": project,
+            "version": VERSION,
+            "part_id": "application",
+            "subject_id": "synthetic-processing-delivery",
+            "build_id": "synthetic-integration",
+            "authority_sbom_sha256": hashlib.sha256(files["application.cdx.json"]).hexdigest(),
+            "observation_sbom_sha256": artifact,
+        }
+        metadata = {
+            "request_id": str(uuid4()),
+            "source": "synthetic/binary-scan",
+            "part_id": "application",
+            "expected": source_state,
+            "expected_authority": selected_head,
+            "expected_configuration": configuration,
+            "build_number": build,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "subject_declaration": declaration,
+        }
+        record(f"observation-{build}-import-metadata", metadata)
+        response = checked(
+            client.post(
+                product + "/observation-files",
+                data={"metadata": json.dumps(metadata)},
+                files={"file": (name, raw, "application/json")},
+            )
+        )
+        if response.get("committed") is not True or response.get("projection") != "current":
+            raise RuntimeError("Observation import uncertain; inspect exact retained metadata")
+        source_state = response["updates"][0]["target"]
+        observation_states.append(source_state)
+        observation_files.append((artifact, raw))
+        selection = {
+            "request_id": str(uuid4()),
+            "expected": selected_head,
+            "expected_configuration": configuration,
+            "sources": [
+                {"source": "synthetic/binary-scan", "part_id": "application", "state": source_state}
+            ],
+        }
+        proposal = record(
+            f"observation-{build}-preview",
+            checked(client.post(product + "/observation-selection/preview", json=selection)),
+        )
+        kernel = proposal["reports"][0]["report"]
+        if kernel["subject_assurance"] != "producer_declared" or not any(
+            item["observation_ref"] == "scanner-only" for item in kernel["component_proposals"]
+        ):
+            raise RuntimeError(
+                "Synthetic overlap failed to retain declared assurance or explicit unknown-component proposal"
+            )
+        selected_head = publication(
+            product + "/observation-selection",
+            {**selection, "preview_digest": proposal["preview_digest"]},
+        )
+        selection_states.append(selected_head)
+        inventory = checked(
+            client.get(product + "/inventory", params={"expected": selected_head, "limit": 200})
+        )
+        if len(inventory["items"]) != len(authority_inventory["items"]) or any(
+            item["component"]["name"] == "Synthetic scanner-only library"
+            for item in inventory["items"]
+        ):
+            raise RuntimeError("Observation silently duplicated or adopted inventory")
+    historical_observation = record(
+        "selected-observation-summary",
+        checked(client.get(path + f"/states/{selected_head}/evidence-summary")),
+    )
+    withdrawal = {
+        "request_id": str(uuid4()),
+        "expected": selected_head,
+        "expected_configuration": configuration,
+        "sources": [],
+        "removal_reason": "Synthetic explicit observation withdrawal; retained history remains available",
+    }
+    withdrawal_preview = record(
+        "observation-withdrawal-preview",
+        checked(client.post(product + "/observation-selection/preview", json=withdrawal)),
+    )
+    initial = publication(
+        product + "/observation-selection",
+        {**withdrawal, "preview_digest": withdrawal_preview["preview_digest"]},
+    )
+    selection_states.append(initial)
+    if checked(client.get(product + "/observation-selection"))["selection"]["sources"]:
+        raise RuntimeError(
+            "Explicit observation withdrawal did not restore authoritative inventory"
+        )
     initial_summary = record(
         "before-review", checked(client.get(path + f"/states/{initial}/evidence-summary"))
     )
@@ -192,6 +362,8 @@ def rehearse(client, *, simulate_reviews=False, output=None):
         raise RuntimeError("Synthetic VScorer input is unexpectedly unresolved")
     for name, raw in prepared["files"].items():
         retain("vscorer-" + name, raw.encode())
+    if "pipeline-context.json" not in prepared["files"]:
+        raise RuntimeError("VScorer input omitted pinned pipeline mappings")
     login(client, "coordinator")
 
     def score_input():
@@ -270,6 +442,19 @@ def rehearse(client, *, simulate_reviews=False, output=None):
         raise RuntimeError("Repeated frozen export did not retain its identity")
     if checked(client.get(path + f"/states/{initial}/evidence-summary")) != initial_summary:
         raise RuntimeError("Historical evidence summary changed")
+    bundle = json.loads(files["issued-bundle.json"])
+    if bundle.get("pipeline_context", {}).get("configuration_state") != configuration:
+        raise RuntimeError("Issued native bundle omitted its exact pipeline configuration")
+    if (
+        checked(client.get(path + f"/states/{selection_states[1]}/evidence-summary"))
+        != historical_observation
+    ):
+        raise RuntimeError("Withdrawing an observation changed retained historical evidence")
+    for artifact, raw in observation_files:
+        response = client.get(path + f"/states/{initial}/artifacts/{artifact}")
+        response.raise_for_status()
+        if response.content != raw:
+            raise RuntimeError("Observation replacement/withdrawal lost original source bytes")
     record("publication-receipts", steps)
     report = {
         "format": "dtvp.pipeline-rehearsal/1",
@@ -278,6 +463,16 @@ def rehearse(client, *, simulate_reviews=False, output=None):
         "project_id": project,
         "version": VERSION,
         "initial_state": initial,
+        "authority_state": authority,
+        "pipeline_configuration": configuration,
+        "observation_states": observation_states,
+        "selection_states": selection_states,
+        "overlap": {
+            "subject_assurance": "producer_declared",
+            "inventory_implicitly_adopted": False,
+            "withdrawn": True,
+            "historical_source_bytes_verified": len(observation_files),
+        },
         "final_state": final,
         "summary_digest": summary["summary_digest"],
         "issuance_receipt": issuance["receipt_sha256"],

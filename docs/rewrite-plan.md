@@ -168,9 +168,9 @@ Preserve unchanged approved target coverage, conflicting target edits and immuta
 release tags. Cascade proposals edge by edge using each target's actual inventory;
 acceptance on an earlier edge never approves a downstream version.
 
-Existing pinned previews/drafts and integration-event records provide the foundation.
-Automatic triggering, coalesced scheduling and proposal lifecycle are planned
-implementation, not behavior enabled by this design update.
+Configured relationships now use the existing worker for coalesced, durable,
+pinned proposals. Scheduling never adopts target drafts or extends approvals.
+See README for current endpoints, bounded execution and retry/cancel behavior.
 
 ### Authoritative state and publication
 
@@ -256,7 +256,7 @@ Native file-intake and assembly UIs now capture explicit source/part selections
 and collection scope. Inputs retain subject digest, source/build identity,
 target/platform/configuration, collector version/method and coverage limitations;
 explicit pinned cross-part topology edits are supported; overlapping-view
-reconciliation remains deferred. Complete inventory replacement is within declared
+reconciliation now ships through separate pinned observation intake and explicit selection. Complete inventory replacement is within declared
 scope; it is not verified discovery of every product component. Source, binary, container and
 build evidence must not silently overwrite incompatible scopes. Preserve typed
 containment/dependency/communication relations and declared/observed/concluded
@@ -267,7 +267,8 @@ distinctions across security, license and architecture workflows.
 Design decision: classify inputs as delivery parts or observations of an existing
 part. Merge compatible overlapping observations into one derived dependency graph
 to avoid duplicate representations, while retaining every original document.
-This extends the target design; overlapping-view reconciliation is not yet shipped.
+Bounded observation intake, reconciliation and explicit adoption now implement
+this design. Original inputs and supplemental assertions remain attributable.
 
 Reconciliation is scoped to one product version, delivery part and compatible
 artifact/build/configuration subject. Similar package coordinates do not establish
@@ -846,8 +847,8 @@ current ownership/evidence/approval synthesis; apply uses the existing guarded
 publication and receipt identity. Unknown or nonproduct predecessor objects are
 rejected before dereferencing. No automatic latest-part selection or approval
 transfer occurs.
-Initial limits: delivery parts only, same-version source inputs, no overlapping
-evidence-view reconciliation or nested assembly. Explicit pinned cross-part
+Assembly limits: delivery parts and same-version source inputs; nested assemblies
+remain unsupported. Overlapping observations use separate reconciliation/selection. Explicit pinned cross-part
 DEPENDS_ON/CONTAINS relationships now ship; no identity merging is inferred.
 
 Ownership now has a product policy reference and derived consuming contexts in
@@ -920,7 +921,7 @@ set through API, CLI and UI. They never approve future versions or create dynami
 applicability ranges. Explicit correspondence can create a new target-author draft
 from an independently approved historical source, with both component and context
 assertions, unchanged material, recorded ancestry and a new target review. Automatic
-semantic cross-import identity reconciliation remains deferred.
+semantic cross-import identity reconciliation now ships through separate pinned observation intake and explicit selection.
 
 Pinned inventory can also be compared with explicitly selected retained advisory
 evidence through API, CLI and a collapsed advisory panel. Provider claims and

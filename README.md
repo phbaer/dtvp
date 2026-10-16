@@ -194,8 +194,8 @@ versioned metadata. DTVP validates them and returns diagnostics, rather than
 routinely prompting reviewers. Generator's existing entity-name mappings remain
 compatible; stable entity IDs require a pinned model revision. See the
 [user/CI metadata contract](docs/rewrite-plan.md#userci-supplied-metadata-and-subject-declarations).
-Public observation intake/publication and durable mapping-manifest integration are
-not yet wired; the caller must authorize declared product/version scope.
+Public observation intake/publication and durable mapping configuration now ship;
+HTTP authorization checks the declared product/version scope before import.
 
 ### Read-only global orphan audit
 
@@ -447,11 +447,12 @@ but does not verify composition, approvals or release readiness beyond this inpu
 gate. Optional missing parts stay visible. Original constituent bytes remain
 retrievable by pinned source state after replacement or removal.
 
-This slice supports delivery parts within one product/version, not overlapping
-evidence views or nested assemblies. Explicit pinned cross-part DEPENDS_ON/CONTAINS
+Assembly selects delivery parts within one product/version. Separate observation
+intake reconciles overlapping evidence; nested assemblies remain unsupported. Explicit pinned cross-part DEPENDS_ON/CONTAINS
 relationships are supported; identities are never merged automatically. Each new
 product version needs its own constituent imports; cross-version source reuse
-and semantic identity reconciliation remain planned. Unresolved relationship
+remains outside the assembly contract. Unique strong identities now support same-version
+lineage continuity without collapsing distinct delivery parts. Unresolved relationship
 endpoints fail assembly; external-document references need explicit reconciliation.
 The Knowledge tab shows assembled findings and their consuming contexts.
 Explore a repeatable two-part nightly update against the running playground:
@@ -1434,8 +1435,8 @@ counts accompany bounded revision/logical-assessment pages; `expected=PLAN_HASH`
 rejects changed references during pagination. The HTTP CLI can use `knowledge
 request GET /api/v3/projects/ID/maintenance/retention-preview`. This dry run writes
 nothing and makes no physical storage estimate. Explicit logical archival uses
-the separate complete-history plan described below. Retention policy and physical
-journal garbage collection remain planned; history is not deleted.
+the separate complete-history plan described below. Stopped-writer orphan cleanup
+now ships; committed history compaction remains unsupported.
 
 Reviewer queue and project/organization portfolios support `agentyzer_evidence`
 and `vscorer_evidence` filters: `missing`, `current`, `historical_only` and
@@ -2814,3 +2815,14 @@ retain exact pins and preview through uncertain outcomes or projection lag. Acto
 changes invalidate late responses; intake and selection drafts cannot replace one
 another silently. Ordinary assessment screens remain focused on the selected team
 and finding; supplemental component evidence expands on demand.
+
+The API-only pipeline rehearsal now declares two delivery-part authorities and a
+same-part binary-scanner observer in a pinned user/CI pipeline configuration before
+imports. It includes a synthetic revision/digest-bound threat-model entity mapping.
+Two original scanner SBOM revisions carry exact-file-bound producer declarations;
+preview/publication demonstrate graph deduplication, attributed supplemental evidence
+and a scanner-only component left as an explicit inventory proposal. Replacement and
+explicit withdrawal preserve historical summaries and byte-exact source downloads.
+Native issued bundles and VScorer input files are checked for pinned model metadata.
+This remains synthetic contract validation, with no claim of real model authenticity,
+producer completeness, license clearance or document acceptance.

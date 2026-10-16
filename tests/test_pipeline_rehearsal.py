@@ -23,6 +23,34 @@ def test_pipeline_rehearsal_assembles_gates_reviews_and_archives_exact_issued_by
     assert report["acceptance"] == "synthetic_contract_rehearsal_only"
     assert report["verified_consumer_files"] >= 2
     assert (report["initial_state"] != report["final_state"]) is simulate_reviews
+    assert report["pipeline_configuration"]
+    assert len(report["observation_states"]) == 2
+    assert len(report["selection_states"]) == 3
+    assert report["overlap"] == {
+        "subject_assurance": "producer_declared",
+        "inventory_implicitly_adopted": False,
+        "withdrawn": True,
+        "historical_source_bytes_verified": 2,
+    }
+    for build in (1, 2):
+        metadata = json.loads(files[f"observation-{build}-import-metadata.json"])
+        assert (
+            metadata["subject_declaration"]["authority_sbom_sha256"]
+            == hashlib.sha256(files["application.cdx.json"]).hexdigest()
+        )
+        assert (
+            metadata["subject_declaration"]["observation_sbom_sha256"]
+            == hashlib.sha256(files[f"observation-{build}.cdx.json"]).hexdigest()
+        )
+        preview = json.loads(files[f"observation-{build}-preview.json"])
+        assert preview["human_decisions_changed"] is False
+        assert preview["reports"][0]["report"]["summary"]["supplemental_assertions"] > 0
+    bundle = json.loads(files["issued-bundle.json"])
+    assert bundle["pipeline_context"]["configuration_state"] == report["pipeline_configuration"]
+    assert any(row["status"] == "mapped" for row in bundle["pipeline_context"]["rows"])
+    vscorer_context = json.loads(files["vscorer-pipeline-context.json"])
+    assert vscorer_context["configuration_state"] == report["pipeline_configuration"]
+    assert any(model["model_id"] == "synthetic-architecture" for model in vscorer_context["models"])
     summary = json.loads(files["evidence-summary.json"])
     assert summary["inventory"]["assembly"]["selected_parts"] == 2
     assert summary["licenses"]["current_approved_components"] == 0
