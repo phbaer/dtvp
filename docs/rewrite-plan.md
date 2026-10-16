@@ -688,10 +688,26 @@ separate from imports and bound into applicable review fingerprints. Single-sour
 baseline withdrawal retains history/tags and makes absence explicit. Legacy tagged
 and metadata-free DT histories remain unverified source claims.
 
+Native management now includes guided pinned product assembly, v1-compatible
+ownership editing, supplied offline CPE policy previews and component-context
+annotations. Compact product/state toolbars preserve drafts and evidence details.
+Explicit queue progression and bulk independent review retain exact requests
+through uncertainty; coordinator scoring remains separate from team assessment.
+Pinned composition input observations expose full source/role/license/topology
+counts and machine-readable issues through API/CLI without claiming completeness.
+A larger API-only playground seeder preserves existing interactive work.
+
+Offline full-installation recovery now has a repeatable SQLite and real PostgreSQL
+18 dump/restore rehearsal. It checks operational credentials/memberships/jobs,
+complete journal integrity, projection-only rebuild, tags, reviews, frozen export
+bytes and access denials. Readiness detects checkpoint/publication misalignment
+without repairing it. Custom roles/extensions, engine major upgrades, production
+identity and remote-service reconciliation still require deployment qualification.
+
 Not yet implemented: remaining native management/integration UI, stable cross-import/context identity,
 range/exclusion expressions beyond explicit reviewed version targets, extended evidence synthesis,
 advanced VDR/VEX scope/schema/signature support, cascading synchronization, cached semantic comparisons, journal
-retention/GC, operational-state recovery and v2/legacy migration. Native Agentyzer
+retention/GC, deployment-specific recovery qualification and v2/legacy migration. Native Agentyzer
 follow-up orchestration and authenticated remote-ID reconciliation, full CPE refresh/migration, extended license qualification and architecture-approval
 workflows, consumer serializer upgrade compatibility and controlled-document
 qualification remain cutover gates. The v2 runtime

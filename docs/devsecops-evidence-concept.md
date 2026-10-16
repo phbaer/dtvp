@@ -232,6 +232,18 @@ missing evidence or an explicitly reviewed limitation. Collector onboarding and
 producer corrections address input defects; DTVP must not silently repair them
 into unsupported conclusions.
 
+The implemented pinned input-observation report is available through native API
+and CLI after intake, including for constituent source states before assembly.
+It reports identity gaps, source coverage declarations, unresolved references and
+license-evidence distinctions with per-source counts and a complete report digest.
+CI can apply an explicit producer-onboarding or publication policy to its machine
+codes. The report does not automatically block imports or releases, assign a
+quality score, verify a producer's claims or discover omitted composition. A
+single-source import advances that baseline before the report is queried; use
+isolated constituent intake when a policy decision must precede product assembly.
+Operational `/readyz` checks schema/projection alignment and is unrelated to a
+product's cybersecurity, license or document publication acceptance.
+
 Preserve four distinctions throughout storage, UI, CLI and exports:
 
 - Declared by a producer or supplier.
