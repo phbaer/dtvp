@@ -758,6 +758,33 @@ without changing annotations/provenance does not invalidate coverage. Baseline
 updates retain artifact pins for authored revisions and external reports; retention
 and garbage collection remain explicit future maintenance work.
 
+### Pinned pipeline evidence summary
+
+`GET /api/v3/projects/{id}/states/{sha}/evidence-summary` returns
+`dtvp.pipeline-evidence-summary/1`: exact product/version/state and section pins,
+a deterministic `summary_digest`, and full unfiltered counts for imported
+inventory, producer-declared acquisition coverage, input-quality observations,
+contextual team reviews, ownership gaps, published-score currency, license
+evidence/dispositions, controlled documents and retained absent assessments.
+Counts reuse the existing backend classifications, including independently
+retained approved pins alongside newer pending revisions. Historical document
+approvals remain separate from approvals whose input material is current in the
+selected state. Team counts may overlap; zero findings never establishes clearance.
+
+```bash
+uv run dtvp knowledge --url http://127.0.0.1:8900 evidence-summary \
+  --project PROJECT_ID --state STATE_SHA --json
+```
+
+The CLI only presents the HTTP result. Project read permission and committed
+product-state membership are checked on every request. Historical states remain
+available without consulting newer branches, provider information or the clock.
+The summary has no release/compliance verdict and changes no records. Consumers
+must explicitly define downstream policies; machine-readable limitation codes
+explain unknown producer coverage, historical-only scope and documentary limits.
+Detailed pinned input-quality, license, document and consumer-bundle reports are
+linked separately; original component/source/report payloads are not duplicated.
+
 ### License evidence worklist
 
 `GET /api/v3/projects/{id}/states/{state}/license-worklist` returns pinned,

@@ -165,7 +165,7 @@ def document_status(journal, state, document_id):
     )
 
 
-def list_documents(journal, state, offset=0, limit=50):
+def list_documents(journal, state, offset=0, limit=50, *, paginate=True):
     if offset < 0 or not 1 <= limit <= 200:
         raise ValueError("Invalid document page bounds")
     revision = journal.state(state)
@@ -187,11 +187,11 @@ def list_documents(journal, state, offset=0, limit=50):
         for value in records
     ]
     return {
-        "items": items[offset : offset + limit],
+        "items": items[offset : offset + limit] if paginate else items,
         "total": len(items),
         "offset": offset,
         "limit": limit,
-        "next_offset": offset + limit if offset + limit < len(items) else None,
+        "next_offset": offset + limit if paginate and offset + limit < len(items) else None,
         "by_status": dict(Counter(item["status"] for item in items)),
     }
 

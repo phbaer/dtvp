@@ -103,7 +103,7 @@ def component_licenses(component, baseline):
     return {"status": status, "facts": facts, "limitations": problems}
 
 
-def license_worklist(journal, state, offset=0, limit=50):
+def license_worklist(journal, state, offset=0, limit=50, *, paginate=True):
     revision = journal.verify_state(state)
     sections = load_sections(journal, state)
     inventory = sections["inventory"]
@@ -151,4 +151,5 @@ def license_worklist(journal, state, offset=0, limit=50):
         },
         "limitations": list(LIMITATIONS),
         **page(rows, offset, limit),
+        **({"items": rows, "next_offset": None} if not paginate else {}),
     }
