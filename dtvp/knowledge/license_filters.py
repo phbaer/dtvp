@@ -65,6 +65,7 @@ class LicenseFilters(RequestModel):
                         "source",
                         "evidence",
                         "license_review",
+                        "supplemental_evidence",
                     )
                 }
             ).casefold()

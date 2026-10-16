@@ -341,6 +341,7 @@ def test_native_license_register_is_complete_beyond_api_page_limit(journal):
         for index in range(201):
             ref = f"license-component-{index}"
             payload = {
+                "format": "dtvp.license-disposition/1",
                 "version": "7.1.1",
                 "component_ref": ref,
                 "source_fingerprint": fingerprint,

@@ -2904,3 +2904,46 @@ format and pinned source attribution. Validated source artifacts can be opened
 through the selected product state. Adopted observation occurrences explicitly
 have no authority license claim. Source differences do not establish compatibility
 or clearance; human conclusions and independent review remain explicit.
+
+License worklists now show attributed `supplemental_evidence` alongside unchanged
+authority evidence. Each claim binds source, part, original reference, pinned
+observation state, validated original artifact SHA and the parser format from that
+state's baseline. A CycloneDX lookalike SPDX property cannot change interpretation.
+Reviewers can retrieve the original selected artifact for document-level custom
+LicenseRef text. Adopted observation-only occurrences have no authority license
+claim; their evidence remains supplemental with an explicit inventory role.
+
+Exact reported tokens remain separated into declared, concluded, file-derived and
+generic categories. `source_claims_differ` compares comparable exact token sets,
+including simple CDX/SPDX declared-token equality; it never evaluates expression
+semantics, compatibility, obligations or legal clearance. Unknown, NONE and
+NOASSERTION remain explicit. Existing evidence filters/counts retain authority
+semantics; supplemental status and differing-claim counts are additive, and free
+text search includes attributed supplemental facts. Sources/report construction
+are bounded and fail without truncation.
+
+New dispositions on layered inventory use `dtvp.license-disposition/2` with a
+pinned source state and `dtvp.license-material/2` fingerprint. Whole-product license
+material retains component/graph facts, effective source roles, unknown context
+attributes, full configuration bodies, collection/coverage assumptions and
+validated supplemental evidence. Only typed import/identity bookkeeping is
+excluded; identical nightly reference/pointer changes preserve valid approvals,
+while changed evidence, source roles, configuration or other product material
+requires fresh review. No component/version coverage is expanded automatically.
+
+Existing `/1` fingerprints retain their exact historical meaning and validation.
+A legacy mismatch stays stale with an explicit diagnostic when no validated
+historical material bridge exists; it never silently gains `/2` continuity.
+States without new layered inventory retain existing `/1` disposition serialization.
+
+The `/2` material also includes canonical document-level licensing evidence from
+original authority/constituent and observation artifacts, bounded to 32 MiB per
+document and 64 MiB of unique raw source documents per material calculation. SPDX extracted licensing definitions,
+files, snippets, annotations, comments, remaining creation/license-list facts and
+unknown document attributes remain material; CDX document/metadata licensing and
+unknown attributes likewise remain. Only typed identifiers/timestamps and facts
+already represented by normalized components/topology are excluded. Thus an
+unchanged LicenseRef token with changed document terms requires new review;
+unchanged definitions across known nightly document-ID/timestamp changes do not.
+
+Malformed or unsupported source evidence fails without truncation.
