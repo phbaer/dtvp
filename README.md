@@ -882,6 +882,13 @@ IDs and preserved source-root counts; these are operator declarations, not verif
 runtime relationships, discovery completeness or approvals. Normal branch/policy/
 evidence CAS and receipt-first replay continue to apply.
 
+The existing assembly editor keeps these declarations in a closed advanced
+section with an explicit JSON editor and endpoint example. Existing mappings are
+loaded from the selected target; changing part pins never silently rewrites
+relationship pins. Preview captures the complete declaration body and request ID
+for unchanged retries. Syntax failures release the workspace lock for correction;
+actor/project teardown invalidates late preview/publication completions.
+
 ### External v1 project archive dry run
 
 Managers can inspect an exported `dtvp.project-archive/v1` ZIP without restoring it:

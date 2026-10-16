@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 type Part = { part_id: string; state: string | null; required: boolean; role: 'delivery'; availability?: string }
 type Row = Part & { action: 'keep' | 'missing' | 'remove' }
-type Target = { state: string | null; predecessor: string | null; previous_kind: string; parts: Part[]; coherence: unknown; capabilities: string[]; limitations: string[] }
-type Preview = { preview_digest: string; readiness: string; missing_required_parts: string[]; selected_part_count: number; counts: Record<string, number>; selection: Part[]; changes: unknown; limitations: string[] }
+type Target = { state: string | null; predecessor: string | null; previous_kind: string; parts: Part[]; coherence: unknown; capabilities: string[]; limitations: string[]; cross_part_relationships?: unknown[] }
+type Preview = { preview_digest: string; readiness: string; missing_required_parts: string[]; selected_part_count: number; counts: Record<string, number>; selection: Part[]; changes: unknown; limitations: string[]; relationship_diagnostics?: unknown }
 type Frozen = { project: string; version: string; input: Record<string, unknown>; preview?: Preview }
 const props = defineProps<{ project: string; version: string; disabled?: boolean }>()
 const emit = defineEmits<{ locked: [value: boolean]; assembled: [value: { version: string; part_id: null; kind: 'assembly' }] }>()
@@ -12,6 +12,8 @@ const busy = ref(false), error = ref(''), notice = ref(''), version = ref(''), p
 const target = ref<Target | null>(null), rows = ref<Row[]>([]), choices = ref<{ part_id: string; state: string; source?: string }[]>([])
 const query = ref(''), next = ref<number | null>(null), missing = ref(''), versionOptions = ref<string[]>([])
 const removal = ref(''), withdrawal = ref(''), policy = ref(''), coherence = ref('unverified'), build = ref(''), rationale = ref(''), frozen = ref<Frozen | null>(null)
+const relationships = ref('[]'), relationshipReason = ref('')
+const relationshipExample = JSON.stringify([{ relationship_id: 'application-runtime', kind: 'DEPENDS_ON', from: { part_id: 'application', state: 'EXACT_SELECTED_STATE_SHA256', ref: 'ORIGINAL_COMPONENT_REF' }, to: { part_id: 'runtime', state: 'EXACT_SELECTED_STATE_SHA256', ref: 'ORIGINAL_ROOT_REF' }, rationale: 'Reason for this explicit occurrence relationship' }], null, 2)
 let sequence = 0
 const base = () => `/projects/${encodeURIComponent(props.project)}`
 const failure = (value: unknown) => value instanceof Error ? value.message : 'Assembly request failed'
@@ -19,7 +21,7 @@ const selectedCount = computed(() => rows.value.filter(item => item.action !== '
 const removed = computed(() => rows.value.filter(item => item.action === 'remove' && target.value?.parts.some(old => old.part_id === item.part_id)))
 const withdrawn = computed(() => rows.value.filter(item => item.action === 'missing' && target.value?.parts.some(old => old.part_id === item.part_id && old.state)))
 const changedPolicy = computed(() => rows.value.some(item => item.action !== 'remove' && target.value?.parts.some(old => old.part_id === item.part_id && old.required !== item.required)))
-function invalidate() { sequence++; target.value = null; rows.value = []; choices.value = []; error.value = ''; notice.value = '' }
+function invalidate() { sequence++; target.value = null; rows.value = []; choices.value = []; relationships.value = '[]'; relationshipReason.value = ''; error.value = ''; notice.value = '' }
 async function search(offset = 0) {
   if (!version.value.trim()) return
   const current = sequence
@@ -42,7 +44,7 @@ async function inspect() {
     const parameters = new URLSearchParams({ version: version.value.trim() }); if (predecessor.value.trim()) parameters.set('predecessor', predecessor.value.trim())
     const value = await knowledgeApi<Target>(`${base()}/assembly-target?${parameters}`)
     if (current !== sequence) return
-    target.value = value; rows.value = value.parts.map(part => ({ ...part, action: 'keep' })); coherence.value = 'unverified'; build.value = ''; rationale.value = ''; removal.value = ''; withdrawal.value = ''; policy.value = ''; await search()
+    target.value = value; rows.value = value.parts.map(part => ({ ...part, action: 'keep' })); relationships.value = JSON.stringify(value.cross_part_relationships || [], null, 2); relationshipReason.value = ''; coherence.value = 'unverified'; build.value = ''; rationale.value = ''; removal.value = ''; withdrawal.value = ''; policy.value = ''; await search()
   } catch (value) { if (current === sequence) error.value = failure(value) }
   finally { if (current === sequence) busy.value = false }
 }
@@ -51,30 +53,38 @@ function addMissing() { if (missing.value.trim()) { add({ part_id: missing.value
 function chooseHead(row: Row) { const choice = choices.value.find(item => item.part_id === row.part_id); if (choice) { row.state = choice.state; row.action = 'keep' } }
 async function preview() {
   if (busy.value || props.disabled || !target.value?.capabilities.includes('assemble')) return
+  const current = sequence
   error.value = ''; busy.value = true; emit('locked', true)
   try {
+    const declarations = frozen.value ? null : JSON.parse(relationships.value)
+    if (!frozen.value && (!Array.isArray(declarations) || declarations.length > 2000)) throw new Error('Cross-part relationships require a JSON array of at most 2000 declarations.')
     if (!frozen.value) frozen.value = { project: props.project, version: version.value.trim(), input: {
       request_id: crypto.randomUUID(), expected: target.value.state, predecessor: target.value.predecessor,
       parts: rows.value.filter(row => row.action !== 'remove').map(row => ({ part_id: row.part_id, state: row.action === 'missing' ? null : row.state, required: row.required, role: row.role })),
       removed_parts: removed.value.map(row => row.part_id), removal_reason: removal.value,
       withdrawn_parts: withdrawn.value.map(row => row.part_id), withdrawal_reason: withdrawal.value, policy_change_reason: policy.value,
       coherence: { status: coherence.value, build_id: coherence.value === 'producer_declared' ? build.value : null, rationale: coherence.value === 'producer_declared' ? rationale.value : '' },
+      ...(declarations.length ? { cross_part_relationships: declarations } : {}),
+      ...(relationshipReason.value.trim() ? { relationship_change_reason: relationshipReason.value.trim() } : {}),
     } }
     const capture = frozen.value
-    capture.preview = await knowledgeApi<Preview>(`/projects/${encodeURIComponent(capture.project)}/versions/${encodeURIComponent(capture.version)}/assembly-preview`, { method: 'POST', body: JSON.stringify(capture.input) })
-  } catch (value) { error.value = `${failure(value)}. Selection and request ID retained; retry or explicitly start a new plan.` }
-  finally { busy.value = false }
+    const result = await knowledgeApi<Preview>(`/projects/${encodeURIComponent(capture.project)}/versions/${encodeURIComponent(capture.version)}/assembly-preview`, { method: 'POST', body: JSON.stringify(capture.input) })
+    if (current === sequence) capture.preview = result
+  } catch (value) { if (current === sequence) error.value = `${failure(value)}. ${frozen.value ? 'Selection and request ID retained; retry or explicitly start a new plan.' : 'Correct the input before previewing.'}` }
+  finally { if (current === sequence) { busy.value = false; if (!frozen.value) emit('locked', false) } }
 }
 async function apply() {
   const capture = frozen.value
   if (busy.value || !capture?.preview) return
+  const current = sequence
   busy.value = true; error.value = ''
   try {
     const result = await knowledgeApi<{ committed: boolean | null; projection?: string }>(`/projects/${encodeURIComponent(capture.project)}/versions/${encodeURIComponent(capture.version)}/assembly-apply`, { method: 'POST', body: JSON.stringify({ assembly: capture.input, preview_digest: capture.preview.preview_digest }) })
+    if (current !== sequence) return
     if (result.committed !== true) throw new Error('Publication is uncertain; retry the identical captured assembly.')
     frozen.value = null; target.value = null; emit('locked', false); notice.value = 'Product assembly published. Source observations remain distinct; current coverage is calculated by the backend.'; emit('assembled', { version: capture.version, part_id: null, kind: 'assembly' })
-  } catch (value) { error.value = `${failure(value)}. Exact selection, preview and request ID retained for retry; no source pin was advanced.` }
-  finally { busy.value = false }
+  } catch (value) { if (current === sequence) error.value = `${failure(value)}. Exact selection, preview and request ID retained for retry; no source pin was advanced.` }
+  finally { if (current === sequence) busy.value = false }
 }
 function reset() { if (busy.value) return; frozen.value = null; emit('locked', false); invalidate() }
 watch(() => [props.project, props.version], () => { if (!frozen.value) { invalidate(); version.value = props.version; void versions() } }, { immediate: true })
@@ -99,11 +109,12 @@ onBeforeUnmount(() => { sequence++; emit('locked', false) })
           <p v-if="!rows.length" class="hint">No parts selected. Choose delivery parts or explicitly declare missing inputs.</p>
           <div class="assembly-rows"><article v-for="row in rows" :key="row.part_id"><strong>{{ row.part_id }}</strong><span>{{ row.state ? `Pinned ${row.state.slice(0, 12)}` : 'Missing input' }}</span><label><input v-model="row.required" type="checkbox"> Required {{ row.part_id }}</label><label>Selection for {{ row.part_id }}<select v-model="row.action"><option value="keep">Keep selected pin</option><option value="missing">Declare missing input</option><option value="remove">Remove declaration</option></select></label><button v-if="choices.some(part => part.part_id === row.part_id && part.state !== row.state)" type="button" @click="chooseHead(row)">Use inspected head for {{ row.part_id }}</button><details><summary>Exact source pin</summary><label>SHA for {{ row.part_id }}<input v-model="row.state" maxlength="64"></label></details></article></div>
           <label v-if="removed.length">Removal reason<textarea v-model="removal" required maxlength="2000" /></label><label v-if="withdrawn.length">Withdrawal reason<textarea v-model="withdrawal" required maxlength="2000" /></label><label v-if="changedPolicy">Requirement change reason<textarea v-model="policy" required maxlength="2000" /></label>
+          <details><summary>Explicit cross-part relationships</summary><p class="hint">Keep existing declarations unless explicitly changing them. Both endpoints require the exact selected part ID, revision SHA and original component/root reference. No names or package identities are matched. DEPENDS_ON adds a dependency path; CONTAINS records containment only. Source roots remain distinct. Changing a selected pin requires explicitly reviewing its relationship pins.</p><label>Cross-part relationships JSON<textarea v-model="relationships" rows="7" spellcheck="false" /></label><label>Relationship change reason<textarea v-model="relationshipReason" maxlength="2000" rows="2" placeholder="Required when changing or removing an existing relationship" /></label><details><summary>Relationship input example</summary><p class="hint">Replace every placeholder with an exact selected input. The backend validates every reference.</p><pre>{{ relationshipExample }}</pre></details></details>
           <details><summary>Build coherence declaration</summary><p class="hint">Default: unverified. Choosing parts does not prove they came from the same build. A producer declaration remains an attributed claim.</p><label>Coherence<select v-model="coherence"><option value="unverified">Unverified</option><option value="producer_declared">Producer declared</option></select></label><template v-if="coherence === 'producer_declared'"><label>Build identity<input v-model="build" required maxlength="200"></label><label>Coherence rationale<textarea v-model="rationale" required maxlength="2000" /></label></template><details v-if="target.coherence"><summary>Previous declaration (not reused)</summary><pre>{{ JSON.stringify(target.coherence, null, 2) }}</pre></details></details>
           <button class="primary" :disabled="!rows.some(row => row.action !== 'remove')">Preview exact assembly</button>
         </fieldset></form>
       </template>
-      <section v-if="frozen" aria-label="Frozen assembly selection"><p>Selection and request ID are frozen. Source head changes never replace these pins.</p><template v-if="frozen.preview"><p><strong>{{ frozen.preview.readiness.replaceAll('_', ' ') }}</strong> · {{ frozen.preview.selected_part_count }} selected inputs · discovery coverage not verified</p><p v-if="frozen.preview.missing_required_parts.length">Missing required parts: {{ frozen.preview.missing_required_parts.join(', ') }}</p><dl><template v-for="(value, key) in frozen.preview.counts" :key="key"><dt>{{ String(key).replaceAll('_', ' ') }}</dt><dd>{{ value }}</dd></template></dl><ul><li v-for="limitation in frozen.preview.limitations" :key="limitation">{{ limitation }}</li></ul><details><summary>Exact selection and structural changes</summary><pre>{{ JSON.stringify({ input: frozen.input, changes: frozen.preview.changes }, null, 2) }}</pre></details><button class="primary" :disabled="busy" @click="apply">Publish selected assembly</button></template><button v-else :disabled="busy" @click="preview">Retry exact preview</button><button :disabled="busy" @click="reset">Discard plan and inspect again</button></section>
+      <section v-if="frozen" aria-label="Frozen assembly selection"><p>Selection and request ID are frozen. Source head changes never replace these pins.</p><template v-if="frozen.preview"><p><strong>{{ frozen.preview.readiness.replaceAll('_', ' ') }}</strong> · {{ frozen.preview.selected_part_count }} selected inputs · discovery coverage not verified</p><p v-if="frozen.preview.missing_required_parts.length">Missing required parts: {{ frozen.preview.missing_required_parts.join(', ') }}</p><dl><template v-for="(value, key) in frozen.preview.counts" :key="key"><dt>{{ String(key).replaceAll('_', ' ') }}</dt><dd>{{ value }}</dd></template></dl><ul><li v-for="limitation in frozen.preview.limitations" :key="limitation">{{ limitation }}</li></ul><details><summary>Exact selection and structural changes</summary><pre>{{ JSON.stringify({ input: frozen.input, changes: frozen.preview.changes, relationship_diagnostics: frozen.preview.relationship_diagnostics }, null, 2) }}</pre></details><button class="primary" :disabled="busy" @click="apply">Publish selected assembly</button></template><button v-else :disabled="busy" @click="preview">Retry exact preview</button><button :disabled="busy" @click="reset">Discard plan and inspect again</button></section>
     </section>
   </details>
 </template>
