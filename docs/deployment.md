@@ -64,6 +64,19 @@ an existing backup. It supports the standard application-owned database; custom
 roles, extensions and server configuration must be transferred separately.
 PostgreSQL 18 mounts the parent `/var/lib/postgresql` volume.
 
+The target image must already exist locally; the helper pins its image ID and
+never pulls it. It rejects an existing target container, target-named volume, dump
+or manifest and uses a fresh ownership-labelled candidate volume. Only source
+majors 10–17 and target 18 are admitted; that is an input bound, not qualification
+of all source versions or extensions. The candidate major and dump checksum are
+checked again before restore. Backups/manifests are exclusive, owner-readable files.
+
+`DTVP_UPGRADE_REHEARSAL=1 uv run pytest -q tests/test_database_upgrade_rehearsal.py`
+exercises actual local-image PostgreSQL 17→18 conversion with synthetic operational
+rows, journal/projection recovery, frozen exports and permission checks. The test
+cleans only its uniquely named, ownership-labelled resources. It does not establish
+production identity, extension/custom-role or concurrent-write recovery acceptance.
+
 Before reopening writes, verify the candidate's schema, counts, artifact hashes,
 consumer snapshots, credentials and denied cross-team access with DTVP. Change
 the database URL only after validation. Until new writes start, reverting to the

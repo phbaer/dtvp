@@ -2196,6 +2196,40 @@ database URL is supported. PostgreSQL major upgrades use a separate dump/restore
 helper creating a new cluster and retaining the old volume. See
 [deployment and recovery](docs/deployment.md).
 
+### Stopped-writer major-upgrade rehearsal
+
+The stopped-writer PostgreSQL major-upgrade helper now requires a locally present
+PostgreSQL 18 image and pins its image ID with `--pull=never`. It refuses existing
+target containers, target-named volumes, dump files or manifests. The actual
+candidate uses a fresh UUID-suffixed volume with an ownership label checked before
+startup. The source major must be older than 18 (at least 10); the candidate's
+actual server major is checked before restore. This is an operational bound, not
+qualification of every older PostgreSQL release or extension.
+
+Dump and manifest use exclusive creation, owner-only permissions and fsync. The
+manifest records source/target majors, exact image ID and candidate volume; the
+dump checksum is checked again before its single-transaction restore. TCP readiness
+avoids the image initializer's temporary socket-only server and bounds each probe.
+Failures retain the source and any candidate/backup for explicit investigation;
+the helper never stops/removes existing services or changes DTVP's database URL.
+
+A reproducible isolated local-image rehearsal is available:
+
+```bash
+DTVP_UPGRADE_REHEARSAL=1 uv run pytest -q tests/test_database_upgrade_rehearsal.py
+```
+
+It creates uniquely named, ownership-labelled synthetic PostgreSQL 17/18 resources,
+then removes only those resources after validation. Existing clusters are untouched;
+images are not pulled. The rehearsal passed actual major conversion with identical
+operational rows (including uncertain remote jobs), credentials/memberships,
+journal heads/references, approved workspace data, issued document bytes and denied
+cross-team access; source SQL/artifacts remained unchanged. This synthetic stopped-
+application candidate rehearsal does not establish production cutover, custom role/
+extension/server-configuration migration, remote identity/provider continuity,
+performance or concurrent-write recovery acceptance. Backup and artifact storage
+must still be captured consistently, and production cutover remains explicit.
+
 ## Development and verification
 
 Use `uv` from the repository root, `npm` from `frontend/`. Python 3.15+, Node
