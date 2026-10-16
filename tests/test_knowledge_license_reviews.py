@@ -291,3 +291,74 @@ def test_assembly_integration_build_labels_are_bookkeeping_not_license_changes(j
     assert inventory_fingerprint(original, "7.1.1") == inventory_fingerprint(changed, "7.1.1")
     changed["inventory"]["assembly"]["coherence"]["status"] = "unverified"
     assert inventory_fingerprint(original, "7.1.1") != inventory_fingerprint(changed, "7.1.1")
+
+
+def test_native_export_preserves_current_approved_pin_separately_from_pending(journal):
+    from dtvp.knowledge.exports import build_bundle
+
+    assert "license_dispositions" not in build_bundle(journal, head(journal))
+    save(journal)
+    review(journal)
+    approved = status(journal)["approved_assessment"]["revision"]
+    save(
+        journal,
+        data(
+            journal, request_id="edit-export", expected_revision=approved, disposition="prohibited"
+        ),
+        submit=False,
+    )
+    exported = build_bundle(journal, head(journal))["license_dispositions"]
+    assert exported["format"] == "dtvp.license-disposition-register/1"
+    assert exported["total"] == 1 and exported["next_offset"] is None
+    item = exported["items"][0]
+    assert item["approved"] and item["pending"]
+    assert item["approved_assessment"]["revision"] == approved
+    assert item["assessment"]["payload"]["disposition"] == "prohibited"
+    assert item["approved_assessment"]["payload"]["disposition"] == "restricted"
+    seed(
+        journal,
+        parent=head(journal),
+        modify=lambda sections: sections["inventory"]["root"].update(version="2"),
+    )
+    stale = build_bundle(journal, head(journal))["license_dispositions"]["items"][0]
+    assert stale["status"] == "stale" and not stale["approved"]
+    assert stale["approved_assessment"] is None and stale["review"]
+
+
+def test_native_license_register_is_complete_beyond_api_page_limit(journal):
+    from dtvp.knowledge.exports import build_bundle
+    from dtvp.knowledge.license_reviews import keys
+
+    def populate(sections):
+        for index in range(201):
+            ref = f"license-component-{index}"
+            sections["inventory"]["component:" + ref] = {
+                "bom-ref": ref,
+                "name": ref,
+                "version": "1",
+            }
+        fingerprint = inventory_fingerprint(sections, "7.1.1")
+        for index in range(201):
+            ref = f"license-component-{index}"
+            payload = {
+                "version": "7.1.1",
+                "component_ref": ref,
+                "source_fingerprint": fingerprint,
+                "disposition": "restricted",
+                "concluded_expression": "MIT",
+                "actor_id": "author",
+            }
+            key, _ = keys(ref)
+            sections["history"][key] = {
+                "revision": journal.store(payload),
+                "payload": payload,
+                "stage": "draft",
+            }
+
+    seed(journal, parent=head(journal), modify=populate)
+    register = build_bundle(journal, head(journal))["license_dispositions"]
+    assert register["total"] == len(register["items"]) == 201
+    assert register["next_offset"] is None
+    assert register["by_status"] == {"draft": 201}
+    assert len({row["component_ref"] for row in register["items"]}) == 201
+    assert not any(row["approved"] for row in register["items"])

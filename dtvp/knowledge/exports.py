@@ -70,7 +70,7 @@ def build_bundle(journal, state):
         {"observation_id": key, **value}
         for key, value in sorted(sections["vulnerabilities"].items())
     ]
-    return {
+    bundle = {
         "format": BUNDLE_FORMAT,
         "state": state,
         "project_id": revision.project_id,
@@ -98,6 +98,18 @@ def build_bundle(journal, state):
             "This export does not establish license clearance, architecture approval or regulatory compliance.",
         ],
     }
+
+    # Optional enrichment preserves existing bytes when no dispositions exist.
+    # Full server-derived status prevents consumers from mistaking a pending
+    # record or inherited review for current independently approved clearance.
+    if any(key.startswith("license-disposition:") for key in sections["history"]):
+        from dtvp.knowledge.license_reviews import list_license_reviews
+
+        bundle["license_dispositions"] = {
+            "format": "dtvp.license-disposition-register/1",
+            **list_license_reviews(journal, sections, revision.version, paginate=False),
+        }
+    return bundle
 
 
 def export_bytes(journal, state):

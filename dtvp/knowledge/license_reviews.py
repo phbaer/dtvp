@@ -179,7 +179,7 @@ def license_status(journal, sections, version, component_ref, *, source_fingerpr
     }
 
 
-def list_license_reviews(journal, sections, version, *, offset=0, limit=50):
+def list_license_reviews(journal, sections, version, *, offset=0, limit=50, paginate=True):
     if offset < 0 or not 1 <= limit <= 200:
         raise ValueError("Invalid license disposition page bounds")
     fingerprint = inventory_fingerprint(sections, version)
@@ -198,10 +198,10 @@ def list_license_reviews(journal, sections, version, *, offset=0, limit=50):
         if key.startswith("license-disposition:")
     ]
     return {
-        "items": items[offset : offset + limit],
+        "items": items[offset : offset + limit] if paginate else items,
         "total": len(items),
         "by_status": dict(Counter(item["status"] for item in items)),
-        "next_offset": offset + limit if offset + limit < len(items) else None,
+        "next_offset": offset + limit if paginate and offset + limit < len(items) else None,
     }
 
 

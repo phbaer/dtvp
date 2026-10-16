@@ -396,6 +396,13 @@ pins. An approved organization disposition is an attributed judgment under state
 assumptions; DTVP does not infer legal permission, expression validity or compatibility.
 The playground includes separate license analyst/reviewer personas without reset.
 
+Native bundles with recorded license dispositions also expose an optional typed
+`license_dispositions` register. It includes current, pending, independently
+approved and stale status with exact revision pins and limitations. Source license
+declarations remain separate; a pending prohibited decision never replaces the
+retained approved disposition implicitly. No-record bundles retain their prior
+bytes. Previously issued inputs always retain their exact archived representation.
+
 ### Historical state comparison
 
 `GET /api/v3/projects/{id}/refs` lists product branches and immutable tags.
