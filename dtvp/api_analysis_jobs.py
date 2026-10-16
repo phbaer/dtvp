@@ -7,6 +7,7 @@ from sqlalchemy import select
 from dtvp.api import DB, Auth, project_for
 from dtvp.api_analysis import AnalysisBinding, bind
 from dtvp.api_knowledge import require_state
+from dtvp.knowledge.analysis_followups import FollowUpInput, enqueue_followup
 from dtvp.knowledge.analysis_jobs import (
     KIND,
     AnalysisJobInput,
@@ -46,7 +47,11 @@ def view(db, actor, selected, settings=None):
         if selected.status in {"queued", "running", "submission_unknown"}:
             actions.append("cancel")
         if selected.status in {"failed", "import_pending"} and (
-            selected.payload.get("remote_id") or selected.payload.get("report_sha256")
+            selected.payload.get("remote_id")
+            or selected.payload.get("report_sha256")
+            or (
+                selected.payload.get("follow_up") and not selected.payload.get("submission_started")
+            )
         ):
             actions.append("retry")
         if (
@@ -56,6 +61,15 @@ def view(db, actor, selected, settings=None):
             and configured(settings)
         ):
             actions.append("reconcile")
+    if (
+        selected.status == "succeeded"
+        and selected.payload.get("report_sha256")
+        and selected.payload.get("correlation")
+        and settings
+        and configured(settings)
+        and allowed_actions(db, actor, project)
+    ):
+        actions.append("follow_up")
     return {**job_view(selected), "capabilities": actions}
 
 
@@ -191,4 +205,45 @@ def reconcile(
         raise HTTPException(
             502,
             "Authenticated remote observation unavailable or inconsistent; nothing was attached",
+        ) from None
+
+
+@router.post(
+    "/projects/{project_id}/versions/{version}/analysis-jobs/{parent_id}/follow-up", status_code=202
+)
+def follow_up(
+    project_id: str,
+    version: Name,
+    parent_id: str,
+    data: FollowUpInput,
+    request: Request,
+    db: DB,
+    actor: Auth,
+):
+    project_for(db, actor, project_id, "evidence")
+    project_for(db, actor, project_id, "snapshot")
+    project_for(db, actor, project_id)
+    try:
+        return view(
+            db,
+            actor,
+            enqueue_followup(
+                db,
+                request.app.state.knowledge,
+                request.app.state.settings,
+                project_id=project_id,
+                version=version,
+                parent_id=parent_id,
+                actor=actor,
+                data=data,
+            ),
+            request.app.state.settings,
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(403, str(error)) from error
+    except httpx.HTTPError, ValueError, TypeError:
+        raise HTTPException(
+            502, "Authenticated parent evidence unavailable or inconsistent; no child was enqueued"
         ) from None

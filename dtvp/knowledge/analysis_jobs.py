@@ -51,10 +51,9 @@ def public_evidence(value, correlation=None):
     while pending:
         selected = pending.pop()
         if isinstance(selected, dict):
-            if (
-                "dtvp_binding" in selected
-                or selected.get("format") == "dtvp.analysis-correlation/1"
-            ):
+            if any(key in selected for key in ("dtvp_binding", "dtvp_follow_up")) or selected.get(
+                "format"
+            ) in {"dtvp.analysis-correlation/1", "dtvp.analysis-followup-correlation/1"}:
                 raise ValueError("Private binding fields must not enter returned evidence")
             pending.extend(selected.values())
         elif isinstance(selected, list):
@@ -203,6 +202,10 @@ def _validate(db, journal, settings, job, *, check_material=True):
         raise ValueError("Analysis observation expired; request a new analysis explicitly")
     if check_material:
         _semantic_current(journal, job)
+    if job.payload.get("follow_up"):
+        from dtvp.knowledge.analysis_followups import validate_followup
+
+        validate_followup(db, journal, settings, job, check_material=check_material)
     return actor
 
 
@@ -274,8 +277,9 @@ def execute_analysis(factory, journal, settings, job_id, token):
                     "Remote submission outcome unknown; no automatic resubmission is permitted",
                 )
                 return
-            job.payload = {**payload, "submission_started": True}
-            payload = dict(job.payload)
+            if not payload.get("follow_up"):
+                job.payload = {**payload, "submission_started": True}
+                payload = dict(job.payload)
     # Submission marker is committed before any external write. No idempotency API
     # exists in the inspected Agentyzer contract, so POST errors are ambiguous.
     headers = (
@@ -285,17 +289,40 @@ def execute_analysis(factory, journal, settings, job_id, token):
     with client() as http:
         if not payload.get("remote_id"):
             try:
+                if payload.get("follow_up"):
+                    from dtvp.knowledge.analysis_followups import fetch_parent
+
+                    follow = payload["follow_up"]
+                    fetch_parent(http, settings, follow["parent"], follow["scope"])
+                    with factory.begin() as db:
+                        job = _locked(db, job_id, token)
+                        if not job:
+                            return
+                        _validate(db, journal, settings, job)
+                        job.payload = {**job.payload, "submission_started": True}
+                        payload = dict(job.payload)
                 with factory.begin() as db:
                     job = _locked(db, job_id, token)
                     if not job:
                         return
                     _validate(db, journal, settings, job)
+                follow = payload.get("follow_up")
+                if follow:
+                    from dtvp.knowledge.analysis_followups import outbound
+
                 submitted = read_json(
                     http,
                     "POST",
-                    base + "/assess",
+                    base
+                    + (
+                        "/jobs/" + quote(follow["parent"]["job_id"], safe="") + "/follow-up"
+                        if follow
+                        else "/assess"
+                    ),
                     headers=headers,
-                    json={
+                    json=outbound(payload)
+                    if follow
+                    else {
                         **payload["request"],
                         **(
                             {"dtvp_binding": payload["correlation"]}
@@ -313,8 +340,12 @@ def execute_analysis(factory, journal, settings, job_id, token):
                     if job:
                         _stop(
                             job,
-                            "submission_unknown",
-                            "Remote submission outcome unknown; no automatic resubmission is permitted",
+                            "submission_unknown"
+                            if job.payload.get("submission_started")
+                            else "failed",
+                            "Remote submission outcome unknown; no automatic resubmission is permitted"
+                            if job.payload.get("submission_started")
+                            else "Authenticated follow-up parent unavailable; no child submission was attempted",
                         )
                 return
             with factory.begin() as db:
@@ -334,7 +365,15 @@ def execute_analysis(factory, journal, settings, job_id, token):
                 # Each bounded request gets a fresh lease. Final writes still check token.
                 job.lease_until = now() + timedelta(seconds=90)
             try:
-                response = read_json(http, "GET", path + suffix, headers=headers)
+                response = read_json(
+                    http,
+                    "GET",
+                    path
+                    + (
+                        "/dtvp-follow-up-binding" if suffix and payload.get("follow_up") else suffix
+                    ),
+                    headers=headers,
+                )
             except httpx.HTTPStatusError:
                 with factory.begin() as db:
                     job = _locked(db, job_id, token)
@@ -378,11 +417,16 @@ def execute_analysis(factory, journal, settings, job_id, token):
                     return
                 native_job = response
             else:
-                envelope = {
-                    "format": "dtvp.agentyzer-result-envelope/1",
-                    "job": native_job,
-                    "report": response,
-                }
+                if payload.get("follow_up"):
+                    from dtvp.knowledge.analysis_followups import result_proof
+
+                    envelope, _ = result_proof(response, payload, remote)
+                else:
+                    envelope = {
+                        "format": "dtvp.agentyzer-result-envelope/1",
+                        "job": native_job,
+                        "report": response,
+                    }
     public_evidence(envelope, payload.get("correlation"))
     report_sha = journal.store(envelope)
     with factory.begin() as db:
@@ -430,7 +474,8 @@ def retry_analysis(db, journal, settings, *, project_id, job_id, actor):
             "import_expected": _head(journal, job.project_id, job.payload["version"]),
         }
     elif not job.payload.get("remote_id"):
-        raise Conflict("No known remote job can be retried safely")
+        if not job.payload.get("follow_up") or job.payload.get("submission_started"):
+            raise Conflict("No known remote job can be retried safely")
     job.status, job.error, job.available_at = "queued", "", now()
     job.lease_token, job.lease_until = None, None
     return job
@@ -450,4 +495,12 @@ def job_view(job):
         "result": job.result,
         "created_at": aware(job.created_at).isoformat(),
         "requires_explicit_reconciliation": job.status == "submission_unknown",
+        **(
+            {
+                "parent_job_id": job.payload["follow_up"]["parent_job_id"],
+                "follow_up_question": job.payload["follow_up"]["wire_request"]["question"],
+            }
+            if job.payload.get("follow_up")
+            else {}
+        ),
     }

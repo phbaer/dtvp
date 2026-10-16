@@ -117,3 +117,45 @@ contract. Default false preserves the previous POST body, even when an existing
 service token is long enough. Only newly enqueued opted-in jobs get a private
 binding; enabling the feature never upgrades an existing unknown job. Disabling
 it blocks reconciliation without rewriting already captured request identities.
+
+## Native bound follow-ups
+
+With the private reconciliation extension enabled, a completed native analysis
+can start a separate child through
+`POST /api/v3/projects/{id}/versions/{version}/analysis-jobs/{parent}/follow-up`.
+Supply a new `request_id`, current `expected` state, exact retained
+`parent_report_sha256`, meaningful `question` and optional `user_guidance`.
+Current read/snapshot/evidence authorization applies to the child actor; the
+parent author is preserved and grants no authorization. Repository, vulnerability,
+versions, context and qualified Git commit cannot be overridden.
+
+The configured service must support authenticated `dtvp-follow-up-parent` and
+`dtvp-follow-up-binding` GET endpoints. Exact parent report/request/scope/private
+association hashes are checked before SQL enqueue, again before POST, and
+atomically by Agentyzer when creating the child. Unsupported services enqueue
+nothing. The child retains its parent's original issued input receipt and gets
+its own private correlation. The analyst's exact wire question and the service's
+compiled effective request remain distinct and are both verified. Private proofs
+and nonces stay out of public views and the journal.
+
+A durable marker precedes POST. An uncertain POST is never repeated automatically;
+explicit authenticated reconciliation can attach its exact completed child.
+Completed evidence can survive later source changes as stale evidence, without
+human assessment, approval or score publication. Parent job age does not expire
+retained evidence; child credentials and timeout are checked independently.
+Agentyzer's in-memory parent must still exist: this does not repair lost remote
+jobs or make source identity equivalent to analysis completeness.
+
+The generic authenticated CLI submits the identical API body (no separate
+follow-up policy). Create `follow-up.json` containing `request_id`, `expected`,
+`parent_report_sha256`, `question` and optional `user_guidance`, then run:
+
+```bash
+uv run dtvp knowledge request POST \
+  /api/v3/projects/PRODUCT/versions/7.1.1/analysis-jobs/PARENT_JOB/follow-up \
+  --body follow-up.json
+```
+
+Use the returned child ID with the existing analysis-jobs API. Repeating the
+same request ID and exact body returns the same child; changing its body requires
+a new explicit request identity.

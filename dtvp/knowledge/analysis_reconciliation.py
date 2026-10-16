@@ -90,7 +90,12 @@ def _checked(db, journal, settings, job, actor_id, credential_id):
     correlation = job.payload.get("correlation")
     if (
         not isinstance(correlation, dict)
-        or correlation.get("format") != "dtvp.analysis-correlation/1"
+        or correlation.get("format")
+        != (
+            "dtvp.analysis-followup-correlation/1"
+            if job.payload.get("follow_up")
+            else "dtvp.analysis-correlation/1"
+        )
         or not isinstance(correlation.get("nonce"), str)
         or not re.fullmatch(r"[a-f0-9]{64}", correlation["nonce"])
     ):
@@ -105,13 +110,22 @@ def _checked(db, journal, settings, job, actor_id, credential_id):
         or issued["payload"]["receipt"] != job.payload["receipt"]
         or correlation["input_receipt_sha256"] != digest(canonical(job.payload["receipt"]))
         or correlation["job_id"] != job.id
-        or correlation["request_sha256"] != digest(canonical(job.payload["request"]))
+        or (
+            correlation.get("submission_sha256")
+            != digest(canonical(job.payload["follow_up"]["wire_request"]))
+            if job.payload.get("follow_up")
+            else correlation.get("request_sha256") != digest(canonical(job.payload["request"]))
+        )
     ):
         raise Conflict("Private correlation differs from the exact issued DTVP input")
     return _transport(settings)
 
 
 def _proof(response, payload, remote_id):
+    if payload.get("follow_up"):
+        from dtvp.knowledge.analysis_followups import result_proof
+
+        return result_proof(response, payload, remote_id)
     if not isinstance(response, dict) or set(response) != {
         "format",
         "job_id",
@@ -216,7 +230,7 @@ def reconcile_analysis(
                 settings.agentyzer_url.rstrip("/")
                 + "/jobs/"
                 + quote(data.remote_id, safe="")
-                + "/dtvp-binding",
+                + ("/dtvp-follow-up-binding" if payload.get("follow_up") else "/dtvp-binding"),
                 headers={"Authorization": "Bearer " + settings.agentyzer_token},
             )
 

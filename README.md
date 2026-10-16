@@ -754,6 +754,19 @@ opted-in jobs gain private proof. The isolated sibling implementation is commit
 `a10b5d4` on `fix/immutable-source-binding` in `/tmp/agentyzer-source-binding`;
 it has not been merged, pushed or deployed.
 
+Native analyses now support explicit parent/report-bound follow-ups through
+`POST /api/v3/projects/{id}/versions/{version}/analysis-jobs/{parent}/follow-up`.
+This requires the optional authenticated Agentyzer extension: exact parent pins
+are checked before enqueue and submission, source scope cannot change, and an
+uncertain POST is never automatically repeated. Each child is independent
+proposed evidence, with its own current authorization and private correlation;
+no approval or score publication is inherited. See [Agentyzer](docs/agentyzer.md#native-bound-follow-ups).
+
+The isolated upstream extension is `9bb5985` on `fix/immutable-source-binding`;
+517 sibling tests passed. It remains unmerged and undeployed. Legacy unbound
+follow-ups retain their existing upstream behavior; DTVP’s native bound mode
+requires the explicit authenticated extension and never falls back to them.
+
 ### External v1 project archive dry run
 
 Managers can inspect an exported `dtvp.project-archive/v1` ZIP without restoring it:
