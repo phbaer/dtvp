@@ -2,27 +2,41 @@
 
 import copy
 import json
-import re
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import Field, field_validator
+from pydantic import Field, model_validator
 
 from dtvp.knowledge.advisory_documents import FORMAT
 from dtvp.knowledge.evidence import EvidenceInput, import_evidence
 from dtvp.knowledge.journal import Name, Sha
 from dtvp.knowledge.ownership import product_heads
 from dtvp.knowledge.workspace import load_sections
+from dtvp.non_us_advisories import (
+    EUVD_URL,
+    JVN_URL,
+    euvd_result,
+    jvn_result,
+    request_parameters,
+    supports_identifier,
+)
 from dtvp.parsers import validate_advisory
 from dtvp.providers import ADVISORY_PROVIDERS, client
 from dtvp.schemas import RequestModel
 from dtvp.storage import digest
 
 CAPTURE_FORMAT = "dtvp.advisory-provider-capture/1"
-PUBLISHERS = {"nvd": "NVD", "circl": "CIRCL Vulnerability-Lookup (mirror)"}
+PUBLISHERS = {
+    "nvd": "NVD",
+    "circl": "CIRCL Vulnerability-Lookup (mirror)",
+    "euvd": "ENISA EUVD",
+    "jvn": "MyJVN API (IPA/JVN iPedia)",
+}
 ENDPOINTS = {
+    "euvd": EUVD_URL,
+    "jvn": JVN_URL,
     "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0",
     "circl": "https://vulnerability.circl.lu/api/vulnerability/",
 }
@@ -38,20 +52,22 @@ LIMITATIONS = [
 
 class AdvisoryRefreshInput(RequestModel):
     request_id: Name
-    provider: Literal["nvd", "circl"]
+    provider: Literal["nvd", "circl", "euvd", "jvn"]
     identifiers: list[str] = Field(min_length=1, max_length=20)
     expected_evidence: Sha | None
     expected_versions: dict[Name, Sha] = Field(max_length=200)
     revision: int = Field(ge=0, strict=True)
 
-    @field_validator("identifiers")
-    @classmethod
-    def exact_ids(cls, values):
-        if any(
-            not re.fullmatch(r"CVE-\d{4}-\d{4,194}", value) or len(value) > 200 for value in values
-        ) or len(values) != len(set(values)):
-            raise ValueError("Refresh requires distinct exact CVE identifiers")
-        return sorted(values)
+    @model_validator(mode="after")
+    def exact_ids(self):
+        if any(not supports_identifier(self.provider, value) for value in self.identifiers) or len(
+            self.identifiers
+        ) != len(set(self.identifiers)):
+            raise ValueError(
+                "Refresh requires distinct exact identifiers supported by the selected provider"
+            )
+        self.identifiers = sorted(self.identifiers)
+        return self
 
 
 def enabled(settings, provider):
@@ -102,7 +118,30 @@ def _json(raw):
         raise ValueError("Malformed provider JSON") from error
 
 
-def _verify_result(provider, identifier, result, body):
+def _body(provider, raw, status):
+    if provider == "jvn":
+        return {"xml": raw.decode("utf-8")}
+    if provider == "euvd" and status == 204:
+        if raw:
+            raise ValueError("EUVD no-content response contains a body")
+        return None
+    return _json(raw)
+
+
+def _verify_result(provider, identifier, result, body, status=200):
+    if provider in {"euvd", "jvn"}:
+        if status not in ({200, 204} if provider == "euvd" else {200}):
+            raise ValueError("Unsupported advisory response status")
+        expected = (
+            euvd_result(identifier, body, status)
+            if provider == "euvd"
+            else jvn_result(identifier, body)
+        )
+        if result != expected:
+            raise ValueError("Provider normalized result differs from original source")
+        if result["status"] == "found":
+            validate_advisory(result["advisory"])
+        return
     if not isinstance(body, dict) or not isinstance(result, dict):
         raise ValueError("Provider response must be an object")
     if provider == "nvd":
@@ -174,8 +213,10 @@ class _Capture:
             raise ValueError(
                 "Only bounded exact-ID GET requests to the configured provider contract are allowed"
             )
-        if self.provider == "nvd" and kwargs.get("params") != {"cveId": self.identifier}:
-            raise ValueError("NVD request must name only the selected exact identifier")
+        if self.provider != "circl" and kwargs.get("params") != request_parameters(
+            self.provider, self.identifier
+        ):
+            raise ValueError("Provider request must name only the selected exact identifier")
         kwargs["follow_redirects"] = False
         with self.http.stream(method, url, **kwargs) as response:
             wrapped = _Response(response, self)
@@ -202,14 +243,9 @@ def collect_advisories(settings, provider, identifiers, *, http=None):
         not identifiers
         or len(identifiers) > 20
         or len(set(identifiers)) != len(identifiers)
-        or any(
-            not isinstance(value, str)
-            or not re.fullmatch(r"CVE-\d{4}-\d{4,194}", value)
-            or len(value) > 200
-            for value in identifiers
-        )
+        or any(not supports_identifier(provider, value) for value in identifiers)
     ):
-        raise ValueError("At most 20 distinct exact CVE identifiers are supported")
+        raise ValueError("At most 20 distinct exact provider-supported identifiers are supported")
 
     def collect(transport):
         captured = _Capture(transport, provider)
@@ -221,8 +257,8 @@ def collect_advisories(settings, provider, identifiers, *, http=None):
             try:
                 result = adapter.get(identifier)
                 response = captured.responses[-1]
-                body = _json(captured.artifacts[response["sha256"]])
-                _verify_result(provider, identifier, result, body)
+                body = _body(provider, captured.artifacts[response["sha256"]], response["status"])
+                _verify_result(provider, identifier, result, body, response["status"])
             except (TypeError, KeyError, AttributeError, IndexError, RecursionError) as error:
                 raise ValueError("Malformed advisory provider response") from error
             results.append(
@@ -297,7 +333,8 @@ def publish_advisories(journal, *, settings, project_id, actor_id, data, capture
             data.provider,
             item["identifier"],
             item.get("result"),
-            _json(journal.objects.read(item["response_sha256"])),
+            _body(data.provider, journal.objects.read(item["response_sha256"]), response["status"]),
+            response["status"],
         )
     capture_sha = journal.store(capture)
     identity = "dtvp-provider-catalog:" + data.provider

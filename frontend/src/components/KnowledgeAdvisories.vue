@@ -4,8 +4,8 @@ import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
 import KnowledgeOsvMatching from './KnowledgeOsvMatching.vue'
 import KnowledgeIntelligenceComparison from './KnowledgeIntelligenceComparison.vue'
-type Provider = { id: string; publisher: string; enabled: boolean; next_revision: number }
-type Plan = { expected_versions: Record<string, string>; expected_evidence: string | null; providers: Provider[]; identifiers: string[]; total: number; next_offset: number | null; capabilities: string[]; limitations: string[] }
+type Provider = { id: string; publisher: string; enabled: boolean; next_revision: number; identifier_formats?: string[] }
+type Plan = { expected_versions: Record<string, string>; expected_evidence: string | null; providers: Provider[]; identifiers: string[]; total: number; unsupported_total?: number; selected_provider?: string | null; next_offset: number | null; capabilities: string[]; limitations: string[] }
 type Job = { id: string; status: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number; attempts: number; error: string; result: Record<string, unknown>; capabilities: string[] }
 type Page = { items: Job[]; next_offset: number | null }
 type Input = { request_id: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number }
@@ -29,7 +29,7 @@ async function loadPlan(page = 0, refresh = false) {
   if (busy.value) return false
   const current = sequence; busy.value = true; error.value = ''
   try {
-    const data = await knowledgeApi<Plan>(`${root()}/advisory-refresh?${new URLSearchParams({ q: query.value, offset: String(page), limit: '20' })}`)
+    const data = await knowledgeApi<Plan>(`${root()}/advisory-refresh?${new URLSearchParams({ q: query.value, offset: String(page), limit: '20', ...(provider.value ? { provider: provider.value } : {}) })}`)
     if (current !== sequence) return false
     if (!refresh && plan.value && pin(data) !== pin(plan.value)) throw new Error('Advisory plan changed. Refresh the plan explicitly; existing selection and pending request are retained.')
     if (refresh) { if (!pending.value) { identifiers.value = []; provider.value = '' }; previous.value = []; stale.value = false }
@@ -87,6 +87,11 @@ async function inspect(job: Job, action?: 'retry' | 'cancel') {
   finally { if (current === sequence) busy.value = false }
 }
 function newRequest() { pending.value = null; recorded.value = false; identifiers.value = []; provider.value = ''; error.value = ''; notice.value = ''; stale.value = true }
+watch(provider, value => {
+  if (!value || pending.value || !plan.value) return
+  identifiers.value = []; previous.value = []
+  void loadPlan(0)
+})
 watch(() => props.state, () => { stale.value = true })
 watch(() => props.project, () => {
   ++sequence; busy.value = false; plan.value = null; pending.value = null; recorded.value = false; stale.value = false; identifiers.value = []; provider.value = ''; query.value = ''; jobs.value = []; recent.value = null; jobsLoaded.value = false; previous.value = []; jobPrevious.value = []; offset.value = 0; jobOffset.value = 0; error.value = ''; notice.value = ''
@@ -107,10 +112,10 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <template v-if="plan">
         <details><summary>Provider availability and plan pins</summary><p v-for="item in plan.providers" :key="item.id">{{ item.id }} · publisher {{ item.publisher }} · {{ item.enabled ? 'Configured' : 'Disabled' }} · next revision {{ item.next_revision }}</p><pre>{{ JSON.stringify({ expected_versions: plan.expected_versions, expected_evidence: plan.expected_evidence }, null, 2) }}</pre><p v-for="text in plan.limitations" :key="text" class="hint">{{ text }}</p></details>
         <form @submit.prevent="loadPlan(0)"><label>Search baseline vulnerability IDs<input v-model="query" maxlength="200" :disabled="busy"></label><button :disabled="busy">Search advisory identifiers</button></form>
-        <p>{{ plan.total }} matching baseline IDs · {{ identifiers.length }}/20 explicitly selected</p>
+        <p>{{ plan.total }} matching baseline IDs · {{ identifiers.length }}/20 explicitly selected</p><p v-if="provider && plan.unsupported_total" class="hint">{{ plan.unsupported_total }} baseline IDs unsupported by {{ provider }}; these have not been looked up.</p>
         <div class="identifiers"><label v-for="identifier in plan.identifiers" :key="identifier"><input type="checkbox" :checked="identifiers.includes(identifier)" :disabled="busy || !can || Boolean(pending) || (!identifiers.includes(identifier) && identifiers.length >= 20)" @change="select(identifier)">{{ identifier }}</label></div>
         <nav class="actions" aria-label="Advisory identifier pages"><button type="button" :disabled="busy || !previous.length" @click="pageIdentifiers(false)">Previous advisory identifiers</button><button type="button" :disabled="busy || plan.next_offset == null" @click="pageIdentifiers(true)">Next advisory identifiers</button></nav>
-        <form v-if="can" aria-label="Queue advisory refresh" @submit.prevent="enqueue"><label>Advisory provider<select v-model="provider" :disabled="busy || Boolean(pending)"><option value="" disabled>Select a provider</option><option v-for="item in plan.providers" :key="item.id" :value="item.id" :disabled="!item.enabled">{{ item.id }} · {{ item.publisher }}{{ item.enabled ? '' : ' (disabled)' }}</option></select></label><p v-if="selectedProvider">Explicit provider catalog revision {{ selectedProvider.next_revision }}.</p><p v-if="pending" class="hint">Request pinned to provider {{ pending.provider }}, revision {{ pending.revision }} and {{ pending.identifiers.length }} IDs. Refreshing the plan does not change this request.</p><details v-if="pending"><summary>Frozen pending advisory request</summary><pre>{{ JSON.stringify(pending, null, 2) }}</pre></details><button v-if="!recorded" :disabled="busy || (!pending && (!selectedProvider?.enabled || !identifiers.length || stale))">{{ pending ? 'Resend identical advisory request' : 'Queue advisory refresh' }}</button><button v-if="pending" type="button" :disabled="busy" @click="newRequest">Start new advisory request</button></form>
+        <form v-if="can" aria-label="Queue advisory refresh" @submit.prevent="enqueue"><label>Advisory provider<select v-model="provider" :disabled="busy || Boolean(pending)"><option value="" disabled>Select a provider</option><option v-for="item in plan.providers" :key="item.id" :value="item.id" :disabled="!item.enabled">{{ item.id }} · {{ item.publisher }}{{ item.enabled ? '' : ' (disabled)' }}</option></select></label><p v-if="selectedProvider">Explicit provider catalog revision {{ selectedProvider.next_revision }}. <template v-if="selectedProvider.identifier_formats">Supported exact IDs: {{ selectedProvider.identifier_formats.join(', ') }}.</template></p><p v-if="pending" class="hint">Request pinned to provider {{ pending.provider }}, revision {{ pending.revision }} and {{ pending.identifiers.length }} IDs. Refreshing the plan does not change this request.</p><details v-if="pending"><summary>Frozen pending advisory request</summary><pre>{{ JSON.stringify(pending, null, 2) }}</pre></details><button v-if="!recorded" :disabled="busy || (!pending && (!selectedProvider?.enabled || !identifiers.length || stale))">{{ pending ? 'Resend identical advisory request' : 'Queue advisory refresh' }}</button><button v-if="pending" type="button" :disabled="busy" @click="newRequest">Start new advisory request</button></form>
       </template>
       <p v-if="jobsLoaded && !shownJobs.length">No advisory jobs for this product.</p>
       <article v-for="job in shownJobs" :key="job.id" :aria-label="`Advisory job ${job.id}`"><strong>{{ job.provider }} · {{ human(job.status) }}</strong><p>{{ job.identifiers.join(', ') }} · {{ job.attempts }} attempts</p><p v-if="job.error">{{ job.error }}</p><div class="actions"><button type="button" :disabled="busy" @click="inspect(job)">Refresh advisory status</button><button v-if="job.capabilities.includes('retry')" type="button" :disabled="busy" @click="inspect(job, 'retry')">Retry advisory job</button><button v-if="job.capabilities.includes('cancel')" type="button" :disabled="busy" @click="inspect(job, 'cancel')">Cancel DTVP advisory job</button></div><details><summary>Advisory job pins and capture result</summary><pre>{{ JSON.stringify({ provider: job.provider, identifiers: job.identifiers, revision: job.revision, expected_versions: job.expected_versions, expected_evidence: job.expected_evidence, result: job.result }, null, 2) }}</pre></details></article>

@@ -2479,8 +2479,9 @@ are disabled unless configured. Mirrors retain upstream publisher data.
 Qualified PURLs unsupported by a matcher remain unknown. Successful no-match
 checks are coverage observations, not applicability decisions.
 
-ENISA EUVD, Japan's JVN and other providers can use the advisory/evidence ports;
-their native feed adapters are not yet shipped. See [API and adapters](docs/api.md).
+Native known-ID refresh also supports ENISA EUVD and Japan's MyJVN with
+provider-specific exact identifier constraints. Additional providers can use the
+advisory/evidence ports. See [API and adapters](docs/api.md).
 Agentyzer submission, durable polling, follow-ups and immutable report retrieval
 are available from each finding. Set `DTVP_AGENTYZER_ENABLED=true` and
 `DTVP_AGENTYZER_URL` on the API and worker; optionally set a gateway bearer token.
@@ -3036,3 +3037,39 @@ remain open. `acceptance` is always `not_granted`; neither fixture parsing nor
 successful requests establish producer completeness, document acceptance, legal
 clearance or regulatory compliance. These results are evidence for a separate
 human acceptance decision.
+
+Native journal-backed advisory refresh supports `nvd`, `circl`, `euvd` and `jvn`
+when explicitly enabled in `DTVP_PROVIDERS_ENABLED`. EUVD uses ENISA's fixed
+`https://euvdservices.enisa.europa.eu/api/enisaid?id=...` endpoint for an exact
+baseline CVE or EUVD ID; requested CVEs must appear exactly in the returned aliases.
+Multi-CVE/contradictory EUVD aggregates fail closed for a single CVE request, avoiding
+transfer of a group score to one CVE. Exact baseline EUVD requests retain their own
+record scope. MyJVN uses the supported HND `getVulnDetailInfo` XML endpoint at
+`https://jvndb.jvn.jp/myjvn`, for exact baseline `JVNDB-YYYY-NNNNNN` IDs only.
+CVE keyword search is deliberately unsupported: it is fuzzy, and JVN's aggregate
+CVSS can describe another CVE in a multi-CVE record. Related CVEs remain aliases,
+never automatic new findings or coverage.
+
+`GET .../advisory-refresh?provider=euvd|jvn` pages only identifiers supported by the
+selected provider, reports `unsupported_total`, and exposes `identifier_formats`
+for every provider. The UI resets selected IDs on provider changes, explains IDs
+not looked up and preserves frozen pending requests across uncertain outcomes.
+CLI/API refresh requests retain existing exact-head/evidence pins and worker leases.
+All responses retain byte-exact decoded HTTP bodies and validated normalized facts
+in immutable captures; publication independently rechecks normalization against the
+retained bytes. Requests disable redirects, bound jobs to 20 IDs, responses to
+4 MiB and captures to 32 MiB. XML rejects DTD/entities, unexpected namespace/status,
+wrong IDs, incomplete counts, excessive depth and nonfinite scores. EUVD's actual
+204/no-body and MyJVN's successful zero-record responses mean provider not-found,
+never remediation. Source severity remains an attributed assertion, not a DTVP
+approval; no matching, inferred applicability or source independence is claimed.
+HTTP errors including rate limiting fail the job; retry remains explicit and uses
+existing frozen captures once collection completed. Deployment quotas/availability
+and unattended feed scheduling remain separate operational requirements.
+
+Provider contract references: [official EUVD API documentation](https://euvd.enisa.europa.eu/apidoc),
+[official MyJVN detail API](https://jvndb.jvn.jp/apis/getVulnDetailInfo_api_hnd.html),
+[JVN aggregate-score FAQ](https://jvndb.jvn.jp/apis/myjvnapi_faq.html),
+and [HND/OKA support announcement](https://jvndb.jvn.jp/nav/sys_announce.html).
+Public success/not-found response shapes were checked against live official
+endpoints; automated tests use synthetic response fixtures without external calls.

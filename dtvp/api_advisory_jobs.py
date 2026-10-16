@@ -1,6 +1,6 @@
 """Explicit, baseline-known advisory refresh jobs; no package matching or approvals."""
 
-import re
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from dtvp.knowledge.evidence import evidence_ref
 from dtvp.knowledge.journal import Conflict
 from dtvp.knowledge.ownership import product_heads
 from dtvp.models import Job
+from dtvp.non_us_advisories import IDENTIFIER_FORMATS, supports_identifier
 
 router = APIRouter(prefix="/api/v3")
 
@@ -49,6 +50,7 @@ def refresh_inputs(
     db: DB,
     actor: Auth,
     q: str = Query("", max_length=200),
+    provider: Literal["nvd", "circl", "euvd", "jvn"] | None = None,
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ):
@@ -64,9 +66,16 @@ def refresh_inputs(
     identifiers = sorted(
         value
         for value in baseline_identifiers(journal, project_id, versions, require_current=False)
-        if re.fullmatch(r"CVE-\d{4}-\d{4,194}", value) and q.casefold() in value.casefold()
+        if any(supports_identifier(provider, value) for provider in PUBLISHERS)
+        and q.casefold() in value.casefold()
     )
+    unsupported_total = (
+        sum(not supports_identifier(provider, value) for value in identifiers) if provider else 0
+    )
+    if provider:
+        identifiers = [value for value in identifiers if supports_identifier(provider, value)]
     providers = []
+    selected_provider = provider
     for provider, publisher in PUBLISHERS.items():
         revisions = [
             record["source_revision"]
@@ -79,6 +88,7 @@ def refresh_inputs(
             {
                 "id": provider,
                 "publisher": publisher,
+                "identifier_formats": IDENTIFIER_FORMATS[provider],
                 "enabled": provider in request.app.state.settings.providers_enabled,
                 "next_revision": max(revisions, default=-1) + 1,
             }
@@ -89,6 +99,8 @@ def refresh_inputs(
         "providers": providers,
         "identifiers": identifiers[offset : offset + limit],
         "total": len(identifiers),
+        "unsupported_total": unsupported_total,
+        "selected_provider": selected_provider,
         "next_offset": offset + limit if offset + limit < len(identifiers) else None,
         "capabilities": ["refresh"] if actor.allowed(db, project, "evidence") else [],
         "limitations": [

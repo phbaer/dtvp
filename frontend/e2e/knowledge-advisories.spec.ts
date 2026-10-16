@@ -16,7 +16,7 @@ async function fixture(page: Page, readonly = false) {
     else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: 'old-head' }] }
     else if (path.endsWith('/workspace')) result = { state: 'old-head', project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
-    else if (path.endsWith('/advisory-refresh')) result = { expected_versions: { '7.1.1': changed ? 'new-head' : 'old-head', '7.1.2': 'parallel-head' }, expected_evidence: changed ? 'new-evidence' : 'old-evidence', providers: [{ id: 'circl', publisher: 'CVE Project mirror', enabled: true, next_revision: changed ? 4 : 3 }, { id: 'nvd', publisher: 'NVD', enabled: false, next_revision: 0 }], identifiers: url.searchParams.get('offset') === '20' ? ['CVE-2099-0021'] : Array.from({ length: 20 }, (_, i) => `CVE-2099-${String(i + 1).padStart(4, '0')}`), total: 21, next_offset: url.searchParams.get('offset') === '20' ? null : 20, capabilities: readonly ? [] : ['refresh'], limitations: ['Publisher identity is unverified; no automatic approval.'] }
+    else if (path.endsWith('/advisory-refresh')) result = { expected_versions: { '7.1.1': changed ? 'new-head' : 'old-head', '7.1.2': 'parallel-head' }, expected_evidence: changed ? 'new-evidence' : 'old-evidence', providers: [{ id: 'circl', publisher: 'CVE Project mirror', enabled: true, next_revision: changed ? 4 : 3 }, { id: 'nvd', publisher: 'NVD', enabled: false, next_revision: 0 }, { id: 'jvn', publisher: 'MyJVN API', enabled: true, next_revision: 0, identifier_formats: ['JVNDB'] }], unsupported_total: url.searchParams.get('provider') === 'jvn' ? 21 : 0, identifiers: url.searchParams.get('provider') === 'jvn' ? ['JVNDB-2099-000001'] : url.searchParams.get('offset') === '20' ? ['CVE-2099-0021'] : Array.from({ length: 20 }, (_, i) => `CVE-2099-${String(i + 1).padStart(4, '0')}`), total: 21, next_offset: url.searchParams.get('offset') === '20' ? null : 20, capabilities: readonly ? [] : ['refresh'], limitations: ['Publisher identity is unverified; no automatic approval.'] }
     else if (path.endsWith('/advisory-jobs')) result = { items: [job], next_offset: url.searchParams.get('offset') === '20' ? null : 20 }
     else if (path.includes('/advisory-jobs/')) result = { ...job, status: 'succeeded', capabilities: [] }
     await route.fulfill({ json: result })
@@ -52,8 +52,8 @@ test('refresh is explicit, bounded to20 exact selected IDs and provider availabi
 test('503 retries identical request despite explicit plan refresh changing heads and provider ordinal', async ({ page }) => {
   const { panel, writes, change, fail } = await fixture(page)
   const queue = panel.getByLabel('Queue advisory refresh', { exact: true })
-  await panel.getByRole('checkbox', { name: 'CVE-2099-0001', exact: true }).check()
   await queue.getByLabel('Advisory provider').selectOption('circl')
+  await panel.getByRole('checkbox', { name: 'CVE-2099-0001', exact: true }).check()
   fail(503)
   await queue.getByRole('button', { name: 'Queue advisory refresh', exact: true }).click()
   await expect(panel.getByRole('alert')).toContainText('Uncertain enqueue')
@@ -111,4 +111,22 @@ test('readonly role sees provenance and jobs with no enqueue or retry controls i
   await expect(panel).toContainText('publisher CVE Project mirror')
   await expect(page.locator('body')).toHaveJSProperty('scrollWidth', 390)
   expect(writes).toHaveLength(0)
+})
+
+
+test('provider switches clear prior selections and explain unsupported baseline IDs', async ({ page }) => {
+  const { panel, writes, queries } = await fixture(page)
+  const queue = panel.getByLabel('Queue advisory refresh', { exact: true })
+  await queue.getByLabel('Advisory provider').selectOption('circl')
+  await panel.getByRole('checkbox', { name: 'CVE-2099-0001', exact: true }).check()
+  await queue.getByLabel('Advisory provider').selectOption('jvn')
+  await expect(panel).toContainText('21 baseline IDs unsupported by jvn; these have not been looked up.')
+  await expect(panel).toContainText('Supported exact IDs: JVNDB')
+  await expect(panel.getByRole('checkbox', { name: 'CVE-2099-0001', exact: true })).toHaveCount(0)
+  await expect(queue.getByRole('button', { name: 'Queue advisory refresh', exact: true })).toBeDisabled()
+  await panel.getByRole('checkbox', { name: 'JVNDB-2099-000001', exact: true }).check()
+  await queue.getByRole('button', { name: 'Queue advisory refresh', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0]!.body).toMatchObject({ provider: 'jvn', identifiers: ['JVNDB-2099-000001'] })
+  expect(queries.some(url => url.pathname.endsWith('/advisory-refresh') && url.searchParams.get('provider') === 'jvn')).toBeTruthy()
 })

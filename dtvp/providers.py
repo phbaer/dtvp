@@ -9,6 +9,8 @@ from urllib.parse import quote
 import httpx
 from packageurl import PackageURL
 
+from dtvp.non_us_advisories import EUVD, JVN
+
 
 class Matcher(Protocol):
     def query(self, purl: str) -> dict: ...
@@ -191,7 +193,8 @@ class DemoFailure(DemoMatcher):
 
 
 MATCHERS = {"osv": OSV, "demo": DemoMatcher, "demo-failure": DemoFailure}
-ADVISORY_PROVIDERS = {"nvd": NVD, "circl": CIRCL}
+
+ADVISORY_PROVIDERS = {"nvd": NVD, "circl": CIRCL, "euvd": EUVD, "jvn": JVN}
 
 
 def import_dt(client, base_url, key, project_id):
