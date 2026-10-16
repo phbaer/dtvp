@@ -300,6 +300,24 @@ viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Guided queue progression
+
+Native single-finding actions offer explicit **Submit and next**, **Approve and next**
+and **Request changes and next**. These publish the current exact assessment/review
+only. Navigation opens evidence for the next surviving finding on the current page;
+it never assesses, approves or rescores that finding. Filters, page offset and scroll
+position are retained. At the visible page boundary, the current position remains
+and the UI reports that no next finding remains; paging stays explicit.
+
+Advancement requires an authoritative `committed: true`, a current projection and
+successful refreshed workspace/detail reads. Errors, uncertain publication and
+pending projections retain the original endpoint, expected heads/revision, evidence,
+request ID and exact body in a visible retry buffer. Retry never repins that input.
+Changing the selected finding, filters, product, version or page prevents deferred
+automatic navigation. Switching actors clears the local captured buffer; stale actor
+responses cannot resume its workflow. Explicit local discard does not undo or prove
+absence of an earlier uncertain commit.
+
 ### Explicit bulk review
 
 The Knowledge queue lets independent team reviewers select up to 100 exact

@@ -21,7 +21,7 @@ async function fixture(page: Page, readonly = false, author = 'person') {
       writes.push({ path, body: route.request().postDataJSON() })
       if (failWrite) return route.fulfill({ status: failWrite, json: { detail: failWrite === 503 ? 'Publication uncertain; retry identical input.' : 'Baseline changed.' } })
       head = 'updated-source-head'
-      return route.fulfill({ status: 201, json: {} })
+      return route.fulfill({ status: 201, json: { committed: true, projection: 'current' } })
     }
     let result: unknown = { items: [], next_cursor: null }
     if (path === '/api/v2/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read', ...(readonly ? [] : ['assess', 'approve'])] }] }
@@ -63,12 +63,12 @@ test('shared assessment requires conditions and retains full scope plus UUID on 
   await detail.getByRole('button', { name: 'Submit assessment', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Publication uncertain')
   await expect(matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true })).toBeChecked()
-  await detail.getByRole('button', { name: 'Submit assessment', exact: true }).click()
+  await page.getByRole('button', { name: 'Retry exact assessment workflow request', exact: true }).click()
   expect(writes).toHaveLength(2)
   expect(writes[1]!.body).toEqual(writes[0]!.body)
   expect(writes[0]!.body).toMatchObject({ expected_versions: { '7.1.1': 'source-head', '7.1.2': '7.1.2-head' }, expected_revision: 'revision-one', targets: [{ version: '7.1.1', context_id: 'context', vulnerability_id: 'CVE-2099-1234' }, { version: '7.1.2', context_id: 'context', vulnerability_id: 'CVE-2099-1234' }] })
   fail(0)
-  await detail.getByRole('button', { name: 'Submit assessment', exact: true }).click()
+  await page.getByRole('button', { name: 'Retry exact assessment workflow request', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('Assessment submitted')
   expect(writes[2]!.body).toEqual(writes[0]!.body)
   await detail.getByRole('button', { name: 'assessment', exact: true }).click()
@@ -134,7 +134,7 @@ test('a replacement author starts a separate decision and retains evidence on un
   fail(503)
   await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Publication uncertain')
-  await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
+  await page.getByRole('button', { name: 'Retry exact assessment workflow request', exact: true }).click()
   expect(writes).toHaveLength(2)
   expect(writes[1]).toEqual(writes[0])
   expect(writes[0]!.path).not.toContain('/logical-one/')

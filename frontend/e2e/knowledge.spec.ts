@@ -27,7 +27,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
         const body = route.request().postDataJSON()
         return route.fulfill({ json: { preview: 'score-preview-sha', eligible: scoreReady, proposal: { base_vector: body.base_vector, vector: body.vector, base_score: 9.8, score: 0, version: '3.1' }, blocked: scoreReady ? [] : [{ version: '7.1.2', vulnerability_id: 'CVE-2099-1234', missing: [{ context_id: 'other-context', status: 'submitted' }], unresolved_components: [] }] } })
       }
-      return route.fulfill({ status: conflict ? 409 : 201, json: conflict ? { detail: 'Baseline changed' } : { assessment_revision: 'new-revision' } })
+      return route.fulfill({ status: conflict ? 409 : 201, json: conflict ? { detail: 'Baseline changed' } : { committed: true, projection: 'current', assessment_revision: 'new-revision' } })
     }
     let result: unknown = { items: [], next_cursor: null }
     if (path === '/api/v2/me') result = { id: reviewer ? 'reviewer' : 'analyst', name: 'Test user', org_admin: false, playground, agentyzer: { enabled: false, mode: 'disabled' }, vscorer_url: '', workspaces: [{ id: 'security', name: 'Security', capabilities: ['read', reviewer ? 'approve' : 'assess'] }] }
@@ -121,7 +121,7 @@ test('uncertain assessment publication retries the identical idempotency key', a
   fixtureState.uncertain()
   await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Publication uncertain')
-  await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
+  await page.getByRole('button', { name: 'Retry exact assessment workflow request', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('Draft saved')
   expect(fixtureState.writes).toHaveLength(2)
   expect(fixtureState.writes[1]?.body).toEqual(fixtureState.writes[0]?.body)

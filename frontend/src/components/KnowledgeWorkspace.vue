@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, ApiError, send } from '../api'
 import { justifications, justificationLabel } from '../assessmentReasons'
 import { knowledgeApi, type KnowledgeFinding, type KnowledgeProposal, type KnowledgeWorkspace, type KnowledgeScoreInput, type KnowledgeScorePreview } from '../knowledgeApi'
@@ -14,15 +14,15 @@ import KnowledgeSources from './KnowledgeSources.vue'
 import KnowledgeComponentMetadata from './KnowledgeComponentMetadata.vue'
 import KnowledgeIntake from './KnowledgeIntake.vue'
 import KnowledgeAssembly from './KnowledgeAssembly.vue'
-import KnowledgeBulkReview from './KnowledgeBulkReview.vue'
-import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
-import KnowledgeOwnership from './KnowledgeOwnership.vue'
-import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
 import KnowledgeDocuments from './KnowledgeDocuments.vue'
 import KnowledgePortfolio from './KnowledgePortfolio.vue'
 import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
 import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
+import KnowledgeOwnership from './KnowledgeOwnership.vue'
+import KnowledgeBulkReview from './KnowledgeBulkReview.vue'
+import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
+import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 const props = defineProps<{ me: Me }>()
 const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false)
 const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value)
@@ -73,15 +73,21 @@ const sourceVectors = computed(() => [...new Set(selected.value?.source_ratings.
 const workflowTabs = computed(() => can('rescore') ? ['evidence', 'assessment', 'review', 'scoring'] as const : ['evidence', 'assessment', 'review'] as const)
 const assessmentScope = ref<{ expected_versions: Record<string, string>; targets: { version: string; context_id: string; vulnerability_id: string }[] } | null>(null)
 const assessmentId = ref(''), confirmed = ref(false), reviewRationale = ref('')
-let pendingRequest: { signature: string; requestId: string } | null = null
+type WorkflowKind = 'draft' | 'submit' | 'approve' | 'request_changes'
+let actorGeneration = 0
+type WorkflowRequest = { scope: string; generation: number; view: string; actor: string; endpoint: string; body: Record<string, unknown>; kind: WorkflowKind; next: boolean; project: string; version: string; row: KnowledgeFinding; following: string[]; scrollX: number; scrollY: number; queueX: number; queueY: number }
+const pendingRequest = ref<WorkflowRequest | null>(null)
+const queueElement = ref<HTMLElement | null>(null)
+const workflowScope = () => JSON.stringify([project.value, version.value, team.value, lifecycle.value, query.value, filters.value, offset.value])
+const workflowView = () => JSON.stringify([workflowScope(), selected.value?.id])
 let sequence = 0, timer: ReturnType<typeof setTimeout> | undefined
 const scope = computed(() => `/projects/${encodeURIComponent(project.value)}/versions/${encodeURIComponent(version.value)}`)
 const assessment = computed(() => selected.value?.coverage.assessment)
 const revisesCurrent = computed(() => assessmentId.value === assessment.value?.payload.assessment_id)
 const canEditAssessment = computed(() => can('assess') && (!assessment.value || !revisesCurrent.value || assessment.value.payload.author_id === props.me.id))
 function startAssessment() {
-  if (!can('assess') || busy.value) return
-  assessmentId.value = crypto.randomUUID(); assessmentScope.value = null; pendingRequest = null
+  if (!can('assess') || busy.value || pendingRequest.value) return
+  assessmentId.value = crypto.randomUUID(); assessmentScope.value = null
   notice.value = 'New assessment started. Existing decisions and approved history are retained; review the copied evidence before submitting.'
 }
 
@@ -93,7 +99,7 @@ const sourceScore = (row: KnowledgeFinding) => row.source_ratings.filter(r => r.
 const selectedIndex = computed(() => workspace.value?.items.findIndex(item => item.id === selected.value?.id) ?? -1)
 function fail(err: unknown) { error.value = err instanceof ApiError && err.status === 409 ? 'The baseline or assessment changed. Refresh before retrying; your text is retained.' : err instanceof Error ? err.message : 'Request failed' }
 function close() { if (metadataLocked.value) return; assessmentScope.value = null; selected.value = null; confirmed.value = false; scorePreview.value = null }
-async function load(reset = true, keep = false) {
+async function load(reset = true, keep = false, refreshHead = false) {
   if (metadataLocked.value) return
   const current = ++sequence
   if (!project.value || !version.value) { workspace.value = null; close(); return }
@@ -102,7 +108,7 @@ async function load(reset = true, keep = false) {
   if (!keep) close()
   try {
     const params = new URLSearchParams({ offset: String(offset.value), limit: '30', q: query.value, team_id: team.value, lifecycle: lifecycle.value, ...Object.fromEntries(Object.entries(filters.value).filter(([, value]) => value !== '')) })
-    if (!reset && workspace.value?.state) params.set('expected', workspace.value.state)
+    if (!reset && workspace.value?.state && !refreshHead) params.set('expected', workspace.value.state)
     const result = await knowledgeApi<KnowledgeWorkspace>(`${scope.value}/workspace?${params}`)
     if (current === sequence) { workspace.value = result; knownTeamLabels.value = { ...knownTeamLabels.value, ...result.team_labels }; syncViewUrl() }
   } catch (err) { if (current === sequence) fail(err) }
@@ -172,29 +178,51 @@ async function paginate(next: boolean) {
   else offset.value = previous.value.pop() || 0
   await load(false)
 }
-async function mutate(kind: 'draft' | 'submit' | 'approve' | 'request_changes') {
-  if (metadataLocked.value) return
-  if (!selected.value || !workspace.value) return
-  if ((kind === 'draft' || kind === 'submit') && !canEditAssessment.value) return
-  if (kind === 'submit' && assessmentScope.value && !conditions.value.trim()) return
-  busy.value = true; error.value = ''; notice.value = ''; const row = selected.value
-  try {
+async function mutate(kind: WorkflowKind, next = false, retry = false) {
+  if (busy.value || metadataLocked.value) return
+  if (!retry) {
+    if (pendingRequest.value || !selected.value || !workspace.value) return
+    if ((kind === 'draft' || kind === 'submit') && !canEditAssessment.value) return
+    if (kind === 'submit' && (!rationale.value.trim() || (assessmentScope.value && !conditions.value.trim()) || (applicability.value === 'not_affected' && !justification.value))) return
+    if ((kind === 'approve' || kind === 'request_changes') && (!can('approve') || !assessment.value || !confirmed.value || !reviewRationale.value.trim())) return
+    const row = selected.value
     const base = { expected_versions: { [version.value]: workspace.value.state }, targets: [{ version: version.value, context_id: row.context_id, vulnerability_id: row.vulnerability_id }] }
     const path = `/projects/${encodeURIComponent(project.value)}`
     const endpoint = kind === 'draft' || kind === 'submit' ? `${path}/assessments/${encodeURIComponent(assessmentId.value)}/${kind}` : `${path}/reviews`
     const body = kind === 'draft' || kind === 'submit'
       ? { ...(assessmentScope.value || base), expected_revision: revisesCurrent.value ? assessment.value?.revision || null : null, state: applicability.value, justification: applicability.value === 'not_affected' ? justification.value || null : null, rationale: rationale.value, conditions: conditions.value, evidence: assessment.value?.payload.evidence || [] }
       : { ...base, assessment_id: assessment.value!.payload.assessment_id, assessment_revision: assessment.value!.revision, action: kind, rationale: reviewRationale.value }
-    const signature = JSON.stringify({ endpoint, body })
-    if (pendingRequest?.signature !== signature) pendingRequest = { signature, requestId: crypto.randomUUID() }
-    await knowledgeApi(endpoint, send({ ...body, request_id: pendingRequest.requestId }))
-    pendingRequest = null
-    await load(true, true); if (error.value) return
-    await open(row)
-    if (!error.value) { notice.value = kind === 'draft' ? 'Draft saved.' : kind === 'submit' ? 'Assessment submitted for independent review.' : kind === 'approve' ? 'Assessment approved.' : 'Changes requested.'; tab.value = kind === 'draft' ? 'assessment' : 'review' }
-  } catch (err) { fail(err) }
-  finally { busy.value = false }
+    pendingRequest.value = { scope: workflowScope(), generation: actorGeneration, view: workflowView(), actor: props.me.id, endpoint, body: JSON.parse(JSON.stringify({ ...body, request_id: crypto.randomUUID() })), kind, next, project: project.value, version: version.value, row: JSON.parse(JSON.stringify(row)), following: workspace.value.items.slice(selectedIndex.value + 1).map(item => item.id), scrollX: window.scrollX, scrollY: window.scrollY, queueX: queueElement.value?.scrollLeft || 0, queueY: queueElement.value?.scrollTop || 0 }
+  }
+  const request = pendingRequest.value
+  if (!request) return
+  busy.value = true; error.value = ''; notice.value = ''
+  try {
+    const receipt = await knowledgeApi<{ committed?: boolean; projection?: string }>(request.endpoint, send(request.body))
+    if (actorGeneration !== request.generation) return
+    if (receipt.committed !== true || receipt.projection !== 'current') {
+      notice.value = receipt.committed === true ? 'Committed; projection is pending. Keep this finding open and retry the exact request to refresh the projection.' : 'Publication is uncertain. The exact request is retained; no next finding was opened.'
+      return
+    }
+    pendingRequest.value = null
+    const message = request.kind === 'draft' ? 'Draft saved.' : request.kind === 'submit' ? 'Assessment submitted for independent review.' : request.kind === 'approve' ? 'Assessment approved.' : 'Changes requested.'
+    if (workflowView() !== request.view) { notice.value = `${message} Recorded for ${request.project} / ${request.version}; current queue retained.`; return }
+    await load(false, true, true); if (actorGeneration !== request.generation || workflowView() !== request.view || error.value) return
+    const nextRow = request.next ? request.following.map(id => workspace.value!.items.find(item => item.id === id)).find((item): item is KnowledgeFinding => Boolean(item)) : undefined
+    const sameRow = workspace.value!.items.find(item => item.id === request.row.id)
+    if (nextRow || sameRow) await open((nextRow || sameRow)!)
+    else close()
+    if (actorGeneration !== request.generation || workflowScope() !== request.scope) return
+    if (!error.value) { notice.value = `${message}${request.next && !nextRow ? ' No next finding remains on this page; queue position retained.' : ''}`; tab.value = nextRow ? 'evidence' : request.kind === 'draft' ? 'assessment' : 'review' }
+    await nextTick(); if (actorGeneration !== request.generation || workflowScope() !== request.scope) return; window.scrollTo(request.scrollX, request.scrollY); queueElement.value?.scrollTo(request.queueX, request.queueY)
+  } catch (err) { if (actorGeneration === request.generation) fail(err) }
+  finally { if (actorGeneration === request.generation) busy.value = false }
 }
+function discardWorkflowRequest() {
+  if (busy.value) return
+  pendingRequest.value = null; error.value = ''; notice.value = 'Captured request discarded locally. Check current state before preparing another action; an earlier uncertain request may already have committed.'
+}
+
 function useProposal(proposal: KnowledgeProposal) {
   if (!can('rescore') || !proposal.eligible || !proposal.score_input) return
   scoreBase.value = proposal.score_input.base_vector; scoreVector.value = proposal.score_input.vector
@@ -268,13 +296,13 @@ async function copyView() {
 }
 watch(() => [project.value, version.value, workspace.value?.state, team.value, lifecycle.value, query.value, JSON.stringify(filters.value), props.me.id], () => { bulkSelection.value = {} })
 watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
-watch(() => props.me.id, () => { knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() })
+watch(() => props.me.id, () => { ++actorGeneration; pendingRequest.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
 onMounted(() => {
   try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
   if (initialView.has('k_project')) void restoreView(initialView.toString())
 })
-onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer) })
+onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer) })
 </script>
 <template>
   <section class="knowledge-workspace" aria-label="Knowledge workspace">
@@ -305,9 +333,10 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
     <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="intakeBusy" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
     <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
     <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
-    <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
-    <KnowledgeBulkReview :key="me.id" :project="project" :version="version" :state="workspace?.state || ''" :rows="bulkRows" @locked="bulkLocked = $event" @reset="bulkSelection = {}" @changed="bulkChanged" />
     <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" />
+    <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
+    <section v-if="pendingRequest" class="knowledge-pane" aria-label="Pending assessment workflow request"><p role="status">Captured {{ label(pendingRequest.kind) }} for {{ pendingRequest.project }} / {{ pendingRequest.version }} / {{ pendingRequest.row.vulnerability_id }}. Exact source heads, evidence, target and request ID are retained.</p><button :disabled="busy || metadataLocked" @click="mutate(pendingRequest.kind, pendingRequest.next, true)">Retry exact assessment workflow request</button><button :disabled="busy" @click="discardWorkflowRequest">Discard captured workflow request</button><details><summary>Captured workflow input</summary><pre>{{ JSON.stringify(pendingRequest.body, null, 2) }}</pre></details></section>
+    <KnowledgeBulkReview :key="me.id" :project="project" :version="version" :state="workspace?.state || ''" :rows="bulkRows" @locked="bulkLocked = $event" @reset="bulkSelection = {}" @changed="bulkChanged" />
     <KnowledgeComparison :project="project" />
     <p v-if="error" role="alert" class="message">{{ error }}</p><p v-if="notice" role="status" class="message">{{ notice }}</p><p v-if="busy" role="status">Loading…</p>
     <p v-if="project && !busy && !version && !versions.length" class="empty">No journal-backed versions. Import a baseline to start.</p><p v-else-if="!project" class="empty">Select a product to review its versioned knowledge.</p>
@@ -322,7 +351,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <KnowledgeAdvisories :project="project" :state="workspace.state" />
       <KnowledgeReconciliation :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">
-        <section class="knowledge-queue" aria-label="Context finding queue"><div class="table-wrap"><table><thead><tr><th v-if="workspace.items.some(row => row.capabilities?.includes('approve')) || bulkRows.length || bulkLocked">Review</th><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td v-if="workspace.items.some(item => item.capabilities?.includes('approve')) || bulkRows.length || bulkLocked"><input type="checkbox" :aria-label="`Select ${row.vulnerability_id} in ${row.context.root_ref} for bulk review`" :checked="!!bulkSelection[row.id]" :disabled="busy || bulkLocked || !bulkEligible(row) || (!bulkSelection[row.id] && bulkRows.length >= 100)" @change="toggleBulk(row)"></td><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small></td><td>{{ sourceScore(row) }}</td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
+        <section class="knowledge-queue" aria-label="Context finding queue"><div ref="queueElement" class="table-wrap"><table><thead><tr><th v-if="workspace.items.some(row => row.capabilities?.includes('approve')) || bulkRows.length || bulkLocked">Review</th><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td v-if="workspace.items.some(item => item.capabilities?.includes('approve')) || bulkRows.length || bulkLocked"><input type="checkbox" :aria-label="`Select ${row.vulnerability_id} in ${row.context.root_ref} for bulk review`" :checked="!!bulkSelection[row.id]" :disabled="busy || bulkLocked || !bulkEligible(row) || (!bulkSelection[row.id] && bulkRows.length >= 100)" @change="toggleBulk(row)"></td><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small></td><td>{{ sourceScore(row) }}</td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
         <section v-if="selected" class="knowledge-detail" aria-label="Context finding detail">
           <header><div><h2>{{ selected.vulnerability_id }}</h2><p>{{ selected.component.name }} {{ selected.component.version }}</p></div><button aria-label="Close context finding" :disabled="busy" @click="close()">×</button></header><p class="hint">{{ teamName(selected.context.team_id) }} · {{ label(selected.coverage.status) }}</p>
           <div class="knowledge-score-pair"><span>Source <strong>{{ sourceScore(selected) }}</strong></span><span>Published <strong>{{ selected.published_score?.score.toFixed(1) ?? 'Not published' }}</strong><small v-if="selected.published_score?.current === false"> · Outdated</small></span></div>
@@ -330,12 +359,12 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
           <KnowledgeSpecialists :project="project" :state="workspace.state" :version="version" :finding="selected" />
           <details v-if="selected.scoring_proposals?.length" class="knowledge-pane"><summary>External scoring proposals ({{ selected.scoring_proposals.length }})</summary><div class="table-wrap"><table aria-label="External scoring comparison"><thead><tr><th>Provider</th><th>Source Base</th><th>Proposed</th><th>Status</th><th v-if="can('rescore')">Action</th></tr></thead><tbody><tr v-for="proposal in selected.scoring_proposals" :key="proposal.id"><td>{{ proposal.source_label }}<small>{{ proposal.provider }}</small></td><td>{{ proposal.proposal?.base_score.toFixed(1) ?? 'Unknown' }}</td><td>{{ proposal.proposal?.score.toFixed(1) ?? 'Withheld' }}</td><td>{{ proposal.eligible ? 'Ready for coordinator preview' : proposal.ineligibility_reasons.map(label).join(' · ') }}<small>{{ proposal.current ? 'Current evidence' : 'Historical evidence' }}</small></td><td v-if="can('rescore')"><button :disabled="busy || !proposal.eligible" @click="useProposal(proposal)">Use proposal</button></td></tr></tbody></table></div><p class="hint">External proposals do not approve assessments or publish scores. Artifact consistency does not verify provider identity.</p><details><summary>Proposal vectors and provenance</summary><pre>{{ JSON.stringify(selected.scoring_proposals, null, 2) }}</pre></details></details>
           <details v-if="selected.curated_metadata" class="knowledge-pane"><summary>Curated component context · {{ label(selected.curated_metadata.status) }}</summary><p v-if="!selected.curated_metadata.applicable" class="warning">Historical annotations require reconciliation with this component/version before use.</p><dl><dt>Criticality / exposure</dt><dd>{{ label(selected.curated_metadata.payload.annotations.cybersecurity.criticality) }} · {{ label(selected.curated_metadata.payload.annotations.cybersecurity.exposure) }}</dd><dt>Deployment</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.environment || 'Unknown' }}</dd><dt>Usage</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.usage || 'Unknown' }}</dd><dt>Support</dt><dd>{{ label(selected.curated_metadata.payload.annotations.support.status) }}</dd><dt>Source</dt><dd>{{ selected.curated_metadata.payload.provenance.source }} · {{ selected.curated_metadata.payload.provenance.reference }}</dd></dl><p>{{ selected.curated_metadata.payload.rationale }}</p><details><summary>Mitigations, testing and supporting details</summary><pre>{{ JSON.stringify(selected.curated_metadata.payload.annotations, null, 2) }}</pre></details></details>
+          <KnowledgeComponentMetadata :key="`${me.id}:${project}:${version}:${selected.context.component_ref}`" :project="project" :state="workspace.state" :version="version" :component-ref="String(selected.context.component_ref || '')" :context-id="selected.context_id" :disabled="busy || bulkLocked || !!pendingRequest" @locked="metadataLocked = $event" @changed="metadataChanged" @refresh="metadataChanged" />
           <details v-if="selected.legacy_evidence?.length" class="knowledge-pane"><summary>Imported DT assessment history</summary><p class="hint">Historical team and author labels are source claims. These records do not establish current DTVP approval.</p><article v-for="claim in selected.legacy_evidence" :key="claim.id"><h3>{{ claim.source }} · {{ label(claim.status) }}</h3><p v-if="claim.conflicting" class="warning">Conflicting imported team conclusions require reconciliation.</p><div v-for="(record, index) in claim.current_records" :key="index"><strong>{{ record.team }} · {{ label(record.state || 'unknown') }}</strong><p>{{ record.rationale }}</p><p v-if="record.justification">{{ justificationLabel(record.justification) }}</p><small>Historical assessor: {{ record.assessor || 'Unknown' }} · reviewer: {{ record.reviewer || 'Unknown' }}</small></div><p v-if="!claim.current_records.length">{{ claim.raw_text || claim.raw_excerpt || 'No interpretable assessment text.' }}</p><ul v-if="claim.errors.length"><li v-for="issue in claim.errors" :key="issue">{{ issue }}</li></ul><details><summary>Complete imported history, comments and score claims</summary><pre>{{ JSON.stringify(claim, null, 2) }}</pre></details></article></details>
-          <KnowledgeComponentMetadata :key="`${me.id}:${project}:${version}:${selected.context.component_ref}`" :project="project" :state="workspace.state" :version="version" :component-ref="String(selected.context.component_ref || '')" :context-id="selected.context_id" :disabled="busy || bulkLocked" @locked="metadataLocked = $event" @changed="metadataChanged" @refresh="metadataChanged" />
           <nav class="knowledge-tabs" aria-label="Assessment workflow"><button v-for="step in workflowTabs" :key="step" :aria-pressed="tab === step" @click="tab = step">{{ label(step) }}</button></nav>
           <div v-if="tab === 'evidence'" class="knowledge-pane"><p class="knowledge-description">{{ selected.description || 'No source description provided.' }}</p><dl><dt>Consuming root</dt><dd>{{ selected.context.root_ref || 'Unknown' }}</dd><dt>Ownership</dt><dd>{{ label(selected.context.status || 'unknown') }}</dd><dt>Package</dt><dd>{{ selected.component.purl || 'Unknown' }}</dd></dl><details><summary>Source ratings and vectors</summary><ul><li v-for="(rating, index) in selected.source_ratings" :key="index">{{ ratingSource(rating) }} · {{ rating.method || 'Unspecified method' }} · {{ rating.score ?? 'Unknown score' }}<code>{{ rating.vector }}</code></li></ul></details><details><summary>Dependency and ownership evidence</summary><pre>{{ JSON.stringify(selected.context, null, 2) }}</pre></details><details><summary>Imported source claims</summary><pre>{{ JSON.stringify(selected.sourcefacts || [], null, 2) }}</pre></details><details><summary>Additional evidence</summary><pre>{{ JSON.stringify(selected.evidence || [], null, 2) }}</pre></details><button v-if="can('assess')" class="primary" @click="tab = 'assessment'">Assess this context</button></div>
-          <form v-if="tab === 'assessment'" class="knowledge-pane" @submit.prevent="mutate('submit')"><p v-if="selected.coverage.approved_assessment" class="hint">An approved assessment is retained. A new draft does not replace its approved pin.</p><p v-if="assessment && revisesCurrent && !canEditAssessment && can('assess')" class="hint">This assessment belongs to another author. Start a separate assessment to record your decision.</p><button v-if="assessment && can('assess')" type="button" :disabled="busy || !revisesCurrent" @click="startAssessment">Start new assessment</button><KnowledgeCoverage :project="project" :state="workspace!.state" :version="version" :finding="selected" :busy="busy" @scope="assessmentScope = $event"/><fieldset :disabled="busy || !canEditAssessment"><label>Applicability<select v-model="applicability"><option v-for="state in ['under_investigation', 'affected', 'not_affected', 'fixed']" :key="state" :value="state">{{ label(state) }}</option></select></label><label v-if="applicability === 'not_affected'">Why not affected?<select v-model="justification" required><option value="" disabled>Select a reason</option><option v-for="(text, code) in justifications" :key="code" :value="code">{{ text }}</option></select></label><label>Reason and evidence<textarea v-model="rationale" rows="5" required placeholder="Explain this decision for the selected consuming context."></textarea></label><details :open="Boolean(assessmentScope)"><summary>Applicability conditions</summary><label>Conditions<textarea v-model="conditions" rows="3" :required="Boolean(assessmentScope)"></textarea></label></details></fieldset><p v-if="!can('assess')" class="hint">Assessment editing is unavailable for this context.</p><div v-else class="knowledge-actions"><button type="button" :disabled="busy || !canEditAssessment" @click="mutate('draft')">Save draft</button><button class="primary" :disabled="busy || !canEditAssessment || !rationale.trim() || (assessmentScope && !conditions.trim()) || (applicability === 'not_affected' && !justification)">Submit assessment</button></div></form>
-          <div v-if="tab === 'review'" class="knowledge-pane"><template v-if="assessment"><h3>{{ label(assessment.payload.state) }}</h3><p v-if="assessment.payload.justification">{{ justificationLabel(assessment.payload.justification) }}</p><p class="knowledge-rationale">{{ assessment.payload.rationale }}</p><p v-if="assessment.payload.conditions" class="knowledge-rationale">Conditions: {{ assessment.payload.conditions }}</p><small>{{ label(assessment.stage) }} · Author {{ assessment.payload.author_id || 'Unknown' }}</small><details><summary>Assessment scope and evidence</summary><pre>{{ JSON.stringify({ targets: assessment.payload.targets, evidence: assessment.payload.evidence }, null, 2) }}</pre></details><template v-if="can('approve')"><label>Review rationale<textarea v-model="reviewRationale" rows="3" placeholder="Explain approval or requested changes."></textarea></label><label class="knowledge-confirm"><input v-model="confirmed" type="checkbox">I checked the evidence, applicability and context of this assessment.</label><div class="knowledge-actions"><button :disabled="busy || !confirmed || !reviewRationale.trim()" @click="mutate('request_changes')">Request changes</button><button class="primary" :disabled="busy || !confirmed || !reviewRationale.trim()" @click="mutate('approve')">Approve assessment</button></div></template><p v-else class="hint">Independent review actions are unavailable for this assessment.</p></template><p v-else>No assessment recorded for this context.</p><details v-if="selected.coverage.approved_assessment"><summary>Retained approved assessment</summary><p>{{ selected.coverage.approved_assessment.payload.rationale }}</p></details></div>
+          <form v-if="tab === 'assessment'" class="knowledge-pane" @submit.prevent="mutate('submit')"><p v-if="selected.coverage.approved_assessment" class="hint">An approved assessment is retained. A new draft does not replace its approved pin.</p><p v-if="assessment && revisesCurrent && !canEditAssessment && can('assess')" class="hint">This assessment belongs to another author. Start a separate assessment to record your decision.</p><button v-if="assessment && can('assess')" type="button" :disabled="busy || !!pendingRequest || !revisesCurrent" @click="startAssessment">Start new assessment</button><KnowledgeCoverage :project="project" :state="workspace!.state" :version="version" :finding="selected" :busy="busy || !!pendingRequest" @scope="assessmentScope = $event"/><fieldset :disabled="busy || !!pendingRequest || !canEditAssessment"><label>Applicability<select v-model="applicability"><option v-for="state in ['under_investigation', 'affected', 'not_affected', 'fixed']" :key="state" :value="state">{{ label(state) }}</option></select></label><label v-if="applicability === 'not_affected'">Why not affected?<select v-model="justification" required><option value="" disabled>Select a reason</option><option v-for="(text, code) in justifications" :key="code" :value="code">{{ text }}</option></select></label><label>Reason and evidence<textarea v-model="rationale" rows="5" required placeholder="Explain this decision for the selected consuming context."></textarea></label><details :open="Boolean(assessmentScope)"><summary>Applicability conditions</summary><label>Conditions<textarea v-model="conditions" rows="3" :required="Boolean(assessmentScope)"></textarea></label></details></fieldset><p v-if="!can('assess')" class="hint">Assessment editing is unavailable for this context.</p><div v-else class="knowledge-actions"><button type="button" :disabled="busy || !!pendingRequest || !canEditAssessment" @click="mutate('draft')">Save draft</button><button class="primary" :disabled="busy || !!pendingRequest || !canEditAssessment || !rationale.trim() || (assessmentScope && !conditions.trim()) || (applicability === 'not_affected' && !justification)">Submit assessment</button><button type="button" :disabled="busy || !!pendingRequest || !canEditAssessment || !rationale.trim() || (assessmentScope && !conditions.trim()) || (applicability === 'not_affected' && !justification)" @click="mutate('submit', true)">Submit and next</button></div></form>
+          <div v-if="tab === 'review'" class="knowledge-pane"><template v-if="assessment"><h3>{{ label(assessment.payload.state) }}</h3><p v-if="assessment.payload.justification">{{ justificationLabel(assessment.payload.justification) }}</p><p class="knowledge-rationale">{{ assessment.payload.rationale }}</p><p v-if="assessment.payload.conditions" class="knowledge-rationale">Conditions: {{ assessment.payload.conditions }}</p><small>{{ label(assessment.stage) }} · Author {{ assessment.payload.author_id || 'Unknown' }}</small><details><summary>Assessment scope and evidence</summary><pre>{{ JSON.stringify({ targets: assessment.payload.targets, evidence: assessment.payload.evidence }, null, 2) }}</pre></details><template v-if="can('approve')"><label>Review rationale<textarea v-model="reviewRationale" :disabled="busy || !!pendingRequest" rows="3" placeholder="Explain approval or requested changes."></textarea></label><label class="knowledge-confirm"><input v-model="confirmed" type="checkbox" :disabled="busy || !!pendingRequest">I checked the evidence, applicability and context of this assessment.</label><div class="knowledge-actions"><button :disabled="busy || !!pendingRequest || !confirmed || !reviewRationale.trim()" @click="mutate('request_changes')">Request changes</button><button class="primary" :disabled="busy || !!pendingRequest || !confirmed || !reviewRationale.trim()" @click="mutate('approve')">Approve assessment</button><button :disabled="busy || !!pendingRequest || !confirmed || !reviewRationale.trim()" @click="mutate('approve', true)">Approve and next</button><button :disabled="busy || !!pendingRequest || !confirmed || !reviewRationale.trim()" @click="mutate('request_changes', true)">Request changes and next</button></div></template><p v-else class="hint">Independent review actions are unavailable for this assessment.</p></template><p v-else>No assessment recorded for this context.</p><details v-if="selected.coverage.approved_assessment"><summary>Retained approved assessment</summary><p>{{ selected.coverage.approved_assessment.payload.rationale }}</p></details></div>
           <form v-if="tab === 'scoring' && can('rescore')" class="knowledge-pane" aria-label="Coordinator rescoring" @submit.prevent="previewScore">
             <p class="hint">Publication requires current independent reviews for every required context of this vulnerability.</p>
             <fieldset :disabled="busy">
