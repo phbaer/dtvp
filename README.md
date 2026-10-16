@@ -254,6 +254,10 @@ separate from selecting assessment coverage.
 
 ### Current-version portfolio statistics
 
+The Knowledge tab offers a collapsed portfolio panel. It inherits workspace
+filters and can select current versions and a team. Changed heads retain the
+previous displayed pins until an explicit refresh; counts come from the API.
+
 `GET /api/v3/projects/{id}/portfolio` aggregates authorized current version heads
 from one reference snapshot. Repeat `version` to select branches; optional
 `expected_heads` rejects changed selection with 409. Workspace filters apply before

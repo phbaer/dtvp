@@ -13,6 +13,7 @@ import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
 import KnowledgeDocuments from './KnowledgeDocuments.vue'
+import KnowledgePortfolio from './KnowledgePortfolio.vue'
 const props = defineProps<{ me: Me }>()
 const project = ref(''), projectName = ref(''), version = ref(''), team = ref(''), lifecycle = ref(''), query = ref('')
 const filterLabels: Record<string, string> = { source_severity: 'Source severity', contextual_severity: 'Published severity', applicability: 'Applicability', scoring_status: 'Scoring status', team_review: 'Team assessment', provider: 'Evidence provider', cvss_version: 'Source CVSS version', dependency: 'Dependency relationship', source_conflict: 'Source discrepancies', component: 'Component' }
@@ -262,6 +263,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <div class="knowledge-statistics" aria-label="Filtered workspace statistics"><span><strong>{{ workspace.statistics.totals.context_findings }}</strong> context findings</span><span><strong>{{ workspace.statistics.totals.unique_vulnerabilities }}</strong> vulnerabilities</span><span><strong>{{ workspace.statistics.recorded }}</strong> recorded</span><span><strong>{{ workspace.statistics.submitted }}</strong> submitted</span><span><strong>{{ workspace.statistics.approved }}</strong> approved</span><details><summary>Breakdown</summary><dl><template v-for="(count, status) in workspace.statistics.by_status" :key="status"><dt>{{ label(String(status)) }}</dt><dd>{{ count }}</dd></template><template v-for="(count, id) in workspace.statistics.by_team" :key="id"><dt>{{ teamName(String(id)) }}</dt><dd>{{ typeof count === 'number' ? count : count.context_findings }} findings</dd></template><template v-for="(count, severity) in workspace.statistics.severity" :key="severity"><dt>{{ severity }}</dt><dd>{{ count }}</dd></template></dl></details></div>
       <KnowledgeRetained v-if="workspace.statistics.retained_absent_assessments" :project="project" :state="workspace.state" :team="team" />
       <KnowledgeLicenses :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
+      <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
       <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">
