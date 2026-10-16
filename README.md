@@ -3584,3 +3584,31 @@ The reviewed public action SDK is pinned to commit `f55fb85ef1d0533f5554a436f8a6
 in `tests/fixtures/cybeats-sdk-contract.json`, with SHA-256/size for its five reviewed
 signing/query/entry-point files and a frozen synthetic signing vector. The pin
 records this reviewed contract; deployment compatibility remains an acceptance gate.
+
+Generator qualification remains branch-specific. Current default `3357ac7` accepts
+Dependency-Track/CycloneDX plus curated configuration; native DTVP knowledge input
+exists on the unmerged `feat/dtvp-snapshot-integrity` branch (`da3cba0`). Its source
+pins and the default-at-review boundary are recorded in
+`tests/fixtures/specialist_contracts/generator-qualified-source.json`.
+
+An optional test executes that isolated adapter's actual `KnowledgeSource` parser
+against real locally issued DTVP bytes through a mocked transport, checking exact
+file capture and rejection of changed bytes or project scope:
+
+```bash
+DTVP_GENERATOR_CONTRACT_ROOT=/path/to/qualified-generator-checkout DTVP_GENERATOR_CONTRACT_PYTHON=/path/to/existing-generator-venv/bin/python uv run pytest -q tests/test_generator_qualified_contract.py
+```
+
+The interpreter override is optional; the test otherwise uses the selected
+checkout's `.venv/bin/python`. Missing source/environment/dependencies leave the
+optional checks skipped; no installation is attempted. Relevant source-file
+hashes must match the recorded reviewed adapter. The child process receives no
+inherited credentials, disables bytecode writes, uses a private temporary working
+directory and blocks live requests. No Generator checkout is changed and no
+rendering, publishing, PDF generation or controlled-document parity is inferred.
+The configured source/environment passed all four focused checks locally.
+
+Generator acceptance attestations in the consolidated acceptance runner still
+remain external `not_run` gates. The adapter must be reconciled with subsequent
+default VSBOM/template changes before cutover; these mocked parser checks do not
+claim that current default Generator already supports native DTVP input.

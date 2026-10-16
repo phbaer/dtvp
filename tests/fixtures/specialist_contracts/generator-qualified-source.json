@@ -1,0 +1,50 @@
+{
+  "format": "dtvp.generator-qualified-mock-contract/1",
+  "assurance": "isolated adapter source; default Generator does not implement native DTVP mode",
+  "qualified_adapter": {
+    "branch": "feat/dtvp-snapshot-integrity",
+    "commit": "da3cba064ed6b9ef88f15881d6b8caa1867189c2",
+    "source_files": [
+      {
+        "path": "README.md",
+        "sha256": "f6fed842cf2ab4f60c40c1602683d8ab45cdad8c984859e1888a615b47d24e00"
+      },
+      {
+        "path": "src/architecture/knowledge_source.py",
+        "sha256": "230339c7a51c6c96f2ec2a38021cd13a2c41a1515ac941d4df967f70d73ae2e0"
+      },
+      {
+        "path": "src/architecture/dtvp_source.py",
+        "sha256": "a3add4e70d7893e0882b606526c72984c06fe15d306c8b6c442485b31de2cf6c"
+      },
+      {
+        "path": "src/architecture/inventory.py",
+        "sha256": "ef8a6ac3fe3fa25737f49006aecd96b04a34754ed08c5920fbf90002d3dc7f6f"
+      },
+      {
+        "path": "src/architecture/pinned_support.py",
+        "sha256": "3bd52ce0636dec9d3d5c30c46528a9daeff570589b8ac0d341c3bdfb2418c37f"
+      },
+      {
+        "path": "src/architecture/pinned_pipeline.py",
+        "sha256": "46fdaa8c109b79df5bc6d77dc32912e1146a16731325c4814552921449bb09be"
+      },
+      {
+        "path": "src/architecture/api/models.py",
+        "sha256": "a78aaada9a2389674edbbc488a0e10329d2543006d1d39c4054e277c4dd03f8b"
+      }
+    ]
+  },
+  "default_checkout_at_review": {
+    "commit": "3357ac7f6be4e0e69e414946de5b38b08ddbc76c",
+    "readme_sha256": "5af982aac66cb4b0a8b92dfe1fa062f89918b40fac4bf5c90620818d288c421b",
+    "native_mode": "not_available",
+    "inputs": "Dependency-Track or CycloneDX plus curated configuration",
+    "readme_hash_basis": "observed working tree; default checkout contains unrelated local changes",
+    "api_models_sha256": "6752f12bcccd9042033da112deee1c735e2df5f2ff0e52e44aabbc48a73f4338"
+  },
+  "limitations": [
+    "The optional test executes the isolated actual parser against mocked DTVP issued-byte transport; no service deployment, renderer, PDF or controlled-document parity is established.",
+    "Qualified adapter changes are not merged into the current default; default VSBOM/template changes require reconciliation before cutover."
+  ]
+}

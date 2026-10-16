@@ -2,6 +2,16 @@
 
 ## Native journal-backed v3
 
+Current default interfaces are qualified with source-pinned offline mocks; see
+[current specialist contracts](../README.md#current-external-specialist-contracts-and-offline-mocks).
+VScorer `b016cf7` is the minimal REST edition: use the explicit
+`proposals/vscorer-minimal` adapter and optional pinned items.csv conversion.
+The qualified DTVP-binding branch described below targets an earlier interface,
+not this default. Agentyzer `8ff8372` does not return checkout-commit proof; its
+reports remain retained evidence and are ineligible for contextual application
+or scoring until that binding is supplied by a qualified provider contract.
+Mocks establish neither deployed authentication nor analysis quality.
+
 Native knowledge bundles use content-addressed state hashes and project IDs.
 They are distinct from v2 UUID snapshots. Authorize every fetch under current
 project permissions; retained source names and imported author labels do not grant
