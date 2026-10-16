@@ -980,6 +980,13 @@ eligibility. Neither is approval, publication or proof of provider authenticity.
 CLI workspace/portfolio accept matching `--agentyzer-evidence` and
 `--vscorer-evidence` options. No job state, receipt age or wall clock is inferred.
 
+The Knowledge workspace's collapsed **More filters** section includes independent
+Agentyzer and VScorer received-evidence selectors: no evidence, current evidence,
+historical evidence only, or current eligible evidence. These filter the server's
+workspace and project/cross-project statistics; saved views and shared URLs retain
+the same scope. They describe received evidence, not queued jobs, human approval
+or an automatically accepted assessment. Current evidence can remain ineligible.
+
 Advanced queue and portfolio filters include authored cybersecurity `criticality`,
 `exposure`, `support_status` and `metadata_status`. UI saved views and the HTTP CLI
 (`--criticality`, `--exposure`, `--support-status`, `--metadata-status`) retain the
