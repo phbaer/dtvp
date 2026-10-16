@@ -846,6 +846,23 @@ Contract references: [OpenVEX 0.2.0](https://github.com/openvex/spec/blob/main/O
 The supported version bounds describe this implementation; newer standard versions
 are not implicitly accepted by these named profiles.
 
+### Bounded workload measurements
+
+```bash
+uv run python scripts/knowledge_workload_probe.py --persona administrator \
+  --project SYNTHETIC_PROJECT_ID --version 7.1.1 --requests 40 --concurrency 4
+```
+
+Against an isolated seeded playground, this measures read-only workspace latency,
+status counts and consistent responses under a pinned version head. Limits: 200
+requests, ten concurrent readers, ten-second per-request timeout and a 120-second
+probe deadline. Publications during the probe yield explicit conflicts; the probe
+never repins silently. JSON reports p50/p95/maximum including client/network time.
+Use a scoped read token instead of `--persona` for an explicitly selected deployment.
+Non-successful or inconsistent responses produce a nonzero exit. Measurements do
+not establish import/job/mixed-write capacity or production acceptance; select
+hardware, representative data and latency budgets for that deployment separately.
+
 ### Explicit cross-part occurrence relationships
 
 Assembly selection optionally accepts `cross_part_relationships` (maximum 2,000):
