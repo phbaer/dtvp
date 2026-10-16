@@ -177,6 +177,7 @@ exact target head, source authority, boundary template and current capabilities.
 `.../intake-parts` supplies bounded searchable source-part choices. The form freezes
 file bytes, metadata, expected head and request ID before publication; ambiguous
 responses retry unchanged. Switching target requires an explicit new request.
+Changing the signed-in identity discards buffered intake requests and capabilities.
 Imports retain historical assessments; their current validity remains server-owned.
 
 ### Versioned ownership and consuming contexts
