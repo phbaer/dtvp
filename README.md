@@ -854,6 +854,46 @@ Contract references: [OpenVEX 0.2.0](https://github.com/openvex/spec/blob/main/O
 The supported version bounds describe this implementation; newer standard versions
 are not implicitly accepted by these named profiles.
 
+### Recorded software-integration observations
+
+Native integration observations support the first bounded cascading-development
+slice. `POST /api/v3/projects/{project}/integration-events` accepts JSON with
+`request_id`, exact committed `source`/`target` states, `expected_target` (equal
+to target), `repository`, `source_commit`, `target_commit`,
+`target_subject_digest`, `pipeline_run`, `integration_kind`, timezone-qualified
+`occurred_at`, and meaningful `rationale`. Both states must be single-baseline
+product versions in one product line with producer-qualified repository/commit;
+the target must retain an accepted SBOM, declared subject digest and matching
+pipeline run. Assembly/part scope is explicitly unsupported for this first slice.
+
+Optional `git_commit_objects` maps lowercase Git SHA-1 commit IDs to strict base64
+of exact raw commit-object content (excluding Git's `commit <size>\0` header).
+DTVP recomputes each object ID and follows an explicit source-to-target parent
+path. Both endpoint objects and every intermediate object on the selected path
+are required. Supplied malformed/partial/unreachable proof rejects; absent proof
+remains a pipeline declaration. Limits: 1,000 objects, 256 KiB each, 8 MiB decoded
+proof total and 12 MiB JSON request (also limited by configured upload size).
+No repository is cloned, fetched or executed. Exact raw object bytes are retained
+as project-readable artifacts. Git SHA-1 is compatibility, not authentication.
+Hash/path consistency does not authenticate repository membership, authors,
+signatures, tree/blob contents, producer identity or artifact/build correspondence;
+cherry-pick, squash and backport labels remain producer declarations.
+
+Recording appends target history under target-head CAS. It never changes inventory,
+source branches, tags, assessments, reviews or scores, and never adds the source as
+a knowledge parent. Exact receipt replay precedes stale-head/proof checks, after
+current API authorization. GET `/states/{state}/integration-events[/event_id]`
+reads retained observations. POST `/integration-events/{event_id}/synchronization-preview`
+with `{target,basis?,context_mapping?}` reuses existing synchronization diagnostics
+only when target is the current head and its exact software/artifact pins still
+match the event. Source may be historical. No common basis is guessed, no approval
+transfers, and existing draft/review gates remain unchanged.
+
+The generic authenticated CLI uses the same JSON: `uv run dtvp knowledge request
+POST /api/v3/projects/PRODUCT/integration-events --body integration.json`; inspect
+or preview through `knowledge request GET/POST` on the endpoints above. No UI or
+automatic cascade execution is introduced in this slice.
+
 ### Retained offline curated CPE sources
 
 DTVP can explicitly preview and replace a bounded **curated** dictionary (up to 2,000 records /2MiB decoded input), or retain the standalone `cpeservice` eight-column `cpe-mapping.csv` as attributed historical claims. This is not full national-dictionary ingestion, upstream refresh or standalone-service parity. No network access, automatic rule publication, native approval, component identity change or vulnerability applicability inference occurs. CSV entries without explicit valid PURL/CPE identities remain unresolved; names are not used to guess identity. Imported status/author/source labels remain unverified. A CSV is a point-in-time capture, not reconstructed Git history.

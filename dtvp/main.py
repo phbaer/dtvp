@@ -27,6 +27,7 @@ from dtvp.api_history import router as history_router
 from dtvp.api_identity import router as identity_router
 from dtvp.api_input_quality import router as input_quality_router
 from dtvp.api_intake import router as intake_router
+from dtvp.api_integration_events import router as integration_events_router
 from dtvp.api_intelligence_comparison import router as intelligence_comparison_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_issued_exports import router as issued_exports_router
@@ -97,6 +98,7 @@ def create_app(settings=None):
     app.include_router(legacy_archive_migration_router)
     app.include_router(router)
     app.include_router(advisory_jobs_router)
+    app.include_router(integration_events_router)
     app.include_router(inventory_router)
     app.include_router(intake_router)
     app.include_router(issued_exports_router)
@@ -145,7 +147,7 @@ def create_app(settings=None):
         archive_stream = (
             request.method == "POST"
             and re.fullmatch(
-                r"/api/v3/projects/[^/]+/(?:migration/v1-archive/preview|versions/[^/]+/migration/v1-archive/(?:preview|apply))",
+                r"/api/v3/projects/[^/]+/(?:migration/v1-archive/preview|versions/[^/]+/migration/v1-archive/(?:preview|apply)|integration-events(?:/[a-f0-9]{64}/synchronization-preview)?)",
                 request.url.path,
             )
             is not None
