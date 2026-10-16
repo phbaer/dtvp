@@ -411,7 +411,7 @@ def apply_migration(journal, *, project_id, version, actor_id, data, raw):
         project_id=project_id,
         version=version,
         actor_id=actor_id,
-        reason=data.reason,
+        reason="Publish reviewed sanitized v1 archive",
         sections=sections,
         parents=[sha for sha in (data.expected_policy, data.expected_evidence) if sha],
         artifacts=sorted(artifacts),

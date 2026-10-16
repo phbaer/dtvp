@@ -363,3 +363,13 @@ def test_nonempty_valid_root_nested_composition_is_rejected_without_loss(journal
     with pytest.raises(ValueError, match="Unsupported root-nested composition"):
         module.apply_migration(journal, **applied)
     assert before == (journal.head(), journal.references(), set(journal.objects.root.rglob("*")))
+
+
+def test_long_multiline_operator_reason_retained_without_invalid_revision_label(journal):
+    reason = "Reviewed migration notes\n" + "x" * 500
+    args = arguments(reason=reason)
+    receipt = module.apply_migration(journal, **prepare_apply(journal, args))
+    state = receipt[1].updates[0].target
+    sections = load_sections(journal, state)
+    assert sections["history"]["legacy-v1:publication"]["declaration"]["reason"] == reason
+    assert journal.state(state).reason == "Publish reviewed sanitized v1 archive"
