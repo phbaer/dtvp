@@ -2799,3 +2799,10 @@ Configuration commands GET by default and PUT only with `--input`; observation
 selection previews by default and publishes only with `--apply`. Files retain exact
 SBOM bytes (CLI transport bound 32 MiB); all matching, validation, policy and workflow
 decisions remain server-side. Commands print JSON; no local domain calculations.
+
+An authority source can be replaced explicitly after a manager publishes its new
+role in pipeline configuration. The import must supply that exact
+`expected_configuration` and a nonblank `authority_change_reason`; the baseline
+retains previous source, policy and reason. The new source starts its own build
+counter. Existing history/assessments remain retained, and source-bound identities
+are revalidated. An ordinary import cannot silently change inventory authority.

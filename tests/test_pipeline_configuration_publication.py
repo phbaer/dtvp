@@ -114,3 +114,62 @@ def test_assembly_preview_pins_policy_and_apply_rejects_changed_configuration(tm
         .target
     )
     assert load_sections(journal, state)["inventory"]["pipeline_configuration"]["state"] == second
+
+
+@pytest.mark.parametrize("missing", ["reason", "pin", None])
+def test_authority_rotation_requires_explicit_manager_policy_pin_and_reason(tmp_path, bom, missing):
+    journal = Journal(tmp_path / "journal")
+    base = dict(
+        project_id="product",
+        version="1",
+        actor_id="pipeline",
+        expected=None,
+        source="build",
+        build_number=50,
+        occurred_at="2026-10-16T00:00:00Z",
+        sbom=bom,
+    )
+    original = import_inventory(journal, request_id="old-build", **base)[1].updates[0].target
+    config = (
+        configure(
+            journal,
+            project_id="product",
+            actor_id="manager",
+            data=PipelineConfigInput(
+                request_id="rotate-config",
+                expected_policy=None,
+                expected_versions={"1": original},
+                reason="Replace retired build provider",
+                parts=[
+                    {"part_id": None, "authority_source": "new-build", "observation_sources": []}
+                ],
+            ),
+        )[1]
+        .updates[0]
+        .target
+    )
+    changes = dict(
+        expected=original,
+        source="new-build",
+        build_number=1,
+        expected_configuration=config,
+        authority_change_reason="Switch approved CI authority",
+    )
+    if missing == "reason":
+        changes["authority_change_reason"] = ""
+    if missing == "pin":
+        changes["expected_configuration"] = None
+    if missing:
+        with pytest.raises(Conflict, match="authority"):
+            import_inventory(journal, request_id="new-build", **(base | changes))
+    else:
+        receipt = import_inventory(journal, request_id="new-build", **(base | changes))
+        sections = load_sections(journal, receipt[1].updates[0].target)
+        assert sections["inventory"]["baseline"]["authority_change"] == {
+            "previous_source": "build",
+            "configuration": config,
+            "reason": changes["authority_change_reason"],
+        }
+        assert sections["inventory"]["baseline"]["build_number"] == 1
+        assert import_inventory(journal, request_id="new-build", **(base | changes)) == receipt
+        assert load_sections(journal, original)["inventory"]["baseline"]["source"] == "build"

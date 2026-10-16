@@ -53,6 +53,9 @@ class InventoryMetadata(RequestModel):
     predecessor: Sha | None = None
     context: CollectionContext | None = None
     expected_configuration: Sha | None = Field(default=None, exclude_if=lambda value: value is None)
+    authority_change_reason: str = Field(
+        default="", max_length=2000, exclude_if=lambda value: not value
+    )
 
     @field_validator("occurred_at")
     @classmethod

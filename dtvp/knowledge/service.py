@@ -87,12 +87,13 @@ def import_inventory(
     source_provenance=None,
     additional_artifacts=(),
     expected_configuration=None,
+    authority_change_reason="",
 ):
     """Replace a complete baseline, preserving all other knowledge sections.
 
     Build numbers are monotonic within one explicitly selected source binding.
-    Changing that source needs a future authority-policy operation; this slice
-    rejects it instead of silently accepting an incompatible build ordering.
+    Changing sources requires an explicit reason and a pinned manager-configured
+    authority policy; build ordering restarts only within that new source binding.
     """
     if (sbom is None) == (raw is None):
         raise ValueError("Provide exactly one SBOM object or original file")
@@ -123,6 +124,10 @@ def import_inventory(
         raise ValueError("Source provenance must be an object")
     if source_provenance:
         operation["source_provenance"] = source_provenance
+    if authority_change_reason:
+        if not isinstance(authority_change_reason, str) or len(authority_change_reason) > 2000:
+            raise ValueError("Authority change reason must be text bounded to 2000 characters")
+        operation["authority_change_reason"] = authority_change_reason
     if expected_configuration is not None:
         operation["expected_configuration"] = expected_configuration
     if not isinstance(additional_artifacts, (list, tuple, set)) or not all(
@@ -174,14 +179,25 @@ def import_inventory(
         if expected:
             baseline = sections["inventory"]["baseline"]
             if baseline["source"] != source:
-                raise Conflict("Changing inventory authority requires an explicit policy")
+                from dtvp.knowledge.pipeline_config import current_config, validate_source_role
+
+                configured_state, configured = current_config(journal, project_id)
+                if not (
+                    configured_state
+                    and expected_configuration == configured_state
+                    and authority_change_reason.strip()
+                ):
+                    raise Conflict(
+                        "Changing inventory authority requires a pinned policy and explicit reason"
+                    )
+                validate_source_role(configured, part_id, source, "authority")
             before = CollectionContext.model_validate(baseline.get("collection", {}))
             if before.boundary() != collection.boundary():
                 raise Conflict(
                     "Different collection scope cannot replace this baseline; "
                     "use an explicit assembly or configuration reconciliation"
                 )
-            if build_number <= baseline["build_number"]:
+            if source == baseline["source"] and build_number <= baseline["build_number"]:
                 raise Conflict("Build is not newer than the accepted baseline")
     document = parse(raw)
     previous_inventory = sections["inventory"]
@@ -197,6 +213,12 @@ def import_inventory(
         part_id=part_id,
         source_provenance=source_provenance,
     )
+    if expected and previous_inventory.get("baseline", {}).get("source") != source:
+        sections["inventory"]["baseline"]["authority_change"] = {
+            "previous_source": previous_inventory["baseline"]["source"],
+            "configuration": expected_configuration,
+            "reason": authority_change_reason,
+        }
     from dtvp.knowledge.component_lineages import reconcile_lineages
 
     sections["inventory"]["identity"] = reconcile_lineages(
