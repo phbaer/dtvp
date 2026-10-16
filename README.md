@@ -588,6 +588,32 @@ with `POST /api/v3/playground/knowledge/seed {"scenario":"specialists"}`.
 
 ### Internal CPE proposals and VScorer inputs
 
+Native Knowledge includes a lazy CPE discovery policy panel, available before the
+first inventory import. Readers can inspect the current policy, supplied catalog,
+attributed mapping rules and scope limits. Project managers can prepare a complete
+replacement as catalog/rules JSON, inspect server normalization and explicit
+addition/removal/change counts, then confirm publication. Omitted catalog entries
+and rules are removed from the current policy; immutable policy history remains.
+Refresh does not repin a captured request. Failed or uncertain publication retains
+the exact original inputs, expected policy state and idempotency key for retry.
+The interactive editor is bounded to 8 MiB; the existing typed API supports up to
+50,000 catalog entries and 50,000 rules. Configure policy through existing
+`PUT /api/v3/projects/{id}/cpe`; the read-only editor adapter is
+`GET .../cpe/editor` and the non-publishing normalization preview is
+`POST .../cpe/preview` with the same DiscoveryInput body. Preview is optional for API
+clients; it is not an additional approval or publication authorization.
+
+This is an offline supplied-input module, not full standalone CPE-service parity.
+Publisher/source and reviewed-status claims remain attributed, unverified inputs.
+Preview checks supported input normalization, not dictionary existence or complete
+alias validity for every future component/version. Component-specific alias cycles
+and version conflicts are checked during discovery. Publishing a policy never
+adopts CPE identities, changes SBOM inventory, assesses vulnerability applicability,
+or creates human approval. Existing candidate panels refresh explicitly against
+updated policy. Network refresh/ranking, full service migration and deployment
+qualification remain separate work.
+
+
 CPE discovery now has an internal offline module. `GET/PUT
 /api/v3/projects/{id}/cpe` reads or explicitly replaces versioned catalog/rule
 inputs; writes require project-management permission and an expected policy head.

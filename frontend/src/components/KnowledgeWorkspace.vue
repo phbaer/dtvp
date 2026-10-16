@@ -14,6 +14,7 @@ import KnowledgeSources from './KnowledgeSources.vue'
 import KnowledgeIntake from './KnowledgeIntake.vue'
 import KnowledgeAssembly from './KnowledgeAssembly.vue'
 import KnowledgeBulkReview from './KnowledgeBulkReview.vue'
+import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
 import KnowledgeOwnership from './KnowledgeOwnership.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
@@ -297,6 +298,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
     <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
     <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
     <KnowledgeBulkReview :key="me.id" :project="project" :version="version" :state="workspace?.state || ''" :rows="bulkRows" @locked="bulkLocked = $event" @reset="bulkSelection = {}" @changed="bulkChanged" />
+    <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" />
     <KnowledgeComparison :project="project" />
     <p v-if="error" role="alert" class="message">{{ error }}</p><p v-if="notice" role="status" class="message">{{ notice }}</p><p v-if="busy" role="status">Loading…</p>
     <p v-if="project && !busy && !version && !versions.length" class="empty">No journal-backed versions. Import a baseline to start.</p><p v-else-if="!project" class="empty">Select a product to review its versioned knowledge.</p>
