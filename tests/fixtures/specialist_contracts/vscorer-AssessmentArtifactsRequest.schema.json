@@ -1,0 +1,57 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "threat_model": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Threat Model",
+      "type": "string"
+    },
+    "sbom": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Sbom",
+      "type": "string"
+    },
+    "items_csv": {
+      "anyOf": [
+        {
+          "maxLength": 32,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Items Csv"
+    },
+    "cves": {
+      "anyOf": [
+        {
+          "maxLength": 32,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cves"
+    },
+    "prior_vex": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 32,
+      "title": "Prior Vex",
+      "type": "array"
+    }
+  },
+  "required": [
+    "threat_model",
+    "sbom"
+  ],
+  "title": "AssessmentArtifactsRequest",
+  "type": "object"
+}

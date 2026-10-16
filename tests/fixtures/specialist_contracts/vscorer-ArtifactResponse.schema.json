@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "LinkResponse": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "LinkResponse",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "original_filename": {
+      "title": "Original Filename",
+      "type": "string"
+    },
+    "media_type": {
+      "maxLength": 128,
+      "title": "Media Type",
+      "type": "string"
+    },
+    "size_bytes": {
+      "minimum": 0,
+      "title": "Size Bytes",
+      "type": "integer"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "_links": {
+      "$ref": "#/$defs/LinkResponse"
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "sha256",
+    "original_filename",
+    "media_type",
+    "size_bytes",
+    "created_at",
+    "_links"
+  ],
+  "title": "ArtifactResponse",
+  "type": "object"
+}

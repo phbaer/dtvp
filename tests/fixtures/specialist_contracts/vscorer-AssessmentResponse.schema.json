@@ -1,0 +1,565 @@
+{
+  "$defs": {
+    "AiAnalysisBatchResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "assessment_id": {
+          "title": "Assessment Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "completed",
+            "partial",
+            "cancelled",
+            "interrupted"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "target_kinds": {
+          "items": {
+            "enum": [
+              "cwe_explanation",
+              "prompt",
+              "critic"
+            ],
+            "type": "string"
+          },
+          "title": "Target Kinds",
+          "type": "array"
+        },
+        "target_count": {
+          "minimum": 0,
+          "title": "Target Count",
+          "type": "integer"
+        },
+        "processed_count": {
+          "minimum": 0,
+          "title": "Processed Count",
+          "type": "integer"
+        },
+        "completed_count": {
+          "minimum": 0,
+          "title": "Completed Count",
+          "type": "integer"
+        },
+        "current_completed_count": {
+          "minimum": 0,
+          "title": "Current Completed Count",
+          "type": "integer"
+        },
+        "refresh_needed_count": {
+          "minimum": 0,
+          "title": "Refresh Needed Count",
+          "type": "integer"
+        },
+        "remaining_count": {
+          "minimum": 0,
+          "title": "Remaining Count",
+          "type": "integer"
+        },
+        "queued_count": {
+          "minimum": 0,
+          "title": "Queued Count",
+          "type": "integer"
+        },
+        "running_count": {
+          "minimum": 0,
+          "title": "Running Count",
+          "type": "integer"
+        },
+        "failed_count": {
+          "minimum": 0,
+          "title": "Failed Count",
+          "type": "integer"
+        },
+        "outcome_unknown_count": {
+          "minimum": 0,
+          "title": "Outcome Unknown Count",
+          "type": "integer"
+        },
+        "cancelled_count": {
+          "minimum": 0,
+          "title": "Cancelled Count",
+          "type": "integer"
+        },
+        "progress_percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Progress Percent",
+          "type": "number"
+        },
+        "configuration_version": {
+          "minimum": 1,
+          "title": "Configuration Version",
+          "type": "integer"
+        },
+        "disclosure_version": {
+          "title": "Disclosure Version",
+          "type": "string"
+        },
+        "disclosure_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Disclosure Sha256",
+          "type": "string"
+        },
+        "endpoint": {
+          "additionalProperties": true,
+          "title": "Endpoint",
+          "type": "object"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "created_by": {
+          "title": "Created By",
+          "type": "string"
+        },
+        "actor_issuer": {
+          "title": "Actor Issuer",
+          "type": "string"
+        },
+        "actor_subject": {
+          "title": "Actor Subject",
+          "type": "string"
+        },
+        "actor_display_name": {
+          "title": "Actor Display Name",
+          "type": "string"
+        },
+        "authentication_method": {
+          "title": "Authentication Method",
+          "type": "string"
+        },
+        "current_attempt": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Current Attempt"
+        },
+        "recent_failures": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Recent Failures",
+          "type": "array"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "string"
+        },
+        "_links": {
+          "$ref": "#/$defs/LinkResponse"
+        }
+      },
+      "required": [
+        "id",
+        "assessment_id",
+        "state",
+        "target_kinds",
+        "target_count",
+        "processed_count",
+        "completed_count",
+        "current_completed_count",
+        "refresh_needed_count",
+        "remaining_count",
+        "queued_count",
+        "running_count",
+        "failed_count",
+        "outcome_unknown_count",
+        "cancelled_count",
+        "progress_percent",
+        "configuration_version",
+        "disclosure_version",
+        "disclosure_sha256",
+        "endpoint",
+        "model",
+        "created_by",
+        "actor_issuer",
+        "actor_subject",
+        "actor_display_name",
+        "authentication_method",
+        "current_attempt",
+        "recent_failures",
+        "version",
+        "created_at",
+        "updated_at",
+        "_links"
+      ],
+      "title": "AiAnalysisBatchResponse",
+      "type": "object"
+    },
+    "AiSummaryResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "configured": {
+          "title": "Configured",
+          "type": "boolean"
+        },
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "api_key_configured": {
+          "title": "Api Key Configured",
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "configured",
+        "available",
+        "api_key_configured",
+        "status",
+        "reason"
+      ],
+      "title": "AiSummaryResponse",
+      "type": "object"
+    },
+    "AssessmentProgressResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "terminal": {
+          "minimum": 0,
+          "title": "Terminal",
+          "type": "integer"
+        },
+        "remaining": {
+          "minimum": 0,
+          "title": "Remaining",
+          "type": "integer"
+        },
+        "left_open": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Left Open",
+          "type": "integer"
+        },
+        "started_findings": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Started Findings",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "terminal",
+        "remaining"
+      ],
+      "title": "AssessmentProgressResponse",
+      "type": "object"
+    },
+    "LinkResponse": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "LinkResponse",
+      "type": "object"
+    },
+    "PriorVexEvaluationSummaryResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "source_artifact_count": {
+          "minimum": 0,
+          "title": "Source Artifact Count",
+          "type": "integer"
+        },
+        "status_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Status Counts",
+          "type": "object"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "available_per_finding": {
+          "const": true,
+          "title": "Available Per Finding",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "total",
+        "source_artifact_count",
+        "status_counts",
+        "content_sha256",
+        "available_per_finding"
+      ],
+      "title": "PriorVexEvaluationSummaryResponse",
+      "type": "object"
+    },
+    "ReportLinkResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "publication_state": {
+          "const": "final",
+          "title": "Publication State",
+          "type": "string"
+        },
+        "media_type": {
+          "const": "text/html",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "revision",
+        "publication_state",
+        "media_type",
+        "url"
+      ],
+      "title": "ReportLinkResponse",
+      "type": "object"
+    },
+    "VexLinkResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "publication_state": {
+          "enum": [
+            "draft",
+            "final"
+          ],
+          "title": "Publication State",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "revision",
+        "publication_state",
+        "url"
+      ],
+      "title": "VexLinkResponse",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "product_version_id": {
+      "title": "Product Version Id",
+      "type": "string"
+    },
+    "configuration_snapshot_id": {
+      "title": "Configuration Snapshot Id",
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "in_review",
+        "complete"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "finding_count": {
+      "minimum": 0,
+      "title": "Finding Count",
+      "type": "integer"
+    },
+    "terminal_finding_count": {
+      "minimum": 0,
+      "title": "Terminal Finding Count",
+      "type": "integer"
+    },
+    "left_open_count": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Left Open Count",
+      "type": "integer"
+    },
+    "review_started": {
+      "default": false,
+      "title": "Review Started",
+      "type": "boolean"
+    },
+    "warnings": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "progress": {
+      "$ref": "#/$defs/AssessmentProgressResponse"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Completed At"
+    },
+    "prior_vex_evaluation_summary": {
+      "$ref": "#/$defs/PriorVexEvaluationSummaryResponse"
+    },
+    "vex": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VexLinkResponse"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "report": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReportLinkResponse"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "ai_interpretation": {
+      "$ref": "#/$defs/AiSummaryResponse"
+    },
+    "ai_analysis": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AiAnalysisBatchResponse"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "_links": {
+      "$ref": "#/$defs/LinkResponse"
+    }
+  },
+  "required": [
+    "id",
+    "product_version_id",
+    "configuration_snapshot_id",
+    "state",
+    "version",
+    "finding_count",
+    "terminal_finding_count",
+    "progress",
+    "created_at",
+    "completed_at",
+    "prior_vex_evaluation_summary",
+    "ai_interpretation",
+    "_links"
+  ],
+  "title": "AssessmentResponse",
+  "type": "object"
+}

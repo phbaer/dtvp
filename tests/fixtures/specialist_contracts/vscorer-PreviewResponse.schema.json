@@ -1,0 +1,232 @@
+{
+  "$defs": {
+    "KevResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "must_patch": {
+          "title": "Must Patch",
+          "type": "boolean"
+        },
+        "last_refreshed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Refreshed At"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "provenance": {
+          "additionalProperties": true,
+          "title": "Provenance",
+          "type": "object"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        }
+      },
+      "required": [
+        "status",
+        "must_patch",
+        "last_refreshed_at",
+        "source",
+        "provenance",
+        "details"
+      ],
+      "title": "KevResponse",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "environmental_vector": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Environmental Vector"
+    },
+    "environmental_score": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Environmental Score"
+    },
+    "selected_control_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Selected Control Ids",
+      "type": "array"
+    },
+    "applied_controls": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Applied Controls",
+      "type": "array"
+    },
+    "withheld_controls": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Withheld Controls",
+      "type": "array"
+    },
+    "reasons": {
+      "items": {},
+      "title": "Reasons",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {},
+      "title": "Warnings",
+      "type": "array"
+    },
+    "control_confirmations": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Control Confirmations",
+      "type": "array"
+    },
+    "placement_candidates": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Placement Candidates",
+      "type": "array"
+    },
+    "dependency_candidate_controls": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Dependency Candidate Controls",
+      "type": "array"
+    },
+    "path_review_effects": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Path Review Effects",
+      "type": "array"
+    },
+    "rescore_opportunities": {
+      "additionalProperties": true,
+      "title": "Rescore Opportunities",
+      "type": "object"
+    },
+    "deployment_profile_exposure_warnings": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Deployment Profile Exposure Warnings",
+      "type": "array"
+    },
+    "scope_complete": {
+      "title": "Scope Complete",
+      "type": "boolean"
+    },
+    "candidate_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Candidate Digest",
+      "type": "string"
+    },
+    "environmental_approval_allowed": {
+      "title": "Environmental Approval Allowed",
+      "type": "boolean"
+    },
+    "candidate_status": {
+      "enum": [
+        "score_reduction_available",
+        "base_result_unchanged",
+        "base_assertion_unavailable",
+        "candidate_unavailable"
+      ],
+      "title": "Candidate Status",
+      "type": "string"
+    },
+    "approval_blockers": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "maxItems": 4,
+      "title": "Approval Blockers",
+      "type": "array"
+    },
+    "finding_id": {
+      "title": "Finding Id",
+      "type": "string"
+    },
+    "finding_version": {
+      "minimum": 1,
+      "title": "Finding Version",
+      "type": "integer"
+    },
+    "kev": {
+      "$ref": "#/$defs/KevResponse"
+    }
+  },
+  "required": [
+    "environmental_vector",
+    "environmental_score",
+    "selected_control_ids",
+    "applied_controls",
+    "withheld_controls",
+    "reasons",
+    "warnings",
+    "control_confirmations",
+    "placement_candidates",
+    "scope_complete",
+    "candidate_digest",
+    "environmental_approval_allowed",
+    "candidate_status",
+    "approval_blockers",
+    "finding_id",
+    "finding_version",
+    "kev"
+  ],
+  "title": "PreviewResponse",
+  "type": "object"
+}

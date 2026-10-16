@@ -1,0 +1,483 @@
+{
+  "$defs": {
+    "BackendInformation": {
+      "description": "Operational backend information for API consumers.",
+      "properties": {
+        "llm": {
+          "$ref": "#/$defs/LlmBackendInfo",
+          "description": "Configured LLM backend details."
+        },
+        "repositories": {
+          "$ref": "#/$defs/RepositoryBackendInfo",
+          "description": "Repository workspace backend details."
+        },
+        "jobs": {
+          "$ref": "#/$defs/JobBackendInfo"
+        }
+      },
+      "required": [
+        "llm",
+        "repositories",
+        "jobs"
+      ],
+      "title": "BackendInformation",
+      "type": "object"
+    },
+    "JobBackendInfo": {
+      "description": "Async job backend details.",
+      "properties": {
+        "job_store": {
+          "description": "Persistence backend used for job records.",
+          "title": "Job Store",
+          "type": "string"
+        },
+        "execution_model": {
+          "description": "How background assessments are run.",
+          "title": "Execution Model",
+          "type": "string"
+        },
+        "known_jobs": {
+          "description": "Number of jobs known to this API process.",
+          "title": "Known Jobs",
+          "type": "integer"
+        },
+        "max_concurrent_jobs": {
+          "description": "Maximum number of assessment pipelines this process runs at the same time.",
+          "minimum": 1,
+          "title": "Max Concurrent Jobs",
+          "type": "integer"
+        },
+        "running_jobs": {
+          "description": "Number of assessment pipelines currently occupying execution slots.",
+          "title": "Running Jobs",
+          "type": "integer"
+        },
+        "queued_jobs": {
+          "description": "Number of accepted jobs waiting for an execution slot.",
+          "title": "Queued Jobs",
+          "type": "integer"
+        },
+        "available_slots": {
+          "description": "Number of execution slots currently available for pending work.",
+          "minimum": 0,
+          "title": "Available Slots",
+          "type": "integer"
+        },
+        "status_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Current in-memory job count by lifecycle status.",
+          "title": "Status Counts",
+          "type": "object"
+        }
+      },
+      "required": [
+        "job_store",
+        "execution_model",
+        "known_jobs",
+        "max_concurrent_jobs",
+        "running_jobs",
+        "queued_jobs",
+        "available_slots"
+      ],
+      "title": "JobBackendInfo",
+      "type": "object"
+    },
+    "JobStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "JobStatus",
+      "type": "string"
+    },
+    "LlmBackendInfo": {
+      "description": "Runtime LLM backend details useful to API consumers.",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Configured LLM provider label, such as ollama, openwebui, or litellm.",
+          "title": "Provider"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Concrete backend client class used by the API process.",
+          "title": "Backend"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Configured backend base URL when available.",
+          "title": "Host"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default model configured for LLM-backed assessment steps.",
+          "title": "Model"
+        },
+        "healthy": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last known startup health-check result for the default backend.",
+          "title": "Healthy"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last backend health or request error observed by the configured client, if any.",
+          "title": "Last Error"
+        },
+        "supports_model_override": {
+          "default": true,
+          "description": "Whether callers can request a per-assessment model override with `model`.",
+          "title": "Supports Model Override",
+          "type": "boolean"
+        }
+      },
+      "title": "LlmBackendInfo",
+      "type": "object"
+    },
+    "RepositoryBackendInfo": {
+      "description": "Repository workspace backend behavior.",
+      "properties": {
+        "workspace_dir": {
+          "description": "Directory used for cloned or reused repository workspaces.",
+          "title": "Workspace Dir",
+          "type": "string"
+        },
+        "reuse_strategy": {
+          "description": "How repository workspace paths are selected and reused.",
+          "title": "Reuse Strategy",
+          "type": "string"
+        },
+        "update_strategy": {
+          "description": "How existing workspaces are refreshed before scanning.",
+          "title": "Update Strategy",
+          "type": "string"
+        },
+        "parallel_safety": {
+          "description": "Current concurrency guarantees and caveats for workspace reuse.",
+          "title": "Parallel Safety",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_dir",
+        "reuse_strategy",
+        "update_strategy",
+        "parallel_safety"
+      ],
+      "title": "RepositoryBackendInfo",
+      "type": "object"
+    },
+    "RepositoryConfigurationSummary": {
+      "description": "Sanitized repository configuration summary.",
+      "properties": {
+        "workspace_dir": {
+          "description": "Base directory where repository workspaces are cached or reused.",
+          "title": "Workspace Dir",
+          "type": "string"
+        },
+        "component_count": {
+          "description": "Number of explicitly configured components in repos.yaml.",
+          "title": "Component Count",
+          "type": "integer"
+        },
+        "components": {
+          "description": "Configured component names. Secrets and raw repository credentials are never included.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "aliases": {
+          "description": "Configured alias names when the defaults template is used.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "default_template_configured": {
+          "description": "True when repos.yaml contains a defaults template for dynamic component resolution.",
+          "title": "Default Template Configured",
+          "type": "boolean"
+        },
+        "hot_reload": {
+          "description": "True when the service watches repos.yaml mtime and reloads component configuration.",
+          "title": "Hot Reload",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workspace_dir",
+        "component_count",
+        "default_template_configured",
+        "hot_reload"
+      ],
+      "title": "RepositoryConfigurationSummary",
+      "type": "object"
+    },
+    "ServiceConfiguration": {
+      "description": "Sanitized service configuration returned by operational endpoints.",
+      "properties": {
+        "service_name": {
+          "description": "Human-readable API service name.",
+          "title": "Service Name",
+          "type": "string"
+        },
+        "service_version": {
+          "description": "API service version.",
+          "title": "Service Version",
+          "type": "string"
+        },
+        "config_dir": {
+          "description": "Resolved configuration directory.",
+          "title": "Config Dir",
+          "type": "string"
+        },
+        "repos_config_path": {
+          "description": "Resolved repos.yaml path.",
+          "title": "Repos Config Path",
+          "type": "string"
+        },
+        "repositories": {
+          "$ref": "#/$defs/RepositoryConfigurationSummary",
+          "description": "Sanitized repository configuration and workspace-cache summary."
+        },
+        "features": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Feature switches and interface capabilities currently exposed by this process.",
+          "title": "Features",
+          "type": "object"
+        }
+      },
+      "required": [
+        "service_name",
+        "service_version",
+        "config_dir",
+        "repos_config_path",
+        "repositories"
+      ],
+      "title": "ServiceConfiguration",
+      "type": "object"
+    }
+  },
+  "example": {
+    "backend": {
+      "jobs": {
+        "available_slots": 1,
+        "execution_model": "bounded asyncio background tasks in this API process",
+        "job_store": "in_memory",
+        "known_jobs": 1,
+        "max_concurrent_jobs": 1,
+        "queued_jobs": 1,
+        "running_jobs": 0,
+        "status_counts": {
+          "cancelled": 0,
+          "completed": 0,
+          "failed": 0,
+          "pending": 1,
+          "running": 0
+        }
+      },
+      "llm": {
+        "backend": "OllamaClient",
+        "healthy": true,
+        "host": "http://localhost:11434",
+        "model": "mistral",
+        "provider": "ollama",
+        "supports_model_override": true
+      },
+      "repositories": {
+        "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; configured repositories use isolated worktrees, while focus_path concurrency is caller-managed",
+        "reuse_strategy": "stable control repository plus detached per-analysis worktree",
+        "update_strategy": "cross-process repository lock around clone, fetch, and worktree creation",
+        "workspace_dir": "repos"
+      }
+    },
+    "configuration": {
+      "config_dir": "config",
+      "features": {
+        "async_assessments": true,
+        "bounded_async_execution": true,
+        "debug_responses": true,
+        "focus_path": true,
+        "job_cancellation": true,
+        "job_logs": true,
+        "repos_config_hot_reload": true,
+        "repository_archive_inspection": true,
+        "request_model_override": true,
+        "sync_assessments": true
+      },
+      "repos_config_path": "config/repos.yaml",
+      "repositories": {
+        "aliases": [],
+        "component_count": 1,
+        "components": [
+          "benchmark"
+        ],
+        "default_template_configured": false,
+        "hot_reload": true,
+        "workspace_dir": "repos"
+      },
+      "service_name": "Agentic Vulnerability Analyzer",
+      "service_version": "1.0.25"
+    },
+    "job_id": "9f7e2c4b5a6d",
+    "poll_url": "/jobs/9f7e2c4b5a6d",
+    "status": "pending"
+  },
+  "properties": {
+    "job_id": {
+      "description": "Opaque identifier for the background assessment job.",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "Initial status for the newly created job."
+    },
+    "poll_url": {
+      "description": "Relative URL that can be polled for job status updates.",
+      "title": "Poll Url",
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "LLM model accepted for this job when known.",
+      "title": "Model"
+    },
+    "llm_backend": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "LLM backend accepted for this job when known.",
+      "title": "Llm Backend"
+    },
+    "llm_provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "LLM provider accepted for this job when known.",
+      "title": "Llm Provider"
+    },
+    "llm": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Structured LLM backend metadata accepted for this job.",
+      "title": "Llm"
+    },
+    "configuration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ServiceConfiguration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Sanitized service configuration accepted for this job."
+    },
+    "backend": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackendInformation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Operational backend details accepted for this job."
+    }
+  },
+  "required": [
+    "job_id",
+    "status",
+    "poll_url"
+  ],
+  "title": "JobSubmittedResponse",
+  "type": "object"
+}

@@ -1,0 +1,110 @@
+{
+  "format": "dtvp.specialist-mock-contracts/1",
+  "assurance": "source-derived offline mocks; not deployed integration qualification",
+  "providers": {
+    "vscorer": {
+      "commit": "b016cf7f69c9a42c175dbe640ce8c41fb8e480cf",
+      "schemas": [
+        {
+          "file": "vscorer-AssessmentCreateRequest.schema.json",
+          "sha256": "48c5ca37fa7f5f48f7a841a5fe929bf968fcfdaee553ea26ddb2296e24dadc02",
+          "model": "cvss_rescorer.api.schemas.AssessmentCreateRequest"
+        },
+        {
+          "file": "vscorer-AssessmentArtifactsRequest.schema.json",
+          "sha256": "ef5cdb3de9488367e7ee12b779cd44f3b3fa65fec0e2ca765abcc77b3b90c4b5",
+          "model": "cvss_rescorer.api.schemas.AssessmentArtifactsRequest"
+        },
+        {
+          "file": "vscorer-ArtifactResponse.schema.json",
+          "sha256": "49169e17f80990cddc493b3377173058592cee088fe27d2786fa3c67e000f394",
+          "model": "cvss_rescorer.api.responses.ArtifactResponse"
+        },
+        {
+          "file": "vscorer-FindingResponse.schema.json",
+          "sha256": "dfa07ed8c3e7621885997c688b4e8c956905bb4f194ea7d6aca1b0f3c85d00a2",
+          "model": "cvss_rescorer.api.responses.FindingResponse"
+        },
+        {
+          "file": "vscorer-PreviewResponse.schema.json",
+          "sha256": "912a45c0f42820e59e6e6fab7603977fa339979426ee71332d6bb9da89ed064e",
+          "model": "cvss_rescorer.api.responses.PreviewResponse"
+        },
+        {
+          "file": "vscorer-AssessmentResponse.schema.json",
+          "sha256": "208b0b04979c4ba74c1c707dde5dc224981abbdee161148f0277e31027666a57",
+          "model": "cvss_rescorer.api.responses.AssessmentResponse"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "README.md",
+          "sha256": "55a3e4b67fc92390b634ee58eb61627bdee686b99ab0bb7e045fc4a632d65513"
+        },
+        {
+          "path": "docs/rest_api.md",
+          "sha256": "6ab7d014d0372b2f5c5db26e22d52e917d09047252cb812a5847cbc64885ba29"
+        },
+        {
+          "path": "cvss_rescorer/api/schemas.py",
+          "sha256": "5904fcc545b7c26876243b27711a2b83e57397962ddd2fdfacb2f789809ca248"
+        },
+        {
+          "path": "cvss_rescorer/api/responses.py",
+          "sha256": "1c015a1e8eaf91dca74ed117ddd2bac8f992f6402b71c40072c599756a56fde9"
+        },
+        {
+          "path": "cvss_rescorer/adapters/parsers/cve.py",
+          "sha256": "52eaedc0f7fb21b5bbfbb910fea5f8720546dccc7768cd7fe4aa174948dd7c15"
+        },
+        {
+          "path": "cvss_rescorer/adapters/parsers/items_csv.py",
+          "sha256": "66f6c752dfe447fab84d58a5f2e49be043c65cdc3cf26462c63930096c4ecdd3"
+        },
+        {
+          "path": "cvss_rescorer/application/domain_adapter_source_facts.py",
+          "sha256": "3f1a14c62f9f950445e0c122b0f7d26d3fdb81ad292a4b25833fb0d2a3abf49a"
+        }
+      ]
+    },
+    "agentyzer": {
+      "commit": "8ff8372dcccef00e24b6e1d55de9f873c462a34f",
+      "schemas": [
+        {
+          "file": "agentyzer-AssessRequest.schema.json",
+          "sha256": "2535629103d49e5a90f411634d74a0e075d36a68e830e337ce87d95ae261916d",
+          "model": "src.api.models.AssessRequest"
+        },
+        {
+          "file": "agentyzer-AssessResponse.schema.json",
+          "sha256": "d57bee21efb9704b8bee82f611c92c3f555678a60a6b8ab3a799ee4f5cb63496",
+          "model": "src.api.models.AssessResponse"
+        },
+        {
+          "file": "agentyzer-JobStatusResponse.schema.json",
+          "sha256": "7742dc01e14eed9bf5877cfc04b4213ea9b7a665bed3923878ba383f87c0db5d",
+          "model": "src.api.models.JobStatusResponse"
+        },
+        {
+          "file": "agentyzer-JobSubmittedResponse.schema.json",
+          "sha256": "40515169c5e9531c12de33e8c30e3f1520c24e1a6ebac182bfbeaa60b97e2f1a",
+          "model": "src.api.models.JobSubmittedResponse"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "README.md",
+          "sha256": "b5dabe39eccfd5d0c63589075db1bdc40b0e7f7e748af9aeeaf1fc74cb9983ec"
+        },
+        {
+          "path": "src/api/models.py",
+          "sha256": "a6bed41716e39ad3b37ecb2bce374d10b0fa2a4ad5d65c38945c76d7266945e3"
+        },
+        {
+          "path": "src/main.py",
+          "sha256": "d7efb5edc6a44dd8359e2b6a724c785a3f913a4e17645d6a987c88619d453d72"
+        }
+      ]
+    }
+  }
+}

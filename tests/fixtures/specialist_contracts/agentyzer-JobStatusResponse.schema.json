@@ -1,0 +1,712 @@
+{
+  "$defs": {
+    "ActiveAgentStatus": {
+      "properties": {
+        "step": {
+          "description": "Stable machine-readable pipeline step identifier.",
+          "title": "Step",
+          "type": "string"
+        },
+        "title": {
+          "description": "Human-readable step title.",
+          "title": "Title",
+          "type": "string"
+        },
+        "agent": {
+          "description": "Agent module currently handling the step.",
+          "title": "Agent",
+          "type": "string"
+        },
+        "activity": {
+          "description": "Short description of the work in progress.",
+          "title": "Activity",
+          "type": "string"
+        },
+        "status": {
+          "description": "Current state of the active agent entry.",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "title",
+        "agent",
+        "activity",
+        "status"
+      ],
+      "title": "ActiveAgentStatus",
+      "type": "object"
+    },
+    "BackendInformation": {
+      "description": "Operational backend information for API consumers.",
+      "properties": {
+        "llm": {
+          "$ref": "#/$defs/LlmBackendInfo",
+          "description": "Configured LLM backend details."
+        },
+        "repositories": {
+          "$ref": "#/$defs/RepositoryBackendInfo",
+          "description": "Repository workspace backend details."
+        },
+        "jobs": {
+          "$ref": "#/$defs/JobBackendInfo"
+        }
+      },
+      "required": [
+        "llm",
+        "repositories",
+        "jobs"
+      ],
+      "title": "BackendInformation",
+      "type": "object"
+    },
+    "JobBackendInfo": {
+      "description": "Async job backend details.",
+      "properties": {
+        "job_store": {
+          "description": "Persistence backend used for job records.",
+          "title": "Job Store",
+          "type": "string"
+        },
+        "execution_model": {
+          "description": "How background assessments are run.",
+          "title": "Execution Model",
+          "type": "string"
+        },
+        "known_jobs": {
+          "description": "Number of jobs known to this API process.",
+          "title": "Known Jobs",
+          "type": "integer"
+        },
+        "max_concurrent_jobs": {
+          "description": "Maximum number of assessment pipelines this process runs at the same time.",
+          "minimum": 1,
+          "title": "Max Concurrent Jobs",
+          "type": "integer"
+        },
+        "running_jobs": {
+          "description": "Number of assessment pipelines currently occupying execution slots.",
+          "title": "Running Jobs",
+          "type": "integer"
+        },
+        "queued_jobs": {
+          "description": "Number of accepted jobs waiting for an execution slot.",
+          "title": "Queued Jobs",
+          "type": "integer"
+        },
+        "available_slots": {
+          "description": "Number of execution slots currently available for pending work.",
+          "minimum": 0,
+          "title": "Available Slots",
+          "type": "integer"
+        },
+        "status_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Current in-memory job count by lifecycle status.",
+          "title": "Status Counts",
+          "type": "object"
+        }
+      },
+      "required": [
+        "job_store",
+        "execution_model",
+        "known_jobs",
+        "max_concurrent_jobs",
+        "running_jobs",
+        "queued_jobs",
+        "available_slots"
+      ],
+      "title": "JobBackendInfo",
+      "type": "object"
+    },
+    "JobProgress": {
+      "properties": {
+        "completed_steps": {
+          "description": "Number of pipeline steps that have finished so far.",
+          "title": "Completed Steps",
+          "type": "integer"
+        },
+        "total_steps": {
+          "description": "Estimated number of steps for the current pipeline path.",
+          "title": "Total Steps",
+          "type": "integer"
+        },
+        "percent": {
+          "description": "Integer progress percentage for the assessment job.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Percent",
+          "type": "integer"
+        },
+        "current_step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Most recently started or currently active pipeline step.",
+          "title": "Current Step"
+        },
+        "current_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable title for the current pipeline step.",
+          "title": "Current Title"
+        },
+        "current_agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent module currently responsible for the active work.",
+          "title": "Current Agent"
+        },
+        "current_activity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Short description of what the current agent is doing.",
+          "title": "Current Activity"
+        },
+        "last_completed_step": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Most recent pipeline step to finish.",
+          "title": "Last Completed Step"
+        },
+        "last_updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "RFC 3339 timestamp for the latest progress update.",
+          "title": "Last Updated At"
+        },
+        "active_agents": {
+          "description": "All steps that are currently running, including parallel branches.",
+          "items": {
+            "$ref": "#/$defs/ActiveAgentStatus"
+          },
+          "title": "Active Agents",
+          "type": "array"
+        },
+        "step_statuses": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Latest known status for each pipeline step reached so far.",
+          "title": "Step Statuses",
+          "type": "object"
+        },
+        "logs": {
+          "description": "Recent live log entries emitted while the job runs.",
+          "items": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Logs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "completed_steps",
+        "total_steps",
+        "percent"
+      ],
+      "title": "JobProgress",
+      "type": "object"
+    },
+    "JobStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "JobStatus",
+      "type": "string"
+    },
+    "LlmBackendInfo": {
+      "description": "Runtime LLM backend details useful to API consumers.",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Configured LLM provider label, such as ollama, openwebui, or litellm.",
+          "title": "Provider"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Concrete backend client class used by the API process.",
+          "title": "Backend"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Configured backend base URL when available.",
+          "title": "Host"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default model configured for LLM-backed assessment steps.",
+          "title": "Model"
+        },
+        "healthy": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last known startup health-check result for the default backend.",
+          "title": "Healthy"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last backend health or request error observed by the configured client, if any.",
+          "title": "Last Error"
+        },
+        "supports_model_override": {
+          "default": true,
+          "description": "Whether callers can request a per-assessment model override with `model`.",
+          "title": "Supports Model Override",
+          "type": "boolean"
+        }
+      },
+      "title": "LlmBackendInfo",
+      "type": "object"
+    },
+    "RepositoryBackendInfo": {
+      "description": "Repository workspace backend behavior.",
+      "properties": {
+        "workspace_dir": {
+          "description": "Directory used for cloned or reused repository workspaces.",
+          "title": "Workspace Dir",
+          "type": "string"
+        },
+        "reuse_strategy": {
+          "description": "How repository workspace paths are selected and reused.",
+          "title": "Reuse Strategy",
+          "type": "string"
+        },
+        "update_strategy": {
+          "description": "How existing workspaces are refreshed before scanning.",
+          "title": "Update Strategy",
+          "type": "string"
+        },
+        "parallel_safety": {
+          "description": "Current concurrency guarantees and caveats for workspace reuse.",
+          "title": "Parallel Safety",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_dir",
+        "reuse_strategy",
+        "update_strategy",
+        "parallel_safety"
+      ],
+      "title": "RepositoryBackendInfo",
+      "type": "object"
+    },
+    "RepositoryConfigurationSummary": {
+      "description": "Sanitized repository configuration summary.",
+      "properties": {
+        "workspace_dir": {
+          "description": "Base directory where repository workspaces are cached or reused.",
+          "title": "Workspace Dir",
+          "type": "string"
+        },
+        "component_count": {
+          "description": "Number of explicitly configured components in repos.yaml.",
+          "title": "Component Count",
+          "type": "integer"
+        },
+        "components": {
+          "description": "Configured component names. Secrets and raw repository credentials are never included.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "aliases": {
+          "description": "Configured alias names when the defaults template is used.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "default_template_configured": {
+          "description": "True when repos.yaml contains a defaults template for dynamic component resolution.",
+          "title": "Default Template Configured",
+          "type": "boolean"
+        },
+        "hot_reload": {
+          "description": "True when the service watches repos.yaml mtime and reloads component configuration.",
+          "title": "Hot Reload",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workspace_dir",
+        "component_count",
+        "default_template_configured",
+        "hot_reload"
+      ],
+      "title": "RepositoryConfigurationSummary",
+      "type": "object"
+    },
+    "ServiceConfiguration": {
+      "description": "Sanitized service configuration returned by operational endpoints.",
+      "properties": {
+        "service_name": {
+          "description": "Human-readable API service name.",
+          "title": "Service Name",
+          "type": "string"
+        },
+        "service_version": {
+          "description": "API service version.",
+          "title": "Service Version",
+          "type": "string"
+        },
+        "config_dir": {
+          "description": "Resolved configuration directory.",
+          "title": "Config Dir",
+          "type": "string"
+        },
+        "repos_config_path": {
+          "description": "Resolved repos.yaml path.",
+          "title": "Repos Config Path",
+          "type": "string"
+        },
+        "repositories": {
+          "$ref": "#/$defs/RepositoryConfigurationSummary",
+          "description": "Sanitized repository configuration and workspace-cache summary."
+        },
+        "features": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Feature switches and interface capabilities currently exposed by this process.",
+          "title": "Features",
+          "type": "object"
+        }
+      },
+      "required": [
+        "service_name",
+        "service_version",
+        "config_dir",
+        "repos_config_path",
+        "repositories"
+      ],
+      "title": "ServiceConfiguration",
+      "type": "object"
+    }
+  },
+  "example": {
+    "created_at": "2026-04-24T15:42:10.123456+00:00",
+    "error": null,
+    "finished_at": null,
+    "job_id": "9f7e2c4b5a6d",
+    "progress": {
+      "active_agents": [
+        {
+          "activity": "Searching source files for vulnerable symbols and usage",
+          "agent": "code_scanner",
+          "status": "running",
+          "step": "scan_code",
+          "title": "Code Scan"
+        },
+        {
+          "activity": "Scanning manifests and lock files for the vulnerable package",
+          "agent": "dependency_scanner",
+          "status": "running",
+          "step": "scan_dependencies",
+          "title": "Dependency Scan"
+        }
+      ],
+      "completed_steps": 5,
+      "current_activity": "Searching source files for vulnerable symbols and usage",
+      "current_agent": "code_scanner",
+      "current_step": "scan_code",
+      "current_title": "Code Scan",
+      "last_completed_step": "inspect_archives",
+      "last_updated_at": "2026-04-24T15:42:11.102938+00:00",
+      "percent": 38,
+      "step_statuses": {
+        "discover_vuln": "completed",
+        "fetch_advisory": "completed",
+        "filter_advisory": "completed",
+        "inspect_archives": "completed",
+        "prepare_repo": "completed",
+        "scan_code": "running",
+        "scan_dependencies": "running"
+      },
+      "total_steps": 13
+    },
+    "status": "running"
+  },
+  "properties": {
+    "job_id": {
+      "description": "Opaque job identifier returned by POST /assess in async mode.",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/JobStatus",
+      "description": "Current lifecycle state of the assessment job."
+    },
+    "created_at": {
+      "description": "RFC 3339 timestamp for when the job was created.",
+      "title": "Created At",
+      "type": "string"
+    },
+    "finished_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "RFC 3339 timestamp for when the job finished, if available.",
+      "title": "Finished At"
+    },
+    "error_details": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Structured failure code, sanitized message, and retryability.",
+      "title": "Error Details"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Error message for failed jobs.",
+      "title": "Error"
+    },
+    "progress": {
+      "$ref": "#/$defs/JobProgress",
+      "description": "UI-friendly live progress snapshot for the assessment pipeline."
+    },
+    "request": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Original assessment request metadata with unset fields omitted.",
+      "title": "Request"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "LLM model used for this assessment when known.",
+      "title": "Model"
+    },
+    "llm_backend": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "LLM backend identifier or URL when known.",
+      "title": "Llm Backend"
+    },
+    "llm_provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "LLM provider label when known.",
+      "title": "Llm Provider"
+    },
+    "llm": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Structured LLM backend metadata when known.",
+      "title": "Llm"
+    },
+    "logs": {
+      "description": "Recent live log entries emitted while the job runs.",
+      "items": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "title": "Logs",
+      "type": "array"
+    },
+    "configuration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ServiceConfiguration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Sanitized service configuration visible to API consumers."
+    },
+    "backend": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackendInformation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Operational backend details visible to API consumers."
+    }
+  },
+  "required": [
+    "job_id",
+    "status",
+    "created_at",
+    "progress"
+  ],
+  "title": "JobStatusResponse",
+  "type": "object"
+}

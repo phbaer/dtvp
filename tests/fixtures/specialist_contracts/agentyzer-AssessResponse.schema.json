@@ -1,0 +1,886 @@
+{
+  "$defs": {
+    "AnalysisJustification": {
+      "description": "Dependency-Track justification values for NOT_AFFECTED findings.",
+      "enum": [
+        "CODE_NOT_PRESENT",
+        "CODE_NOT_REACHABLE",
+        "REQUIRES_CONFIGURATION",
+        "REQUIRES_DEPENDENCY",
+        "REQUIRES_ENVIRONMENT",
+        "PROTECTED_BY_COMPILER",
+        "PROTECTED_AT_RUNTIME",
+        "PROTECTED_AT_PERIMETER",
+        "PROTECTED_BY_MITIGATING_CONTROL",
+        "NOT_SET"
+      ],
+      "title": "AnalysisJustification",
+      "type": "string"
+    },
+    "AnalysisResponse": {
+      "description": "Dependency-Track analysis response values.",
+      "enum": [
+        "CAN_NOT_FIX",
+        "WILL_NOT_FIX",
+        "UPDATE",
+        "ROLLBACK",
+        "WORKAROUND_AVAILABLE",
+        "NOT_SET"
+      ],
+      "title": "AnalysisResponse",
+      "type": "string"
+    },
+    "AnalysisState": {
+      "description": "Dependency-Track analysis states (VEX).",
+      "enum": [
+        "EXPLOITABLE",
+        "IN_TRIAGE",
+        "FALSE_POSITIVE",
+        "NOT_AFFECTED",
+        "RESOLVED",
+        "NOT_SET"
+      ],
+      "title": "AnalysisState",
+      "type": "string"
+    },
+    "Assessment": {
+      "description": "Overall verdict produced by the pipeline.",
+      "properties": {
+        "code_coverage": {
+          "additionalProperties": true,
+          "description": "Source/parser/retrieval coverage and exclusion eligibility.",
+          "title": "Code Coverage",
+          "type": "object"
+        },
+        "application_eligible": {
+          "default": false,
+          "description": "True only for a validated assessment supported by the final audit. Missing or false blocks applying this result.",
+          "title": "Application Eligible",
+          "type": "boolean"
+        },
+        "rescoring_eligible": {
+          "default": false,
+          "description": "True only when validated analysis and audit support the emitted CVSS adjustment.",
+          "title": "Rescoring Eligible",
+          "type": "boolean"
+        },
+        "affected": {
+          "description": "Whether the analyzer concluded that the target is affected by the vulnerability.",
+          "title": "Affected",
+          "type": "boolean"
+        },
+        "verdict": {
+          "description": "Top-level verdict label returned by the analyzer.",
+          "examples": [
+            "Affected"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "confidence": {
+          "description": "Confidence level for the verdict.",
+          "examples": [
+            "High"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "exposure": {
+          "description": "Exposure classification such as direct, transitive, or none.",
+          "examples": [
+            "direct"
+          ],
+          "title": "Exposure",
+          "type": "string"
+        },
+        "dependency_presence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependencyPresence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Normalized dependency presence provenance combining local repo rediscovery and SBOM attribution signals."
+        },
+        "advisory_relevance": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Outcome of the advisory relevance filter step, including whether the advisory was considered relevant, whether the decision came from deterministic rules or the LLM, and the supporting reasons.",
+          "title": "Advisory Relevance"
+        },
+        "version_analysis": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Structured version evidence, including covered product versions, the separately detected dependency/component version, advisory range summaries, and the per-ref version table used during verdicting.",
+          "title": "Version Analysis"
+        },
+        "researcher_view": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Security researcher / analyst view: what weakness was examined, what evidence was found, and why the project does or does not appear affected.",
+          "title": "Researcher View"
+        },
+        "remediation_view": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Remediation-focused view aimed at reaching low/info if possible, including upgrade targets or other concrete actions.",
+          "title": "Remediation View"
+        },
+        "audit_view": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Critical review of whether the final assessment is well supported by the available evidence.",
+          "title": "Audit View"
+        },
+        "ticket_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Developer-focused Markdown ticket text generated from the assessment, excluding analyzer runtime details.",
+          "title": "Ticket Text"
+        },
+        "adjusted_cvss": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CvssAdjustment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rescored CVSS details when advisory scoring data is available."
+        },
+        "executive_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutiveSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Compact executive statements that separate the advisory's vulnerability from the audited, repository-specific assessment and explain the decision with concrete evidence."
+        },
+        "summary": {
+          "description": "Short summary intended for human-readable reporting.",
+          "title": "Summary",
+          "type": "string"
+        },
+        "reasoning": {
+          "description": "Detailed rationale that supports the verdict.",
+          "title": "Reasoning",
+          "type": "string"
+        },
+        "analysis": {
+          "$ref": "#/$defs/AnalysisState",
+          "description": "Dependency-Track analysis state (VEX). Maps the verdict to one of: EXPLOITABLE, IN_TRIAGE, FALSE_POSITIVE, NOT_AFFECTED, NOT_SET.",
+          "examples": [
+            "EXPLOITABLE"
+          ]
+        },
+        "justification": {
+          "$ref": "#/$defs/AnalysisJustification",
+          "description": "Dependency-Track justification for NOT_AFFECTED findings. One of CODE_NOT_PRESENT, CODE_NOT_REACHABLE, REQUIRES_CONFIGURATION, REQUIRES_DEPENDENCY, REQUIRES_ENVIRONMENT, PROTECTED_BY_COMPILER, PROTECTED_AT_RUNTIME, PROTECTED_AT_PERIMETER, PROTECTED_BY_MITIGATING_CONTROL, NOT_SET.",
+          "examples": [
+            "NOT_SET"
+          ]
+        },
+        "response": {
+          "$ref": "#/$defs/AnalysisResponse",
+          "default": "NOT_SET",
+          "description": "Dependency-Track analysis response recommendation.",
+          "examples": [
+            "UPDATE"
+          ]
+        },
+        "details": {
+          "description": "Assessment text that rationalizes the analysis decision. Suitable for the Dependency-Track analysis comment field.",
+          "title": "Details",
+          "type": "string"
+        },
+        "cvss_vector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Full CVSS vector string (original or adjusted) for this finding.",
+          "examples": [
+            "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+          ],
+          "title": "Cvss Vector"
+        },
+        "cvss_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Numeric CVSS score derived from the vector (adjusted if rescoring was applied).",
+          "examples": [
+            6.3
+          ],
+          "title": "Cvss Score"
+        }
+      },
+      "required": [
+        "affected",
+        "verdict",
+        "confidence",
+        "exposure",
+        "summary",
+        "reasoning",
+        "analysis",
+        "justification",
+        "details"
+      ],
+      "title": "Assessment",
+      "type": "object"
+    },
+    "CvssAdjustment": {
+      "description": "Original and rescored CVSS details for the assessment.",
+      "properties": {
+        "original_score": {
+          "description": "Highest CVSS score reported by the advisory.",
+          "examples": [
+            6.3
+          ],
+          "title": "Original Score",
+          "type": "number"
+        },
+        "adjusted_score": {
+          "description": "Environment-adjusted CVSS score after dependency, reachability, and version evidence are applied.",
+          "examples": [
+            6.3
+          ],
+          "title": "Adjusted Score",
+          "type": "number"
+        },
+        "original_vector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Original CVSS vector used as the rescoring baseline.",
+          "examples": [
+            "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+          ],
+          "title": "Original Vector"
+        },
+        "adjusted_vector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Modified CVSS vector after environmental metrics are applied.",
+          "examples": [
+            "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A"
+          ],
+          "title": "Adjusted Vector"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CVSS specification version for the vector and scores.",
+          "examples": [
+            "4.0"
+          ],
+          "title": "Version"
+        },
+        "reasons": {
+          "description": "Ordered explanation of why the score changed or stayed the same.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "summary": {
+          "description": "One-line explanation summarizing the original and adjusted score relationship.",
+          "examples": [
+            "6.3 → 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)"
+          ],
+          "title": "Summary",
+          "type": "string"
+        },
+        "version_context": {
+          "$ref": "#/$defs/VersionContext",
+          "description": "Detailed context for the component version checked during rescoring."
+        }
+      },
+      "required": [
+        "original_score",
+        "adjusted_score",
+        "summary"
+      ],
+      "title": "CvssAdjustment",
+      "type": "object"
+    },
+    "DependencyPresence": {
+      "description": "Dependency presence and provenance evidence for the assessed component.",
+      "properties": {
+        "found": {
+          "description": "True when the vulnerable dependency is considered present in the assessed project.",
+          "title": "Found",
+          "type": "boolean"
+        },
+        "repo_found": {
+          "description": "True when manifests or lock files in the local repo scan rediscovered the dependency.",
+          "title": "Repo Found",
+          "type": "boolean"
+        },
+        "sbom_attributed": {
+          "description": "True when the dependency presence comes from upstream SBOM/input attribution.",
+          "title": "Sbom Attributed",
+          "type": "boolean"
+        },
+        "presence_basis": {
+          "description": "Primary presence source used for reporting (direct, transitive, sbom_attributed, not_found, or unknown).",
+          "examples": [
+            "sbom_attributed"
+          ],
+          "title": "Presence Basis",
+          "type": "string"
+        },
+        "direct": {
+          "description": "True when the dependency is declared directly in a top-level manifest.",
+          "title": "Direct",
+          "type": "boolean"
+        },
+        "transitive": {
+          "description": "True when dependency evidence is transitive rather than directly declared.",
+          "title": "Transitive",
+          "type": "boolean"
+        },
+        "declared_in": {
+          "description": "Manifest files where the dependency was declared directly.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Declared In",
+          "type": "array"
+        },
+        "lock_files": {
+          "description": "Lock files where the dependency was observed.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Lock Files",
+          "type": "array"
+        },
+        "locked_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Best-effort pinned version discovered in lock files.",
+          "title": "Locked Version"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reason dependency presence remains unknown or otherwise needs qualification.",
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "found",
+        "repo_found",
+        "sbom_attributed",
+        "presence_basis",
+        "direct",
+        "transitive"
+      ],
+      "title": "DependencyPresence",
+      "type": "object"
+    },
+    "ExecutiveSummary": {
+      "description": "Compact advisory, repository assessment, and decisive evidence.",
+      "properties": {
+        "vulnerability": {
+          "description": "Brief description of the vulnerability and affected dependency.",
+          "title": "Vulnerability",
+          "type": "string"
+        },
+        "assessment": {
+          "description": "Brief final assessment after version, reachability, and audit checks.",
+          "title": "Assessment",
+          "type": "string"
+        },
+        "why": {
+          "description": "Complete, audit-ready decision rationale drawn from labeled advisory applicability, dependency, version, reachability, exploitability, release, and assurance evidence.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Why",
+          "type": "array"
+        }
+      },
+      "required": [
+        "vulnerability",
+        "assessment"
+      ],
+      "title": "ExecutiveSummary",
+      "type": "object"
+    },
+    "StepFindings": {
+      "description": "Structured findings from a single pipeline step.",
+      "properties": {
+        "step": {
+          "description": "Stable machine-readable step identifier.",
+          "examples": [
+            "scan_dependencies"
+          ],
+          "title": "Step",
+          "type": "string"
+        },
+        "title": {
+          "description": "Human-readable title for the pipeline step.",
+          "examples": [
+            "Scan dependency manifests and lock files"
+          ],
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "description": "Outcome of the step, such as pass, fail, or skip.",
+          "examples": [
+            "pass"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "findings": {
+          "additionalProperties": true,
+          "description": "Structured findings emitted by the step. Keys vary by step type.",
+          "examples": [
+            {
+              "direct": true,
+              "found": true,
+              "locked_version": "2.0.0"
+            }
+          ],
+          "title": "Findings",
+          "type": "object"
+        },
+        "evidence": {
+          "description": "Short evidence statements supporting the step findings.",
+          "examples": [
+            [
+              "Found werkzeug in fixtures/python-direct-werkzeug/uv.lock"
+            ]
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "step",
+        "title",
+        "status",
+        "findings",
+        "evidence"
+      ],
+      "title": "StepFindings",
+      "type": "object"
+    },
+    "VersionContext": {
+      "description": "Concrete version evidence used during CVSS rescoring.",
+      "properties": {
+        "detected_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Version of the affected component that the analyzer actually evaluated.",
+          "examples": [
+            "2.0.0"
+          ],
+          "title": "Detected Version"
+        },
+        "version_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the detected version came from, such as a lock file or worktree manifest.",
+          "examples": [
+            "lock file"
+          ],
+          "title": "Version Source"
+        },
+        "affected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the detected version falls inside the advisory's affected range.",
+          "title": "Affected"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable explanation of the version match decision.",
+          "examples": [
+            "lock file — version 2.0.0 is in the explicit affected versions list"
+          ],
+          "title": "Note"
+        },
+        "affected_ranges_summary": {
+          "description": "Normalized summaries of the advisory ranges used for the comparison.",
+          "examples": [
+            [
+              "SEMVER range: introduced=0 fixed=3.0.6 (source=osv_ghsa)"
+            ]
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Affected Ranges Summary",
+          "type": "array"
+        },
+        "comparison_inputs": {
+          "additionalProperties": true,
+          "description": "Exact inputs supplied to the version comparison, including advisory ranges and explicit version lists.",
+          "title": "Comparison Inputs",
+          "type": "object"
+        },
+        "comparison_trace": {
+          "description": "Full ordered trace of the version comparison logic, including each match or non-match decision.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Comparison Trace",
+          "type": "array"
+        }
+      },
+      "title": "VersionContext",
+      "type": "object"
+    }
+  },
+  "description": "Top-level response — assessment + per-step detail.",
+  "example": {
+    "assessment": {
+      "adjusted_cvss": {
+        "adjusted_score": 6.3,
+        "adjusted_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A",
+        "original_score": 6.3,
+        "original_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+        "reasons": [
+          "version 2.0.0 (lock file) confirmed in affected range — lock file — version 2.0.0 is in the explicit affected versions list",
+          "LLM confirmed exploitable code path → E:A"
+        ],
+        "summary": "6.3 → 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)",
+        "version": "4.0",
+        "version_context": {
+          "affected": true,
+          "affected_ranges_summary": [
+            "SEMVER range: introduced=0 fixed=3.0.6 (source=osv_ghsa)"
+          ],
+          "comparison_inputs": {
+            "affected_ranges_summary": [
+              "ECOSYSTEM range: introduced=0 fixed=3.0.6 (source=osv_ghsa)",
+              "Explicit affected versions: 2 listed"
+            ],
+            "affected_versions_count": 2,
+            "component_name": "werkzeug",
+            "locked_version": "2.0.0"
+          },
+          "comparison_trace": [
+            "Affected ranges: 1 SEMVER/ECOSYSTEM, 0 GIT, 2 explicit versions",
+            "  Explicit affected versions: ['2.0.0', '3.0.2']",
+            "  SEMVER range: introduced=0 fixed=3.0.6 (source=osv_ghsa)",
+            "version=2.0.0: MATCH in explicit affected versions list"
+          ],
+          "detected_version": "2.0.0",
+          "note": "lock file — version 2.0.0 is in the explicit affected versions list",
+          "version_source": "lock file"
+        }
+      },
+      "advisory_relevance": {
+        "reasons": [
+          "OSV ecosystem match: {'PyPI'} (project={'PyPI'})"
+        ],
+        "relevant": true,
+        "source": "rules",
+        "status": "ok"
+      },
+      "affected": true,
+      "analysis": "EXPLOITABLE",
+      "application_eligible": true,
+      "audit_view": {
+        "checks": [
+          "Supports verdict: the current detected version remains within the affected range.",
+          "Supports verdict: direct production reachability was identified."
+        ],
+        "conclusion": "The available evidence is internally consistent with the current verdict. The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.",
+        "consistency": "strong",
+        "downgrade_supported": true,
+        "downgrade_target": false,
+        "objective": "Challenge the assessment and verify that the conclusion really matches the available evidence.",
+        "status": "pass"
+      },
+      "confidence": "High",
+      "cvss_score": 6.3,
+      "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A",
+      "dependency_presence": {
+        "declared_in": [
+          "pyproject.toml"
+        ],
+        "direct": true,
+        "found": true,
+        "lock_files": [
+          "uv.lock"
+        ],
+        "locked_version": "2.0.0",
+        "presence_basis": "direct",
+        "repo_found": true,
+        "sbom_attributed": true,
+        "transitive": false
+      },
+      "details": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\nCVSS: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A (score: 6.3)\nRescoring: LLM confirmed exploitable code path → E:A",
+      "executive_summary": {
+        "assessment": "Disposition: Affected. Confidence: High. Exposure: direct. Audit: status pass; evidence consistency strong. Basis: the current detected version remains within the affected range. Required action: upgrade werkzeug to a fixed release.",
+        "vulnerability": "CVE-2024-49766 · werkzeug: crafted multipart form data can trigger excessive resource consumption.",
+        "why": [
+          "Advisory applicability: Applicable — the advisory matches the assessed dependency context.",
+          "Dependency evidence: werkzeug is a direct dependency; declared in pyproject.toml; resolved from uv.lock.",
+          "Version evidence: current dependency version 2.0.0 (lock file) is inside the advisory's affected range.",
+          "Direct reachability (current workspace): Reachable — an evidence-backed production path to the dependency was identified. The vulnerable multipart parser is called by the request handler.",
+          "Deep exploitability (current workspace): Exploitability: Yes; vulnerability-specific path: confirmed.",
+          "Audit assurance: status pass; evidence consistency strong."
+        ]
+      },
+      "exposure": "direct",
+      "justification": "NOT_SET",
+      "reasoning": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.",
+      "remediation_view": {
+        "objective": "Reduce the finding to low/info when supportable, ideally by proving the current codebase is Not Affected.",
+        "recommendations": [
+          "Upgrade to 3.0.6",
+          "Upgrade, remove, or isolate the direct dependency and verify the vulnerable path is no longer reachable.",
+          "Rerun Agentyzer after remediation to confirm a Not Affected or low/info rescoring outcome."
+        ],
+        "status": "action_needed",
+        "summary": "The current assessment does not yet justify a low/info outcome. Use the recommended changes to eliminate reachability or move the assessed version outside the affected range."
+      },
+      "rescoring_eligible": true,
+      "researcher_view": {
+        "conclusion": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.",
+        "findings": [
+          "Advisory relevance: relevant via rules",
+          "Dependency presence: found as a direct dependency",
+          "Version check: 2.0.0 (lock file) is inside the advisory range",
+          "Direct reachability: reachable from production code",
+          "Deep analysis: confirmed=True, exploitable=YES"
+        ],
+        "objective": "Find the weakness, determine exposure, and check whether the assessed application is actually affected.",
+        "target_outcome": "Prefer an evidence-backed Not Affected / low-info outcome when the current codebase can be excluded."
+      },
+      "response": "UPDATE",
+      "summary": "Direct dependency with reachable vulnerable code path.",
+      "verdict": "Affected",
+      "version_analysis": {
+        "affected": true,
+        "affected_ranges_summary": [
+          "SEMVER range: introduced=0 fixed=3.0.6 (source=osv_ghsa)"
+        ],
+        "checked_versions": [
+          {
+            "affected": true,
+            "notes": "lock file — version 2.0.0 is in the explicit affected versions list",
+            "ref": "LOCKED",
+            "ref_type": "lock",
+            "source": null,
+            "version": "2.0.0"
+          },
+          {
+            "affected": true,
+            "notes": "version is in the explicit affected versions list",
+            "ref": "WORKTREE",
+            "ref_type": "worktree",
+            "source": "manifest",
+            "version": "2.0.0"
+          }
+        ],
+        "comparison_inputs": {
+          "affected_ranges_summary": [
+            "ECOSYSTEM range: introduced=0 fixed=3.0.6 (source=osv_ghsa)",
+            "Explicit affected versions: 2 listed"
+          ],
+          "affected_versions_count": 2,
+          "component_name": "werkzeug",
+          "locked_version": "2.0.0"
+        },
+        "comparison_trace": [
+          "Affected ranges: 1 SEMVER/ECOSYSTEM, 0 GIT, 2 explicit versions",
+          "  Explicit affected versions: ['2.0.0', '3.0.2']",
+          "  SEMVER range: introduced=0 fixed=3.0.6 (source=osv_ghsa)",
+          "version=2.0.0: MATCH in explicit affected versions list"
+        ],
+        "detected_version": "2.0.0",
+        "historical_affected": [],
+        "note": "lock file — version 2.0.0 is in the explicit affected versions list",
+        "version_source": "lock file"
+      }
+    },
+    "steps": [
+      {
+        "evidence": [
+          "Found werkzeug in fixtures/python-direct-werkzeug/uv.lock",
+          "Locked version resolved to 2.0.0"
+        ],
+        "findings": {
+          "direct": true,
+          "found": true,
+          "locked_version": "2.0.0"
+        },
+        "status": "pass",
+        "step": "scan_dependencies",
+        "title": "Scan dependency manifests and lock files"
+      }
+    ]
+  },
+  "properties": {
+    "assessment": {
+      "$ref": "#/$defs/Assessment",
+      "description": "Overall assessment result."
+    },
+    "steps": {
+      "description": "Ordered pipeline findings produced while computing the assessment.",
+      "items": {
+        "$ref": "#/$defs/StepFindings"
+      },
+      "title": "Steps",
+      "type": "array"
+    },
+    "llm_conversation": {
+      "description": "Actual LLM conversation turns captured during this assessment. Each turn includes timestamps, messages sent to the model, the assistant response, directional token usage, and provider metrics when available.",
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Llm Conversation",
+      "type": "array"
+    }
+  },
+  "required": [
+    "assessment",
+    "steps"
+  ],
+  "title": "AssessResponse",
+  "type": "object"
+}

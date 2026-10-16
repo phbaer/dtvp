@@ -1,0 +1,177 @@
+{
+  "$defs": {
+    "AssessmentArtifactsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "threat_model": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Threat Model",
+          "type": "string"
+        },
+        "sbom": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Sbom",
+          "type": "string"
+        },
+        "items_csv": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Items Csv"
+        },
+        "cves": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cves"
+        },
+        "prior_vex": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Prior Vex",
+          "type": "array"
+        }
+      },
+      "required": [
+        "threat_model",
+        "sbom"
+      ],
+      "title": "AssessmentArtifactsRequest",
+      "type": "object"
+    },
+    "AssessmentDeploymentProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "none",
+            "selected"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "profile_id": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Id"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "AssessmentDeploymentProfileRequest",
+      "type": "object"
+    },
+    "AssessmentVulnInsightRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "enrichment_job_id": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enrichment Job Id"
+        }
+      },
+      "title": "AssessmentVulnInsightRequest",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "product_version_id": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Product Version Id",
+      "type": "string"
+    },
+    "configuration_snapshot_id": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Configuration Snapshot Id",
+      "type": "string"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/AssessmentArtifactsRequest"
+    },
+    "vulninsight": {
+      "$ref": "#/$defs/AssessmentVulnInsightRequest"
+    },
+    "deployment_profile": {
+      "$ref": "#/$defs/AssessmentDeploymentProfileRequest"
+    }
+  },
+  "required": [
+    "product_version_id",
+    "configuration_snapshot_id",
+    "artifacts",
+    "deployment_profile"
+  ],
+  "title": "AssessmentCreateRequest",
+  "type": "object"
+}

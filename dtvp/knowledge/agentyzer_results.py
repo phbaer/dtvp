@@ -79,6 +79,8 @@ def _report(raw, derived):
         report = raw
         reasons.append("native_vulnerability_request_binding_missing")
     safe = copy.deepcopy(report)
+    if not isinstance(report.get("source_input"), dict):
+        reasons.append("provider_source_commit_binding_unavailable")
     for key in ("assessment", "source_input"):
         if not isinstance(safe.get(key), dict):
             reasons.append("malformed_or_missing_" + key)

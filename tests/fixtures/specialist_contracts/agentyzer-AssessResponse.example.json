@@ -1,0 +1,34 @@
+{
+  "assessment": {
+    "affected": true,
+    "verdict": "Affected",
+    "confidence": "High",
+    "exposure": "direct",
+    "summary": "Synthetic current-contract report",
+    "reasoning": "Mocked external analysis only",
+    "analysis": "EXPLOITABLE",
+    "justification": "NOT_SET",
+    "details": "synthetic",
+    "application_eligible": true,
+    "rescoring_eligible": true,
+    "code_coverage": {
+      "permits_exclusion": false
+    },
+    "version_analysis": {
+      "detected_version": "1.2.0",
+      "comparison_inputs": {
+        "component_name": "demo-http"
+      }
+    },
+    "adjusted_cvss": {
+      "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "original_score": 9.8,
+      "adjusted_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:P/MAC:H/MPR:H/MUI:R/MC:N/MI:N/MA:N",
+      "adjusted_score": 0.0,
+      "version": "3.1",
+      "reasons": [],
+      "summary": "Synthetic proposal"
+    }
+  },
+  "steps": []
+}

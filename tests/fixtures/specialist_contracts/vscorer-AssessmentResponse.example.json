@@ -1,0 +1,31 @@
+{
+  "id": "assessment-1",
+  "product_version_id": "version-1",
+  "configuration_snapshot_id": "configuration-1",
+  "state": "in_review",
+  "version": 1,
+  "finding_count": 1,
+  "terminal_finding_count": 1,
+  "progress": {
+    "total": 1,
+    "terminal": 1,
+    "remaining": 1
+  },
+  "created_at": "synthetic",
+  "completed_at": "synthetic",
+  "prior_vex_evaluation_summary": {
+    "total": 1,
+    "source_artifact_count": 1,
+    "status_counts": {},
+    "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "available_per_finding": true
+  },
+  "ai_interpretation": {
+    "configured": false,
+    "available": false,
+    "api_key_configured": false,
+    "status": "available",
+    "reason": "synthetic"
+  },
+  "_links": {}
+}

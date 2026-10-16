@@ -1,0 +1,10 @@
+{
+  "job_id": "job-1",
+  "status": "completed",
+  "created_at": "2026-10-16T12:00:00Z",
+  "progress": {
+    "completed_steps": 1,
+    "total_steps": 1,
+    "percent": 1
+  }
+}

@@ -1,0 +1,253 @@
+{
+  "description": "Input for starting a vulnerability assessment.",
+  "examples": [
+    {
+      "component_name": "benchmark",
+      "debug": true,
+      "focus_path": "/tmp/agentyzer-repos/vuln-benchmark-08dfa46a5b30",
+      "user_guidance": "Prioritize code paths reachable from HTTP request handlers.",
+      "vuln_id": "CVE-2024-49766"
+    },
+    {
+      "component_name": "benchmark",
+      "debug": false,
+      "dependency_paths": [
+        [
+          "flask",
+          "werkzeug"
+        ]
+      ],
+      "vuln_id": "CVE-2024-49766"
+    }
+  ],
+  "properties": {
+    "vuln_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Vulnerability identifier to assess, typically a CVE or GHSA.",
+      "examples": [
+        "CVE-2024-49766"
+      ],
+      "title": "Vuln Id"
+    },
+    "cvss_vector": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional CVSS vector string to rescore when advisory metadata does not already provide one.",
+      "examples": [
+        "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+      ],
+      "title": "Cvss Vector"
+    },
+    "component_name": {
+      "description": "Logical component name from config/repos.yaml, or an ad-hoc name when focus_path is provided.",
+      "examples": [
+        "benchmark"
+      ],
+      "title": "Component Name",
+      "type": "string"
+    },
+    "assessment_scope": {
+      "default": "auto",
+      "description": "auto selects component scope for an exact advisory package match, otherwise repository scope; repository reviews all advisory packages found in the checkout.",
+      "enum": [
+        "auto",
+        "component",
+        "repository"
+      ],
+      "title": "Assessment Scope",
+      "type": "string"
+    },
+    "project_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional caller project name used to correlate and selectively clean assessment jobs.",
+      "examples": [
+        "ExampleApp"
+      ],
+      "title": "Project Name"
+    },
+    "focus_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional absolute path to a local checkout to assess instead of cloning or resolving from config/repos.yaml.",
+      "examples": [
+        "/tmp/agentyzer-repos/vuln-benchmark-08dfa46a5b30"
+      ],
+      "title": "Focus Path"
+    },
+    "dependency_paths": {
+      "anyOf": [
+        {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional dependency chains to bias transitive reachability analysis. Each nested list represents one path from a top-level dependency to the vulnerable package.",
+      "examples": [
+        [
+          [
+            "flask",
+            "werkzeug"
+          ]
+        ]
+      ],
+      "title": "Dependency Paths"
+    },
+    "project_versions": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Caller-supplied project/application releases for which the vulnerability was processed. These are repository-version candidates, not vulnerable dependency versions. The analyzer intersects them with repository tags, release branches, and configured default-branch version metadata before checking dependency versions.",
+      "examples": [
+        [
+          "1.0.0",
+          "1.1.0",
+          "2.0.0"
+        ]
+      ],
+      "title": "Project Versions"
+    },
+    "affected_product_versions": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "deprecated": true,
+      "description": "Deprecated alias for project_versions. Values are processed project releases, never vulnerable dependency versions.",
+      "title": "Affected Product Versions"
+    },
+    "user_guidance": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional analyst context passed verbatim to every LLM call.",
+      "examples": [
+        "Treat code reachable from background workers as in scope."
+      ],
+      "title": "User Guidance"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional LLM model override for this assessment.",
+      "examples": [
+        "mistral"
+      ],
+      "title": "Model"
+    },
+    "llm_backend": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional LLM backend label supplied by the caller for tracking.",
+      "examples": [
+        "ollama"
+      ],
+      "title": "Llm Backend"
+    },
+    "llm_provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional LLM provider label supplied by the caller for tracking.",
+      "examples": [
+        "ollama"
+      ],
+      "title": "Llm Provider"
+    },
+    "debug": {
+      "default": false,
+      "description": "Enable verbose debug output, including per-step input snapshots and full version comparison traces.",
+      "examples": [
+        true
+      ],
+      "title": "Debug",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "component_name"
+  ],
+  "title": "AssessRequest",
+  "type": "object"
+}

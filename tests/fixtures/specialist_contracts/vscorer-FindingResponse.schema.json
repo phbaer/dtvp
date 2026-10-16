@@ -1,0 +1,565 @@
+{
+  "$defs": {
+    "DecisionResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "supersedes_decision_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Supersedes Decision Id"
+        },
+        "decision": {
+          "title": "Decision",
+          "type": "string"
+        },
+        "environmental_vector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Environmental Vector"
+        },
+        "environmental_score": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Environmental Score"
+        },
+        "candidate_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Digest"
+        },
+        "selected_control_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selected Control Ids",
+          "type": "array"
+        },
+        "evidence_references": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence References",
+          "type": "array"
+        },
+        "placement_candidate_decisions": {
+          "additionalProperties": {
+            "enum": [
+              "confirmed",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "title": "Placement Candidate Decisions",
+          "type": "object"
+        },
+        "path_decisions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PathReviewDecisionResponse"
+          },
+          "title": "Path Decisions",
+          "type": "object"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "must_patch": {
+          "title": "Must Patch",
+          "type": "boolean"
+        },
+        "decided_at": {
+          "title": "Decided At",
+          "type": "string"
+        },
+        "decided_by": {
+          "title": "Decided By",
+          "type": "string"
+        },
+        "actor_issuer": {
+          "title": "Actor Issuer",
+          "type": "string"
+        },
+        "actor_subject": {
+          "title": "Actor Subject",
+          "type": "string"
+        },
+        "actor_display_name": {
+          "title": "Actor Display Name",
+          "type": "string"
+        },
+        "authentication_method": {
+          "title": "Authentication Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "supersedes_decision_id",
+        "decision",
+        "environmental_vector",
+        "environmental_score",
+        "candidate_digest",
+        "selected_control_ids",
+        "evidence_references",
+        "rationale",
+        "must_patch",
+        "decided_at",
+        "decided_by",
+        "actor_issuer",
+        "actor_subject",
+        "actor_display_name",
+        "authentication_method"
+      ],
+      "title": "DecisionResponse",
+      "type": "object"
+    },
+    "DraftResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "selected_control_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selected Control Ids",
+          "type": "array"
+        },
+        "evidence_references": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence References",
+          "type": "array"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "placement_candidate_decisions": {
+          "additionalProperties": {
+            "enum": [
+              "confirmed",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "title": "Placement Candidate Decisions",
+          "type": "object"
+        },
+        "path_decisions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PathReviewDecisionResponse"
+          },
+          "title": "Path Decisions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "selected_control_ids",
+        "evidence_references",
+        "rationale"
+      ],
+      "title": "DraftResponse",
+      "type": "object"
+    },
+    "KevResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "must_patch": {
+          "title": "Must Patch",
+          "type": "boolean"
+        },
+        "last_refreshed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Refreshed At"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "provenance": {
+          "additionalProperties": true,
+          "title": "Provenance",
+          "type": "object"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        }
+      },
+      "required": [
+        "status",
+        "must_patch",
+        "last_refreshed_at",
+        "source",
+        "provenance",
+        "details"
+      ],
+      "title": "KevResponse",
+      "type": "object"
+    },
+    "LinkResponse": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "LinkResponse",
+      "type": "object"
+    },
+    "PathReviewDecisionResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "applicable",
+            "not_applicable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "reason"
+      ],
+      "title": "PathReviewDecisionResponse",
+      "type": "object"
+    },
+    "ProgressNoteResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "created_by": {
+          "title": "Created By",
+          "type": "string"
+        },
+        "actor_display_name": {
+          "title": "Actor Display Name",
+          "type": "string"
+        },
+        "actor_issuer": {
+          "title": "Actor Issuer",
+          "type": "string"
+        },
+        "actor_subject": {
+          "title": "Actor Subject",
+          "type": "string"
+        },
+        "authentication_method": {
+          "title": "Authentication Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "note",
+        "created_at",
+        "created_by",
+        "actor_display_name",
+        "actor_issuer",
+        "actor_subject",
+        "authentication_method"
+      ],
+      "title": "ProgressNoteResponse",
+      "type": "object"
+    },
+    "ReviewClassificationResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "reviewable",
+            "for_information_only",
+            "historical_terminal_review"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "connection_status": {
+          "enum": [
+            "connected",
+            "possible_component_match",
+            "possible_placement",
+            "placement_search_incomplete",
+            "no_placement",
+            "historical"
+          ],
+          "title": "Connection Status",
+          "type": "string"
+        },
+        "for_information_only": {
+          "title": "For Information Only",
+          "type": "boolean"
+        },
+        "can_rescore": {
+          "title": "Can Rescore",
+          "type": "boolean"
+        },
+        "can_repair_component_scope": {
+          "default": false,
+          "title": "Can Repair Component Scope",
+          "type": "boolean"
+        },
+        "message": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "affected_component_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Affected Component Count"
+        }
+      },
+      "required": [
+        "status",
+        "connection_status",
+        "for_information_only",
+        "can_rescore",
+        "message"
+      ],
+      "title": "ReviewClassificationResponse",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "assessment_id": {
+      "title": "Assessment Id",
+      "type": "string"
+    },
+    "cve_id": {
+      "title": "Cve Id",
+      "type": "string"
+    },
+    "ordinal": {
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "total": {
+      "minimum": 1,
+      "title": "Total",
+      "type": "integer"
+    },
+    "state": {
+      "title": "State",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "source_facts": {
+      "additionalProperties": true,
+      "title": "Source Facts",
+      "type": "object"
+    },
+    "analysis_context": {
+      "additionalProperties": true,
+      "title": "Analysis Context",
+      "type": "object"
+    },
+    "suggested_environmental": {
+      "additionalProperties": true,
+      "title": "Suggested Environmental",
+      "type": "object"
+    },
+    "suggestion": {
+      "additionalProperties": true,
+      "title": "Suggestion",
+      "type": "object"
+    },
+    "speculative_maximum": {
+      "additionalProperties": true,
+      "title": "Speculative Maximum",
+      "type": "object"
+    },
+    "review_classification": {
+      "$ref": "#/$defs/ReviewClassificationResponse"
+    },
+    "kev": {
+      "$ref": "#/$defs/KevResponse"
+    },
+    "draft": {
+      "$ref": "#/$defs/DraftResponse"
+    },
+    "preview": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Preview"
+    },
+    "prompt": {
+      "title": "Prompt",
+      "type": "string"
+    },
+    "ai_context_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Ai Context Sha256",
+      "type": "string"
+    },
+    "ai_context_sha256_by_kind": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "enum": [
+          "cwe_explanation",
+          "prompt",
+          "critic"
+        ]
+      },
+      "title": "Ai Context Sha256 By Kind",
+      "type": "object"
+    },
+    "ai_critic_refresh": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ai Critic Refresh"
+    },
+    "progress_notes": {
+      "items": {
+        "$ref": "#/$defs/ProgressNoteResponse"
+      },
+      "title": "Progress Notes",
+      "type": "array"
+    },
+    "decision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionResponse"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "_links": {
+      "$ref": "#/$defs/LinkResponse"
+    }
+  },
+  "required": [
+    "id",
+    "assessment_id",
+    "cve_id",
+    "ordinal",
+    "total",
+    "state",
+    "version",
+    "source_facts",
+    "analysis_context",
+    "suggested_environmental",
+    "suggestion",
+    "speculative_maximum",
+    "review_classification",
+    "kev",
+    "draft",
+    "preview",
+    "prompt",
+    "ai_context_sha256",
+    "ai_context_sha256_by_kind",
+    "_links"
+  ],
+  "title": "FindingResponse",
+  "type": "object"
+}

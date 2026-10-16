@@ -3443,3 +3443,78 @@ tears down old requests on session changes; late responses cannot restore them.
 Five scheduling browser checks and six existing manual-advisory checks passed;
 frontend typecheck/build passed. No network collection or human approval is
 simulated by these UI fixtures.
+
+### Current external specialist contracts and offline mocks
+
+The default sibling checkouts were inspected again: VScorer `b016cf7` is now the
+minimal REST-first edition, while Agentyzer is `8ff8372`. The previous isolated
+VScorer DTVP-binding branch describes the older product and must not be treated
+as the current default service contract. No sibling checkout was modified.
+
+Source-derived JSON Schema snapshots under `tests/fixtures/specialist_contracts`
+record full sibling commits and exact relevant source-file hashes. Offline HTTP
+mocks validate current request/response shapes while exercising DTVP-issued bytes,
+explicit proposal intake and the real native Agentyzer job worker. They perform
+no network/provider calls, cloning, LLM analysis or human review. To detect source
+drift deliberately against local sibling directories:
+
+```bash
+DTVP_SPECIALIST_SOURCE_ROOT=/path/to/src uv run pytest -q tests/test_current_specialist_contracts.py
+```
+
+Without that opt-in directory the source-drift check skips; the committed mock
+contracts still run in CI. These tests establish the exercised mocked transport
+and evidence behavior, not deployed service authentication or analysis quality.
+
+Current minimal VScorer accepts the existing issued `sbom.json` and `cves.json`
+unchanged. Its canonical mapping format is semicolon-delimited
+`component_ref;threat_model_element_id`. It accepts a separately supplied TM7,
+optional items.csv/prior VEX and explicit effective settings. It does not accept
+`dtvp-source.json` or `pipeline-context.json` as artifact kinds and does not echo
+DTVP receipts in returned finding facts. Its production API currently uses local
+sessions, CSRF, exact Origin and idempotency keys; a bearer-token or OIDC service
+account must not be assumed. The old qualified DTVP-extension path remains a
+separate compatibility contract.
+
+`POST /api/v3/projects/{id}/versions/{version}/proposals/vscorer-minimal`
+provides an explicit operator-bound adapter. Inputs are `request_id`, `expected`,
+`issued_input_receipt_sha256`, `input_artifacts` (`sbom`/`cves`, each with actual
+external `artifact_id` and exact `sha256`), `assessment_id`, exact UTF-8
+`finding_json`, its `finding_sha256`, meaningful `binding_reason`, and explicit
+`mapping_mode` (`not_declared` or `issued_items_csv`). Optional `source_label`
+defaults to `VScorer minimal`. The operator declares which issued upload/result
+exchange belongs together; the adapter never manufactures an echoed receipt.
+It checks issued input hashes, finding/assessment/revision links, exact selected
+CVE/component name/version/PURL/Base facts, native scope/conflict flags and the
+recalculated contextual vector. Missing preview or incomplete/conflicting scope
+retains a blocked proposal. Exact result bytes, operator declaration, input
+receipt and source target fingerprint remain retained; idempotent retries never
+publish twice. Changed target material invalidates eligibility through the
+existing proposal workflow. No human assessment, approval or score is published.
+
+`POST /api/v3/projects/{id}/vscorer-minimal-mapping` is read-only. It requires
+`issued_input_receipt_sha256`, `model_id`, `model_revision` and `model_sha256`,
+selecting one exact issued context/model. It returns canonical `items_csv`, its
+`items_csv_sha256`, model/context/configuration/parent-receipt pins and a report
+digest. Missing mappings, ambiguous/multiple context rows or changed model pins
+fail closed. Existing issued serializers and file bytes are untouched. Uploading
+this CSV and selecting its effective VScorer mapping settings are separate
+explicit actions; no TM7 or placement is invented.
+
+For `mapping_mode: issued_items_csv`, proposal intake additionally requires
+`mapping_selection` with that exact selector, plus `input_artifacts.items_csv`
+and `input_artifacts.threat_model` upload IDs/hashes. CSV and model-byte digests
+must match the declared issued conversion. In `not_declared` mode no CSV/model
+mapping proof is implied. TM7 association remains operator-declared; effective
+VScorer configuration contents, model authenticity and mapping approval remain
+unverified. Reports label provenance `operator_bound_minimal_rest_exchange` and
+`DTVP operator; not echoed by VScorer`, visibly distinct from the old extension.
+
+Current default Agentyzer ignores an unknown `source_commit` request field and
+its declared response model supplies no `source_input` checkout binding. DTVP
+still retains the exact attempted request, completed job/result and raw report,
+but explicitly diagnoses `provider_source_commit_binding_unavailable`; those
+reports cannot become eligible contextual application or rescoring proposals.
+The existing qualified extension path continues to require its full commit and
+artifact consistency checks. A useful unqualified report is evidence for review,
+never proof of the requested checkout or delivered binary/container contents.

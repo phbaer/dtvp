@@ -1,0 +1,79 @@
+{
+  "id": "finding-1",
+  "assessment_id": "assessment-1",
+  "cve_id": "CVE-2099-10001",
+  "ordinal": 1,
+  "total": 1,
+  "state": "pending",
+  "version": 1,
+  "source_facts": {
+    "cve_id": "CVE-2099-10001",
+    "base_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "base_score": 9.8,
+    "base_conflict": false,
+    "component_scope_conflict": false,
+    "unresolved_scope": false,
+    "components": [
+      {
+        "bom_ref": "shared",
+        "name": "shared",
+        "version": "1",
+        "purl": "pkg:generic/acme/shared@1"
+      }
+    ]
+  },
+  "analysis_context": {},
+  "suggested_environmental": {},
+  "suggestion": {},
+  "speculative_maximum": {},
+  "review_classification": {
+    "status": "reviewable",
+    "connection_status": "connected",
+    "for_information_only": false,
+    "can_rescore": false,
+    "message": "synthetic"
+  },
+  "kev": {
+    "status": "synthetic",
+    "must_patch": false,
+    "last_refreshed_at": "synthetic",
+    "source": "synthetic",
+    "provenance": {},
+    "details": {}
+  },
+  "draft": {
+    "selected_control_ids": [],
+    "evidence_references": [],
+    "rationale": "synthetic"
+  },
+  "preview": {
+    "environmental_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:P/MAC:H/MPR:H/MUI:R/MC:N/MI:N/MA:N",
+    "environmental_score": 0.0,
+    "selected_control_ids": [],
+    "applied_controls": [],
+    "withheld_controls": [],
+    "reasons": [],
+    "warnings": [],
+    "control_confirmations": [],
+    "placement_candidates": [],
+    "scope_complete": true,
+    "candidate_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "environmental_approval_allowed": true,
+    "candidate_status": "score_reduction_available",
+    "approval_blockers": [],
+    "finding_id": "finding-1",
+    "finding_version": 1,
+    "kev": {
+      "status": "synthetic",
+      "must_patch": false,
+      "last_refreshed_at": "synthetic",
+      "source": "synthetic",
+      "provenance": {},
+      "details": {}
+    }
+  },
+  "prompt": "synthetic",
+  "ai_context_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "ai_context_sha256_by_kind": {},
+  "_links": {}
+}
