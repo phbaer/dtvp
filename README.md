@@ -50,7 +50,8 @@ safety analysis. SBOM correctness is the producer's responsibility; DTVP validat
 its input contract and exposes coverage limits. Generator's established audit
 documents are the output baseline to preserve while replacing DT reads with DTVP.
 CPE discovery has an internal offline module preserving reviewed mappings and
-provenance; complete service migration and refresh remain planned.
+provenance, with explicit scoped official NVD refresh. A complete national catalog
+mirror and standalone-service retirement require separate scale/parity qualification.
 The concept's [integration status](docs/devsecops-evidence-concept.md#reviewed-integration-increments)
 records isolated sibling fixes, validation and remaining cutover gates. Native
 consumer commands and v2 compatibility boundaries are in [consumer contracts](docs/consumers.md).
@@ -3073,3 +3074,39 @@ Provider contract references: [official EUVD API documentation](https://euvd.eni
 and [HND/OKA support announcement](https://jvndb.jvn.jp/nav/sys_announce.html).
 Public success/not-found response shapes were checked against live official
 endpoints; automated tests use synthetic response fixtures without external calls.
+
+### Explicit scoped official CPE refresh
+
+Managers can capture current candidates from the [official NVD CPE 2.0 API](https://nvd.nist.gov/developers/products)
+using `POST /api/v3/projects/{project}/cpe/sources/refresh` with `request_id`, exact
+`expected` CPE policy SHA (or null), `keyword` (3–200 characters) and a meaningful
+`reason`. Network access is disabled unless `nvd` appears in `DTVP_PROVIDERS_ENABLED`.
+One fixed HTTPS GET requests the complete returned keyword subset. Redirects and
+automatic retries are disabled; responses above 2 MiB, inconsistent pagination,
+or more than 2,000 results fail rather than publishing a truncated dictionary.
+Narrow broad queries explicitly. Upstream throttling/errors leave policy unchanged.
+This scoped refresh is not a full national dictionary mirror or scheduled crawler.
+
+Capture writes no journal state. It returns `source_input` and its exact `preview`;
+explicit existing `/cpe/sources/apply` with that captured input plus
+`preview.preview_digest` publishes the curated dictionary replacement. It retains
+exact original NVD response bytes and typed query/endpoint/capture-time/hash
+provenance, while preserving mapping rules, manually reviewed identities, other
+retained sources, historical captures and approvals. Query matches are discovery
+candidates, not vulnerability applicability. Capture provenance remains attributed
+and replayable, not signed publisher authentication or a completeness guarantee
+beyond the returned query subset. Current management authorization is rechecked
+after network work; concurrent policy changes require a fresh explicit preview.
+Once publication is attempted, retry the identical captured body, not a new fetch.
+
+The existing advanced **Offline curated sources** panel offers a **Scoped official
+NVD query** capture method alongside local files. It checks returned scope/policy
+and exact byte digest, then requires independent replacement confirmation. Failed
+capture retains the original query and pin; discard explicitly releases that draft.
+Publication retries preserve exact captured bytes and request identity. Generic
+`knowledge request POST` CLI calls use the same endpoints and JSON contracts.
+
+Verification: 71 core CPE/source/ranking checks, 13 source/refresh HTTP checks,
+seven CPE browser checks, frontend typecheck/build and Ruff passed. These mocked
+provider fixtures qualify acquisition controls; no live NVD availability, customer
+mapping correctness or full standalone-service parity is claimed.

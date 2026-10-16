@@ -1,11 +1,19 @@
 import { expect, test, type Page } from '@playwright/test'
+import { createHash } from 'node:crypto'
 const sha = (value: string) => value.repeat(64)
 const bytes = '[{"cpeName":"cpe:2.3:a:vendor:library:*:*:*:*:*:node.js:*:*","source":"fixture"}]'
 async function fixture(page: Page, readonly = false) {
-  let pin = sha('a'), failure = 0, previewFailure = 0, projection = 'current'
-  const previews: Record<string, unknown>[] = [], writes: Record<string, unknown>[] = [], reads: string[] = []
+  let pin = sha('a'), failure = 0, previewFailure = 0, captureFailure = 0, corruptCapture = false, projection = 'current'
+  const captures: Record<string, unknown>[] = [], previews: Record<string, unknown>[] = [], writes: Record<string, unknown>[] = [], reads: string[] = []
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/cpe/sources/refresh')) {
+      const body = route.request().postDataJSON(); captures.push(body)
+      if (captureFailure) return route.fulfill({ status: captureFailure, json: { detail: 'NVD provider unavailable; no policy changed' } })
+      const artifact = createHash('sha256').update(bytes).digest('hex')
+      const sourceInput = { ...body, kind: 'dictionary', source: 'nvd-scoped-query', revision: artifact, occurred_at: '2026-10-16T00:00:00Z', artifact_sha256: corruptCapture ? sha('f') : artifact, content_base64: Buffer.from(bytes).toString('base64'), acquisition: { provider: 'nvd', keyword: body.keyword, captured_at: '2026-10-16T00:00:00Z', artifact_sha256: artifact } }
+      return route.fulfill({ json: { format: 'dtvp.cpe-scoped-capture/1', committed: false, source_input: sourceInput, preview: { committed: false, policy_state: body.expected, preview_digest: sha('d'), source: { source: 'nvd-scoped-query', revision: artifact, artifact_sha256: sourceInput.artifact_sha256, records: 1, losses: {} }, replaces: null, limitations: ['Complete scoped keyword subset, not the full dictionary.'] } } })
+    }
     if (path.endsWith('/cpe/sources/preview')) {
       const body = route.request().postDataJSON(); previews.push(body)
       if (previewFailure) return route.fulfill({ status: previewFailure, json: { detail: 'temporary preview failure' } })
@@ -36,7 +44,7 @@ async function fixture(page: Page, readonly = false) {
   const parent = page.getByLabel('CPE discovery policy', { exact: true })
   await expect(parent).toContainText('0 catalog entries')
   await parent.getByText('Offline curated sources', { exact: true }).click()
-  return { parent, panel: page.getByLabel('Offline curated CPE sources', { exact: true }), previews, writes, reads, fail: (status: number) => { failure = status }, previewFail: (status: number) => { previewFailure = status }, advance: () => { pin = sha('c') }, pending: () => { projection = 'pending' }, current: () => { projection = 'current' } }
+  return { parent, panel: page.getByLabel('Offline curated CPE sources', { exact: true }), captures, previews, writes, reads, captureFail: (status: number) => { captureFailure = status }, corrupt: () => { corruptCapture = true }, fail: (status: number) => { failure = status }, previewFail: (status: number) => { previewFailure = status }, advance: () => { pin = sha('c') }, pending: () => { projection = 'pending' }, current: () => { projection = 'current' } }
 }
 async function prepare(panel: ReturnType<Page['getByLabel']>) {
   await panel.getByLabel('Exact source file').setInputFiles({ name: 'curated.json', mimeType: 'application/json', buffer: Buffer.from(bytes) })
@@ -101,4 +109,45 @@ test('reader can browse exact retained policy; paging and download remain on cap
   await expect(panel.getByRole('link', { name: 'Download exact retained source' })).toHaveAttribute('href', new RegExp(`/${sha('e')}/dictionary/artifact$`))
   expect(writes).toHaveLength(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+})
+
+async function prepareRemote(panel: ReturnType<Page['getByLabel']>) {
+  await panel.getByLabel('Capture method').selectOption('nvd')
+  await panel.getByLabel('NVD query keyword').fill('library')
+  await panel.getByLabel('Replacement reason').fill('Refresh scoped evidence')
+  await panel.getByRole('button', { name: 'Capture scoped NVD source' }).click()
+}
+test('scoped capture previews without publishing; exact apply retries retain source bytes and query', async ({ page }) => {
+  const { panel, captures, previews, writes, fail } = await fixture(page)
+  await prepareRemote(panel)
+  await expect(panel.getByRole('button', { name: 'Publish previewed offline source' })).toBeDisabled()
+  expect(captures).toHaveLength(1); expect(previews).toHaveLength(0); expect(writes).toHaveLength(0)
+  await expect(panel).toContainText('nvd-scoped-query')
+  await panel.getByRole('checkbox').check(); fail(503)
+  await panel.getByRole('button', { name: 'Publish previewed offline source' }).click()
+  await expect(panel.getByRole('alert')).toContainText('Retry the identical captured request')
+  fail(0); await panel.getByRole('button', { name: 'Retry identical source publication' }).click()
+  await expect(panel.getByRole('status')).toContainText('Offline source committed')
+  expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1]); expect(captures).toHaveLength(1)
+  expect(writes[0]).toMatchObject({ expected: sha('a'), acquisition: { provider: 'nvd', keyword: 'library' } })
+  expect(Buffer.from(String(writes[0]!.content_base64), 'base64').toString()).toBe(bytes)
+})
+test('failed remote capture retains original query and policy; explicit retry makes no publication', async ({ page }) => {
+  const { panel, captures, writes, captureFail } = await fixture(page)
+  captureFail(502); await prepareRemote(panel)
+  await expect(panel.getByRole('alert')).toContainText('NVD provider unavailable')
+  await expect(panel.getByLabel('NVD query keyword')).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  captureFail(0); await panel.getByRole('button', { name: 'Retry scoped NVD capture' }).click()
+  await expect(panel.getByRole('button', { name: 'Publish previewed offline source' })).toBeVisible()
+  expect(captures).toHaveLength(2); expect(captures[0]).toEqual(captures[1]); expect(writes).toHaveLength(0)
+  await panel.getByRole('button', { name: 'Discard offline source draft' }).click()
+  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+})
+test('changed captured bytes fail closed before any publication', async ({ page }) => {
+  const { panel, writes, corrupt } = await fixture(page)
+  corrupt(); await prepareRemote(panel)
+  await expect(panel.getByRole('alert')).toContainText('bytes differ from their digest')
+  await expect(panel.getByRole('button', { name: 'Publish previewed offline source' })).toHaveCount(0)
+  expect(writes).toHaveLength(0)
 })

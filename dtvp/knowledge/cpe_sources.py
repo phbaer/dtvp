@@ -12,6 +12,7 @@ from pydantic import Field, field_validator
 
 from dtvp.knowledge.cpe import current_discovery_policy, parse_purl, policy_ref, validate_cpe
 from dtvp.knowledge.cpe_ranking import DictionaryRecord, rank_candidates
+from dtvp.knowledge.cpe_refresh import CpeAcquisition, validate_acquisition
 from dtvp.knowledge.journal import SECTIONS, Conflict, Name, Sha, Update
 from dtvp.knowledge.legacy_archive import strict_json
 from dtvp.knowledge.service import validate_time
@@ -42,6 +43,8 @@ class CpeSourceInput(RequestModel):
     artifact_sha256: Sha
     content_base64: str = Field(min_length=1, max_length=4 * ((MAX_BYTES + 2) // 3))
 
+    acquisition: CpeAcquisition | None = None
+
     @field_validator("occurred_at")
     @classmethod
     def aware_time(cls, value):
@@ -59,9 +62,16 @@ class CpeSourceApply(CpeSourceInput):
     preview_digest: Sha
 
 
+def _input_payload(data):
+    payload = data.model_dump(mode="json")
+    if payload.get("acquisition") is None:
+        payload.pop("acquisition", None)
+    return payload
+
+
 def identity(project_id, actor_id, data):
     return digest(canonical([project_id, actor_id, data.request_id])), digest(
-        canonical(["cpe.offline-source/1", project_id, actor_id, data.model_dump(mode="json")])
+        canonical(["cpe.offline-source/1", project_id, actor_id, _input_payload(data)])
     )
 
 
@@ -167,6 +177,10 @@ def _candidate(journal, *, project_id, actor_id, data):
     if state != data.expected:
         raise Conflict("CPE policy changed; prepare the offline source replacement again")
     raw = decode(data)
+    if data.acquisition is not None:
+        if data.kind != "dictionary" or data.acquisition.artifact_sha256 != data.artifact_sha256:
+            raise ValueError("CPE acquisition must bind the exact dictionary artifact")
+        validate_acquisition(raw, data.acquisition)
     rows, losses = (
         dictionary(raw, data.source) if data.kind == "dictionary" else mapping_history(raw)
     )
@@ -186,6 +200,10 @@ def _candidate(journal, *, project_id, actor_id, data):
         "ordering": "expected_head_CAS_only",
         "losses": losses,
     }
+    if data.acquisition is not None:
+        metadata["acquisition"] = data.acquisition.model_dump(mode="json")
+        metadata["coverage"] = "complete_returned_keyword_subset_not_full_dictionary"
+        metadata["verification"] = "declared_capture_provenance_not_signed_publisher_authentication"
     sources[data.kind] = metadata
     config["retained_dictionary" if data.kind == "dictionary" else "retained_mapping_history"] = (
         rows
@@ -215,7 +233,16 @@ def _candidate(journal, *, project_id, actor_id, data):
     }
     result["preview_digest"] = digest(
         canonical(
-            [result, actor_id, data.model_dump(mode="json", exclude={"preview_digest"}), sections]
+            [
+                result,
+                actor_id,
+                {
+                    key: value
+                    for key, value in _input_payload(data).items()
+                    if key != "preview_digest"
+                },
+                sections,
+            ]
         )
     )
     return result, sections, raw
