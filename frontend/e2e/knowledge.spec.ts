@@ -91,7 +91,7 @@ test('server-scoped team labels display and filter without adding memberships an
   await expect(teams.getByRole('option', { name: 'Product cybersecurity', exact: true })).toHaveCount(1)
   await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
   await page.getByRole('option', { name: 'Other Product', exact: true }).click()
-  await expect(teams).toHaveValue('')
+  await expect(teams).toHaveValue('security')
   await expect(teams.getByRole('option', { name: 'Product cybersecurity', exact: true })).toHaveCount(0)
   expect(writes).toHaveLength(0)
 })

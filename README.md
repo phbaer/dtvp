@@ -230,6 +230,10 @@ Production CLI calls read a bearer credential from `DTVP_API_TOKEN` (or the name
 Workspace flags mirror advanced server filters with hyphens, for example
 `--source-severity critical --team-review approved --dependency transitive`.
 Displayed totals always come from the server's complete filtered selection.
+Analysts and reviewers with exactly one responsible team start in that team’s
+scope. Multiple teams require an explicit selection. An explicitly chosen all-team
+view is retained in shared URLs and saved views, including after reload. Filtering
+a workspace never grants team permissions.
 Team labels come from that authorized selection, including teams outside the
 viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations

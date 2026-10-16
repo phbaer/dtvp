@@ -24,6 +24,12 @@ const activeFilterCount = computed(() => Object.values(filters.value).filter(Boo
 const severityBands = ['critical', 'high', 'medium', 'low', 'none', 'unknown']
 const savedViews = ref<{ name: string; query: string }[]>([]), viewName = ref('')
 const initialView = new URLSearchParams(location.search)
+const explicitAllTeams = ref(initialView.has('k_team') && !initialView.get('k_team'))
+function defaultTeam() {
+  const teams = props.me.workspaces.filter(item => item.capabilities.some(cap => cap === 'assess' || cap === 'approve'))
+  return teams.length === 1 ? teams[0]!.id : ''
+}
+
 let restoring = false
 const versions = ref<{ version: string; state: string }[]>([])
 const versionMenu = ref(false), versionQuery = ref(''), versionNext = ref<number | null>(null), versionBusy = ref(false)
@@ -79,7 +85,7 @@ async function load(reset = true, keep = false) {
   finally { if (current === sequence) busy.value = false }
 }
 async function chooseProject(option: { id: string; name?: string }, preferredVersion = '') {
-  if (teamLabelProject !== option.id) { knownTeamLabels.value = {}; teamLabelProject = option.id; if (!restoring) team.value = '' }
+  if (teamLabelProject !== option.id) { knownTeamLabels.value = {}; teamLabelProject = option.id; if (!restoring) team.value = explicitAllTeams.value ? '' : defaultTeam() }
   const current = ++sequence; ++versionSequence; projectName.value = option.name || option.id; versions.value = []; version.value = ''; versionQuery.value = ''; versionMenu.value = false; workspace.value = null; close()
   busy.value = true; error.value = ''; notice.value = ''
   try {
@@ -185,7 +191,7 @@ watch([scoreBase, scoreVector, scoreRationale], () => { scorePreview.value = nul
 function viewParams() {
   const params = new URLSearchParams()
   const values = { project: project.value, version: version.value, team: team.value, lifecycle: lifecycle.value, q: query.value, ...filters.value }
-  for (const [key, value] of Object.entries(values)) if (value) params.set(`k_${key}`, value)
+  for (const [key, value] of Object.entries(values)) if (value || key === 'team') params.set(`k_${key}`, value)
   return params
 }
 function syncViewUrl() {
@@ -210,7 +216,8 @@ async function restoreView(value: string) {
   const params = new URLSearchParams(value), id = params.get('k_project') || ''
   restoring = true; busy.value = true; error.value = ''
   try {
-    team.value = params.get('k_team') || ''; lifecycle.value = params.get('k_lifecycle') || ''; query.value = params.get('k_q') || ''
+    explicitAllTeams.value = params.has('k_team') && !params.get('k_team')
+    team.value = params.has('k_team') ? params.get('k_team') || '' : defaultTeam(); lifecycle.value = params.get('k_lifecycle') || ''; query.value = params.get('k_q') || ''
     filters.value = Object.fromEntries(Object.keys(filterLabels).map(key => [key, params.get(`k_${key}`) || ''])); filterDraft.value = { ...filters.value }
     if (id) { const result = await api<{ id: string; name: string }>(`/projects/${encodeURIComponent(id)}`); project.value = result.id; await chooseProject(result, params.get('k_version') || '') }
     else await load()
@@ -221,8 +228,8 @@ async function copyView() {
   syncViewUrl()
   try { await navigator.clipboard.writeText(location.href); notice.value = 'View link copied.' } catch { error.value = 'Clipboard unavailable. Copy this page address instead.' }
 }
-watch([team, lifecycle], () => { if (!restoring) void load() })
-watch(() => props.me.id, () => { knownTeamLabels.value = {}; team.value = ''; workspace.value = null; close(); void load() })
+watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
+watch(() => props.me.id, () => { knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
 onMounted(() => {
   try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
@@ -236,7 +243,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
     <form class="knowledge-filters" @submit.prevent="load()">
       <SearchSelect v-model="project" label="Knowledge product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy" @select="chooseProject" />
       <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>
-      <label>Responsible team<select v-model="team" :disabled="busy"><option value="">All accessible teams</option><option v-for="item in teamOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+      <label>Responsible team<select v-model="team" :disabled="busy" @change="explicitAllTeams = !team"><option value="">All accessible teams</option><option v-for="item in teamOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
       <label>Review status<select v-model="lifecycle" :disabled="busy"><option value="">All statuses</option><option v-for="status in ['unassessed', 'draft', 'submitted', 'approved', 'reassessment_needed', 'historically_absent']" :key="status" :value="status">{{ label(status) }}</option></select></label>
       <label class="knowledge-search">Search<input v-model="query" :disabled="busy" type="search" placeholder="Vulnerability, component or description"></label>
     </form>
