@@ -35,7 +35,7 @@ def database(request):
             "alembic_version", MetaData(), Column("version_num", String(32), primary_key=True)
         )
         version.create(connection)
-        connection.execute(insert(version).values(version_num="0005"))
+        connection.execute(insert(version).values(version_num="0006"))
         connection.execute(insert(Workspace).values(id="workspace", name="synthetic"))
         connection.execute(
             insert(User).values(id="user", issuer="synthetic", subject="user", name="user")
@@ -90,9 +90,9 @@ def test_snapshot_is_deterministic_secret_free_and_covers_all_statuses(database,
     assert module.snapshot_operational_roots(database, journal) == first
     assert first["roots"] == sorted(hashes)
     assert first["table_counts"]["jobs"] == 7
-    assert len(first["table_counts"]) == 24
+    assert len(first["table_counts"]) == 25
     assert secret not in str(first)
-    assert first["schema_revision"] == "0005"
+    assert first["schema_revision"] == "0006"
     database.execute(update(Project).values(metadata_json={"unrelated_change": True}))
     assert (
         module.snapshot_operational_roots(database, journal)["database_digest"]
@@ -243,3 +243,24 @@ def test_synchronization_inputs_and_frozen_proposals_are_strict_roots(database, 
         assert module.snapshot_operational_roots(database, journal)["roots"] == sorted(
             objects.values()
         )
+
+
+def test_provider_pacing_rows_are_hashed_but_have_no_object_roots(database, journal):
+    from datetime import UTC, datetime
+
+    from dtvp.models import AdvisoryProviderThrottle
+
+    before = module.snapshot_operational_roots(database, journal)
+    database.execute(
+        insert(AdvisoryProviderThrottle).values(provider="nvd", last_dispatch_at=datetime.now(UTC))
+    )
+    after = module.snapshot_operational_roots(database, journal)
+    assert after["table_counts"]["advisory_provider_throttles"] == 1
+    assert after["database_digest"] != before["database_digest"]
+    assert after["roots"] == before["roots"] == []
+
+
+def test_scheduled_advisory_policy_is_a_required_checkpoint(database, journal):
+    job(database, kind="refresh-advisories-native", payload={"schedule": {"policy": "f" * 64}})
+    with pytest.raises(CorruptJournal, match="missing or corrupt"):
+        module.snapshot_operational_roots(database, journal)

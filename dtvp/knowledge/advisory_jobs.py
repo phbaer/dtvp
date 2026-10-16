@@ -89,6 +89,12 @@ def _validate(db, journal, settings, job, *, collecting=False):
     data = AdvisoryRefreshInput.model_validate(job.payload["intake"])
     enabled(settings, data.provider)
     if collecting:
+        schedule = job.payload.get("schedule")
+        if schedule:
+            from dtvp.knowledge.advisory_schedule import policy_ref as schedule_ref
+
+            if journal.resolve(schedule_ref(job.project_id)) != schedule["policy"]:
+                raise Conflict("Advisory schedule changed; obsolete collection cannot continue")
         _inputs(journal, job.project_id, data)
         started = job.payload.get("collection_started_at")
         if (
@@ -114,6 +120,9 @@ class _AuthorizedHTTP:
     def stream(self, method, url, **kwargs):
         if method != "GET":
             raise ValueError("Advisory refresh permits only exact-ID GET requests")
+        from dtvp.knowledge.advisory_schedule import wait_for_provider_slot
+
+        wait_for_provider_slot(self.factory, self.identity)
         with self.factory.begin() as db:
             job = _locked(db, self.identity, self.token)
             if not job:
@@ -121,6 +130,10 @@ class _AuthorizedHTTP:
             _validate(db, self.journal, self.settings, job, collecting=True)
             job.lease_until = now() + timedelta(seconds=90)
         with self.transport.stream(method, url, **kwargs) as response:
+            if response.status_code == 429:
+                from dtvp.knowledge.advisory_schedule import record_retry_after
+
+                record_retry_after(self.factory, self.identity, response.headers.get("Retry-After"))
             yield response
 
 

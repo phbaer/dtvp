@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
 import KnowledgeOsvMatching from './KnowledgeOsvMatching.vue'
+import KnowledgeAdvisorySchedule from './KnowledgeAdvisorySchedule.vue'
 import KnowledgeIntelligenceComparison from './KnowledgeIntelligenceComparison.vue'
 type Provider = { id: string; publisher: string; enabled: boolean; next_revision: number; identifier_formats?: string[] }
 type Plan = { expected_versions: Record<string, string>; expected_evidence: string | null; providers: Provider[]; identifiers: string[]; total: number; unsupported_total?: number; selected_provider?: string | null; next_offset: number | null; capabilities: string[]; limitations: string[] }
@@ -10,13 +11,13 @@ type Job = { id: string; status: string; provider: string; identifiers: string[]
 type Page = { items: Job[]; next_offset: number | null }
 type Input = { request_id: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number }
 const emit = defineEmits<{ locked: [boolean] }>()
-const childLocked = ref(false)
+const childLocked = ref(false), scheduleLocked = ref(false)
 const props = defineProps<{ project: string; state: string }>()
 const expanded = ref(false), busy = ref(false), plan = ref<Plan | null>(null), provider = ref(''), query = ref(''), identifiers = ref<string[]>([])
 const error = ref(''), notice = ref(''), stale = ref(false), recorded = ref(false), pending = ref<Input | null>(null)
 const offset = ref(0), previous = ref<number[]>([]), jobs = ref<Job[]>([]), recent = ref<Job | null>(null), jobOffset = ref(0), jobNext = ref<number | null>(null), jobPrevious = ref<number[]>([]), jobsLoaded = ref(false)
 const ownLocked = computed(() => busy.value || Boolean(pending.value && !recorded.value))
-watch(() => ownLocked.value || childLocked.value, value => emit('locked', value), { immediate: true, flush: 'sync' })
+watch(() => ownLocked.value || childLocked.value || scheduleLocked.value, value => emit('locked', value), { immediate: true, flush: 'sync' })
 let sequence = 0
 const root = () => `/projects/${encodeURIComponent(props.project)}`
 const selectedProvider = computed(() => plan.value?.providers.find(item => item.id === provider.value))
@@ -102,7 +103,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 <template>
   <details class="knowledge-advisories" @toggle="toggle">
     <summary>Advisory intelligence refresh</summary>
-    <section aria-label="Advisory intelligence refresh"><fieldset class="advisory-controls" :disabled="childLocked">
+    <section aria-label="Advisory intelligence refresh"><fieldset class="advisory-controls" :disabled="childLocked || scheduleLocked">
       <KnowledgeIntelligenceComparison :project="project" :state="state" />
       <p class="hint">Enrich exact vulnerability IDs already reported by product baselines. No package matching, new vulnerability discovery or assessment approval is implied.</p>
       <p class="hint">Provider and advisory publisher differ: mirrors are not independent corroboration. A provider not-found response never proves remediation. Cancel stops DTVP work; an in-flight remote lookup may finish.</p>
@@ -120,7 +121,8 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <p v-if="jobsLoaded && !shownJobs.length">No advisory jobs for this product.</p>
       <article v-for="job in shownJobs" :key="job.id" :aria-label="`Advisory job ${job.id}`"><strong>{{ job.provider }} · {{ human(job.status) }}</strong><p>{{ job.identifiers.join(', ') }} · {{ job.attempts }} attempts</p><p v-if="job.error">{{ job.error }}</p><div class="actions"><button type="button" :disabled="busy" @click="inspect(job)">Refresh advisory status</button><button v-if="job.capabilities.includes('retry')" type="button" :disabled="busy" @click="inspect(job, 'retry')">Retry advisory job</button><button v-if="job.capabilities.includes('cancel')" type="button" :disabled="busy" @click="inspect(job, 'cancel')">Cancel DTVP advisory job</button></div><details><summary>Advisory job pins and capture result</summary><pre>{{ JSON.stringify({ provider: job.provider, identifiers: job.identifiers, revision: job.revision, expected_versions: job.expected_versions, expected_evidence: job.expected_evidence, result: job.result }, null, 2) }}</pre></details></article>
       <nav v-if="jobsLoaded" class="actions" aria-label="Advisory job pages"><button type="button" :disabled="busy || !jobPrevious.length" @click="pageJobs(false)">Previous advisory jobs</button><button type="button" :disabled="busy || jobNext == null" @click="pageJobs(true)">Next advisory jobs</button></nav>
-      </fieldset><KnowledgeOsvMatching :project="project" :state="state" :disabled="ownLocked" @locked="childLocked = $event" />
+      </fieldset><KnowledgeOsvMatching :project="project" :state="state" :disabled="ownLocked || scheduleLocked" @locked="childLocked = $event" />
+      <KnowledgeAdvisorySchedule v-if="plan" :project="project" :providers="plan.providers" :disabled="ownLocked || childLocked" @locked="scheduleLocked = $event" />
     </section>
   </details>
 </template>

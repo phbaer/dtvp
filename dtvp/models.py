@@ -224,3 +224,12 @@ class FinalRescoring(Record, Base):
     evidence_revision: Mapped[int] = mapped_column(Integer)
     review_digest: Mapped[str] = mapped_column(String(64))
     proposal: Mapped[dict] = mapped_column(Document)
+
+
+class AdvisoryProviderThrottle(Base):
+    """Instance-wide dispatch pacing; operational SQL state, no journal roots."""
+
+    __tablename__ = "advisory_provider_throttles"
+    provider: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_dispatch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

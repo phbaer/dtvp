@@ -111,3 +111,30 @@ def test_management_revocation_during_capture_returns_no_source(analyst, app, mo
     result = analyst.post(path + "/refresh", json=request().model_dump())
     assert result.status_code == 404
     assert app.state.knowledge.head() == before
+
+
+def test_cpe_429_sets_shared_provider_cooldown_before_another_capture(analyst, app, monkeypatch):
+    from sqlalchemy import select
+
+    import dtvp.providers
+    from dtvp.models import AdvisoryProviderThrottle
+
+    _, path, _ = prepare(analyst)
+    remote(monkeypatch, app)
+    seen = []
+
+    def limited(req):
+        seen.append(req)
+        return httpx.Response(429, headers={"Retry-After": "120"})
+
+    monkeypatch.setattr(
+        dtvp.providers, "client", lambda: httpx.Client(transport=httpx.MockTransport(limited))
+    )
+    assert analyst.post(path + "/refresh", json=request().model_dump()).status_code == 502
+    with app.state.sessions() as db:
+        assert db.scalar(select(AdvisoryProviderThrottle)).cooldown_until is not None
+    repeated = analyst.post(
+        path + "/refresh", json=request(request_id="another-capture").model_dump()
+    )
+    assert repeated.status_code == 422 and "30 seconds" in repeated.text
+    assert len(seen) == 1

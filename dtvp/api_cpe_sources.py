@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from dtvp.api import DB, Auth, project_for
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.auth import authenticate
+from dtvp.knowledge.advisory_schedule import record_provider_retry_after, wait_for_provider
 from dtvp.knowledge.cpe_refresh import CpeRefreshInput
 from dtvp.knowledge.cpe_refresh import capture as capture_refresh
 from dtvp.knowledge.cpe_sources import (
@@ -56,9 +57,25 @@ async def refresh(project_id: str, request: Request, db: DB, actor: Auth):
     journal = request.app.state.knowledge
     if current_discovery_policy(journal, project_id)[0] != data.expected:
         raise HTTPException(409, "CPE policy changed; refresh the capture inputs")
+    if "nvd" not in request.app.state.settings.providers_enabled:
+        raise ValueError("Enable the nvd provider explicitly before CPE refresh")
+    await run_in_threadpool(wait_for_provider, request.app.state.sessions, "nvd")
+    db.rollback()
+    db.expire_all()
+    actor = authenticate(request, db)
+    project_for(db, actor, project_id, "manage")
+    if current_discovery_policy(journal, project_id)[0] != data.expected:
+        raise HTTPException(409, "CPE policy changed while waiting for provider pacing")
     try:
         source = await run_in_threadpool(capture_refresh, request.app.state.settings, data)
     except httpx.HTTPError as error:
+        if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429:
+            await run_in_threadpool(
+                record_provider_retry_after,
+                request.app.state.sessions,
+                "nvd",
+                error.response.headers.get("Retry-After"),
+            )
         raise HTTPException(502, "NVD CPE capture failed; no policy was changed") from error
     # Network work must not grant a user whose management permission was revoked.
     db.rollback()

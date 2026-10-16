@@ -91,6 +91,11 @@ def _job_roots(journal, row, roots):
             _required(journal, relationship["basis"], roots)
         if "artifact_sha" in row["result"]:
             _required(journal, row["result"]["artifact_sha"], roots)
+    if row["kind"] == "refresh-advisories-native" and "schedule" in payload:
+        schedule = payload["schedule"]
+        if not isinstance(schedule, dict):
+            raise CorruptJournal("Invalid retained advisory scheduling metadata")
+        _required(journal, schedule.get("policy"), roots)
     correlations = [payload.get("correlation")]
     follow_up = payload.get("follow_up")
     if isinstance(follow_up, dict):
@@ -167,6 +172,9 @@ def snapshot_operational_roots(connection, journal):
                 hasher.update(len(raw).to_bytes(8, "big"))
                 hasher.update(raw)
                 counts[name] += 1
+                if name == "advisory_provider_throttles":
+                    # Dispatch/cooldown timestamps are operational state, never object pointers.
+                    continue
                 if name == "jobs":
                     _job_roots(journal, document, roots)
                 for value in _values(document):

@@ -3374,3 +3374,72 @@ META races without live downloads. Official META and the first compressed TAR bl
 were inspected to verify the contract; a complete current national archive has not
 been downloaded or qualified here. Production resource/latency qualification remains
 an operator acceptance task.
+
+### Optional unattended known-ID advisory refresh
+
+`GET/PUT /api/v3/projects/{project}/advisory-schedule` configures a journal-backed,
+CAS-pinned opt-in policy. PUT requires `request_id`, `expected_policy` and up to
+four distinct `providers`: each has an enabled provider ID, 1–20 explicit version
+labels, `interval_seconds` (3,600–2,592,000; default 86,400) and `batch_size` (1–20;
+default 20). An empty list stops new scheduling. Generic authenticated
+`knowledge request GET/PUT` CLI calls use the same contract.
+
+The existing SQL worker rotates across at most 100 configured products per pass.
+It selects only supported exact advisory IDs already reported in configured
+versions; each native job pins the complete current product-head register and
+product-wide evidence head. Each interval selects one bounded batch, rotating
+known IDs across cycles. This is not a promise to refresh every ID per interval.
+Selected logical input is bounded to 100,000 records / 64 MiB. Oversized or stale
+policies do not block other configured products. Missing configured versions wait.
+Provider disablement and the policy author's current credential, management and
+evidence permissions are checked before enqueue; native collection rechecks its
+credential/permissions/provider and stops fresh GETs after a policy change.
+
+Queued/running/pending-publication native jobs for the same project/provider
+coalesce manual and scheduled work. Missed intermediate cycles are coalesced;
+terminal failures permit another policy-authorized cycle after the interval.
+Frozen unresolved publication requires explicit existing job resolution rather
+than silently repinning. Original captures/receipts remain inspectable through
+the existing advisory jobs APIs. Changed policies do not rewrite earlier captures.
+Use a scoped machine credential for unattended operation; expired session/API
+credentials require explicit policy reauthorization. Provider catalogs remain
+product-scoped, not version-local discovery or human approvals.
+
+Native manual/scheduled advisory GETs and scoped CPE acquisition share durable
+per-provider SQL pacing:
+NVD at least six seconds, CIRCL/EUVD/MyJVN at least one second between dispatches.
+HTTP 429 Retry-After delta/date values persist a shared cooldown; invalid/missing
+values use 60 seconds. There is no automatic HTTP retry. Local waiting is bounded
+to 30 seconds; a longer cooldown fails before any outbound request and retains the
+job for explicit retry or a later scheduled cycle. Cancellation and current
+permission are rechecked after waits. Provider limits can still impose stricter
+quotas; this does not guarantee remote availability.
+
+Implicit schema upgrade `0006` adds the small operational provider-throttle table;
+normal pre-upgrade backup and startup migration behavior applies. SQL backup keeps
+these dispatch/cooldown timestamps; the journal cannot reconstruct operational
+rate limits/jobs. Offline cleanup hashes this table without treating timestamps
+as object roots and retains each scheduled job's policy checkpoint.
+
+Verification: 32 scheduler/native-job/migration checks and 67 affected HTTP,
+maintenance, installation-recovery and upgrade-helper checks passed (33 optional
+PostgreSQL cases skipped without a disposable database). Provider fixtures and
+fake-clock pacing checks perform no live advisory queries or human approvals.
+
+Nine additional focused HTTP checks verify shared NVD advisory/CPE cooldown,
+post-wait CPE management authorization and provider-disabled handling.
+
+The advisory intelligence panel now includes a lazy, collapsed **Optional automatic
+refresh schedule** editor. Provider choices come from the current server plan;
+managers explicitly configure version labels, interval seconds and bounded batch
+sizes. A local review captures the complete CAS replacement before confirmation.
+Empty replacements stop new scheduling. Readers see configured scope without
+editing actions. Policy/source refreshes never repin captured publication requests.
+
+Failed or uncertain PUTs retain the exact request UUID/body; committed projection
+lag keeps its exact receipt refresh. Drafts and pending publication block competing
+manual advisory/OSV actions and ordinary navigation. The actor/project-keyed host
+tears down old requests on session changes; late responses cannot restore them.
+Five scheduling browser checks and six existing manual-advisory checks passed;
+frontend typecheck/build passed. No network collection or human approval is
+simulated by these UI fixtures.

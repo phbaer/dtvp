@@ -27,7 +27,22 @@ source_env = analysis_env
 
 
 @pytest.fixture
-def env(source_env):
+def env(source_env, monkeypatch):
+    from dtvp.knowledge import advisory_schedule
+
+    # Exercise real shared pacing with deterministic time; never sleep in a
+    # provider-fixture test. Dedicated pacing tests cover cooldown/deadline cases.
+    tick = [now()]
+    original = advisory_schedule.wait_for_provider_slot
+
+    def advance(seconds):
+        tick[0] += timedelta(seconds=seconds)
+
+    monkeypatch.setattr(
+        advisory_schedule,
+        "wait_for_provider_slot",
+        lambda factory, identity: original(factory, identity, clock=lambda: tick[0], sleep=advance),
+    )
     value = source_env
     value.settings.providers_enabled = ["nvd", "circl"]
     value.data = AdvisoryRefreshInput(

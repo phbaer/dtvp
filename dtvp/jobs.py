@@ -288,6 +288,15 @@ def _work_once(factory, artifacts, settings):
             reconcile(factory, Journal(artifacts.root / "knowledge"))
         except Exception:
             logger.exception("Automatic synchronization scheduling awaits reconciliation")
+    last_advisory_scan = getattr(_work_once, "last_advisory_scan", 0)
+    if time.monotonic() - last_advisory_scan >= 5:
+        _work_once.last_advisory_scan = time.monotonic()
+        try:
+            from dtvp.knowledge.advisory_schedule import reconcile as reconcile_advisories
+
+            reconcile_advisories(factory, Journal(artifacts.root / "knowledge"), settings)
+        except Exception:
+            logger.exception("Automatic advisory scheduling awaits reconciliation")
     claimed = claim(factory)
     if not claimed:
         return False
