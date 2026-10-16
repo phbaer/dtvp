@@ -17,6 +17,7 @@ from dtvp.api_assessment_archive import router as assessment_archive_router
 from dtvp.api_bulk_reviews import router as bulk_reviews_router
 from dtvp.api_component_inventory import router as component_inventory_router
 from dtvp.api_coverage import router as coverage_router
+from dtvp.api_cpe_catalog import router as cpe_catalog_router
 from dtvp.api_cpe_editor import router as cpe_editor_router
 from dtvp.api_cpe_ranking import router as cpe_ranking_router
 from dtvp.api_cpe_sources import router as cpe_sources_router
@@ -141,6 +142,7 @@ def _create_app(settings, lease):
     app.include_router(bulk_reviews_router)
     app.include_router(coverage_router)
     app.include_router(cpe_editor_router)
+    app.include_router(cpe_catalog_router)
     app.include_router(cpe_ranking_router)
     app.include_router(cpe_sources_router)
     app.include_router(documents_router)

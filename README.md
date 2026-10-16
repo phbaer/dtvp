@@ -3302,3 +3302,75 @@ mutations are disabled while validation runs. Schema reports distinguish the
 server-canonical JSON digest from the displayed original local-file SHA-256.
 Complete pins/reports remain collapsed; passing checks never import evidence,
 change retained trust or grant an approval. The tool stays usable on narrow screens.
+
+### Optional complete CPE catalog captures
+
+Instance operators can retain an NVD-shaped complete CPE catalog outside product
+journal states, under `ARTIFACT_DIR/cpe-catalog`. The [official NIST bulk-feed
+contract](https://www.nist.gov/itl/nvd) uses a **tar.gz containing JSON 2.0 chunks**;
+legacy XML dictionaries were retired in 2025. The current fixed acquisition URLs
+are [META](https://nvd.nist.gov/feeds/json/cpe/2.0/nvdcpe-2.0.meta) and
+[tar.gz](https://nvd.nist.gov/feeds/json/cpe/2.0/nvdcpe-2.0.tar.gz).
+
+```bash
+uv run python scripts/cpe_catalog.py --root data/artifacts/cpe-catalog import --archive /path/nvdcpe-2.0.tar.gz --meta /path/nvdcpe-2.0.meta
+uv run python scripts/cpe_catalog.py --root data/artifacts/cpe-catalog search 'openssl' --limit 25
+uv run python scripts/cpe_catalog.py --root data/artifacts/cpe-catalog verify
+uv run python scripts/cpe_catalog.py --root data/artifacts/cpe-catalog rebuild
+uv run python scripts/cpe_catalog.py --root data/artifacts/cpe-catalog export 'openssl' --limit 25 --output /tmp/cpe-candidates.json
+```
+
+`mirror` explicitly checks official META before download, skips unchanged captures,
+disables redirects and rechecks META afterward; failure or a changed active
+selection prevents activation. It performs no startup/polling download. The
+operator needs sufficient disk for raw chunks, staging and the disposable index.
+Acquisition is bounded to 512 MiB compressed/8 GiB decoded, 1,000 regular JSON
+members, 10 million CPEs, 512 MiB/member and 1 MiB/record. JSON duplicate keys,
+nonfinite/malformed tokens, excessive depth/key memory and parser progress stalls
+fail closed. Archive links, traversal, gaps/overlaps, duplicate identities,
+incomplete counts and hidden trailing content fail before atomic activation.
+
+Exact original compressed chunks and META bytes are immutable content-addressed
+objects. Every decoded TAR byte, including padding, must match META size/SHA-256;
+chunk pagination must cover the declared total using a consistent zero/one-based
+index. Assurance is **META_consistent_complete_archive**, not independent publisher
+authentication or completeness of NVD's knowledge. No catalog bytes are copied into
+whole product state manifests; project policy, reviewed mappings and approvals are
+unchanged. Existing generations remain inspectable with `--generation SHA`.
+
+SQLite/FTS5 is a rebuildable local search projection, with no extra database service.
+Its receipt pins the generation, index algorithm and exact SQLite byte SHA/size.
+Queries hash the index once per filesystem identity and reject subsequent content/
+metadata changes; matching row counts or SQLite structural integrity alone are
+insufficient. The first query in a process can therefore incur a full index read.
+`rebuild` reconstructs it exclusively from verified original chunks/META. Back up
+`objects` and `CURRENT` along with the installation; indexes can be regenerated.
+Catalog retention/cleanup is explicit operator work; no destructive catalog GC runs.
+
+Project readers use `GET /api/v3/projects/{id}/cpe/catalog`, `/search?q=...` and
+`/export?q=...` with optional pinned `generation`, bounded paging and explicit
+`include_deprecated`. Search remains on the captured generation across pages.
+The collapsed **Local catalog (optional)** panel exposes source/deprecation pins and
+SHA-verified candidate downloads. Export contains only the requested page (maximum
+200 records/2 MiB), plus source receipt and omitted-field disclosure. Uploading it
+through existing curated source preview/publication is a separate explicit action;
+search/export never adopts identities or changes mappings/approvals.
+
+For an entirely offline interactive example, use a **new** catalog root:
+
+```bash
+uv run python scripts/cpe_catalog.py --root /tmp/dtvp-demo/artifacts/cpe-catalog demo
+```
+
+Use that installation's actual artifact directory to expose it in its UI. Demo
+refuses an existing selected generation and retains synthetic markers in archive,
+META, manifest, API/UI and exported candidate attribution. Its invented records
+are never presented as official NVD provenance. Query `demo`; include deprecated
+names to see all three synthetic versions.
+
+Synthetic complete-archive tests cover capture, >2,000 records, integrity/semantic
+index tampering, reconstruction, exact export, missing/unsafe inputs and fixed-origin
+META races without live downloads. Official META and the first compressed TAR block
+were inspected to verify the contract; a complete current national archive has not
+been downloaded or qualified here. Production resource/latency qualification remains
+an operator acceptance task.

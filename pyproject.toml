@@ -23,6 +23,7 @@ dependencies = [
   "defusedxml>=0.7,<1",
   "packageurl-python>=0.17,<1",
   "cyclonedx-python-lib[json-validation]>=11.7,<12",
+  "ijson>=3.4,<4",
 ]
 
 [dependency-groups]

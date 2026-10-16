@@ -2,12 +2,14 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
+import KnowledgeCpeCatalog from './KnowledgeCpeCatalog.vue'
 type Source = { source: string; revision: string; occurred_at: string; artifact_sha256: string; records: number; losses: Record<string, number> }
 type Input = { request_id: string; expected: string | null; kind: string; source: string; revision: string; occurred_at: string; reason: string; artifact_sha256: string; content_base64: string; acquisition?: Record<string, unknown> | null; preview_digest?: string }
 type Preview = { preview_digest: string; policy_state: string | null; committed: false; source: Source; replaces: Source | null; limitations: string[] }
 type Page = { policy_state: string; source: Source | null; items: unknown[]; total: number; next_offset: number | null; limitations: string[] }
 const props = defineProps<{ project: string; policy: string | null; sources?: Record<string, Source>; canConfigure: boolean; disabled?: boolean }>()
 const emit = defineEmits<{ locked: [boolean]; refresh: [] }>()
+const catalogLocked = ref(false)
 const kind = ref('dictionary'), source = ref(''), revision = ref(''), observed = ref(new Date().toISOString()), reason = ref('')
 const mode = ref('offline'), keyword = ref('')
 const refreshDraft = ref<{ endpoint: string; input: { request_id: string; expected: string | null; keyword: string; reason: string } } | null>(null)
@@ -17,8 +19,8 @@ const captured = ref<{ endpoint: string; input: Input } | null>(null), preview =
 const historical = ref(''), pageKind = ref('dictionary'), pageSourceKind = ref('dictionary'), page = ref<Page | null>(null), pagePin = ref(''), pageOffset = ref(0)
 let sequence = 0
 const locked = computed(() => !committed.value && (busy.value || !!captured.value || !!file.value || !!source.value || !!revision.value || !!reason.value || !!keyword.value || !!refreshDraft.value))
-watch(locked, value => emit('locked', value), { immediate: true })
-const blocked = computed(() => busy.value || props.disabled === true)
+watch(() => locked.value || catalogLocked.value, value => emit('locked', value), { immediate: true })
+const blocked = computed(() => busy.value || catalogLocked.value || props.disabled === true)
 const stale = computed(() => !!captured.value && captured.value.input.expected !== props.policy)
 const path = () => `/projects/${encodeURIComponent(props.project)}/cpe/sources`
 function choose(event: Event) { if (!captured.value && !blocked.value) file.value = (event.target as HTMLInputElement).files?.[0] || null }
@@ -103,6 +105,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
     <p class="hint">Up to 2,000 records; not a complete national dictionary. Source revisions are declared claims. Scoped NVD capture is optional and requires the enabled provider. No approval or vulnerability applicability is inferred.</p>
     <p v-for="(item, name) in sources || {}" :key="name">{{ name }}: {{ item.source }} · {{ item.revision }} · {{ item.records }} records</p>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
+    <KnowledgeCpeCatalog :project="project" :disabled="busy || props.disabled || locked" @locked="catalogLocked = $event" />
     <form v-if="canConfigure" aria-label="Import offline CPE source" @submit.prevent="inspect">
       <fieldset :disabled="blocked || !!captured || !!refreshDraft">
         <label>Capture method<select v-model="mode"><option value="offline">Local source file</option><option value="nvd">Scoped official NVD query</option></select></label>
