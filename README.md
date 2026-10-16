@@ -809,6 +809,43 @@ Actor/context teardown invalidates late responses. Discard does not cancel a job
 that may already have been recorded. A follow-up report never creates a human
 assessment, review or contextual score publication automatically.
 
+### Named VDR/VEX validation subsets
+
+Evidence imports and JSON/file previews accept optional `validation_profile`:
+`dtvp-cyclonedx-1.5-exact/1`, `dtvp-cyclonedx-1.6-exact/1`,
+`dtvp-openvex-0.2.0-exact/1`, or `dtvp-csaf-2.0-vex-exact/1`.
+These are DTVP consumed-field contracts, **not complete schema conformance**.
+Omitting the field retains existing semantic-subset behavior and old request
+fingerprints. Strict profile declarations are retained with the imported document
+and returned by document listings/previews; they bind into retry identity.
+
+Strict profiles validate consumed field shapes, version bounds, status/reason
+semantics and exact versioned PURL scopes. Unsupported CycloneDX version/range
+constraints and external references, OpenVEX inheritance/subcomponent scope, and
+CSAF groups/relationships are rejected before publication. CSAF product identities
+inside nested branches are now indexed without deriving relationships or ranges;
+duplicate document-local identifiers remain unresolved. A strict profile also
+rejects unknown/ambiguous product identifiers and conflicting CSAF status assignments.
+An exact PURL identifies package occurrences; it does not verify every consuming
+context or turn source claims into DTVP approvals.
+
+`POST /api/v3/projects/{project}/evidence/conformance` takes
+`{document, validation_profile}` and returns a non-publishing report with bounded
+JSON paths/reason codes, validity, limitations and signature-verification status.
+Current evidence permission is required. This check does not validate import
+ordering, source supersession, branch pins or publisher trust; existing import
+checks remain authoritative. File imports retain exact original bytes. No schemas,
+contexts or source URLs are fetched; signatures/proofs are never trusted or verified,
+including when present. Diagnostic traversal is bounded to 100,000 nodes and depth
+64, with at most 64 reported issues. Existing non-strict parsing remains available
+for evidence with explicitly unresolved scopes.
+
+Contract references: [OpenVEX 0.2.0](https://github.com/openvex/spec/blob/main/OPENVEX-SPEC.md),
+[CSAF 2.0 VEX](https://docs.oasis-open.org/csaf/csaf/v2.0/os/csaf-v2.0-os.html),
+[CycloneDX 1.6 reference](https://cyclonedx.org/docs/1.6/json/).
+The supported version bounds describe this implementation; newer standard versions
+are not implicitly accepted by these named profiles.
+
 ### Explicit cross-part occurrence relationships
 
 Assembly selection optionally accepts `cross_part_relationships` (maximum 2,000):

@@ -79,7 +79,8 @@ def documents(
                 "document": {
                     key: document.get(key)
                     for key in ("format", "document_id", "publisher", "revision", "losses")
-                },
+                }
+                | ({"conformance": document["conformance"]} if "conformance" in document else {}),
             }
         )
     return {
@@ -128,11 +129,11 @@ def import_document_file(
     if len(raw) > request.app.state.settings.max_upload_bytes:
         raise HTTPException(413, "Evidence file exceeds upload limit")
     # The adapter validates exact bytes, duplicate keys and the supported format.
-    parse_evidence(raw)
     fields = json.loads(metadata)
     if not isinstance(fields, dict) or "document" in fields:
         raise ValueError("File metadata must contain import fields without document")
-    data = EvidenceInput.model_validate({**fields, "document": json.loads(raw)})
+    normalized = parse_evidence(raw, validation_profile=fields.get("validation_profile"))
+    data = EvidenceInput.model_validate({**fields, "document": normalized["raw"]})
     return apply_document(project_id, data, request, db, actor, raw=raw)
 
 
@@ -147,7 +148,11 @@ def preview(project_id: str, data: EvidenceInput, request: Request, db: DB, acto
     ):
         raise HTTPException(409, "Evidence or versions changed; refresh the preview")
     raw = canonical(data.document)
-    record = {"document": parse_evidence(raw), "source": data.source, "artifact_sha": digest(raw)}
+    record = {
+        "document": parse_evidence(raw, validation_profile=data.validation_profile),
+        "source": data.source,
+        "artifact_sha": digest(raw),
+    }
     previews = {
         version: preview_evidence(load_sections(journal, sha), record)
         for version, sha in data.expected_versions.items()
@@ -159,6 +164,11 @@ def preview(project_id: str, data: EvidenceInput, request: Request, db: DB, acto
         "application": previews,
         "trust": "unverified_publisher_and_signature",
         "artifact_sha": digest(raw),
+        **(
+            {"conformance": record["document"]["conformance"]}
+            if "conformance" in record["document"]
+            else {}
+        ),
     }
 
 

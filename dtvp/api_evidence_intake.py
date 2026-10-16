@@ -59,6 +59,8 @@ def describe_preview(journal, data, record):
         "trust": "unverified_publisher_and_signature",
         "limitations": LIMITATIONS,
     }
+    if "conformance" in document:
+        content["conformance"] = document["conformance"]
     return {**content, "preview_digest": digest(canonical(content))}
 
 
@@ -75,10 +77,10 @@ def file_preview(
     raw = file.file.read(request.app.state.settings.max_upload_bytes + 1)
     if len(raw) > request.app.state.settings.max_upload_bytes:
         raise HTTPException(413, "Evidence file exceeds upload limit")
-    normalized = parse_evidence(raw)
     fields = json.loads(metadata)
     if not isinstance(fields, dict) or "document" in fields:
         raise ValueError("File metadata must contain import fields without document")
+    normalized = parse_evidence(raw, validation_profile=fields.get("validation_profile"))
     data = EvidenceInput.model_validate({**fields, "document": normalized["raw"]})
     journal = request.app.state.knowledge
     checked_refs(journal, project_id, data)
@@ -108,3 +110,27 @@ def retained_preview(
     if sha is None:
         raise HTTPException(404, "Artifact is not a document in the selected evidence collection")
     return describe_preview(journal, data, journal.load(sha))
+
+
+class ConformanceInput(RequestModel):
+    document: dict
+    validation_profile: str
+
+
+@router.post("/projects/{project_id}/evidence/conformance")
+def inspect_conformance(project_id: str, data: ConformanceInput, db: DB, actor: Auth):
+    """Read-only validation; no source, policy or publication claims."""
+    project_for(db, actor, project_id, "evidence")
+    from dtvp.knowledge.evidence_conformance import conformance
+
+    raw = canonical(data.document)
+    if len(raw) > 32 * 1024 * 1024:
+        raise ValueError("Evidence exceeds the 32 MiB validation limit")
+    report = conformance(data.document, data.validation_profile)
+    if report["valid"]:
+        try:
+            parse_evidence(raw, validation_profile=data.validation_profile)
+        except ValueError:
+            report["valid"] = False
+            report["diagnostics"] = [{"path": "/", "code": "unsupported_statement_semantics"}]
+    return report

@@ -248,7 +248,9 @@ def csaf(document):
         raise ValueError("Supported CSAF evidence profile is CSAF 2.0 csaf_vex")
     tree = document.get("product_tree", {})
     products = {}
-    for item in objects(tree.get("full_product_names", []), "full_product_names"):
+    from dtvp.knowledge.evidence_conformance import csaf_products
+
+    for item in csaf_products(tree):
         products.setdefault(item.get("product_id"), []).append(item)
     statements = []
     for vulnerability in objects(document.get("vulnerabilities", []), "vulnerabilities"):
@@ -307,12 +309,14 @@ def csaf(document):
         "publisher": header.get("publisher"),
         "statements": statements,
         "losses": [
-            "Only full_product_names with exact PURLs are resolved; branches, relationships, groups, and version boundaries are not evaluated."
+            "Nested branch and full_product_names identities with exact PURLs are resolved; relationships, groups, and version boundaries are not evaluated."
+            if tree.get("branches")
+            else "Only full_product_names with exact PURLs are resolved; branches, relationships, groups, and version boundaries are not evaluated."
         ],
     }
 
 
-def parse_evidence(raw):
+def parse_evidence(raw, *, validation_profile=None):
     if not isinstance(raw, bytes) or len(raw) > MAX_BYTES:
         raise ValueError("Evidence must be JSON bytes within the 32 MiB limit")
 
@@ -336,6 +340,11 @@ def parse_evidence(raw):
         raise ValueError("Evidence must be unambiguous UTF-8 JSON") from error
     if not isinstance(document, dict):
         raise ValueError("Evidence document must be an object")
+    conformance = None
+    if validation_profile is not None:
+        from dtvp.knowledge.evidence_conformance import require_conformance
+
+        conformance = require_conformance(document, validation_profile)
     try:
         if document.get("format") == "dtvp.advisory-feed/1":
             from dtvp.knowledge.advisory_documents import advisory_document
@@ -353,10 +362,16 @@ def parse_evidence(raw):
         raise ValueError("Malformed evidence document structure") from error
     if not result["statements"] and result["format"] != "dtvp.advisory-feed/1":
         raise ValueError("Evidence document contains no supported statement records")
+    if conformance is not None:
+        if any(item["unresolved_reasons"] for item in result["statements"]):
+            raise ValueError("DTVP evidence profile rejected unresolved statement semantics")
+        result["conformance"] = conformance
     result.update(
         original_sha=digest(raw),
         signature_verification="not_performed",
-        schema_validation="supported_semantic_subset",
+        schema_validation="dtvp_supported_subset_only"
+        if conformance
+        else "supported_semantic_subset",
         raw=document,
     )
     if len(canonical(result)) > MAX_BYTES * 2:

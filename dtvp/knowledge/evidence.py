@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from pydantic import Field
 
+from dtvp.knowledge.evidence_conformance import ValidationProfile
 from dtvp.knowledge.journal import SECTIONS, Conflict, Name, Ref, Sha, Update
 from dtvp.knowledge.ownership import product_heads
 from dtvp.knowledge.vex import parse_evidence, reconcile_evidence
@@ -21,6 +22,9 @@ class EvidenceInput(RequestModel):
     source: Name
     revision: int = Field(ge=0, strict=True)
     document: dict
+    validation_profile: ValidationProfile | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class WithdrawalInput(RequestModel):
@@ -181,7 +185,7 @@ def import_evidence(journal, *, project_id, actor_id, data, raw=None, additional
     documents = expected_documents(
         journal, project_id, data.expected_evidence, data.expected_versions
     )
-    normalized = parse_evidence(raw)
+    normalized = parse_evidence(raw, validation_profile=data.validation_profile)
     if canonical(normalized["raw"]) != canonical(data.document):
         raise ValueError("Original evidence bytes do not match the declared document")
     sha = normalized["original_sha"]
