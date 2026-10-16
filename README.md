@@ -251,6 +251,27 @@ block, vulnerability assessment, or license/legal conclusion. CI may apply its o
 explicit policy to observation codes. A reported complete SBOM remains the
 producer's declaration; the report cannot find components omitted by that producer.
 
+### Historical comparison performance
+
+Historical semantic comparisons reuse actor-independent canonical JSON bytes in a
+process-local cache. Keys bind the product, ordered state hashes, historical mode
+and derivation algorithm version. Current project permissions and committed
+same-product membership are checked on every call. Journal instances have separate
+namespaces; current intelligence and actor capabilities are never cached.
+
+The cache retains at most 32 MiB of encoded payloads and 16 entries for five
+minutes; individual results over 8 MiB bypass it. This bounds encoded bytes, not
+process memory. Returned pages are detached. Errors are not cached; restarting
+discards all entries. No files, SQL history or temporary tables are added. A cache
+hit reuses prior derived data and does not verify every object's current bytes;
+use offline journal verification for integrity checks.
+
+On a local synthetic 2,000-library/250-CVE-per-version comparison, repeated pages
+improved from 1.68–1.95 seconds and 19,785 object reads to roughly 0.01–0.07 seconds
+and 21 reads. The first computation still took about 1.33 seconds. These exploratory
+warm-filesystem timings exclude HTTP/concurrent deployment qualification; import
+and ownership write performance is unchanged.
+
 ### Assessment read performance
 
 Native workspaces reuse a request-local dependency/evidence fingerprint builder.

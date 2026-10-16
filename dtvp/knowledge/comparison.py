@@ -191,6 +191,21 @@ def compare_states(journal, project_id, before, after, offset=0, limit=50):
     reachable = reachable_states(journal, project_id)
     if before not in reachable or after not in reachable:
         raise ValueError("Comparison states must be committed product history in this product line")
+    # Access is checked by the API; committed membership is checked above on
+    # every read. Only historical, actor-independent derived bytes are cached.
+    from dtvp.knowledge.comparison_cache import cache_for, cache_key
+
+    cache = cache_for(journal)
+    key = cache_key(project_id, before, after)
+    result = cache.get(key)
+    if result is None:
+        result = _compare_states(journal, project_id, before, after, reachable)
+        cache.put(key, result)
+    return {**result, **page(result["items"], offset, limit)}
+
+
+def _compare_states(journal, project_id, before, after, reachable):
+    """Full deterministic historical result, without authorization or presentation."""
     old, new = load_sections(journal, before), load_sections(journal, after)
     rows = []
 
@@ -283,5 +298,5 @@ def compare_states(journal, project_id, before, after, offset=0, limit=50):
             for label, view in (("before", old_workspace), ("after", new_workspace))
         },
         "limitations": list(LIMITATIONS),
-        **page(rows, offset, limit),
+        "items": rows,
     }

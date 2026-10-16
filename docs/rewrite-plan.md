@@ -688,6 +688,12 @@ separate from imports and bound into applicable review fingerprints. Single-sour
 baseline withdrawal retains history/tags and makes absence explicit. Legacy tagged
 and metadata-free DT histories remain unverified source claims.
 
+Historical semantic comparisons now cache bounded actor-independent derived bytes
+per journal instance and algorithm version. Every page still checks current access
+and committed membership; cache hits do not attest full object integrity. No SQL
+history or temporary tables are retained. Current-intelligence comparison and
+broader concurrent-load qualification remain separate work.
+
 Native management now includes guided pinned product assembly, v1-compatible
 ownership editing, supplied offline CPE policy previews and component-context
 annotations. Compact product/state toolbars preserve drafts and evidence details.
@@ -706,7 +712,7 @@ identity and remote-service reconciliation still require deployment qualificatio
 
 Not yet implemented: remaining native management/integration UI, stable cross-import/context identity,
 range/exclusion expressions beyond explicit reviewed version targets, extended evidence synthesis,
-advanced VDR/VEX scope/schema/signature support, cascading synchronization, cached semantic comparisons, journal
+advanced VDR/VEX scope/schema/signature support, cascading synchronization, current-intelligence comparisons, journal
 retention/GC, deployment-specific recovery qualification and v2/legacy migration. Native Agentyzer
 follow-up orchestration and authenticated remote-ID reconciliation, full CPE refresh/migration, extended license qualification and architecture-approval
 workflows, consumer serializer upgrade compatibility and controlled-document
