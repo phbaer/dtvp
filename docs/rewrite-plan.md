@@ -230,6 +230,43 @@ build evidence must not silently overwrite incompatible scopes. Preserve typed
 containment/dependency/communication relations and declared/observed/concluded
 distinctions across security, license and architecture workflows.
 
+#### Reconciled graph from overlapping observations
+
+Design decision: classify inputs as delivery parts or observations of an existing
+part. Merge compatible overlapping observations into one derived dependency graph
+to avoid duplicate representations, while retaining every original document.
+This extends the target design; overlapping-view reconciliation is not yet shipped.
+
+Reconciliation is scoped to one product version, delivery part and compatible
+artifact/build/configuration subject. Similar package coordinates do not establish
+that two documents describe the same delivered subject. Uncertain subject binding
+requires explicit confirmation; distinct delivery parts remain distinct.
+
+Within that scope, consolidate uniquely matched component occurrences and duplicate
+typed edges, retaining source-to-canonical mappings and all supporting assertions.
+Equal package identities alone cannot collapse distinct install locations, variants
+or instances. Preserve separate consuming roots/contexts and multiple dependency
+paths. A shared dependency node never merges its contextual assessment coverage.
+
+Retain field/edge provenance, source roles, coverage and selected source revisions.
+Conflicting versions, digests, metadata or topology remain visible; missing fields
+are not conflicting values. Never choose authority solely by upload arrival time.
+A reconciled path assembled from multiple observations is derived, not a claim
+that any one source observed the entire path. Cycles remain graph cycles.
+
+Recompute from the current selected source layers instead of accumulating historical
+trees. A newer complete authoritative observation replaces its earlier inventory
+contribution within its declared scope; absent components/edges lose that support.
+Other selected observations can retain attributed claims, but cannot silently
+restore membership excluded by current authoritative inventory. Partial/failed
+observations cannot erase a baseline. Withdrawal removes only the selected source
+contribution and retains historical inputs and assessments.
+
+Preview node/edge consolidations, conflicts, additions/removals, unresolved identity
+and assessment impact before atomic publication. Version the reconciliation policy
+and explicit mappings; UI, CLI and exports use the same backend-derived graph.
+The next design decision is source authority per subject/scope and conflict handling.
+
 ### Inventory layers and source acceptance
 
 Retain original SBOMs losslessly as immutable layers. The latest accepted complete

@@ -73,6 +73,12 @@ PURL and other external identity markers are optional. Incomplete components ret
 DTVP IDs and provenance; ambiguous continuity requires confirmation and never
 silently discards or transfers existing assessments.
 
+The [overlapping-input design](docs/rewrite-plan.md#reconciled-graph-from-overlapping-observations)
+classifies delivery parts separately from observations of the same part. Compatible
+observations should form one provenance-preserving graph without collapsing usage
+contexts or accumulating obsolete nightly inventory. Reconciliation remains planned;
+source-authority and conflict policy are the next design decision.
+
 ### Rewrite completion and acceptance boundary
 
 The bounded implementation batches are committed on `rewrite/knowledge-journal`.
