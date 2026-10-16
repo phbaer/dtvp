@@ -205,6 +205,11 @@ Assessor/reviewer authority requires both project access and the responsible
 team's role; authors cannot approve their own revisions. Admin alone grants
 neither assessment, review nor rescoring authority.
 
+A replacement analyst explicitly starts a new logical assessment; the previous
+author's record is read-only. Copied evidence stays visible for verification,
+and prior decisions and approved pins remain retained.
+
+
 Coordinators use `POST .../scoring/preview`, then explicit `.../publish` with the
 returned `preview` hash. Inputs include `request_id`, `expected_versions`,
 `targets`, original `base_vector`, contextual `vector` and `rationale`. Publication
