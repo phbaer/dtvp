@@ -610,6 +610,13 @@ separate. Source/current published severity and outdated scores stay distinct.
 The authorized API and CLI share this read model; broader cross-project portfolio
 views and large-inventory performance qualification remain planned.
 
+Controlled document registration now archives exact artifacts, issued inputs,
+renderer/configuration provenance and independent exact-revision review with
+dedicated documentation permissions. Pending changes retain approved pins;
+historical input approval requires acknowledgment and does not become current.
+Inherited reviews never approve a new version. Generator renderer/template
+qualification and issued-input consumer cutover remain acceptance gates.
+
 Native bundles retain exact source/context/proposal/approval distinctions. CPE
 has an internal offline policy/proposal module; VScorer has explicit focused inputs
 and returned bound proposals. Producer-qualified Agentyzer inputs and returned

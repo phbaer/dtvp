@@ -24,9 +24,11 @@ class MemberInput(RequestModel):
             "coordinator",
             "license_analyst",
             "license_reviewer",
+            "documentary_analyst",
+            "documentary_reviewer",
             "admin",
         ]
-    ] = Field(max_length=7)
+    ] = Field(max_length=9)
 
 
 class ProjectInput(RequestModel):
@@ -51,6 +53,8 @@ class ShareInput(RequestModel):
             "rescore",
             "license_assess",
             "license_approve",
+            "documentary_assess",
+            "documentary_approve",
         ]
     ]
 
@@ -71,6 +75,8 @@ class TokenInput(RequestModel):
             "rescore",
             "license_assess",
             "license_approve",
+            "documentary_assess",
+            "documentary_approve",
         ]
     ]
     hours: int = Field(default=24, ge=1, le=24 * 90)

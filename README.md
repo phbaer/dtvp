@@ -542,6 +542,26 @@ do not add global references per finding. Exact bytes and source parents remain
 journal-owned and recoverable. Uncertain issuance requires the identical retry.
 Hashes establish consistency, not external provider identity or approval.
 
+### Controlled generated documents
+
+Native document registration stores exact output bytes, an issued input receipt,
+renderer name/version, configuration and rationale. Documentation analyst and
+reviewer are dedicated roles; vulnerability, license and administrator roles do
+not confer these authorities. An independent reviewer approves an exact submitted
+revision. Pending changes retain the previous approved output. Historical input
+requires explicit acknowledgment, and approved output remains visibly historical
+when material input changes. Approval records content review; it does not certify
+architecture correctness, legal clearance or regulatory compliance.
+
+Upload multipart `file` and JSON `metadata` to
+`POST /api/v3/projects/{id}/versions/{version}/documents/draft` or `/submit`.
+Metadata pins `expected`, `expected_revision`, `document_id`, `issued_receipt_sha`,
+`renderer`, `configuration`, `title`, `purpose`, `rationale`, `filename`,
+`media_type` and `request_id`. Submit exact revision reviews to `/documents/reviews`;
+read paged records under `.../states/{state}/documents`. Original artifact downloads
+use the authorized state artifact route. Generator qualification and adoption of
+issued inputs remain separate cutover work.
+
 ### Native analysis jobs
 
 `PUT /api/v3/projects/{id}/connectors/agentyzer` binds an administrator-approved

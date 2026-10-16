@@ -20,6 +20,8 @@ PERSONAS = {
     "reviewer": ("Platform reviewer", ["reviewer"], "Platform"),
     "license-analyst": ("License analyst", ["license_analyst"], "Platform"),
     "license-reviewer": ("License reviewer", ["license_reviewer"], "Platform"),
+    "documentary-analyst": ("Documentation analyst", ["documentary_analyst"], "Platform"),
+    "documentary-reviewer": ("Documentation reviewer", ["documentary_reviewer"], "Platform"),
     "coordinator": ("Security coordinator", ["coordinator"], "Platform"),
     "operations-reviewer": ("Operations reviewer", ["reviewer"], "Operations"),
     "viewer": ("Platform viewer", ["viewer"], "Platform"),
@@ -37,6 +39,8 @@ def seed(db, artifacts):
             "operations-reviewer",
             "license-analyst",
             "license-reviewer",
+            "documentary-analyst",
+            "documentary-reviewer",
         ):
             if not db.scalar(
                 select(User).where(User.issuer == "playground", User.subject == subject)
