@@ -5,7 +5,7 @@ test('real import, assessment, approval, snapshot, revalidation, and team isolat
   test.setTimeout(60000)
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
-  await page.goto('/')
+  await page.goto('/?page=Review')
   await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
   await page.getByText('Replay events', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset playground', exact: true }).click()

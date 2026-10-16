@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 
 test('long vulnerability evidence stays readable while recording a not-affected reason', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?page=Review')
   await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
   await page.getByText('Replay events', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset playground', exact: true }).click()

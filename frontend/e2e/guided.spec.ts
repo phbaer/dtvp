@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { beginAssessment } from './workflow'
 
 test('analysts assess applicability with evidence and independent review, without rescoring', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?page=Review')
   await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
   await page.getByText('Replay events', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset playground', exact: true }).click()

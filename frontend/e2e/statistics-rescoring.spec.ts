@@ -3,7 +3,7 @@ import { beginAssessment } from './workflow'
 
 test('statistics, applicability review and original severity retention', async ({ page }) => {
   test.setTimeout(60000)
-  await page.goto('/')
+  await page.goto('/?page=Review')
   await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
   await page.getByText('Replay events', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset playground', exact: true }).click()

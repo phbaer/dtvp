@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test('Agentyzer simulation offers explicit drafts, follow-ups and coverage failures', async ({ page }) => {
   test.setTimeout(60000)
-  await page.goto('/')
+  await page.goto('/?page=Review')
   await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
   await page.getByText('Replay events', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset playground', exact: true }).click()

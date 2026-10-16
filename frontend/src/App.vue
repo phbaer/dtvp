@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { justificationLabel } from './assessmentReasons'
 import { api, ApiError, send } from './api'
 import SearchSelect from './components/SearchSelect.vue'
-import KnowledgeWorkspace from './components/KnowledgeWorkspace.vue'
-import ReviewWorkspace from './components/ReviewWorkspace.vue'
-import StatisticsView from './components/StatisticsView.vue'
-import RescorePolicyEditor from './components/RescorePolicyEditor.vue'
 import type { AssessmentDraft, Component, Finding, Job, Me, Project, Release, RescoreRequest, Revision, Snapshot } from './types'
+const KnowledgeWorkspace = defineAsyncComponent(() => import('./components/KnowledgeWorkspace.vue'))
+const ReviewWorkspace = defineAsyncComponent(() => import('./components/ReviewWorkspace.vue'))
+const StatisticsView = defineAsyncComponent(() => import('./components/StatisticsView.vue'))
+const RescorePolicyEditor = defineAsyncComponent(() => import('./components/RescorePolicyEditor.vue'))
 
 const me = ref<Me | null>(null)
+const nativeLocked = ref(false)
 const personas = ref<{ id: string; name: string }[]>([])
-const page = ref(new URLSearchParams(location.search).get('page') || 'Review')
+function pageFromLocation(params: URLSearchParams) {
+  const requested = params.get('page')
+  if (['Review', 'Knowledge', 'Statistics', 'Products', 'Activity', 'Access'].includes(requested || '')) return requested!
+  if (!requested && ['q', 'status', 'project', 'team', 'owner', 'owner_match', 'sort'].some(key => params.has(key))) return 'Review'
+  return 'Knowledge'
+}
+const page = ref(pageFromLocation(new URLSearchParams(location.search)))
 const projects = ref<Project[]>([])
 const releases = ref<Release[]>([])
 const projectId = ref('')
@@ -76,11 +83,11 @@ function updateUrl() { const query = new URLSearchParams(viewQuery()); if (page.
 function resetReviewFilters() {
   search.value = ''; lifecycle.value = ''; reviewProject.value = ''; reviewProjectLabel.value = ''; reviewTeam.value = ''; reviewTeamLabel.value = ''; ownerSearch.value = ''; ownerMatch.value = 'contains'; order.value = 'identifier'
 }
-function applyView(query: string) {
+function applyView(query: string, load = true) {
   if (busy.value) return
   const params = new URLSearchParams(query)
   search.value = params.get('q') || ''; lifecycle.value = params.get('status') || ''; reviewProject.value = params.get('project') || ''; reviewProjectLabel.value = ''; reviewTeam.value = params.get('team') || ''; ownerSearch.value = params.get('owner') || ''; ownerMatch.value = params.get('owner_match') || 'contains'; order.value = params.get('sort') || 'identifier'
-  void action(() => loadFindings())
+  if (load) void action(() => loadFindings())
 }
 function statisticsSlice(filters: Record<string, string>) {
   if (filters.project_id !== undefined) { reviewProject.value = filters.project_id; reviewProjectLabel.value = filters.project_name || '' }
@@ -96,7 +103,7 @@ function saveView() {
   localStorage.setItem(`dtvp.views:${me.value.id}`, JSON.stringify(savedViews.value)); viewName.value = ''
 }
 function removeView(name: string) { savedViews.value = savedViews.value.filter(view => view.name !== name); localStorage.setItem(`dtvp.views:${me.value!.id}`, JSON.stringify(savedViews.value)) }
-function restoreLocation() { const params = new URLSearchParams(location.search); page.value = ['Review', 'Knowledge', 'Statistics', 'Products', 'Activity', 'Access'].includes(params.get('page') || '') ? params.get('page')! : 'Review'; applyView(params.toString()) }
+function restoreLocation() { const params = new URLSearchParams(location.search); page.value = pageFromLocation(params); applyView(params.toString(), page.value === 'Review') }
 async function moveFinding(delta: number) {
   const target = reviewIndex.value >= 0 ? reviewIndex.value + delta : delta > 0 ? Math.min(queueAnchor.value, rows.value.length) : queueAnchor.value - 1
   if (target >= rows.value.length && nextCursor.value) await loadFindings(true)
@@ -149,6 +156,7 @@ watch(embeddedReview, embedded => {
   else showReviewFilters.value = previousFilterVisibility
 })
 const modalOpen = computed(() => Boolean((detail.value && !embeddedReview.value) || metadataEdit.value))
+const reviewWorkspace = ref<InstanceType<typeof ReviewWorkspace> | null>(null)
 
 function rememberFocus() {
   returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -167,7 +175,7 @@ function dialogKeys(event: KeyboardEvent) {
   }
 }
 
-watch([modalOpen, busy], async ([open, pending], [wasOpen]) => {
+watch([modalOpen, busy, reviewWorkspace], async ([open, pending], [wasOpen]) => {
   if (open !== wasOpen) {
     restorePending = !open
     document.body.style.overflow = open ? 'hidden' : ''
@@ -199,6 +207,14 @@ async function action(callback: () => Promise<unknown>) {
     if (err instanceof ApiError && err.status === 401) me.value = null
   }
   finally { busy.value = false }
+}
+
+async function loadPageData() {
+  if (page.value === 'Review') await loadFindings()
+  else if (page.value === 'Statistics' && reviewProject.value && !reviewProjectLabel.value) reviewProjectLabel.value = (await api<Project>(`/projects/${reviewProject.value}`)).name
+  else if (page.value === 'Products') await loadProjects()
+  else if (page.value === 'Activity') jobs.value = await api('/jobs')
+  else if (page.value === 'Access') workspaceId.value ||= me.value?.workspaces[0]?.id || ''
 }
 
 async function loadProjects() {
@@ -262,7 +278,7 @@ async function login(persona: string) {
     if (me.value) resetReviewFilters()
     me.value = await api('/me'); detail.value = null; token.value = ''; workspaceId.value = ''; provider.value = me.value!.playground ? 'demo' : 'osv'
     rows.value = []; projects.value = []; releases.value = []; components.value = []; revisions.value = []; jobs.value = []; approvalSelection.value = []; approvalPreview.value = null; latestSnapshot.value = null; metadataEdit.value = null
-    await loadProjects(); await loadFindings()
+    await loadPageData()
   })
 }
 
@@ -322,7 +338,7 @@ watch(approvalSelection, () => { approvalPreview.value = null }, { deep: true })
 watch(draft, value => { if (detail.value && me.value) sessionStorage.setItem(draftKey.value, JSON.stringify(value)) }, { deep: true })
 watch(power, value => localStorage.setItem('dtvp.power', String(value)))
 watch(theme, value => { localStorage.setItem('dtvp.theme', value); document.documentElement.dataset.theme = value }, { immediate: true })
-watch(page, value => { if (value !== 'Review') detail.value = null; updateUrl(); if (value === 'Products') void action(() => loadCatalog()); if (value === 'Activity') void action(async () => { jobs.value = await api('/jobs') }) })
+watch(page, value => { if (value !== 'Review') detail.value = null; updateUrl(); if (me.value) void action(loadPageData) })
 
 onMounted(async () => {
   desktopMedia.addEventListener('change', desktopChanged)
@@ -332,7 +348,7 @@ onMounted(async () => {
   await action(async () => {
     try { me.value = await api('/me') } catch (err) { if (err instanceof ApiError && err.status === 401) return; throw err }
     provider.value = me.value!.playground ? 'demo' : 'osv'
-    await loadProjects(); await loadFindings()
+    await loadPageData()
   })
   poll = setInterval(() => { if (me.value && page.value === 'Activity' && !busy.value) void api<Job[]>('/jobs').then(value => jobs.value = value).catch(() => {}) }, 3000)
 })
@@ -344,7 +360,7 @@ onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); 
     <header :inert="modalOpen">
       <a class="brand" href="/">DTVP <span>Security review</span></a>
       <nav v-if="me" aria-label="Main navigation">
-        <button v-for="item in ['Review', 'Knowledge', 'Statistics', 'Products', 'Activity', ...(access ? ['Access'] : [])]" :key="item" :class="{ current: page === item }" :disabled="busy" @click="page = item">{{ item }}</button>
+        <button v-for="item in ['Knowledge', 'Review', 'Statistics', 'Products', 'Activity', ...(access ? ['Access'] : [])]" :key="item" :class="{ current: page === item }" :disabled="busy || nativeLocked" @click="page = item">{{ item }}</button>
       </nav>
       <div class="preferences">
         <label>Theme <select v-model="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
@@ -366,7 +382,7 @@ onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); 
       <a v-else class="button primary" href="/auth/login">Sign in with SSO</a>
     </main>
     <main v-else :inert="modalOpen" :class="{ 'review-main': page === 'Review' }">
-      <KnowledgeWorkspace v-if="page === 'Knowledge'" :key="me.id" :me="me" />
+      <KnowledgeWorkspace v-if="page === 'Knowledge'" :key="me.id" :me="me" @locked="nativeLocked = $event" />
       <template v-if="page === 'Review'">
         <div class="page-title"><div><p class="eyebrow">{{ me.name }}</p><h1>Review workspace</h1><p>What needs your attention, across your accessible teams and releases.</p></div><label class="toggle"><input v-model="power" type="checkbox"> Technical details</label></div>
         <form class="review-searchbar" @submit.prevent="action(() => loadFindings())">
@@ -436,7 +452,7 @@ onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); 
       </template>
     </main>
 
-    <Teleport v-if="detail" to="#review-detail-host" :disabled="!embeddedReview"><ReviewWorkspace :embedded="embeddedReview" :key="detail.id" :finding="detail" :draft="draft" :me="me!" :busy="busy" :error="error" :notice="notice" :power="power" :can-approve="Boolean(canApprove)" :index="reviewIndex" :loaded="rows.length" :previous="reviewIndex >= 0 ? reviewIndex > 0 : queueAnchor > 0" :next="!(reviewIndex < 0 && queueAnchor < 0) && (reviewIndex >= 0 ? reviewIndex < rows.length - 1 || Boolean(nextCursor) : queueAnchor < rows.length || Boolean(nextCursor))" @close="detail = null" @move="delta => action(() => moveFinding(delta))" @refresh="action(() => openFinding(detail!.id, true))" @team="workspace => action(() => openFinding(detail!.id, false, workspace))" @update:draft="value => draft = value" @submit="submit" @approve="approve" /></Teleport>
+    <Teleport v-if="detail" to="#review-detail-host" :disabled="!embeddedReview"><ReviewWorkspace ref="reviewWorkspace" :embedded="embeddedReview" :key="detail.id" :finding="detail" :draft="draft" :me="me!" :busy="busy" :error="error" :notice="notice" :power="power" :can-approve="Boolean(canApprove)" :index="reviewIndex" :loaded="rows.length" :previous="reviewIndex >= 0 ? reviewIndex > 0 : queueAnchor > 0" :next="!(reviewIndex < 0 && queueAnchor < 0) && (reviewIndex >= 0 ? reviewIndex < rows.length - 1 || Boolean(nextCursor) : queueAnchor < rows.length || Boolean(nextCursor))" @close="detail = null" @move="delta => action(() => moveFinding(delta))" @refresh="action(() => openFinding(detail!.id, true))" @team="workspace => action(() => openFinding(detail!.id, false, workspace))" @update:draft="value => draft = value" @submit="submit" @approve="approve" /></Teleport>
     <div v-if="metadataEdit" class="overlay"><section class="inspector" role="dialog" aria-modal="true" aria-labelledby="metadata-title"><div class="inspector-header"><h2 id="metadata-title">Metadata · {{ metadataEdit.name }}</h2><button aria-label="Close metadata" :disabled="busy" @click="metadataEdit = null">×</button></div><div class="inspector-content"><p>Curated information survives source reimports. Changes reopen affected approvals for review.</p><label v-for="(name, key) in metadataFields" :key="key">{{ name }}<input v-model="metadataForm[key]"></label><details><summary>Additional properties</summary><label>Extension data (JSON)<textarea v-model="metadataText" rows="8"></textarea></label></details><p v-if="error" role="alert">{{ error }}</p><button class="primary" :disabled="busy" @click="action(async () => { await api(`/components/${metadataEdit!.id}/metadata`, { method: 'PUT', body: JSON.stringify({ expected_version: metadataEdit!.metadata_version, metadata: { ...JSON.parse(metadataText), ...metadataForm } }) }); metadataEdit = null; await loadInventory(); notice = 'Metadata saved.' })">Save metadata</button></div></section></div>
   </div>
 </template>

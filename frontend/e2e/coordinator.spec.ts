@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { confirmDraft, confirmReview } from './workflow'
 
 test('rescoring waits for team approval and belongs to the coordinator', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?page=Review')
   await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
   await page.getByText('Replay events', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset playground', exact: true }).click()

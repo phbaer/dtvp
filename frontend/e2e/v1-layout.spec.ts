@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test('v1 desktop list/detail layout keeps search, filters and drafts usable', async ({ page }) => {
   await page.setViewportSize({width: 1680, height: 1050})
-  await page.goto('/')
+  await page.goto('/?page=Review')
   await page.getByRole('button', {name: 'Organization administrator', exact: true}).click()
   await page.getByText('Replay events', {exact: true}).click()
   await page.getByRole('button', {name: 'Reset playground', exact: true}).click()

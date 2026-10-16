@@ -21,6 +21,13 @@ tags, a rebuildable SQL projection and journal-backed inventory import/compariso
 under `/api/v3`, with contextual assessment/review, coordinator scoring, curated
 metadata, bound proposals, semantic comparisons and retained history.
 The Review tab retains `/api/v2`; the Knowledge tab uses the journal-backed workspace.
+Knowledge is the default landing page; Review remains an explicit compatibility
+workspace. Existing filter-only Review URLs still work. Page code and compatibility
+data load on demand; entering Knowledge does not fetch legacy findings/catalogs.
+Captured native operations lock ordinary page navigation until resolved or explicitly
+discarded. Persona changes remain available and invalidate prior-actor responses.
+Shared authentication, catalog and job services remain required; removing the v2
+router requires explicit consumer/project cutover, not just changing the landing page.
 VDR/VEX JSON semantic subsets, explicit occurrence correspondence and pinned
 assessment synchronization previews/drafts are available. Advanced scope handling
 and automatic cascading synchronization remain planned. Local v2 snapshot migration
@@ -224,7 +231,8 @@ gate. Optional missing parts stay visible. Original constituent bytes remain
 retrievable by pinned source state after replacement or removal.
 
 This slice supports delivery parts within one product/version, not overlapping
-evidence views, nested assemblies or cross-part relationship mapping. Each new
+evidence views or nested assemblies. Explicit pinned cross-part DEPENDS_ON/CONTAINS
+relationships are supported; identities are never merged automatically. Each new
 product version needs its own constituent imports; cross-version source reuse
 and semantic identity reconciliation remain planned. Unresolved relationship
 endpoints fail assembly; external-document references need explicit reconciliation.
@@ -1630,7 +1638,9 @@ already-covered targets, required review, conflicting edits, absent applicabilit
 and unresolved scope. Exact source-local references/material evidence govern
 matching; explicit maps cannot collapse different contexts or establish equivalence.
 Target inventory, reviews and published scores remain unchanged. Knowledge ancestry
-never proves a software merge. Verified pipeline merge provenance and automatic synchronization remain planned.
+never proves a software merge. Explicit integration events retain software/artifact
+pins and optionally verify supplied Git parent paths; this establishes object
+consistency, not repository/build authenticity. Automatic synchronization remains deferred.
 `POST .../synchronization/drafts` explicitly extends one source assessment's logical
 ID into a target-only draft. It requires the source author, current source/target
 heads, exact preview/revision, explicit target conditions and a reason. Any existing

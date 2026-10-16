@@ -28,8 +28,9 @@ import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
 import KnowledgeAssessmentArchive from './KnowledgeAssessmentArchive.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 const props = defineProps<{ me: Me }>()
-const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false), cpeLocked = ref(false)
-const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value)
+const emit = defineEmits<{ locked: [boolean] }>()
+const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false), cpeLocked = ref(false), advisoryLocked = ref(false)
+const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value || advisoryLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
 function bulkEligible(row: KnowledgeFinding) {
@@ -339,11 +340,12 @@ watch(() => [project.value, version.value, workspace.value?.state, team.value, l
 watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
 watch(() => props.me.id, () => { analysisFollowUpLocked.value = false; ++actorGeneration; ++scoreSequence; pendingRequest.value = null; pendingScore.value = null; scorePreview.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
+watch(() => Boolean(busy.value || intakeLocked.value || bulkLocked.value || pendingRequest.value || pendingScore.value), value => emit('locked', value), { immediate: true })
 onMounted(() => {
   try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
   if (initialView.has('k_project')) void restoreView(initialView.toString())
 })
-onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer) })
+onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer); emit('locked', false) })
 </script>
 <template>
   <section class="knowledge-workspace" aria-label="Knowledge workspace">
@@ -401,7 +403,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
         <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
         <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
         <div class="knowledge-composition-tools"><KnowledgeSources :project="project" :version="version" :state="workspace.state" /><KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" /></div>
-        <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
+        <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" @locked="advisoryLocked = $event" />
         <KnowledgeReconciliation :key="`${me.id}:${project}`" :project="project" :version="version" :state="workspace.state" @locked="correspondenceLocked = $event" @changed="load(true, true)" />
       </div>
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">

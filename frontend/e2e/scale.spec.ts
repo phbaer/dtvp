@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test('large inventory stays searchable and review context survives navigation', async ({ page }) => {
   test.setTimeout(120000)
-  await page.goto('/')
+  await page.goto('/?page=Review')
   if (await page.getByLabel('Persona').count()) await page.getByLabel('Persona').selectOption('administrator')
   else await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
   await page.getByText('Replay events', { exact: true }).click()

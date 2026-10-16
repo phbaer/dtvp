@@ -55,6 +55,7 @@ test('empty project bootstraps original bytes with identical frozen UUID and met
   await target(page)
   await prepare(page)
   await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeDisabled()
   const commit = state.panel.getByRole('button', { name: 'Commit captured import', exact: true })
   await commit.click()
   await expect(state.panel.getByRole('alert')).toContainText('Captured bytes, metadata and request ID are retained')
@@ -66,6 +67,7 @@ test('empty project bootstraps original bytes with identical frozen UUID and met
   expect(state.writes[0]!.metadata).toMatchObject({ expected: null, source: 'CI:files', build_number: 2, occurred_at: '2026-10-16T12:00:00+02:00', completeness: 'complete' })
   expect(state.writes[0]!.metadata.request_id).toMatch(/^[0-9a-f-]{36}$/)
   await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeEnabled()
   expect(await state.panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
 })
 
