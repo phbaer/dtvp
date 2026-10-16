@@ -27,6 +27,37 @@ WORKSPACE_FILTERS = (
 )
 
 
+def archive_request(client, archive, endpoint, *, params=None, metadata_header=None):
+    """Bounded exact-byte transport only; the server owns archive interpretation."""
+    from stat import S_ISREG
+
+    from dtvp.knowledge.legacy_archive import MAX_COMPRESSED
+
+    path = Path(archive)
+    metadata = path.stat()
+    if not S_ISREG(metadata.st_mode) or metadata.st_size > MAX_COMPRESSED:
+        raise ValueError("Legacy archive requires a regular file no larger than 64 MiB")
+    headers = {"Content-Type": "application/zip"}
+    if metadata_header is not None:
+        headers["X-DTVP-Migration"] = metadata_header
+    with path.open("rb") as source:
+        opened = os.fstat(source.fileno())
+        if not S_ISREG(opened.st_mode) or opened.st_size > MAX_COMPRESSED:
+            raise ValueError("Opened legacy archive exceeds the regular-file upload bound")
+
+        def chunks():
+            total = 0
+            while chunk := source.read(64 * 1024):
+                total += len(chunk)
+                if total > MAX_COMPRESSED:
+                    raise ValueError("Legacy archive grew beyond the 64 MiB upload bound")
+                yield chunk
+
+        return read_response(
+            client.post(endpoint, params=params, headers=headers, content=chunks())
+        )
+
+
 def configure(parser):
     command = parser.add_parser("knowledge", help="Use the journal-backed HTTP API")
     command.add_argument("--url", default=os.getenv("DTVP_URL", "http://127.0.0.1:8900"))
@@ -116,6 +147,15 @@ def configure(parser):
     archive.add_argument("--offset", type=int, default=0)
     archive.add_argument("--limit", type=int, default=25)
     archive.add_argument("--json", action="store_true")
+    publication = commands.add_parser(
+        "legacy-archive-publication",
+        help="Preview or explicitly publish one reviewed sanitized v1 version",
+    )
+    for option in ("project", "version", "archive", "input"):
+        publication.add_argument("--" + option, required=True)
+    publication.add_argument(
+        "--apply", action="store_true", help="Publish the exact reviewed preview explicitly"
+    )
     quality = commands.add_parser(
         "input-quality", help="Inspect pinned producer input observations"
     )
@@ -258,36 +298,14 @@ def run(args):
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
         if args.knowledge_command == "legacy-archive-preview":
-            from stat import S_ISREG
             from urllib.parse import quote
 
-            from dtvp.knowledge.legacy_archive import MAX_COMPRESSED
-
-            path = Path(args.archive)
-            metadata = path.stat()
-            if not S_ISREG(metadata.st_mode) or metadata.st_size > MAX_COMPRESSED:
-                raise ValueError("Legacy archive requires a regular file no larger than 64 MiB")
-            with path.open("rb") as source:
-                opened = os.fstat(source.fileno())
-                if not S_ISREG(opened.st_mode) or opened.st_size > MAX_COMPRESSED:
-                    raise ValueError("Opened legacy archive exceeds the regular-file upload bound")
-
-                def chunks():
-                    total = 0
-                    while chunk := source.read(64 * 1024):
-                        total += len(chunk)
-                        if total > MAX_COMPRESSED:
-                            raise ValueError("Legacy archive grew beyond the 64 MiB upload bound")
-                        yield chunk
-
-                result = read_response(
-                    client.post(
-                        f"/api/v3/projects/{quote(args.project, safe='')}/migration/v1-archive/preview",
-                        params={"offset": args.offset, "limit": args.limit},
-                        headers={"Content-Type": "application/zip"},
-                        content=chunks(),
-                    )
-                )
+            result = archive_request(
+                client,
+                args.archive,
+                f"/api/v3/projects/{quote(args.project, safe='')}/migration/v1-archive/preview",
+                params={"offset": args.offset, "limit": args.limit},
+            )
             if args.json:
                 print(json.dumps(result, indent=2))
             else:
@@ -303,6 +321,37 @@ def run(args):
                     print("Limit: " + limitation)
                 if result.get("next_offset") is not None:
                     print(f"Next offset: {result['next_offset']} (resubmit the identical archive)")
+            return
+        if args.knowledge_command == "legacy-archive-publication":
+            from stat import S_ISREG
+            from urllib.parse import quote
+
+            from dtvp.knowledge.legacy_archive import strict_json
+            from dtvp.knowledge.legacy_archive_migration import MAX_HEADER
+
+            path = Path(args.input)
+            metadata_stat = path.stat()
+            if not S_ISREG(metadata_stat.st_mode) or metadata_stat.st_size > MAX_HEADER:
+                raise ValueError("Migration metadata requires a regular file within 8 KiB")
+            with path.open("rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if not S_ISREG(opened.st_mode) or opened.st_size > MAX_HEADER:
+                    raise ValueError("Opened migration metadata exceeds its upload bound")
+                raw = stream.read(MAX_HEADER + 1)
+            if len(raw) > MAX_HEADER:
+                raise ValueError("Migration metadata file exceeds 8 KiB")
+            metadata = strict_json(raw)
+            if not isinstance(metadata, dict):
+                raise ValueError("Migration metadata must be a JSON object")
+            header = json.dumps(metadata, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
+            if len(header) > MAX_HEADER:
+                raise ValueError("ASCII migration metadata header exceeds 8 KiB")
+            endpoint = (
+                f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}/migration/v1-archive/"
+                + ("apply" if args.apply else "preview")
+            )
+            result = archive_request(client, args.archive, endpoint, metadata_header=header)
+            print(json.dumps(result, indent=2))
             return
         if args.knowledge_command == "evidence-summary":
             from urllib.parse import quote

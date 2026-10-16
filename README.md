@@ -862,6 +862,20 @@ The exact submitted sanitized ZIP, manifest and five selected exported members b
 
 `POST /api/v3/projects/{project}/versions/{version}/migration/v1-archive/{preview,apply}` accepts a raw `application/zip` body (maximum min(configured upload bound,64MiB)) and ASCII JSON `X-DTVP-Migration` metadata (maximum8192bytes; escape Unicode with JSON `ensure_ascii=True`). Required metadata: `request_id`, `archive_sha256`, `source_entry_id`, `expected:null`, `expected_policy`, `expected_evidence`, `source`, `build_number`, `occurred_at`, `reason`, `acknowledge_sanitized_export:true`, `acknowledge_operator_review:true`, `acknowledge_project_reader_disclosure:true`. Apply additionally requires the captured `preview_digest`. Authentication is checked before consuming uploads and refreshed afterward. Preview writes nothing; fresh apply requires the branch still absent and both pins unchanged. Exact receipt replay precedes archive parsing/head revalidation after current authorization and raw-byte hash validation. Changed input under one request ID conflicts; uncertain publication retries require the same bytes, metadata, UUID, endpoint and preview digest.
 
+The HTTP-only CLI reads the explicit declaration from a bounded JSON file and streams the ZIP unchanged:
+
+```bash
+uv run dtvp knowledge --url "$DTVP_URL" legacy-archive-publication \
+  --project PROJECT_ID --version NEW_VERSION --archive reviewed-single-version.zip \
+  --input publication.json
+# Add the returned preview_digest to the same declaration, then explicitly apply:
+uv run dtvp knowledge --url "$DTVP_URL" legacy-archive-publication \
+  --project PROJECT_ID --version NEW_VERSION --archive reviewed-single-version.zip \
+  --input publication.json --apply
+```
+
+Populate every required metadata field listed above; obtain `archive_sha256` and `source_entry_id` from inspection and current policy/evidence pins from project references. The CLI supplies no acknowledgments automatically. Retain the exact apply declaration and ZIP for retries; backend failures remain command failures.
+
 This deliberately does not restore a multi-version archive, Git history, source memberships, roles or a complete v1 database. Representative sanitized exports and producer/operator acceptance remain migration gates.
 
 ### Explicit local v2 snapshot migration rehearsal
