@@ -86,6 +86,12 @@ def configure(parser):
     for name in ("project", "version", "file", "metadata"):
         document.add_argument("--" + name, required=True)
     document.add_argument("--submit", action="store_true", help="Submit for independent review")
+    evidence = commands.add_parser(
+        "evidence-import", help="Preview or import exact VDR/VEX/advisory JSON file bytes"
+    )
+    for name in ("project", "file", "metadata"):
+        evidence.add_argument("--" + name, required=True)
+    evidence.add_argument("--preview", action="store_true", help="Read-only semantic scope preview")
     request = commands.add_parser("request", help="Read or mutate API resources using JSON")
     request.add_argument("method", choices=["GET", "POST", "PUT"])
     request.add_argument("path", help="Absolute /api/v3/ path; query parameters supported")
@@ -272,19 +278,23 @@ def run(args):
                         f"Next offset: {result['next_offset']} (pin --expected-preview {result['preview_digest']})"
                     )
             return
-        if args.knowledge_command in {"import-file", "document-register"}:
+        if args.knowledge_command in {"import-file", "document-register", "evidence-import"}:
             from urllib.parse import quote
 
             metadata = json.loads(Path(args.metadata).read_text())
             if not isinstance(metadata, dict):
                 raise ValueError("Upload metadata must be a JSON object")
-            path = f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}"
-            if args.knowledge_command == "document-register":
-                path += "/documents/" + ("submit" if args.submit else "draft")
+            path = f"/api/v3/projects/{quote(args.project, safe='')}"
+            if args.knowledge_command == "evidence-import":
+                path += "/evidence/files" + ("/preview" if args.preview else "")
             else:
-                if args.part:
-                    path += f"/parts/{quote(args.part, safe='')}"
-                path += "/files"
+                path += f"/versions/{quote(args.version, safe='')}"
+                if args.knowledge_command == "document-register":
+                    path += "/documents/" + ("submit" if args.submit else "draft")
+                else:
+                    if args.part:
+                        path += f"/parts/{quote(args.part, safe='')}"
+                    path += "/files"
             with Path(args.file).open("rb") as source:
                 result = read_response(
                     client.post(

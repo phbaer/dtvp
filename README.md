@@ -741,6 +741,27 @@ available in original source evidence with an explicit interpretation limit.
 
 ### VDR/VEX intake and application
 
+The collapsed **Vulnerability evidence sources** panel works before the first SBOM.
+It lists retained active/inactive documents, original downloads and parser losses.
+Uploads preview semantic scope across exact version/evidence pins, then explicitly
+import the frozen original bytes. Withdrawals require an explicit reason and keep
+history. Unknown scope, source contradictions and unsupported fields remain visible;
+received assertions never become human approvals automatically.
+
+`POST /api/v3/projects/{id}/evidence/files/preview` accepts the same raw multipart
+file/import metadata as `/evidence/files`. It writes nothing and returns the raw
+SHA-256 plus matched/unresolved/conflict information. This is a semantic preview,
+not an exact simulation of producer ordering or supersession; import performs those
+checks separately. Read-authorized retained inspection uses
+`POST .../evidence/{artifact}/preview` with expected evidence/version pins.
+
+CLI: `knowledge evidence-import --project ID --file evidence.json --metadata import.json`
+imports exact bytes; add `--preview` for read-only inspection. Metadata explicitly
+supplies request ID, source, producer revision and evidence/version pins. Ambiguous
+responses reuse the same bytes and metadata; the CLI never replaces pins or IDs.
+JSON semantic subsets are supported; XML and signature verification remain outside
+this intake contract.
+
 `GET /api/v3/projects/{id}/evidence` returns bounded document summaries, current
 `evidence_state` and version heads. `POST .../evidence/preview` previews matching
 and contradictions without committing. `POST .../evidence/imports` requires

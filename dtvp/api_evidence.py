@@ -62,9 +62,10 @@ def documents(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ):
-    project_for(db, actor, project_id)
+    project = project_for(db, actor, project_id)
     journal = request.app.state.knowledge
-    state = journal.resolve(evidence_ref(project_id))
+    references = journal.references()
+    state = references.get(evidence_ref(project_id).key)
     records = journal.records(state, "vulnerabilities") if state else {}
     keys = sorted(key for key in records if key.startswith("evidence-document:"))
     summaries = []
@@ -83,7 +84,9 @@ def documents(
         )
     return {
         "evidence_state": state,
-        "versions": product_heads(journal.references(), project_id),
+        "versions": product_heads(references, project_id),
+        "total": len(keys),
+        "capabilities": ["import", "withdraw"] if actor.allowed(db, project, "evidence") else [],
         "documents": summaries,
         "next_offset": offset + limit if offset + limit < len(keys) else None,
     }

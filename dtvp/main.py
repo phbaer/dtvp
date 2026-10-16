@@ -14,6 +14,7 @@ from dtvp.api_analysis_jobs import router as analysis_jobs_router
 from dtvp.api_coverage import router as coverage_router
 from dtvp.api_documents import router as documents_router
 from dtvp.api_evidence import router as evidence_router
+from dtvp.api_evidence_intake import router as evidence_intake_router
 from dtvp.api_history import router as history_router
 from dtvp.api_identity import router as identity_router
 from dtvp.api_intake import router as intake_router
@@ -94,6 +95,7 @@ def create_app(settings=None):
     app.include_router(reconciliation_catalog_router)
     app.include_router(workflow_router)
     app.include_router(evidence_router)
+    app.include_router(evidence_intake_router)
     app.include_router(identity_router)
     app.include_router(proposal_router)
     app.include_router(portfolio_router)

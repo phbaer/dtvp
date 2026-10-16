@@ -519,3 +519,59 @@ def test_document_cli_preserves_bytes_and_explicit_review_pins(tmp_path, monkeyp
     }
     assert parts["file"] == raw
     assert json.loads(parts["metadata"]) == metadata
+
+
+@pytest.mark.parametrize("preview", [False, True])
+@respx.mock
+def test_evidence_cli_preserves_original_bytes_and_explicit_collection_pins(
+    tmp_path, monkeypatch, preview
+):
+    from email.parser import BytesParser
+    from email.policy import default
+
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    raw = b'{ "statements": [], "format": "opaque test input" }\r\n'
+    artifact = tmp_path / "evidence.json"
+    artifact.write_bytes(raw)
+    metadata = {
+        "request_id": "evidence-id",
+        "source": "supplier",
+        "revision": 19,
+        "expected_evidence": "a" * 64,
+        "expected_versions": {"7.1.2": "b" * 64},
+    }
+    config = tmp_path / "metadata.json"
+    config.write_text(json.dumps(metadata))
+    argv = [
+        "dtvp",
+        "knowledge",
+        "--url",
+        "http://dtvp.test",
+        "evidence-import",
+        "--project",
+        "product",
+        "--file",
+        str(artifact),
+        "--metadata",
+        str(config),
+    ]
+    if preview:
+        argv.append("--preview")
+    monkeypatch.setattr(sys, "argv", argv)
+    path = "http://dtvp.test/api/v3/projects/product/evidence/files" + (
+        "/preview" if preview else ""
+    )
+    route = respx.post(path).mock(
+        return_value=httpx.Response(200 if preview else 201, json={"committed": not preview})
+    )
+    main()
+    request = route.calls[0].request
+    message = BytesParser(policy=default).parsebytes(
+        b"Content-Type: " + request.headers["Content-Type"].encode() + b"\r\n\r\n" + request.content
+    )
+    parts = {
+        part.get_param("name", header="content-disposition"): part.get_payload(decode=True)
+        for part in message.iter_parts()
+    }
+    assert parts["file"] == raw
+    assert json.loads(parts["metadata"]) == metadata

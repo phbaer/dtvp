@@ -597,6 +597,13 @@ complete preview digest across pages. Shared draft/submission targets are explic
 reviews and publication never inherit across versions. Continuous applicability
 ranges and semantic cross-import identity reconciliation remain planned.
 
+Native evidence management now provides exact-byte multipart semantic previews,
+explicit import/withdrawal, retained original downloads and active/inactive/loss
+inspection before or after inventory intake. UI and raw-file CLI preserve complete
+request pins and bytes through retries. Semantic previews disclose their limits;
+source ordering and supersession stay authoritative import checks. No human
+approvals, XML support or verified signatures are inferred.
+
 The native ownership editor now preserves v1 namespace/name/case/PURL matching
 through backend selector encoding, lossless raw selectors and full policy previews.
 Rules default across versions and can limit their version scope. Atomic policy
