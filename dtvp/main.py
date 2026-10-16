@@ -31,6 +31,7 @@ from dtvp.api_inventory import router as inventory_router
 from dtvp.api_issued_exports import router as issued_exports_router
 from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_legacy_archive import router as legacy_archive_router
+from dtvp.api_legacy_archive_migration import router as legacy_archive_migration_router
 from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_metadata_editor import router as metadata_editor_router
@@ -92,6 +93,7 @@ def create_app(settings=None):
         same_site="lax",
     )
     app.include_router(migration_router)
+    app.include_router(legacy_archive_migration_router)
     app.include_router(router)
     app.include_router(advisory_jobs_router)
     app.include_router(inventory_router)
@@ -141,7 +143,8 @@ def create_app(settings=None):
         archive_stream = (
             request.method == "POST"
             and re.fullmatch(
-                r"/api/v3/projects/[^/]+/migration/v1-archive/preview", request.url.path
+                r"/api/v3/projects/[^/]+/(?:migration/v1-archive/preview|versions/[^/]+/migration/v1-archive/(?:preview|apply))",
+                request.url.path,
             )
             is not None
         )

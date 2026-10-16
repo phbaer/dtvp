@@ -840,19 +840,29 @@ SBOMs are reported without silently adding a CycloneDX version or upgrading them
 Git-friendly expanded exports can be rezipped with their manifest at the root;
 missing capture/author/build fields stay unknown, not reconstructed from Git.
 
-No ZIP, member, metadata, assessment or permission is persisted. There is no apply
-endpoint, DT writeback, membership creation or native approval. V1 captures are
+The dry run persists no ZIP, member, metadata, assessment or permission.
+It performs no DT writeback, membership creation or native approval. V1 captures are
 partial snapshots: assessment comments may have been stripped, histories and
 operational databases are incomplete, and exported BOM JSON need not be the
 original pipeline bytes. Retain the caller's original archive. Complete migration
-and controlled cutover still require representative sanitized archives and an
-explicit publication contract.
+and controlled cutover still require representative sanitized archives and
+reviewed publication acceptance.
 
 Three committed synthetic fixtures were produced by the frozen v1 exporter and
 its fake clients: its original incomplete BOM/plain documentation, an explicitly
 valid CycloneDX/tagged variant, and the original diffable-tree writer. Fixture
 provenance/hash pins are in `tests/fixtures/legacy-v1/provenance.json`; tests and
 production inspection require no old runtime, Git, DT or customer data.
+
+### Reviewed single-version v1 publication
+
+A reviewed, sanitized **single-version** `dtvp.project-archive/v1` export can be previewed and explicitly published into a new, empty native product version. The existing archive dry run remains read-only. Publication requires current project read/manage/write permissions, an exact archive SHA/source-entry selection, explicit null branch expectation, ownership/evidence pins, a declared timezone-aware observation time, meaningful reason, and separate explicit acknowledgments of operator review, sanitization and disclosure to current and future target-project readers. Known credential configuration keys and credential-bearing URL user-info are rejected; this does not prove arbitrary free text is secret-free.
+
+The exact submitted sanitized ZIP, manifest and five selected exported members become readable target-state artifacts. DTVP does not claim to retain the unsanitized original. Native composition uses the exact exported BOM member without adding a CycloneDX version or pretending it is original pipeline bytes. Tagged/plain/missing DTVP/DT documentation and all source assessment records remain attributed, unverified historical claims. Exact unique component UUID-field mappings and literal source-UUID-equals-exported-reference mappings admit source findings; conflicting/missing mappings remain historical without name/PURL guessing. Only validated original Base ratings enter source severity. Legacy team, author, reviewer, suppression, not-affected and contextual-score claims create no native permissions, assessments, reviews or scores.
+
+`POST /api/v3/projects/{project}/versions/{version}/migration/v1-archive/{preview,apply}` accepts a raw `application/zip` body (maximum min(configured upload bound,64MiB)) and ASCII JSON `X-DTVP-Migration` metadata (maximum8192bytes; escape Unicode with JSON `ensure_ascii=True`). Required metadata: `request_id`, `archive_sha256`, `source_entry_id`, `expected:null`, `expected_policy`, `expected_evidence`, `source`, `build_number`, `occurred_at`, `reason`, `acknowledge_sanitized_export:true`, `acknowledge_operator_review:true`, `acknowledge_project_reader_disclosure:true`. Apply additionally requires the captured `preview_digest`. Authentication is checked before consuming uploads and refreshed afterward. Preview writes nothing; fresh apply requires the branch still absent and both pins unchanged. Exact receipt replay precedes archive parsing/head revalidation after current authorization and raw-byte hash validation. Changed input under one request ID conflicts; uncertain publication retries require the same bytes, metadata, UUID, endpoint and preview digest.
+
+This deliberately does not restore a multi-version archive, Git history, source memberships, roles or a complete v1 database. Representative sanitized exports and producer/operator acceptance remain migration gates.
 
 ### Explicit local v2 snapshot migration rehearsal
 
@@ -861,8 +871,8 @@ previews an existing local immutable `dtvp.snapshot/1` snapshot. The same body,
 plus its returned `preview_digest`, is accepted by `/migration/v2/apply`.
 Use the generic authenticated `knowledge request` CLI or HTTP API for this local
 snapshot contract. External v1 ZIP inspection has its separate bounded dry run
-and streamed CLI described above; no general archive apply or migration wizard
-is provided.
+and streamed CLI described above. Reviewed single-version publication uses the
+separate explicit contract above.
 
 Example request (replace IDs, digest and configuration pins):
 
@@ -923,8 +933,9 @@ Preview exposes full counts, capture coverage/conversion losses and bounded firs
 Limits: local installation only, up to 200 source revisions, 64 MiB bundle and
 256 MiB total original source bytes. Missing or corrupt originals fail closed.
 External v1 archive inspection is implemented as the separate read-only dry run.
-Native publication from those archives, Git history conversion, ownership/identity
-reconciliation and complete legacy recovery still require explicit contracts. In particular,
+Reviewed single-version archive publication is available under the contract above.
+Git history conversion, ownership/identity reconciliation and complete legacy
+recovery still require explicit contracts. In particular,
 `dtvp.snapshot/1` includes captured decisions but only the latest decision's
 approval, so older approvals may be absent. No snapshot-completeness or regulatory
 compliance claim is made.

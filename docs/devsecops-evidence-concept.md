@@ -561,11 +561,13 @@ explicit consistency limitation. Neither integration creates human approvals.
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,
 dynamic future-version coverage beyond finite explicit range selection, selected
-VDR/VEX conformance profiles, native publication from reviewed legacy captures,
-and broader architecture modeling/rendering acceptance. General archive apply
-first needs a disclosure contract: a single-version, operator-reviewed sanitized
-export is the recommended simple initial scope, not an automatic secret-free
-guarantee or complete legacy backup. Issued exports and
+VDR/VEX conformance profiles and broader architecture modeling/rendering acceptance.
+Reviewed, sanitized single-version v1 exports now have explicit preview/publication
+under separate operator-review, sanitization and project-reader-disclosure
+acknowledgments. Exact submitted ZIP/member bytes remain readable project artifacts;
+known credential fields are rejected, without an automatic secret-free guarantee
+or complete legacy recovery claim. Imported decisions remain historical evidence.
+Issued exports and
 independent controlled-document registration/review are implemented; they do not
 establish renderer parity, architecture acceptance or regulatory compliance.
 Source license evidence now has a separate human disposition/review workflow with

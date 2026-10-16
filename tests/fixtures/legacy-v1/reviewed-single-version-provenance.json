@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "source_fixture": "valid-synthetic.zip",
+  "source_sha256": "4499e2f0c5e2257bd93203db3613bfc0036061f311442e53823506413fefbdce",
+  "sha256": "2064bb4cb447d1282be03bbe16ba7a272d2cf37b412561cd4adec17d966c60bc",
+  "changes": [
+    "Removed synthetic URL userinfo. No operational or personal data.",
+    "Added explicit original Base 0.0 and separate legacy contextual 9.8 claims to verify no adoption."
+  ],
+  "sanitization_scope": "Synthetic publication fixture only; caller confirmation remains mandatory."
+}
