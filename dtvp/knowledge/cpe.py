@@ -333,6 +333,17 @@ def import_discovery_policy(journal, *, project_id, actor_id, data):
         "rules_content_digest": digest(canonical(rules)),
         "limitations": list(LIMITATIONS),
     }
+    # Catalog/rule edits do not implicitly replace separately captured offline sources.
+    if data.expected:
+        previous = journal.load(journal.records(data.expected, "inventory")["cpe:configuration"])
+        for key in (
+            "offline_sources",
+            "retained_dictionary",
+            "retained_mapping_history",
+            "offline_source_limitations",
+        ):
+            if key in previous:
+                config[key] = copy.deepcopy(previous[key])
     sections = {name: {} for name in SECTIONS}
     sections["inventory"] = {"cpe:configuration": config}
     state = journal.snapshot(
@@ -342,6 +353,7 @@ def import_discovery_policy(journal, *, project_id, actor_id, data):
         reason="Import CPE identification inputs",
         sections=sections,
         parents=[data.expected] if data.expected else [],
+        artifacts=journal.state(data.expected).artifacts if data.expected else [],
     )
     return journal.publish(
         request_id=request_id,

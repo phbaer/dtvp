@@ -19,6 +19,7 @@ from dtvp.api_component_inventory import router as component_inventory_router
 from dtvp.api_coverage import router as coverage_router
 from dtvp.api_cpe_editor import router as cpe_editor_router
 from dtvp.api_cpe_ranking import router as cpe_ranking_router
+from dtvp.api_cpe_sources import router as cpe_sources_router
 from dtvp.api_documents import router as documents_router
 from dtvp.api_evidence import router as evidence_router
 from dtvp.api_evidence_intake import router as evidence_intake_router
@@ -108,6 +109,7 @@ def create_app(settings=None):
     app.include_router(coverage_router)
     app.include_router(cpe_editor_router)
     app.include_router(cpe_ranking_router)
+    app.include_router(cpe_sources_router)
     app.include_router(documents_router)
     app.include_router(agentyzer_results_router)
     app.include_router(statistics_router)

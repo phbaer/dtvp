@@ -854,6 +854,16 @@ Contract references: [OpenVEX 0.2.0](https://github.com/openvex/spec/blob/main/O
 The supported version bounds describe this implementation; newer standard versions
 are not implicitly accepted by these named profiles.
 
+### Retained offline curated CPE sources
+
+DTVP can explicitly preview and replace a bounded **curated** dictionary (up to 2,000 records /2MiB decoded input), or retain the standalone `cpeservice` eight-column `cpe-mapping.csv` as attributed historical claims. This is not full national-dictionary ingestion, upstream refresh or standalone-service parity. No network access, automatic rule publication, native approval, component identity change or vulnerability applicability inference occurs. CSV entries without explicit valid PURL/CPE identities remain unresolved; names are not used to guess identity. Imported status/author/source labels remain unverified. A CSV is a point-in-time capture, not reconstructed Git history.
+
+Managers use `POST /api/v3/projects/{project}/cpe/sources/preview` and `/apply` with JSON `request_id`, `expected` CPE policy SHA or explicit null, `kind` (`dictionary` or `mapping_history`), `source`, declared `revision`, timezone-aware `occurred_at`, meaningful `reason`, exact `artifact_sha256` and `content_base64`. The complete JSON body is capped at3MiB before decoding. Apply adds the exact `preview_digest`. Preview writes nothing. Expected-head CAS controls replacement; declared source revisions/times do not prove freshness or enforce upstream chronology. Empty dictionaries explicitly remove the current curated set while historical captures remain readable. Exact retries use the same captured body and UUID; current management authorization is required before parsing or replay. Uncertain responses retain the captured request.
+
+Dictionary input is an explicit JSON array of the existing supplied-ranking `DictionaryRecord` shape, or a bounded NVD-shaped `products[].cpe` extract. The latter projects supported fields for ranking and reports extra fields; exact original bytes are retained. This does not download NVD or claim completeness. Mapping CSV requires exactly `name,cpe,status,options,package_type,group,author,purl`; bounded fields and unique names are validated. No CSV rule is adopted automatically.
+
+Exact source bytes and declared provenance are retained in immutable CPE policy states. Replacing one source preserves the other, catalog/rules and prior history. Ordinary catalog/rule edits preserve retained source metadata and artifact pins. Project readers use `GET .../cpe/sources/{policy}/{kind}` with offset/limit to inspect exact retained claims, and `/artifact` to download exact source bytes; every read rechecks current project scope and membership in retained CPE policy history. Ranking against retained inputs is explicit: `POST .../states/{inventory}/cpe/rank-retained` with `component_ref`, exact `policy`, and optional offset/limit. Inventory and policy pins remain separate. Generic native CLI JSON requests use the same backend workflow.
+
 ### Bounded workload measurements
 
 ```bash
