@@ -894,6 +894,19 @@ POST /api/v3/projects/PRODUCT/integration-events --body integration.json`; inspe
 or preview through `knowledge request GET/POST` on the endpoints above. No UI or
 automatic cascade execution is introduced in this slice.
 
+The API-only synthetic cascade demo uses four independent development versions:
+
+```bash
+uv run python scripts/knowledge_integration_demo.py
+```
+
+Each run creates a new synthetic project with `6.15.6`, `7.1.1`, `7.1.2` and
+`7.2.0`, records separate integration observations on `7.1.1 → 7.1.2 → 7.2.0`,
+and retains locally checked synthetic commit-object parent paths. A later nightly
+build advances only `7.2.0` and demonstrates rejection of stale integration inputs.
+The older branch and other versions remain unchanged. No repository, tree, binary,
+producer identity or human decision is verified or created by this scenario.
+
 ### Retained offline curated CPE sources
 
 DTVP can explicitly preview and replace a bounded **curated** dictionary (up to 2,000 records /2MiB decoded input), or retain the standalone `cpeservice` eight-column `cpe-mapping.csv` as attributed historical claims. This is not full national-dictionary ingestion, upstream refresh or standalone-service parity. No network access, automatic rule publication, native approval, component identity change or vulnerability applicability inference occurs. CSV entries without explicit valid PURL/CPE identities remain unresolved; names are not used to guess identity. Imported status/author/source labels remain unverified. A CSV is a point-in-time capture, not reconstructed Git history.
