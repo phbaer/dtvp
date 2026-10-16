@@ -3223,3 +3223,23 @@ key decoding and cryptographic verification remain Authlib/joserfc operations.
 Discovery endpoints must be HTTP(S) URLs without embedded credentials or fragments;
 `none` is rejected as an ID-token signing algorithm. HTTPS termination and trusted
 provider endpoint configuration remain deployment responsibilities.
+
+### Concurrent-import playground rehearsal
+
+```bash
+uv run python -m scripts.knowledge_contention_rehearsal --url http://127.0.0.1:8900 --rounds 3 --writers 3 --output /tmp/dtvp-contention-new
+```
+
+This command verifies playground mode before creating one new labelled synthetic
+product. Competing CI imports pin the same expected state; every round requires
+exactly one current publication and conflicts for every other writer. The winner's
+exact request must replay the same receipt and its pinned workspace must agree.
+Existing products, reviews and specialist services are untouched. Source requests
+are retained before sending, responses after each round, and final outcomes in a
+new private output directory. Uncertain publication, pending projection or unexpected
+results stop subsequent rounds rather than automatically repinning. Limits are
+1–20 rounds, 2–8 writers and at most 80 competing requests. This verifies bounded
+synthetic CAS/replay behavior, not production capacity or mixed-workload acceptance.
+The real PostgreSQL three-round/three-writer regression passed; SQLite is deliberately
+excluded from this concurrent SQL qualification (sequential native workflows are
+checked on both databases).
