@@ -729,6 +729,11 @@ for absent findings by default, with optional recorded `team_id`, `absent_only`,
 Recorded team labels/targets are preserved across reassignment; these records are
 historical evidence, not current approvals or proof of remediation.
 
+Native Agentyzer report JSON retains its 8 MiB, 100,000-node and depth-64
+limits. Child traversal is admitted before queue expansion, so a wide report is
+rejected before allocating an oversized traversal queue. These limits do not
+change serialization, source binding or proposal eligibility.
+
 Native Agentyzer jobs support explicit actor-only reconciliation of unknown POST
 outcomes against the additive private authenticated Agentyzer completed-job
 endpoint. Original private correlation (unique 256-bit nonce and issued/request

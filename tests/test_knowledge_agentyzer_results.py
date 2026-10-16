@@ -327,3 +327,17 @@ def test_optional_native_guidance_is_preserved_without_becoming_source_verificat
     assert rows[0]["binary_binding_verified"] is False
     assert rows[0]["provider_authenticity"] == "caller_asserted_not_verified"
     assert journal.objects.read(rows[0]["report_sha256"]) == canonical(raw)
+
+
+def test_oversized_json_children_rejected_before_iteration():
+    from dtvp.knowledge.agentyzer_results import _json
+
+    class WideList(list):
+        def __len__(self):
+            return 100000
+
+        def __iter__(self):
+            raise AssertionError("Oversized children must not be iterated")
+
+    with pytest.raises(ValueError, match="node limits"):
+        _json(WideList())

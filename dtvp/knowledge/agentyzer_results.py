@@ -35,6 +35,10 @@ def _json(value):
         count += 1
         if count > 100000 or depth > 64:
             raise ValueError("Agentyzer report exceeds nesting/node limits")
+        if isinstance(node, (dict, list)) and len(node) and (
+            count + len(pending) + len(node) > 100000 or depth >= 64
+        ):
+            raise ValueError("Agentyzer report exceeds nesting/node limits")
         if isinstance(node, dict):
             if any(not isinstance(key, str) for key in node):
                 raise ValueError("Agentyzer report keys must be strings")
