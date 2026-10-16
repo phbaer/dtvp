@@ -7,7 +7,7 @@ async function fixture(page: Page, readonly = false, empty = false) {
   let head = sha('a'), evidence = sha('b'), failure = 0, wrongHash = false, active = true
   const writes: { path: string; metadata: Record<string, unknown>; raw: Buffer | null }[] = [], previews: Record<string, unknown>[] = [], reads: URL[] = []
   function pins() { return { expected_evidence: evidence, expected_versions: empty ? {} : { '7.1.1': head } } }
-  function preview(metadata: Record<string, unknown>, selected = true) { return { ...metadata, source_revision: metadata.revision || 1, committed: false, artifact_sha: wrongHash ? sha('f') : artifact, preview_digest: sha('d'), source: metadata.source || 'supplier', active: selected, trust: 'unverified_publisher_and_signature', document: { format: 'openvex', document_id: 'SUPPLIER-1', publisher: 'Supplier', revision: 1, losses: ['unsupported_signature_not_verified'] }, limitations: ['Semantic scope only: supersession and producer ordering are checked on import.'], application: { [empty ? 'unassigned' : '7.1.1']: { application: { matched: selected && !empty ? 1 : 0, unresolved: selected ? 1 : 0, statements: [], ...(!selected ? { selection: 'inactive' } : {}) }, would_apply: [], unmatched: [{ reason: 'unknown_component' }], contradictions: [] } } } }
+  function preview(metadata: Record<string, unknown>, selected = true) { return { ...metadata, ...(metadata.validation_profile ? { conformance: { profile: metadata.validation_profile, valid: true, schema_validation: 'dtvp_supported_subset_only', signature_verification: 'not_performed', diagnostics: [], warnings: [{ path: '/', code: 'signature_present_not_verified' }], limitations: ['DTVP consumed-field subset only; complete schema conformance is not established.'] } } : {}), source_revision: metadata.revision || 1, committed: false, artifact_sha: wrongHash ? sha('f') : artifact, preview_digest: sha('d'), source: metadata.source || 'supplier', active: selected, trust: 'unverified_publisher_and_signature', document: { format: 'openvex', document_id: 'SUPPLIER-1', publisher: 'Supplier', revision: 1, losses: ['unsupported_signature_not_verified'] }, limitations: ['Semantic scope only: supersession and producer ordering are checked on import.'], application: { [empty ? 'unassigned' : '7.1.1']: { application: { matched: selected && !empty ? 1 : 0, unresolved: selected ? 1 : 0, statements: [], ...(!selected ? { selection: 'inactive' } : {}) }, would_apply: [], unmatched: [{ reason: 'unknown_component' }], contradictions: [] } } } }
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname; reads.push(url)
     if (path.endsWith('/files/preview')) {
@@ -135,4 +135,45 @@ test('empty product can preview and retain evidence before the first inventory',
   await expect(panel.getByLabel('Candidate evidence preview')).toContainText('unassigned')
   expect(previews[0]).toMatchObject({ expected_versions: {} })
   expect(writes).toHaveLength(0)
+})
+
+
+test('optional subset profile stays frozen across503 and reports signatures as unverified', async ({ page }) => {
+  const f = await fixture(page)
+  await f.panel.getByText('Import a source evidence revision', { exact: true }).click()
+  const form = f.panel.getByLabel('Preview evidence file', { exact: true })
+  await form.getByLabel('Attributed evidence source', { exact: true }).fill('supplier')
+  await form.getByLabel('Producer revision ordinal', { exact: true }).fill('2')
+  await form.getByLabel('Evidence JSON file', { exact: true }).setInputFiles({ name: 'supplier-vex.json', mimeType: 'application/json', buffer: raw })
+  await form.getByText('Supported-subset validation profile', { exact: true }).click()
+  const profile = form.getByRole('combobox', { name: 'Evidence validation profile', exact: true })
+  await profile.selectOption('dtvp-openvex-0.2.0-exact/1')
+  await form.getByRole('button', { name: 'Preview exact evidence bytes', exact: true }).click()
+  const report = f.panel.getByLabel('Evidence conformance report', { exact: true })
+  await report.locator('summary').click()
+  await expect(report).toContainText('signature verification: not performed')
+  await expect(report).toContainText('signature present not verified')
+  await expect(report).toContainText('complete schema conformance is not established')
+  await expect(profile).toBeDisabled()
+  expect(f.previews[0]!.validation_profile).toBe('dtvp-openvex-0.2.0-exact/1')
+  f.fail(503)
+  await f.panel.getByRole('button', { name: 'Import exact previewed evidence', exact: true }).click()
+  await expect(f.panel.getByRole('alert')).toContainText('Publication uncertain')
+  f.advance()
+  await f.panel.getByRole('button', { name: 'Refresh evidence registry and pins', exact: true }).click()
+  await f.panel.getByRole('button', { name: 'Resend identical evidence import', exact: true }).click()
+  expect(f.writes[0]!.metadata).toEqual(f.writes[1]!.metadata)
+  expect(f.writes[0]!.metadata.validation_profile).toBe('dtvp-openvex-0.2.0-exact/1')
+  await f.panel.getByRole('button', { name: 'Edit evidence request', exact: true }).click()
+  await expect(profile).toBeEnabled()
+})
+
+test('default subset omits the new field from preview and import metadata', async ({ page }) => {
+  const f = await fixture(page)
+  await previewFile(f.panel)
+  expect(f.previews[0]).not.toHaveProperty('validation_profile')
+  await expect(f.panel.getByLabel('Evidence conformance report', { exact: true })).toHaveCount(0)
+  await f.panel.getByRole('button', { name: 'Import exact previewed evidence', exact: true }).click()
+  await expect.poll(() => f.writes.length).toBe(1)
+  expect(f.writes[0]!.metadata).not.toHaveProperty('validation_profile')
 })

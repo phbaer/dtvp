@@ -840,6 +840,13 @@ including when present. Diagnostic traversal is bounded to 100,000 nodes and dep
 64, with at most 64 reported issues. Existing non-strict parsing remains available
 for evidence with explicitly unresolved scopes.
 
+The existing evidence-file intake exposes profile selection under collapsed
+**Supported-subset validation profile** details. Default requests omit the new
+field entirely. A selected profile freezes with exact file bytes, source ordinal,
+request ID and version/evidence pins through retries. Successful previews expose
+the backend's conformance diagnostics, signature warnings and limitations; failed
+strict previews retain their frozen request and display the backend rejection.
+
 Contract references: [OpenVEX 0.2.0](https://github.com/openvex/spec/blob/main/OPENVEX-SPEC.md),
 [CSAF 2.0 VEX](https://docs.oasis-open.org/csaf/csaf/v2.0/os/csaf-v2.0-os.html),
 [CycloneDX 1.6 reference](https://cyclonedx.org/docs/1.6/json/).
