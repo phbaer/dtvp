@@ -5,7 +5,7 @@ export async function knowledgeApi<T>(path: string, options: RequestInit = {}): 
   const headers = new Headers(options.headers)
   const csrf = document.cookie.split('; ').find(item => item.startsWith('dtvp_csrf='))?.split('=')[1]
   if (csrf) headers.set('X-CSRF-Token', decodeURIComponent(csrf))
-  if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   const response = await fetch(`/api/v3${path}`, { ...options, headers, credentials: 'same-origin' })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))

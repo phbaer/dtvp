@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
+import KnowledgeLegacyArchiveIntake from './KnowledgeLegacyArchiveIntake.vue'
 import { knowledgeApi } from '../knowledgeApi'
 
 type Target = { project_id: string; version: string; part_id: string | null; kind: 'product' | 'part'; state: string | null; source_authority: string; scope_template?: Record<string, unknown>; blocked_reasons: string[]; baseline: { source: string | null; build_number: number | null; occurred_at: string | null; collection: unknown }; capabilities: string[]; max_upload_bytes: number; formats: string[] }
 type Frozen = { project: string; version: string; part: string; metadata: Record<string, unknown>; raw: Uint8Array<ArrayBuffer>; filename: string; sha: string }
 const props = defineProps<{ project: string; version: string; disabled?: boolean }>()
 const emit = defineEmits<{ locked: [value: boolean]; imported: [value: { version: string; part_id: string | null }] }>()
+const nativeLocked = ref(false), archiveLocked = ref(false)
+function setNativeLock(value: boolean) { nativeLocked.value = value; emit('locked', value || archiveLocked.value) }
+function setArchiveLock(value: boolean) { archiveLocked.value = value; emit('locked', value || nativeLocked.value) }
 const opened = ref(false), busy = ref(false), target = ref<Target | null>(null), error = ref(''), notice = ref('')
 const selectedVersion = ref(''), mode = ref('product'), part = ref(''), source = ref(''), build = ref(''), observed = ref(''), context = ref(''), predecessor = ref(''), replace = ref(false)
 const file = ref<File | null>(null), inputKey = ref(0), frozen = ref<Frozen | null>(null), committed = ref(false)
@@ -28,7 +32,7 @@ async function suggestions() {
 }
 function search() { changed(); clearTimeout(timer); timer = setTimeout(() => void suggestions(), 200) }
 async function inspect() {
-  if (busy.value || props.disabled || frozen.value || !selectedVersion.value.trim() || mode.value === 'part' && !part.value.trim()) return
+  if (busy.value || props.disabled || archiveLocked.value || frozen.value || !selectedVersion.value.trim() || mode.value === 'part' && !part.value.trim()) return
   const current = ++sequence
   busy.value = true; error.value = ''; notice.value = ''
   try {
@@ -42,9 +46,9 @@ async function inspect() {
 }
 function selectedFile(event: Event) { file.value = (event.target as HTMLInputElement).files?.[0] || null; error.value = '' }
 async function prepare() {
-  if (busy.value || props.disabled || frozen.value || !target.value?.capabilities.includes('import') || !file.value || !replace.value) return
+  if (busy.value || props.disabled || archiveLocked.value || frozen.value || !target.value?.capabilities.includes('import') || !file.value || !replace.value) return
   const current = sequence, chosen = target.value, original = file.value
-  busy.value = true; error.value = ''; emit('locked', true)
+  busy.value = true; error.value = ''; setNativeLock(true)
   try {
     if (original.size > chosen.max_upload_bytes) throw new Error('File exceeds the server upload limit.')
     const number = Number(build.value), time = observed.value.trim()
@@ -57,7 +61,7 @@ async function prepare() {
     if (current !== sequence) return
     frozen.value = { project: props.project, version: chosen.version, part: chosen.part_id || '', metadata: fields, raw, filename: original.name, sha: [...new Uint8Array(hash)].map(value => value.toString(16).padStart(2, '0')).join('') }
   } catch (value) { if (current === sequence) error.value = message(value) }
-  finally { if (current === sequence) { busy.value = false; if (!frozen.value) emit('locked', false) } }
+  finally { if (current === sequence) { busy.value = false; if (!frozen.value) setNativeLock(false) } }
 }
 async function publish() {
   if (busy.value || !frozen.value || committed.value) return
@@ -70,22 +74,22 @@ async function publish() {
     const result = await knowledgeApi<{ committed: boolean | null; projection?: string }>(path, { method: 'POST', body })
     if (current !== sequence) return
     if (result.committed !== true) throw new Error('Publication is uncertain. Retry this exact captured request; do not create a replacement request.')
-    committed.value = true; emit('locked', false)
+    committed.value = true; setNativeLock(false)
     notice.value = selected.part ? 'Source part imported. The assembled product is unchanged; select this part explicitly when assembling.' : 'Product baseline imported. Historical assessments remain retained; current coverage is evaluated by the backend.'
     if (result.projection === 'pending') notice.value += ' Projection is pending; the authoritative import is committed.'
     emit('imported', { version: selected.version, part_id: selected.part || null })
   } catch (value) { if (current === sequence) error.value = `${message(value)} Captured bytes, metadata and request ID are retained. Retry unchanged, or explicitly start a new import after reviewing the target.` }
   finally { if (current === sequence) busy.value = false }
 }
-function reset() { if (busy.value) return; ++sequence; frozen.value = null; committed.value = false; target.value = null; file.value = null; ++inputKey.value; replace.value = false; error.value = ''; notice.value = ''; emit('locked', false) }
+function reset() { if (busy.value) return; ++sequence; frozen.value = null; committed.value = false; target.value = null; file.value = null; ++inputKey.value; replace.value = false; error.value = ''; notice.value = ''; setNativeLock(false) }
 function toggle(event: Event) { opened.value = (event.currentTarget as HTMLDetailsElement).open; if (opened.value && !selectedVersion.value) selectedVersion.value = props.version; if (opened.value) void suggestions() }
 watch(() => props.project, () => { ++sequence; busy.value = false; reset(); selectedVersion.value = props.version; versionOptions.value = []; partOptions.value = [] })
-onBeforeUnmount(() => { ++sequence; clearTimeout(timer); emit('locked', false) })
+onBeforeUnmount(() => { ++sequence; clearTimeout(timer); setNativeLock(false) })
 </script>
 <template>
   <details v-if="project" class="knowledge-intake" @toggle="toggle">
     <summary>Import composition</summary>
-    <section aria-label="Native composition intake">
+    <section aria-label="Native composition intake"><fieldset class="native-intake-fields" :disabled="archiveLocked">
       <p class="hint">Import original CycloneDX or SPDX files into an existing or new product version. Complete source documents replace the selected baseline; missing components do not establish remediation.</p>
       <form aria-label="Select composition target" @submit.prevent="inspect"><fieldset :disabled="busy || !!frozen || disabled">
         <label>Product version (existing or new)<input v-model="selectedVersion" list="intake-versions" required maxlength="200" @input="search"><datalist id="intake-versions"><option v-for="value in versionOptions" :key="value" :value="value" /></datalist></label>
@@ -111,7 +115,7 @@ onBeforeUnmount(() => { ++sequence; clearTimeout(timer); emit('locked', false) }
         </fieldset></form>
       </template>
       <section v-if="frozen" aria-label="Captured composition import"><h3>{{ committed ? 'Import recorded' : 'Review import' }}</h3><p>{{ frozen.version }}<span v-if="frozen.part"> · source part {{ frozen.part }}</span> · {{ frozen.filename }} · {{ frozen.raw.byteLength }} bytes</p><details><summary>Exact request and file digest</summary><code>SHA-256 {{ frozen.sha }}</code><pre>{{ JSON.stringify(frozen.metadata, null, 2) }}</pre></details><p v-if="!committed" class="hint">This captured request stays fixed across retries. A conflict requires explicit target review before starting a new import.</p><button v-if="!committed" class="primary" :disabled="busy" @click="publish">Commit captured import</button><button :disabled="busy" @click="reset">{{ committed ? 'Start another import' : 'Discard capture and start a new import' }}</button></section>
-    </section>
+    </fieldset><KnowledgeLegacyArchiveIntake :key="project" :project="project" :disabled="disabled || busy || nativeLocked" @locked="setArchiveLock" @imported="emit('imported', $event)" /></section>
   </details>
 </template>
 <style scoped>

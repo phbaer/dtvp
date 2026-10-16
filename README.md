@@ -862,6 +862,18 @@ The exact submitted sanitized ZIP, manifest and five selected exported members b
 
 `POST /api/v3/projects/{project}/versions/{version}/migration/v1-archive/{preview,apply}` accepts a raw `application/zip` body (maximum min(configured upload bound,64MiB)) and ASCII JSON `X-DTVP-Migration` metadata (maximum8192bytes; escape Unicode with JSON `ensure_ascii=True`). Required metadata: `request_id`, `archive_sha256`, `source_entry_id`, `expected:null`, `expected_policy`, `expected_evidence`, `source`, `build_number`, `occurred_at`, `reason`, `acknowledge_sanitized_export:true`, `acknowledge_operator_review:true`, `acknowledge_project_reader_disclosure:true`. Apply additionally requires the captured `preview_digest`. Authentication is checked before consuming uploads and refreshed afterward. Preview writes nothing; fresh apply requires the branch still absent and both pins unchanged. Exact receipt replay precedes archive parsing/head revalidation after current authorization and raw-byte hash validation. Changed input under one request ID conflicts; uncertain publication retries require the same bytes, metadata, UUID, endpoint and preview digest.
 
+Within **Import composition**, the collapsed **Reviewed v1 archive** flow inspects
+an operator-sanitized ZIP, selects its single exported version, and captures a new
+native target/source plus current ownership/evidence pins. Source counts, mapping
+coverage, known losses and retained-reader audience remain visible before explicit
+publication. Three mandatory acknowledgments cover sanitization, operator review
+and disclosure of the entire submitted ZIP to current and future project readers.
+A server preview precedes publication; exact ZIP bytes, ASCII metadata, pins,
+preview digest and request ID remain fixed through retries. Discarding a capture
+does not reverse a potentially committed request. Legacy identities, labels and
+scores remain historical source evidence; no native assessments or approvals are
+adopted. Archive and regular composition intake mutually lock while captured.
+
 The HTTP-only CLI reads the explicit declaration from a bounded JSON file and streams the ZIP unchanged:
 
 ```bash
