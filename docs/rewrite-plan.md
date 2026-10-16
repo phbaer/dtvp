@@ -604,6 +604,13 @@ complete preview digest across pages. Shared draft/submission targets are explic
 reviews and publication never inherit across versions. Continuous applicability
 ranges and semantic cross-import identity reconciliation remain planned.
 
+Explicit bulk review now provides backend preview/apply and a queue selection UI.
+Each independent review pins the latest submitted revision and an explicit
+version/context target; exclusions and statistics precede paging. Final selection,
+rationale and evidence confirmation are explicit. Atomic publication checks every
+candidate branch, reauthorizes selected targets and preserves receipt-first retries;
+shared scope never grants extra approvals or publishes scores.
+
 Native evidence management now provides exact-byte multipart semantic previews,
 explicit import/withdrawal, retained original downloads and active/inactive/loss
 inspection before or after inventory intake. UI and raw-file CLI preserve complete

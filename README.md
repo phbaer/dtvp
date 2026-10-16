@@ -300,6 +300,24 @@ viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Explicit bulk review
+
+The Knowledge queue lets independent team reviewers select up to 100 exact
+submitted context assessments. The backend preview reports every ready/excluded
+target before pagination; drafts, stale evidence, self-authored revisions,
+missing authority and already reviewed current revisions are excluded. A newer
+submitted revision remains reviewable while an older approved revision is retained.
+Review rationale, evidence, consuming context and source/published severity are
+available before explicit final selection and confirmation. Only selected ready
+targets are committed atomically; shared assessment scope adds no implicit reviews.
+
+`POST .../reviews/bulk/preview` and `/apply` use exact assessment revisions,
+all candidate version heads, a complete preview digest and a stable request ID.
+The UI preserves frozen requests across uncertain responses and scope navigation;
+filter changes clear only the uncaptured queue selection. The generic HTTP CLI
+uses the same API. Approval never publishes contextual scores or changes source
+claims. A changed candidate head or selected exclusion blocks the entire batch.
+
 ### Cross-version assessment scope
 
 The Knowledge assessment panel can load a pinned coverage matrix across current

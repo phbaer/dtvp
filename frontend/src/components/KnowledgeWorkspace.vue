@@ -13,6 +13,7 @@ import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
 import KnowledgeIntake from './KnowledgeIntake.vue'
 import KnowledgeAssembly from './KnowledgeAssembly.vue'
+import KnowledgeBulkReview from './KnowledgeBulkReview.vue'
 import KnowledgeOwnership from './KnowledgeOwnership.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
@@ -23,6 +24,19 @@ import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
 const props = defineProps<{ me: Me }>()
 const intakeBusy = ref(false), assemblyLocked = ref(false)
 const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value)
+const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
+const bulkRows = computed(() => Object.values(bulkSelection.value))
+function bulkEligible(row: KnowledgeFinding) {
+  const record = row.coverage.assessment
+  return Boolean(row.capabilities?.includes('approve') && record?.stage === 'submitted' && record.payload.author_id && record.payload.author_id !== props.me.id && !['unassessed', 'draft', 'reassessment_needed', 'historically_absent'].includes(row.coverage.status) && record.revision !== row.coverage.approved_assessment?.revision)
+}
+function toggleBulk(row: KnowledgeFinding) {
+  if (bulkLocked.value || busy.value) return
+  if (bulkSelection.value[row.id]) delete bulkSelection.value[row.id]
+  else if (bulkEligible(row) && bulkRows.value.length < 100) bulkSelection.value[row.id] = JSON.parse(JSON.stringify(row)) as KnowledgeFinding
+}
+function bulkChanged(scope: { project: string; version: string }) { bulkSelection.value = {}; if (scope.project === project.value && scope.version === version.value) void load(true, true) }
+
 const project = ref(''), projectName = ref(''), version = ref(''), team = ref(''), lifecycle = ref(''), query = ref('')
 const filterLabels: Record<string, string> = { source_severity: 'Source severity', contextual_severity: 'Published severity', applicability: 'Applicability', scoring_status: 'Scoring status', team_review: 'Team assessment', provider: 'Evidence provider', cvss_version: 'Source CVSS version', dependency: 'Dependency relationship', source_conflict: 'Source discrepancies', component: 'Component' }
 const emptyFilters = () => Object.fromEntries(Object.keys(filterLabels).map(key => [key, '']))
@@ -242,6 +256,7 @@ async function copyView() {
   syncViewUrl()
   try { await navigator.clipboard.writeText(location.href); notice.value = 'View link copied.' } catch { error.value = 'Clipboard unavailable. Copy this page address instead.' }
 }
+watch(() => [project.value, version.value, workspace.value?.state, team.value, lifecycle.value, query.value, JSON.stringify(filters.value), props.me.id], () => { bulkSelection.value = {} })
 watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
 watch(() => props.me.id, () => { knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
@@ -281,6 +296,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
     <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
     <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
     <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
+    <KnowledgeBulkReview :key="me.id" :project="project" :version="version" :state="workspace?.state || ''" :rows="bulkRows" @locked="bulkLocked = $event" @reset="bulkSelection = {}" @changed="bulkChanged" />
     <KnowledgeComparison :project="project" />
     <p v-if="error" role="alert" class="message">{{ error }}</p><p v-if="notice" role="status" class="message">{{ notice }}</p><p v-if="busy" role="status">Loading…</p>
     <p v-if="project && !busy && !version && !versions.length" class="empty">No journal-backed versions. Import a baseline to start.</p><p v-else-if="!project" class="empty">Select a product to review its versioned knowledge.</p>
@@ -295,7 +311,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <KnowledgeAdvisories :project="project" :state="workspace.state" />
       <KnowledgeReconciliation :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">
-        <section class="knowledge-queue" aria-label="Context finding queue"><div class="table-wrap"><table><thead><tr><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small></td><td>{{ sourceScore(row) }}</td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
+        <section class="knowledge-queue" aria-label="Context finding queue"><div class="table-wrap"><table><thead><tr><th v-if="workspace.items.some(row => row.capabilities?.includes('approve')) || bulkRows.length || bulkLocked">Review</th><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td v-if="workspace.items.some(item => item.capabilities?.includes('approve')) || bulkRows.length || bulkLocked"><input type="checkbox" :aria-label="`Select ${row.vulnerability_id} in ${row.context.root_ref} for bulk review`" :checked="!!bulkSelection[row.id]" :disabled="busy || bulkLocked || !bulkEligible(row) || (!bulkSelection[row.id] && bulkRows.length >= 100)" @change="toggleBulk(row)"></td><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small></td><td>{{ sourceScore(row) }}</td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
         <section v-if="selected" class="knowledge-detail" aria-label="Context finding detail">
           <header><div><h2>{{ selected.vulnerability_id }}</h2><p>{{ selected.component.name }} {{ selected.component.version }}</p></div><button aria-label="Close context finding" :disabled="busy" @click="close()">×</button></header><p class="hint">{{ teamName(selected.context.team_id) }} · {{ label(selected.coverage.status) }}</p>
           <div class="knowledge-score-pair"><span>Source <strong>{{ sourceScore(selected) }}</strong></span><span>Published <strong>{{ selected.published_score?.score.toFixed(1) ?? 'Not published' }}</strong><small v-if="selected.published_score?.current === false"> · Outdated</small></span></div>

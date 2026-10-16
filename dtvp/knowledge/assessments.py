@@ -334,6 +334,44 @@ def save_assessment(
     )
 
 
+def review_for_target(journal, section, *, actor_id, data, target, authorize, created_at=None):
+    """Build one exact review without mutating sections or publishing anything."""
+    record = section["assessments"].get("assessment:" + data.assessment_id)
+    if (
+        not record
+        or record["revision"] != data.assessment_revision
+        or record["stage"] != "submitted"
+    ):
+        raise Conflict("Review requires the exact current submitted assessment revision")
+    payload = journal.load(data.assessment_revision)
+    if payload["author_id"] == actor_id:
+        raise PermissionError("An assessment requires an independent reviewer")
+    checked = checked_target(section, target)
+    authored = next(
+        (
+            item
+            for item in payload["targets"]
+            if all(item[key] == value for key, value in target.model_dump().items())
+        ),
+        None,
+    )
+    if not authored or authored["fingerprint"] != checked["fingerprint"]:
+        raise Conflict("Assessment evidence changed; submit a fresh revision")
+    authorize(checked["team_id"], "approve")
+    return {
+        "format": "dtvp.review/1",
+        "assessment_id": data.assessment_id,
+        "assessment_revision": data.assessment_revision,
+        "assessment": payload,
+        "target": authored,
+        "status": "approved" if data.action == "approve" else "changes_requested",
+        "reviewer_id": actor_id,
+        "reviewer_team_id": checked["team_id"],
+        "rationale": data.rationale,
+        "created_at": created_at or datetime.now(UTC).isoformat(),
+    }
+
+
 def create_review(journal, *, project_id, actor_id, data, authorize):
     request_id, fingerprint, receipt = prepare(
         journal, project_id, actor_id, "assessment.review/1", data.model_dump(mode="json")
@@ -343,40 +381,9 @@ def create_review(journal, *, project_id, actor_id, data, authorize):
     sections = selected_sections(journal, project_id, data.expected_versions)
     for target in data.targets:
         section = sections[target.version]
-        record = section["assessments"].get("assessment:" + data.assessment_id)
-        if (
-            not record
-            or record["revision"] != data.assessment_revision
-            or record["stage"] != "submitted"
-        ):
-            raise Conflict("Review requires the exact current submitted assessment revision")
-        payload = journal.load(data.assessment_revision)
-        if payload["author_id"] == actor_id:
-            raise PermissionError("An assessment requires an independent reviewer")
-        checked = checked_target(section, target)
-        authored = next(
-            (
-                item
-                for item in payload["targets"]
-                if all(item[key] == value for key, value in target.model_dump().items())
-            ),
-            None,
+        section["reviews"]["review:" + target_key(target)] = review_for_target(
+            journal, section, actor_id=actor_id, data=data, target=target, authorize=authorize
         )
-        if not authored or authored["fingerprint"] != checked["fingerprint"]:
-            raise Conflict("Assessment evidence changed; submit a fresh revision")
-        authorize(checked["team_id"], "approve")
-        section["reviews"]["review:" + target_key(target)] = {
-            "format": "dtvp.review/1",
-            "assessment_id": data.assessment_id,
-            "assessment_revision": data.assessment_revision,
-            "assessment": payload,
-            "target": authored,
-            "status": "approved" if data.action == "approve" else "changes_requested",
-            "reviewer_id": actor_id,
-            "reviewer_team_id": checked["team_id"],
-            "rationale": data.rationale,
-            "created_at": datetime.now(UTC).isoformat(),
-        }
     return publish(
         journal,
         project_id,
