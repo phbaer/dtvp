@@ -7,6 +7,7 @@ from dtvp.api_intake import intake_parts
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.assembly import (
     AssemblyInput,
+    assembly_payload,
     assembly_request_identity,
     build_assembly_candidate,
     publish_assembly,
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/v3")
 LIMITATIONS = [
     "Preview describes the exact selected immutable source parts, structural counts and declared coherence only.",
     "Ownership, external evidence, assessment coverage and final review status are not previewed; publication applies current policy/evidence with CAS.",
-    "Part selection never infers component identity, creates cross-part dependency edges, transfers approval or verifies complete product discovery.",
+    "Part selection never infers component identity or cross-part relationships; only explicit pinned DEPENDS_ON declarations create cross-part dependency edges. CONTAINS remains nondependency evidence; no approval or complete discovery is established.",
 ]
 
 
@@ -45,7 +46,7 @@ def preview_candidate(journal, project_id, version, data):
         "format": "dtvp.assembly-preview/1",
         "project_id": project_id,
         "version": version,
-        "input": data.model_dump(mode="json"),
+        "input": assembly_payload(data),
         "previous_kind": candidate["previous_kind"],
         "selection": [
             {key: part.get(key) for key in ("part_id", "state", "required", "role", "availability")}
@@ -68,6 +69,11 @@ def preview_candidate(journal, project_id, version, data):
                 len(edge.get("dependsOn", [])) for edge in inventory["dependencies"]["edges"]
             ),
         },
+        **(
+            {"relationship_diagnostics": candidate["relationship_diagnostics"]}
+            if "relationship_diagnostics" in candidate
+            else {}
+        ),
     }
     return {**content, "preview_digest": digest(canonical(content)), "limitations": LIMITATIONS}
 
@@ -112,6 +118,14 @@ def target(
         if actor.allowed(db, project, "write") and not version.startswith("@")
         else [],
         "max_parts": 200,
+        **(
+            {
+                "cross_part_relationships": manifest["cross_part_relationships"],
+                "relationship_change_reason": manifest.get("relationship_change_reason", ""),
+            }
+            if manifest and "cross_part_relationships" in manifest
+            else {}
+        ),
         "limitations": LIMITATIONS,
     }
 

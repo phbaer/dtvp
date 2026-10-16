@@ -2,8 +2,9 @@
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from dtvp.knowledge.assembly_relationships import CrossPartRelationship, qualify_relationships
 from dtvp.knowledge.journal import SECTIONS, Conflict, Name, Ref, Sha, Update
 from dtvp.knowledge.service import component_key, part_ref
 from dtvp.schemas import RequestModel
@@ -41,6 +42,17 @@ class AssemblyInput(RequestModel):
     withdrawal_reason: str = Field(default="", max_length=2000)
     policy_change_reason: str = Field(default="", max_length=2000)
     coherence: Coherence = Field(default_factory=Coherence)
+    cross_part_relationships: list[CrossPartRelationship] = Field(
+        default_factory=list, max_length=2000
+    )
+    relationship_change_reason: str = Field(default="", max_length=2000)
+
+    @field_validator("relationship_change_reason")
+    @classmethod
+    def meaningful_relationship_change(cls, value):
+        if value and not value.strip():
+            raise ValueError("Relationship change reason must contain meaningful text")
+        return value
 
     @model_validator(mode="after")
     def distinct_parts(self):
@@ -93,13 +105,27 @@ def selected_inventory(journal, project_id, version, part):
     return inventory
 
 
+def assembly_payload(data):
+    """Omitted extension preserves pre-extension request fingerprints and previews."""
+    payload = data.model_dump(
+        mode="json", exclude={"cross_part_relationships", "relationship_change_reason"}
+    )
+    if data.cross_part_relationships:
+        payload["cross_part_relationships"] = [
+            item.model_dump(mode="json", by_alias=True) for item in data.cross_part_relationships
+        ]
+    if data.relationship_change_reason:
+        payload["relationship_change_reason"] = data.relationship_change_reason
+    return payload
+
+
 def assembly_request_identity(project_id, version, actor_id, data):
     operation = {
         "operation": "assembly.select/1",
         "project_id": project_id,
         "version": version,
         "actor_id": actor_id,
-        **data.model_dump(mode="json"),
+        **assembly_payload(data),
     }
     return digest(canonical([project_id, actor_id, data.request_id])), digest(canonical(operation))
 
@@ -139,7 +165,7 @@ def build_assembly_candidate(journal, *, project_id, version, data):
     if changed_policy and not data.policy_change_reason:
         raise Conflict("Changing part requirements needs a policy change reason")
     inventory, findings, parts, artifacts = {}, {}, [], []
-    edges, relations = [], []
+    edges, relations, selected_occurrences = [], [], {}
     for part in sorted(data.parts, key=lambda item: item.part_id):
         selection = part.model_dump(mode="json")
         if not part.state:
@@ -155,6 +181,7 @@ def build_assembly_candidate(journal, *, project_id, version, data):
         if root.get("bom-ref"):
             local_refs.add(root["bom-ref"])
             components = [root, *components]
+        selected_occurrences[part.part_id] = {"state": part.state, "refs": local_refs}
 
         def qualify(original):
             if original not in local_refs:
@@ -211,6 +238,28 @@ def build_assembly_candidate(journal, *, project_id, version, data):
             # occurrence refs point exclusively into this assembled inventory.
             value["match"] = {**item["match"], "ref": value["ref"]}
             findings[digest(canonical([part.part_id, item]))] = value
+    declarations = assembly_payload(data).get("cross_part_relationships", [])
+    old_relationships = {
+        item["relationship_id"]: item for item in old_manifest.get("cross_part_relationships", [])
+    }
+    new_relationships = {item["relationship_id"]: item for item in declarations}
+    if (
+        any(new_relationships.get(key) != value for key, value in old_relationships.items())
+        and not data.relationship_change_reason
+    ):
+        raise Conflict("Changing or removing cross-part relationships requires an explicit reason")
+    explicit_relations = qualify_relationships(
+        data.cross_part_relationships, selected_occurrences, namespaced_ref
+    )
+    relations.extend(explicit_relations)
+    for relation in explicit_relations:
+        if relation["kind"] != "DEPENDS_ON":
+            continue  # Containment never manufactures dependency/ownership paths.
+        edge = next((item for item in edges if item["ref"] == relation["from"]), None)
+        if edge is None:
+            edges.append({"ref": relation["from"], "dependsOn": [relation["to"]]})
+        elif relation["to"] not in edge.get("dependsOn", []):
+            edge["dependsOn"] = sorted([*edge.get("dependsOn", []), relation["to"]])
     missing = [part.part_id for part in data.parts if part.required and not part.state]
     selected_count = sum(part.state is not None for part in data.parts)
     readiness = (
@@ -234,6 +283,11 @@ def build_assembly_candidate(journal, *, project_id, version, data):
         "withdrawal_reason": data.withdrawal_reason,
         "policy_change_reason": data.policy_change_reason,
     }
+    if declarations or old_relationships:
+        manifest.update(
+            cross_part_relationships=declarations,
+            relationship_change_reason=data.relationship_change_reason,
+        )
     sections["inventory"] = {
         **inventory,
         "assembly": manifest,
@@ -265,6 +319,29 @@ def build_assembly_candidate(journal, *, project_id, version, data):
             for key in old_parts.keys() & new_parts.keys()
             if new_parts[key].required != old_parts[key]["required"]
             or new_parts[key].role != old_parts[key]["role"]
+        ),
+        **(
+            {
+                "relationship_diagnostics": {
+                    "declared": len(explicit_relations),
+                    "dependency_relations": sum(
+                        item["kind"] == "DEPENDS_ON" for item in explicit_relations
+                    ),
+                    "containment_relations": sum(
+                        item["kind"] == "CONTAINS" for item in explicit_relations
+                    ),
+                    "changed_or_removed_ids": sorted(
+                        key
+                        for key, value in old_relationships.items()
+                        if new_relationships.get(key) != value
+                    ),
+                    "preserved_part_roots": sum(key.startswith("part-root:") for key in inventory),
+                    "identity_merges": 0,
+                    "verification": "operator_declared_occurrence_relationships_not_runtime_verification",
+                }
+            }
+            if declarations or old_relationships
+            else {}
         ),
     }
 

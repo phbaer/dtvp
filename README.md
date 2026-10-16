@@ -809,6 +809,25 @@ Actor/context teardown invalidates late responses. Discard does not cancel a job
 that may already have been recorded. A follow-up report never creates a human
 assessment, review or contextual score publication automatically.
 
+### Explicit cross-part occurrence relationships
+
+Assembly selection optionally accepts `cross_part_relationships` (maximum 2,000):
+`{relationship_id, kind, from:{part_id,state,ref}, to:{part_id,state,ref}, rationale}`.
+Use exact original component/root references and the exact selected immutable part
+revision for both endpoints. `DEPENDS_ON` creates an explicit dependency path;
+`CONTAINS` remains typed containment and does not create dependency/ownership paths.
+The assembler never matches names/PURLs or merges occurrences. Source roots,
+imported edges and raw part provenance remain retained. Unselected/missing refs,
+mismatched revisions, duplicate IDs/edges and same-part declarations fail closed.
+
+Target inspection returns existing mappings for explicit preservation. Changing or
+removing an existing declaration requires `relationship_change_reason`; older forms
+cannot silently discard it. Existing requests without extension fields retain their
+fingerprint and output shape. Structural previews report cross-part counts, changed
+IDs and preserved source-root counts; these are operator declarations, not verified
+runtime relationships, discovery completeness or approvals. Normal branch/policy/
+evidence CAS and receipt-first replay continue to apply.
+
 ### External v1 project archive dry run
 
 Managers can inspect an exported `dtvp.project-archive/v1` ZIP without restoring it:
