@@ -148,3 +148,69 @@ def inspect_schema(project_id: str, data: SchemaValidationInput, db: DB, actor: 
     from dtvp.knowledge.schema_validation import validate_schema
 
     return validate_schema(data.document, data.validation_profile)
+
+
+@router.get("/projects/{project_id}/evidence/signature-policy")
+def signature_policy(project_id: str, request: Request, db: DB, actor: Auth):
+    """Expose only keys whose configured scope includes this authorized project."""
+    project_for(db, actor, project_id, "evidence")
+    from dtvp.knowledge.signature_verification import validate_trust_policy
+
+    policy = request.app.state.settings.evidence_jws_trust
+    keys = validate_trust_policy(policy)
+    return {
+        "format": "dtvp.artifact-signature-policy/1",
+        "project_id": project_id,
+        "trust_policy_sha256": digest(canonical(policy)),
+        "keys": [
+            {
+                "subject": item["subject"], "key_id": item["jwk"]["kid"],
+                "algorithm": item["algorithm"], "public_key_thumbprint": key.thumbprint(),
+            }
+            for item, key in keys if project_id in item["project_ids"]
+        ],
+        "verification_scope": "exact_artifact_bytes_only",
+    }
+
+
+@router.post("/projects/{project_id}/evidence/signature-verification")
+def inspect_signature(
+    project_id: str,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    file: UploadFile = File(),
+    signature: UploadFile = File(),
+    expected_artifact_sha256: Sha = Form(),
+    trusted_subject: str = Form(min_length=1, max_length=500),
+    expected_trust_policy_sha256: Sha | None = Form(default=None),
+):
+    """Verify uploaded bytes against one deployment-trusted signer; never publish."""
+    project_for(db, actor, project_id, "evidence")
+    from dtvp.knowledge.signature_verification import (
+        MAX_ARTIFACT_BYTES,
+        MAX_JWS_BYTES,
+        TrustPolicyConflict,
+        verify_artifact_signature,
+    )
+
+    limit = min(MAX_ARTIFACT_BYTES, request.app.state.settings.max_upload_bytes)
+    raw = file.file.read(limit + 1)
+    compact = signature.file.read(MAX_JWS_BYTES + 1)
+    if len(raw) > limit or len(compact) > MAX_JWS_BYTES:
+        raise HTTPException(413, "Artifact or compact JWS exceeds verification limits")
+    try:
+        value = compact.decode("ascii")
+    except UnicodeDecodeError:
+        raise HTTPException(422, "Compact JWS must be ASCII") from None
+    try:
+        return verify_artifact_signature(
+            raw, value,
+            expected_artifact_sha256=expected_artifact_sha256,
+            trusted_subject=trusted_subject,
+            project_id=project_id,
+            trust_policy=request.app.state.settings.evidence_jws_trust,
+            expected_trust_policy_sha256=expected_trust_policy_sha256,
+        )
+    except TrustPolicyConflict:
+        raise HTTPException(409, "Deployment JWS trust policy changed; repin explicitly") from None

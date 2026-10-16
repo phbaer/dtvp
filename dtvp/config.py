@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     session_secret: str = ""
     playground: bool = False
     legacy_review_enabled: bool = True
+    evidence_jws_trust: list[dict] = []
     frontend_dir: Path = Path("frontend/dist")
     max_upload_bytes: int = 32 * 1024 * 1024
     oidc_issuer: str = ""
@@ -56,4 +57,8 @@ class Settings(BaseSettings):
                 )
         if not 60 <= self.agentyzer_timeout_seconds <= 86400:
             raise ValueError("Agentyzer observation timeout must be between 60 and 86400 seconds")
+        if self.evidence_jws_trust:
+            from dtvp.knowledge.signature_verification import validate_trust_policy
+
+            validate_trust_policy(self.evidence_jws_trust)
         return self

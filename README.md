@@ -3243,3 +3243,47 @@ synthetic CAS/replay behavior, not production capacity or mixed-workload accepta
 The real PostgreSQL three-round/three-writer regression passed; SQLite is deliberately
 excluded from this concurrent SQL qualification (sequential native workflows are
 checked on both databases).
+
+### Exact-artifact signature verification
+
+An optional read-only verifier supports standard compact [JWS](https://www.rfc-editor.org/rfc/rfc7515.html)
+using [joserfc](https://jose.authlib.org/en/guide/jws/) and deployment-configured
+public keys. `DTVP_EVIDENCE_JWS_TRUST` defaults to `[]`. Its JSON array entries
+contain exactly `subject` (configured producer identity label), `project_ids`
+(explicit permitted IDs), `algorithm` and `jwk` (public JWK with a unique `kid`).
+Allowed algorithms are `ES256`/P-256, `ES384`/P-384, `RS256`, `PS256` and
+fully specified `Ed25519`/Ed25519. Deprecated polymorphic `EdDSA` is excluded; see
+[RFC 9864](https://www.rfc-editor.org/rfc/rfc9864.html). RSA keys must be 2048–8192
+bits. Startup rejects private/symmetric keys, duplicate IDs, wildcard scopes,
+remote/certificate/unknown key fields and conflicting algorithms, curves or usage.
+At most 100 keys, 200 exact project scopes/key, 8 KiB/JWK and 1 MiB/policy are allowed.
+
+`GET /api/v3/projects/{id}/evidence/signature-policy` returns the current complete
+policy digest and only this project's permitted subjects, key IDs, algorithms and
+RFC 7638 public-key thumbprints. `POST .../evidence/signature-verification`
+accepts multipart uploads `file` (exact artifact bytes) and `signature` (ASCII
+compact JWS file), plus `expected_artifact_sha256`, `trusted_subject` and optional
+`expected_trust_policy_sha256`. Both routes require project evidence permission.
+A stale policy pin returns 409; no trusted matching key, wrong bytes or an invalid
+signature returns an explicit `verified: false` report. Request keys never become
+trusted and no key/context/certificate URLs are fetched.
+
+The signature must cover the complete raw artifact as its encoded payload. The
+verifier compares its decoded payload byte-for-byte to the upload and checks the
+caller's expected SHA-256; JSON whitespace changes therefore fail. Only a selected
+key whose configured subject, exact project scope, protected `kid` and algorithm
+all match can verify. Reports retain the policy hash, exact artifact/JWS hashes,
+configured signer label, successful key thumbprint, algorithm, observation time
+and report digest. The observation time is not an authenticated signing time.
+Limits are 1 byte–8 MiB/artifact, 12 MiB/compact JWS and 8 KiB/protected header,
+also respecting a smaller configured upload limit. Compact files must contain
+only the serialization, without trailing whitespace; duplicate headers, padding,
+unknown/critical headers, detached or unencoded payloads are rejected.
+
+This establishes integrity under the configured key policy only. It does not
+verify embedded JSF, DSSE, Sigstore, certificate chains, revocation or publisher
+identity independently of configuration. It creates no import, retained trust
+upgrade, human approval, product applicability or regulatory/legal conclusion.
+The separate official-schema report continues to mark signature verification as
+`not_performed`; callers must deliberately retain and assess the signature report
+alongside their exact source bytes.
