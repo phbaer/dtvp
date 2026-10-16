@@ -19,6 +19,7 @@ async function fixture(page: Page, personas = false) {
     if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path === '/api/v2/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product', workspace_id: 'team' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.1', state: head }] }
     else if (path.endsWith('/workspace')) data = { state: head, project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/advisory-refresh')) data = { expected_versions: { '7.1.1': head }, expected_evidence: live, providers: [], identifiers: [], total: 0, next_offset: null, capabilities: [], limitations: [] }
@@ -86,6 +87,7 @@ test('actor teardown prevents a late report response from restoring the previous
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toBeEnabled()
   await page.getByRole('combobox', { name: 'Persona', exact: true }).selectOption('person')
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toHaveValue('person')
+  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toContainText('Product')
   const response = page.waitForResponse(item => item.url().includes('/compare/intelligence'))
   f.release(); await response
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
