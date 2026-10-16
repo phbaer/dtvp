@@ -522,8 +522,10 @@ assessment coverage; the lifecycle below binds explicit decisions to those conte
 Assessment/review workflows now persist exact contextual/version targets and
 independent decisions. Coordinator score publication requires all current contexts
 for that vulnerability/version to be approved. Initial combined workspace, HTTP
-CLI and guided Knowledge UI share these backend rules; advanced migration and
-cross-import identity reconciliation remain separate work.
+CLI and guided Knowledge UI share these backend rules. Explicit occurrence
+correspondence and local v2 snapshot migration rehearsal are implemented; automatic
+semantic identity reuse, external/v1 archive migration and complete cutover
+qualification remain separate work.
 
 VDR/VEX evidence now has standalone durable selection, explicit producer ordering,
 withdrawal and baseline reapplication. Initial JSON semantic subsets preserve
@@ -533,16 +535,23 @@ complete conformance or internal approval. Originals remain retrievable.
 
 Native Agentyzer jobs now checkpoint submission intent, remote identity and raw
 reports, recheck permissions/configuration and preserve uncertain publication
-inputs. Unknown remote POST outcomes never trigger automatic resubmission. Native
-DT intake uses dedicated per-version bindings and GET-only durable collection.
+inputs. Unknown remote POST outcomes never trigger automatic resubmission.
+Opt-in actor-only reconciliation can verify an explicitly selected completed job
+through private authenticated correlation and exact issued-input pins; legacy
+unbound jobs remain unresolved. This is receipt consistency, not cryptographic
+provider attestation, and the sibling implementation still requires deployment.
+Native DT intake uses dedicated per-version bindings and GET-only durable collection.
 Exact raw responses and frozen captures are retained before publication; SBOM export
 claims and finding claims remain separate. Nontransactional DT reads remain an
 explicit consistency limitation. Neither integration creates human approvals.
 
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,
-advanced review/range coverage, extended evidence synthesis and VDR/VEX conformance,
-extended specialist orchestration and controlled architecture/export workflows.
+continuous range/exclusion syntax beyond explicit reviewed targets, extended
+evidence synthesis and VDR/VEX conformance, native specialist follow-up conversations,
+and broader architecture modeling/rendering qualification. Issued exports and
+independent controlled-document registration/review are implemented; they do not
+establish renderer parity, architecture acceptance or regulatory compliance.
 Source license evidence now has a separate human disposition/review workflow with
 dedicated roles, explicit distribution/modification/linking context, independent
 revision approvals and material-change revalidation. It does not infer legal clearance. The existing v2 UI is not evidence these new contracts already ship.
@@ -559,7 +568,7 @@ end-to-end qualification.
 | `cpeservice`, `feat/dtvp-evidence-contract`, `98049fc` | Truthful rule/identity provenance, requested/resolved identifiers and deterministic result digest. 213 tests passed. | Internal DTVP offline catalog/rule proposals now exist; complete migration, ranking and refresh remain planned. Candidates are not applicability. |
 | `generator`, `feat/dtvp-snapshot-integrity`, `791b186` | Native v3 project/state input now consumes exact issued files with scope/receipt/digest checks and byte-exact issuance/receipt/bundle/manifest archives. Actual DTVP issuance→Generator roundtrip passed. Context/approval pins, verified published CVSS, real assembly roots and existing renderer/templates remain preserved. Reviewed adapter: 97 focused tests passed; broader suite: 718 passed, the same six baseline resource-path failures, one skip. | Richer metadata presentation, multi-version SOUP and controlled document parity remain gates. |
 | `vscorer`, `feat/dtvp-context-binding`, `3994254` | Optional exact context/component/CVE/Base receipt survives native intake and proposal responses. Independent Python/architecture reviews approved; 27 final checks passed and real DTVP-derived inputs were accepted. | No remote authenticity claim; production auth, serializer upgrade compatibility and controlled round-trip qualification remain. |
-| `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` | Exact requested Git commit, isolated clean worktree and explicit verified/unverified source evidence. 493 tests passed. | Commit identity does not verify binaries, submodules or LFS; durable remote jobs and complete artifact binding remain gaps. |
+| `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` / `a10b5d4` | Exact Git-commit source binding and additive private authenticated completed-job correlation; public request/report paths exclude private binding. The native DTVP adapter retains exact issued-input/request pins and never repeats unknown analysis POSTs. | These isolated changes are not merged or deployed. Upstream process-local job retention, deployed authentication/endpoint compatibility and source-to-binary/submodule/LFS verification remain qualification gaps. |
 
 DTVP's v2 adapter additionally requires producer-qualified repository/commit
 binding before external Agentyzer proposals become eligible. Reports without it

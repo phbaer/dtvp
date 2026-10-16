@@ -21,9 +21,10 @@ tags, a rebuildable SQL projection and journal-backed inventory import/compariso
 under `/api/v3`, with contextual assessment/review, coordinator scoring, curated
 metadata, bound proposals, semantic comparisons and retained history.
 The Review tab retains `/api/v2`; the Knowledge tab uses the journal-backed workspace.
-VDR/VEX JSON semantic subsets are available; advanced scope reconciliation and
-merge synchronization remain planned. Existing v2 data is not migrated or made
-journal-authoritative implicitly.
+VDR/VEX JSON semantic subsets, explicit occurrence correspondence and pinned
+assessment synchronization previews/drafts are available. Advanced scope handling
+and automatic cascading synchronization remain planned. Local v2 snapshot migration
+is explicit; existing v2 data never becomes journal-authoritative implicitly.
 Reuse decisions compare original v1 on local
 `main` (`bdc7ba4`), committed refactoring and uncommitted work separately; see the
 [baseline and reuse matrix](docs/rewrite-plan.md#baseline-and-reuse-matrix).
@@ -269,8 +270,9 @@ use offline journal verification for integrity checks.
 On a local synthetic 2,000-library/250-CVE-per-version comparison, repeated pages
 improved from 1.68–1.95 seconds and 19,785 object reads to roughly 0.01–0.07 seconds
 and 21 reads. The first computation still took about 1.33 seconds. These exploratory
-warm-filesystem timings exclude HTTP/concurrent deployment qualification; import
-and ownership write performance is unchanged.
+warm-filesystem timings exclude HTTP/concurrent deployment qualification. They
+measure comparison reads; artifact reuse separately improves repeated import and
+ownership writes, as described under offline journal verification.
 
 ### Assessment read performance
 
@@ -879,10 +881,11 @@ with `offset`/`limit`; configuration and constituent-source states are excluded.
 dependency and contextual-finding changes with full-set counts. Classifications
 separate material evidence, bookkeeping, ownership, assessment, review and scoring.
 Retained absent assessments stay visible. Comparisons read immutable journal
-states without loading historical data into live PostgreSQL tables. Current
-intelligence reevaluation and comparison caches remain planned. Exact source-local
-references determine identity: changed references appear as remove/add, never a
-name-based match or proof of remediation.
+states without loading historical data into live PostgreSQL tables. Historical
+comparisons use the bounded actor-independent cache described above; current
+intelligence reevaluation remains planned. Exact source-local references determine
+identity: changed references appear as remove/add, never a name-based match or
+proof of remediation.
 
 The HTTP CLI exposes `knowledge refs`, `knowledge history` and
 `knowledge compare --project ID --before SHA --after SHA`, with `--json`,
@@ -1118,13 +1121,16 @@ filters and bounded paging. `GET .../analysis-jobs/{id}` shows safe status; expl
 `POST .../{id}/retry` or `/cancel` requires the submitting actor and current
 permissions. Cancel stops local work, not a claimed remote cancellation. Unknown
 submissions need reconciliation or a deliberately new request. Operational SQL
-backups remain necessary for jobs. Authenticated remote-ID reconciliation and
-native follow-up conversations remain planned.
+backups remain necessary for jobs. Opt-in actor-only authenticated remote-ID
+reconciliation is implemented as described above; native follow-up conversations
+remain planned.
 The specialist panel shows bounded jobs for the selected context/vulnerability.
 Qualified input preparation precedes an explicit queue action. Status refresh,
 retry and local cancellation are explicit; backend capabilities control actions.
-Failed submissions preserve guidance and retry identity. Unknown submissions show
-reconciliation guidance without a retry button.
+Failed submissions preserve guidance and retry identity. Unknown submissions
+never offer analysis resubmission; eligible opted-in jobs offer explicit completed
+remote-job verification with frozen remote/request IDs. Legacy jobs without private
+correlation remain unresolved.
 
 ### Qualified Agentyzer inputs
 
@@ -1307,9 +1313,11 @@ uv run pytest tests/test_knowledge_journal.py tests/test_knowledge_api.py
 Migration `0005` runs implicitly. New `knowledge_*` tables hold active records,
 reference heads and an applied-publication checkpoint; tags store only references.
 They are an initial general projection, not the final indexed finding/context
-schema. Diffs currently report changed record keys; cached interactive comparisons
-and cross-import identity reconciliation are later slices. Normal application
-commands must use the API; local reconstruction is an administrative operation.
+schema. The basic comparison reports changed record keys; historical semantic
+comparison adds bounded classified details and a process-local cache. Explicit
+occurrence correspondence is available, while automatic semantic identity reuse
+remains deferred. Normal application commands must use the API; local reconstruction
+is an administrative operation.
 
 ## Existing refactoring runtime
 

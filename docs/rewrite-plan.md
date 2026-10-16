@@ -164,7 +164,7 @@ branches pin exact immutable revisions and coverage. New shared revisions cannot
 silently alter existing branch states. Global advisory data is likewise pinned
 when incorporated into a product state.
 
-Publication protocol to implement and fault-test:
+Implemented publication protocol, exercised by fault/recovery tests:
 
 1. Validate authorization, input revisions and expected branch heads.
 2. Durably store immutable objects and complete state manifests.
@@ -176,9 +176,10 @@ Publication protocol to implement and fault-test:
 Start with one journal writer per installation, shared by API and jobs. A durable
 publication sequence orders reference transactions; the revision graph alone
 does not establish projection order. Multi-branch publication cannot be achieved
-by independently replacing branch files. The reference transaction format,
-locking, filesystem durability and recovery algorithm remain an implementation
-contract to settle before coding the writer.
+by independently replacing branch files. The implemented journal serializes
+writers/projection with filesystem flock and publishes the complete reference
+transaction through one durable HEAD replacement. Hash-verified objects precede
+publication; projection checkpoints and explicit verification support recovery.
 
 Before publication, interrupted writes leave unreferenced objects; after it,
 projection catch-up recovers PostgreSQL. Replies identify the committed revision
@@ -219,9 +220,10 @@ can skip failed inputs and can write after validation errors. Contract hardening
 and collision/failure fixtures precede trusted automation. See the
 [critical review](devsecops-evidence-concept.md#product-assembly-from-several-sboms).
 
-Configuration UI remains deferred, but inputs retain subject digest, source/build
-identity, target/platform/configuration, collector version/method and coverage
-limitations now. Complete inventory replacement is within declared scope; it is
+Native file-intake and assembly UIs now capture explicit source/part selections
+and collection scope. Inputs retain subject digest, source/build identity,
+target/platform/configuration, collector version/method and coverage limitations;
+overlapping-view reconciliation and cross-part topology editing remain deferred. Complete inventory replacement is within declared scope; it is
 not verified discovery of every product component. Source, binary, container and
 build evidence must not silently overwrite incompatible scopes. Preserve typed
 containment/dependency/communication relations and declared/observed/concluded
@@ -579,7 +581,8 @@ guided assessment/independent review/coordinator scoring, ten advanced filters,
 user-local saved views, shared URLs and readable retained/legacy evidence. HTTP CLI
 uses the same backend contracts. A populated isolated workflow demo preserves
 interactive edits. Product refs/history and bounded semantic comparisons use
-immutable journal states; current-intelligence comparison caches remain planned.
+immutable journal states with an actor-independent historical cache; current
+intelligence reevaluation remains planned.
 
 Explicit synchronization now extends source-author content into target-only drafts
 under exact source/target/preview pins. Existing target decisions cannot be overwritten;
@@ -588,8 +591,10 @@ active branches and tags. Offline full-journal verification supports recovery.
 
 Known-ID advisory feed documents now enrich baseline-reported identifiers through
 the durable product evidence lifecycle. Provider facts remain independent; unknown
-IDs are unresolved and removed baseline findings cannot self-resurrect. Native
-live provider refresh and new package/version matching remain separate work.
+IDs are unresolved and removed baseline findings cannot self-resurrect. Explicit
+native NVD/CIRCL refresh now uses durable GET-only jobs and frozen captures;
+additional providers, provider-specific rate policies and new package/version
+matching remain separate work.
 
 Native DT collection now uses per-version bindings and GET-only durable jobs.
 Complete captures and exact response bytes are checkpointed before publication;
@@ -710,13 +715,20 @@ bytes and access denials. Readiness detects checkpoint/publication misalignment
 without repairing it. Custom roles/extensions, engine major upgrades, production
 identity and remote-service reconciliation still require deployment qualification.
 
-Not yet implemented: remaining native management/integration UI, stable cross-import/context identity,
-range/exclusion expressions beyond explicit reviewed version targets, extended evidence synthesis,
-advanced VDR/VEX scope/schema/signature support, cascading synchronization, current-intelligence comparisons, journal
-retention/GC, deployment-specific recovery qualification and v2/legacy migration. Native Agentyzer
-follow-up orchestration and authenticated remote-ID reconciliation, full CPE refresh/migration, extended license qualification and architecture-approval
-workflows, consumer serializer upgrade compatibility and controlled-document
-qualification remain cutover gates. The v2 runtime
+Bounded local v2 snapshot migration now preserves exact originals, native format
+and relationship semantics, and historical-only decisions; it never synthesizes
+native approvals. Opt-in authenticated Agentyzer remote-ID reconciliation now
+verifies completed jobs with private correlation and exact issued-input pins.
+Neither feature establishes complete legacy cutover or deployed sibling parity.
+
+Still deferred: automatic semantic cross-import/context identity reuse; continuous
+range/exclusion expressions beyond explicit reviewed version targets; extended
+evidence synthesis and VDR/VEX scope/schema/signature support; verified cascading
+synchronization; current-intelligence comparison; destructive journal retention/GC;
+external/v1 archive migration and complete cutover qualification; native Agentyzer
+follow-up conversations; complete CPE-service migration/refresh; extended license
+and architecture-model qualification; serializer upgrade compatibility; and
+controlled-document/production recovery qualification. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain
 source-local references; no implicit assessment inheritance or scope approval
 is inferred from them. JSON-object imports retain their canonical representation;
