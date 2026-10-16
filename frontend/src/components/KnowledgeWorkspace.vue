@@ -19,6 +19,7 @@ import KnowledgeAssembly from './KnowledgeAssembly.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
 import KnowledgeDocuments from './KnowledgeDocuments.vue'
 import KnowledgePortfolio from './KnowledgePortfolio.vue'
+import KnowledgeOrganizationPortfolio from './KnowledgeOrganizationPortfolio.vue'
 import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
 import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
 import KnowledgeOwnership from './KnowledgeOwnership.vue'
@@ -344,6 +345,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
 <template>
   <section class="knowledge-workspace" aria-label="Knowledge workspace">
     <header class="knowledge-heading"><div><h1>Contextual review</h1><p class="hint">Product version · consuming context · responsible team</p></div><div class="knowledge-actions"><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo()">Load workflow demo</button><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo('specialists')">Load specialist demo</button><button :disabled="busy || !version" @click="load()">Refresh workspace</button></div></header>
+    <KnowledgeOrganizationPortfolio :key="me.id" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
     <form class="knowledge-filters" @submit.prevent="load()">
       <SearchSelect v-model="project" label="Knowledge product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy || intakeLocked" @select="chooseProject" />
       <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || intakeLocked || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>

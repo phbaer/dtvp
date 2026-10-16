@@ -621,6 +621,24 @@ renamed display label cannot reorder a pinned selection. CLI consumers can use
 `knowledge request GET /api/v3/portfolio` with the same query parameters. This
 read-only report creates no assessments, approvals or completeness claims.
 
+The Knowledge workspace offers collapsed **Statistics across products** before a
+product is selected. Opening it requests complete server-derived statistics for
+all currently accessible products (up to 100), or use the bounded searchable
+catalog to select products explicitly. Team and current workspace finding filters
+apply on explicit load/refresh. Findings, unique vulnerability IDs, project-scoped
+logical assessments and required context-review workload remain separate counts.
+Source severity and current published contextual severity remain separate; missing
+or outdated contextual scores stay unknown. Team workloads can overlap under
+ownership disputes and must not be added as disjoint totals.
+
+Product rows are paged, while totals and team workloads cover the entire selected
+scope. Every page retains the original product/team/filter query and complete
+project/version head digest, including after draft selector/filter edits. Changed
+heads retain the previous result and require explicit refresh. Per-version facts,
+unfiltered input coverage, exact pins and limitations are progressive details.
+The view is read-only, loads only when opened, and actor changes invalidate late
+responses. Oversized selections fail visibly instead of silently truncating.
+
 ### Current-version portfolio statistics
 
 The Knowledge tab offers a collapsed portfolio panel. It inherits workspace
