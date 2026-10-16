@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
+import KnowledgeIntegrationEvents from './KnowledgeIntegrationEvents.vue'
 import KnowledgeCorrespondenceDraft from './KnowledgeCorrespondenceDraft.vue'
 type Kind = 'component' | 'context'
 type Pair = { kind: Kind; source_id: string; target_id: string }
@@ -144,6 +145,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <p v-if="registry">{{ registry.total }} retained assertions in this pinned target state</p><article v-for="row in registry?.items" :key="row.revision"><strong>{{ row.payload.reconciliation_id }} · {{ human(row.payload.stage) }}</strong><p>{{ row.payload.rationale }}</p><p v-if="!row.in_version_scope" class="hint">Historical assertion from another version; no current coverage is inferred.</p><details><summary>Recorded correspondence pins and evidence</summary><pre>{{ JSON.stringify(row, null, 2) }}</pre></details><template v-if="writable && row.in_version_scope"><button type="button" :disabled="busy || Boolean(pending)" @click="edit(row)">Supersede assertion {{ row.payload.reconciliation_id }}</button><button v-if="row.payload.stage === 'active'" type="button" :disabled="busy || Boolean(pending)" @click="retractId = row.payload.reconciliation_id; retractReason = ''">Consider retraction {{ row.payload.reconciliation_id }}</button><form v-if="row.payload.stage === 'active' && retractId === row.payload.reconciliation_id" @submit.prevent="mutate('retract', row)"><label>Retraction reason<textarea v-model="retractReason" required maxlength="6000" :disabled="busy || Boolean(pending)" /></label><button :disabled="busy || (pending && (pending.action !== 'retract' || pending.recordId !== row.payload.reconciliation_id)) || (!pending && !retractReason.trim())">{{ pending ? 'Resend identical retraction request' : 'Retract assertion' }}</button></form></template></article>
       <nav class="actions" aria-label="Correspondence registry pages"><button type="button" :disabled="busy || !registryPrevious.length" @click="registryPage(false)">Previous correspondence assertions</button><button type="button" :disabled="busy || registry?.next_offset == null" @click="registryPage(true)">Next correspondence assertions</button></nav>
       </fieldset>
+      <KnowledgeIntegrationEvents :project="project" :state="state" :disabled="busy || !!pending || draftLocked" />
     </section>
   </details>
 </template>

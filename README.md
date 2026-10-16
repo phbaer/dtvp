@@ -891,8 +891,23 @@ transfers, and existing draft/review gates remain unchanged.
 
 The generic authenticated CLI uses the same JSON: `uv run dtvp knowledge request
 POST /api/v3/projects/PRODUCT/integration-events --body integration.json`; inspect
-or preview through `knowledge request GET/POST` on the endpoints above. No UI or
-automatic cascade execution is introduced in this slice.
+or preview through `knowledge request GET/POST` on the endpoints above. Recording
+remains an API/CLI operation; automatic cascade execution is not enabled.
+
+The existing **Occurrence correspondence across imports** panel now contains a
+collapsed **Pipeline integration observations** view. It lazily lists retained
+observations for the displayed immutable workspace state, separates producer
+integration claims from optional offline commit-object consistency, and keeps
+source/target commits, artifact pins and assurance limits available in details.
+
+An explicit event selection enables a read-only assessment comparison. A common
+basis is never inferred; an optional exact basis SHA and context mapping JSON
+freeze with the event and target across retries and pages. Page results must keep
+the same report digest. Workspace advances mark the retained selection stale and
+invalidate late responses; loading the new state requires explicit refresh. Actor
+and project teardown discard old response authority. No draft, assessment, review,
+score, SBOM merge or source integration is applied from this view. Pipeline/event
+recording remains an API/CLI operation; existing human review remains independent.
 
 The API-only synthetic cascade demo uses four independent development versions:
 
