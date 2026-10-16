@@ -1782,6 +1782,30 @@ Mirrors retain upstream publisher attribution and do not establish independent
 corroboration. Provider rate-limit errors fail collection without partial publication;
 broader scheduling and provider-specific rate management remain planned.
 
+Within **Advisory intelligence refresh**, the collapsed **External OSV package
+matching** flow lists a bounded, pinned catalog of eligible package versions.
+Users explicitly select at most 20 PURLs; selection persists across catalog pages,
+whose selection digest must remain unchanged. Provider configuration and server
+capabilities control available operations. Unsupported and unselected coordinates
+retain unknown coverage; no-match responses never establish absence or remediation.
+
+Enqueue captures exact PURLs, product heads, evidence selection, source revision
+and request ID. Network failures and head conflicts retain that request unchanged;
+workspace advances preserve the captured scope and block first enqueue of stale
+drafts until an explicit plan refresh. Current server authorization governs every
+retry/cancel; durable job lists and manual status refresh expose progress and raw
+capture downloads without automatic polling. Actor/project teardown invalidates
+late responses. OSV results remain provider claims requiring contextual human
+analysis, never automatic assessments, approvals or scores.
+
+Busy operations, unconfirmed enqueue receipts and uncertain job actions lock normal
+product/version and global-page navigation until recording is confirmed or the
+capture is explicitly discarded. The advisory parent combines its own request
+state with the OSV child lock without disabling the child's retry/discard controls.
+Changing persona remains possible and invalidates the old actor's responses.
+Status/action responses must match the requested job ID, kind and immutable scope
+before replacing displayed job data.
+
 ### Issued consumer exports
 
 `POST /api/v3/projects/{id}/states/{state}/exports/bundle` explicitly archives exact

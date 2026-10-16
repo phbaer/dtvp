@@ -2,16 +2,21 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
+import KnowledgeOsvMatching from './KnowledgeOsvMatching.vue'
 import KnowledgeIntelligenceComparison from './KnowledgeIntelligenceComparison.vue'
 type Provider = { id: string; publisher: string; enabled: boolean; next_revision: number }
 type Plan = { expected_versions: Record<string, string>; expected_evidence: string | null; providers: Provider[]; identifiers: string[]; total: number; next_offset: number | null; capabilities: string[]; limitations: string[] }
 type Job = { id: string; status: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number; attempts: number; error: string; result: Record<string, unknown>; capabilities: string[] }
 type Page = { items: Job[]; next_offset: number | null }
 type Input = { request_id: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number }
+const emit = defineEmits<{ locked: [boolean] }>()
+const childLocked = ref(false)
 const props = defineProps<{ project: string; state: string }>()
 const expanded = ref(false), busy = ref(false), plan = ref<Plan | null>(null), provider = ref(''), query = ref(''), identifiers = ref<string[]>([])
 const error = ref(''), notice = ref(''), stale = ref(false), recorded = ref(false), pending = ref<Input | null>(null)
 const offset = ref(0), previous = ref<number[]>([]), jobs = ref<Job[]>([]), recent = ref<Job | null>(null), jobOffset = ref(0), jobNext = ref<number | null>(null), jobPrevious = ref<number[]>([]), jobsLoaded = ref(false)
+const ownLocked = computed(() => busy.value || Boolean(pending.value && !recorded.value))
+watch(() => ownLocked.value || childLocked.value, value => emit('locked', value), { immediate: true, flush: 'sync' })
 let sequence = 0
 const root = () => `/projects/${encodeURIComponent(props.project)}`
 const selectedProvider = computed(() => plan.value?.providers.find(item => item.id === provider.value))
@@ -87,12 +92,12 @@ watch(() => props.project, () => {
   ++sequence; busy.value = false; plan.value = null; pending.value = null; recorded.value = false; stale.value = false; identifiers.value = []; provider.value = ''; query.value = ''; jobs.value = []; recent.value = null; jobsLoaded.value = false; previous.value = []; jobPrevious.value = []; offset.value = 0; jobOffset.value = 0; error.value = ''; notice.value = ''
   if (expanded.value) void loadPlan().then(() => loadJobs(0))
 })
-onBeforeUnmount(() => { ++sequence })
+onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
   <details class="knowledge-advisories" @toggle="toggle">
     <summary>Advisory intelligence refresh</summary>
-    <section aria-label="Advisory intelligence refresh">
+    <section aria-label="Advisory intelligence refresh"><fieldset class="advisory-controls" :disabled="childLocked">
       <KnowledgeIntelligenceComparison :project="project" :state="state" />
       <p class="hint">Enrich exact vulnerability IDs already reported by product baselines. No package matching, new vulnerability discovery or assessment approval is implied.</p>
       <p class="hint">Provider and advisory publisher differ: mirrors are not independent corroboration. A provider not-found response never proves remediation. Cancel stops DTVP work; an in-flight remote lookup may finish.</p>
@@ -110,9 +115,10 @@ onBeforeUnmount(() => { ++sequence })
       <p v-if="jobsLoaded && !shownJobs.length">No advisory jobs for this product.</p>
       <article v-for="job in shownJobs" :key="job.id" :aria-label="`Advisory job ${job.id}`"><strong>{{ job.provider }} · {{ human(job.status) }}</strong><p>{{ job.identifiers.join(', ') }} · {{ job.attempts }} attempts</p><p v-if="job.error">{{ job.error }}</p><div class="actions"><button type="button" :disabled="busy" @click="inspect(job)">Refresh advisory status</button><button v-if="job.capabilities.includes('retry')" type="button" :disabled="busy" @click="inspect(job, 'retry')">Retry advisory job</button><button v-if="job.capabilities.includes('cancel')" type="button" :disabled="busy" @click="inspect(job, 'cancel')">Cancel DTVP advisory job</button></div><details><summary>Advisory job pins and capture result</summary><pre>{{ JSON.stringify({ provider: job.provider, identifiers: job.identifiers, revision: job.revision, expected_versions: job.expected_versions, expected_evidence: job.expected_evidence, result: job.result }, null, 2) }}</pre></details></article>
       <nav v-if="jobsLoaded" class="actions" aria-label="Advisory job pages"><button type="button" :disabled="busy || !jobPrevious.length" @click="pageJobs(false)">Previous advisory jobs</button><button type="button" :disabled="busy || jobNext == null" @click="pageJobs(true)">Next advisory jobs</button></nav>
+      </fieldset><KnowledgeOsvMatching :project="project" :state="state" :disabled="ownLocked" @locked="childLocked = $event" />
     </section>
   </details>
 </template>
 <style scoped>
-.knowledge-advisories { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; } summary { cursor: pointer; font-weight: 600; } section, article, form { min-width: 0; overflow-wrap: anywhere; }.hint { font-size: .85rem; color: var(--muted); }.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-block: .6rem; } label { display: grid; gap: .3rem; margin-block: .6rem; } input, select { width: 100%; min-width: 0; box-sizing: border-box; }.identifiers { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }.identifiers label { display: flex; align-items: center; }.identifiers input { width: auto; } article { border-top: 1px solid var(--line); padding-block: .7rem; } pre { overflow-wrap: anywhere; white-space: pre-wrap; max-height: 18rem; overflow: auto; font-size: .75rem; }
+.knowledge-advisories { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; } .advisory-controls { min-width:0; margin:0; padding:0; border:0 } summary { cursor: pointer; font-weight: 600; } section, article, form { min-width: 0; overflow-wrap: anywhere; }.hint { font-size: .85rem; color: var(--muted); }.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-block: .6rem; } label { display: grid; gap: .3rem; margin-block: .6rem; } input, select { width: 100%; min-width: 0; box-sizing: border-box; }.identifiers { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }.identifiers label { display: flex; align-items: center; }.identifiers input { width: auto; } article { border-top: 1px solid var(--line); padding-block: .7rem; } pre { overflow-wrap: anywhere; white-space: pre-wrap; max-height: 18rem; overflow: auto; font-size: .75rem; }
 </style>
