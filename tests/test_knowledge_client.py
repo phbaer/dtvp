@@ -458,3 +458,64 @@ def test_portfolio_cli_forwards_selected_heads_filters_and_displays_server_count
         assert "approved targets=50/79" in output and "not assessable=2" in output
         assert "team=Platform" in output
         assert "packages=unknown" in output and "state unfiltered" in output
+
+
+@pytest.mark.parametrize("submit", [False, True])
+@respx.mock
+def test_document_cli_preserves_bytes_and_explicit_review_pins(tmp_path, monkeypatch, submit):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    raw = b"%PDF-exact\r\n\x00\xff"
+    artifact = tmp_path / "review.pdf"
+    artifact.write_bytes(raw)
+    metadata = {
+        "request_id": "stable-request",
+        "expected": "a" * 64,
+        "expected_revision": None,
+        "issued_receipt_sha": "b" * 64,
+        "renderer": {"name": "generator", "version": "1"},
+        "configuration": {"template": "reviewed"},
+        "document_id": "architecture",
+        "title": "Architecture",
+        "purpose": "architecture",
+        "rationale": "Ready for review",
+        "filename": "review.pdf",
+        "media_type": "application/pdf",
+    }
+    config = tmp_path / "metadata.json"
+    config.write_text(json.dumps(metadata))
+    argv = [
+        "dtvp",
+        "knowledge",
+        "--url",
+        "http://dtvp.test",
+        "document-register",
+        "--project",
+        "product",
+        "--version",
+        "7.1.2",
+        "--file",
+        str(artifact),
+        "--metadata",
+        str(config),
+    ]
+    if submit:
+        argv.append("--submit")
+    monkeypatch.setattr(sys, "argv", argv)
+    route = respx.post(
+        "http://dtvp.test/api/v3/projects/product/versions/7.1.2/documents/"
+        + ("submit" if submit else "draft")
+    ).mock(return_value=httpx.Response(201, json={"committed": True}))
+    main()
+    from email.parser import BytesParser
+    from email.policy import default
+
+    request = route.calls[0].request
+    message = BytesParser(policy=default).parsebytes(
+        b"Content-Type: " + request.headers["Content-Type"].encode() + b"\r\n\r\n" + request.content
+    )
+    parts = {
+        part.get_param("name", header="content-disposition"): part.get_payload(decode=True)
+        for part in message.iter_parts()
+    }
+    assert parts["file"] == raw
+    assert json.loads(parts["metadata"]) == metadata

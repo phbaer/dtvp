@@ -559,8 +559,11 @@ Metadata pins `expected`, `expected_revision`, `document_id`, `issued_receipt_sh
 `renderer`, `configuration`, `title`, `purpose`, `rationale`, `filename`,
 `media_type` and `request_id`. Submit exact revision reviews to `/documents/reviews`;
 read paged records under `.../states/{state}/documents`. Original artifact downloads
-use the authorized state artifact route. Generator qualification and adoption of
-issued inputs remain separate cutover work.
+use the authorized state artifact route. CLI uploads preserve the same exact bytes
+and explicit metadata: `knowledge document-register --project ID --version VERSION
+--file report.pdf --metadata document.json` saves a draft; add `--submit` for review.
+The CLI never creates request IDs or replaces concurrency pins. Generator
+qualification and adoption of issued inputs remain separate cutover work.
 
 ### Native analysis jobs
 
