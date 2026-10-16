@@ -11,6 +11,7 @@ import KnowledgeLicenses from './KnowledgeLicenses.vue'
 import KnowledgeAnalysisEvidence from './KnowledgeAnalysisEvidence.vue'
 import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
+import KnowledgeComponentMetadata from './KnowledgeComponentMetadata.vue'
 import KnowledgeIntake from './KnowledgeIntake.vue'
 import KnowledgeAssembly from './KnowledgeAssembly.vue'
 import KnowledgeBulkReview from './KnowledgeBulkReview.vue'
@@ -23,8 +24,8 @@ import KnowledgePortfolio from './KnowledgePortfolio.vue'
 import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
 import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
 const props = defineProps<{ me: Me }>()
-const intakeBusy = ref(false), assemblyLocked = ref(false)
-const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value)
+const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false)
+const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
 function bulkEligible(row: KnowledgeFinding) {
@@ -91,8 +92,9 @@ const ratingSource = (rating: KnowledgeFinding['source_ratings'][number]) => (ty
 const sourceScore = (row: KnowledgeFinding) => row.source_ratings.filter(r => r.score != null).map(r => r.score!.toFixed(1)).join(' / ') || (typeof row.source_severity === 'string' ? label(row.source_severity) : 'Unknown')
 const selectedIndex = computed(() => workspace.value?.items.findIndex(item => item.id === selected.value?.id) ?? -1)
 function fail(err: unknown) { error.value = err instanceof ApiError && err.status === 409 ? 'The baseline or assessment changed. Refresh before retrying; your text is retained.' : err instanceof Error ? err.message : 'Request failed' }
-function close() { assessmentScope.value = null; selected.value = null; confirmed.value = false; scorePreview.value = null }
+function close() { if (metadataLocked.value) return; assessmentScope.value = null; selected.value = null; confirmed.value = false; scorePreview.value = null }
 async function load(reset = true, keep = false) {
+  if (metadataLocked.value) return
   const current = ++sequence
   if (!project.value || !version.value) { workspace.value = null; close(); return }
   busy.value = true; error.value = ''
@@ -117,6 +119,11 @@ async function chooseProject(option: { id: string; name?: string }, preferredVer
     versions.value = result.items; versionNext.value = result.next_offset; version.value = preferredVersion || result.items[0]?.version || ''; await load()
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
+}
+async function metadataChanged() {
+  const row = selected.value
+  await load(true, true)
+  if (row && workspace.value) await open(row)
 }
 async function onCompositionImported(value: { version: string; part_id: string | null }) {
   if (value.part_id) { notice.value = 'Source part imported; the assembled product remains unchanged.'; return }
@@ -146,6 +153,7 @@ async function loadVersions(append = false) {
 function searchVersions() { clearTimeout(versionTimer); versionTimer = setTimeout(() => { void loadVersions() }, 200) }
 function chooseVersion(value: string) { if (intakeLocked.value) return; version.value = value; versionMenu.value = false; void load() }
 async function open(row: KnowledgeFinding) {
+  if (metadataLocked.value) return
   const current = ++sequence; busy.value = true; error.value = ''; notice.value = ''
   try {
     const detail = await knowledgeApi<KnowledgeFinding>(`${scope.value}/workspace/${encodeURIComponent(row.context_id)}/${encodeURIComponent(row.vulnerability_id)}?expected=${workspace.value!.state}`)
@@ -165,6 +173,7 @@ async function paginate(next: boolean) {
   await load(false)
 }
 async function mutate(kind: 'draft' | 'submit' | 'approve' | 'request_changes') {
+  if (metadataLocked.value) return
   if (!selected.value || !workspace.value) return
   if ((kind === 'draft' || kind === 'submit') && !canEditAssessment.value) return
   if (kind === 'submit' && assessmentScope.value && !conditions.value.trim()) return
@@ -322,6 +331,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
           <details v-if="selected.scoring_proposals?.length" class="knowledge-pane"><summary>External scoring proposals ({{ selected.scoring_proposals.length }})</summary><div class="table-wrap"><table aria-label="External scoring comparison"><thead><tr><th>Provider</th><th>Source Base</th><th>Proposed</th><th>Status</th><th v-if="can('rescore')">Action</th></tr></thead><tbody><tr v-for="proposal in selected.scoring_proposals" :key="proposal.id"><td>{{ proposal.source_label }}<small>{{ proposal.provider }}</small></td><td>{{ proposal.proposal?.base_score.toFixed(1) ?? 'Unknown' }}</td><td>{{ proposal.proposal?.score.toFixed(1) ?? 'Withheld' }}</td><td>{{ proposal.eligible ? 'Ready for coordinator preview' : proposal.ineligibility_reasons.map(label).join(' · ') }}<small>{{ proposal.current ? 'Current evidence' : 'Historical evidence' }}</small></td><td v-if="can('rescore')"><button :disabled="busy || !proposal.eligible" @click="useProposal(proposal)">Use proposal</button></td></tr></tbody></table></div><p class="hint">External proposals do not approve assessments or publish scores. Artifact consistency does not verify provider identity.</p><details><summary>Proposal vectors and provenance</summary><pre>{{ JSON.stringify(selected.scoring_proposals, null, 2) }}</pre></details></details>
           <details v-if="selected.curated_metadata" class="knowledge-pane"><summary>Curated component context · {{ label(selected.curated_metadata.status) }}</summary><p v-if="!selected.curated_metadata.applicable" class="warning">Historical annotations require reconciliation with this component/version before use.</p><dl><dt>Criticality / exposure</dt><dd>{{ label(selected.curated_metadata.payload.annotations.cybersecurity.criticality) }} · {{ label(selected.curated_metadata.payload.annotations.cybersecurity.exposure) }}</dd><dt>Deployment</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.environment || 'Unknown' }}</dd><dt>Usage</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.usage || 'Unknown' }}</dd><dt>Support</dt><dd>{{ label(selected.curated_metadata.payload.annotations.support.status) }}</dd><dt>Source</dt><dd>{{ selected.curated_metadata.payload.provenance.source }} · {{ selected.curated_metadata.payload.provenance.reference }}</dd></dl><p>{{ selected.curated_metadata.payload.rationale }}</p><details><summary>Mitigations, testing and supporting details</summary><pre>{{ JSON.stringify(selected.curated_metadata.payload.annotations, null, 2) }}</pre></details></details>
           <details v-if="selected.legacy_evidence?.length" class="knowledge-pane"><summary>Imported DT assessment history</summary><p class="hint">Historical team and author labels are source claims. These records do not establish current DTVP approval.</p><article v-for="claim in selected.legacy_evidence" :key="claim.id"><h3>{{ claim.source }} · {{ label(claim.status) }}</h3><p v-if="claim.conflicting" class="warning">Conflicting imported team conclusions require reconciliation.</p><div v-for="(record, index) in claim.current_records" :key="index"><strong>{{ record.team }} · {{ label(record.state || 'unknown') }}</strong><p>{{ record.rationale }}</p><p v-if="record.justification">{{ justificationLabel(record.justification) }}</p><small>Historical assessor: {{ record.assessor || 'Unknown' }} · reviewer: {{ record.reviewer || 'Unknown' }}</small></div><p v-if="!claim.current_records.length">{{ claim.raw_text || claim.raw_excerpt || 'No interpretable assessment text.' }}</p><ul v-if="claim.errors.length"><li v-for="issue in claim.errors" :key="issue">{{ issue }}</li></ul><details><summary>Complete imported history, comments and score claims</summary><pre>{{ JSON.stringify(claim, null, 2) }}</pre></details></article></details>
+          <KnowledgeComponentMetadata :key="`${me.id}:${project}:${version}:${selected.context.component_ref}`" :project="project" :state="workspace.state" :version="version" :component-ref="String(selected.context.component_ref || '')" :context-id="selected.context_id" :disabled="busy || bulkLocked" @locked="metadataLocked = $event" @changed="metadataChanged" @refresh="metadataChanged" />
           <nav class="knowledge-tabs" aria-label="Assessment workflow"><button v-for="step in workflowTabs" :key="step" :aria-pressed="tab === step" @click="tab = step">{{ label(step) }}</button></nav>
           <div v-if="tab === 'evidence'" class="knowledge-pane"><p class="knowledge-description">{{ selected.description || 'No source description provided.' }}</p><dl><dt>Consuming root</dt><dd>{{ selected.context.root_ref || 'Unknown' }}</dd><dt>Ownership</dt><dd>{{ label(selected.context.status || 'unknown') }}</dd><dt>Package</dt><dd>{{ selected.component.purl || 'Unknown' }}</dd></dl><details><summary>Source ratings and vectors</summary><ul><li v-for="(rating, index) in selected.source_ratings" :key="index">{{ ratingSource(rating) }} · {{ rating.method || 'Unspecified method' }} · {{ rating.score ?? 'Unknown score' }}<code>{{ rating.vector }}</code></li></ul></details><details><summary>Dependency and ownership evidence</summary><pre>{{ JSON.stringify(selected.context, null, 2) }}</pre></details><details><summary>Imported source claims</summary><pre>{{ JSON.stringify(selected.sourcefacts || [], null, 2) }}</pre></details><details><summary>Additional evidence</summary><pre>{{ JSON.stringify(selected.evidence || [], null, 2) }}</pre></details><button v-if="can('assess')" class="primary" @click="tab = 'assessment'">Assess this context</button></div>
           <form v-if="tab === 'assessment'" class="knowledge-pane" @submit.prevent="mutate('submit')"><p v-if="selected.coverage.approved_assessment" class="hint">An approved assessment is retained. A new draft does not replace its approved pin.</p><p v-if="assessment && revisesCurrent && !canEditAssessment && can('assess')" class="hint">This assessment belongs to another author. Start a separate assessment to record your decision.</p><button v-if="assessment && can('assess')" type="button" :disabled="busy || !revisesCurrent" @click="startAssessment">Start new assessment</button><KnowledgeCoverage :project="project" :state="workspace!.state" :version="version" :finding="selected" :busy="busy" @scope="assessmentScope = $event"/><fieldset :disabled="busy || !canEditAssessment"><label>Applicability<select v-model="applicability"><option v-for="state in ['under_investigation', 'affected', 'not_affected', 'fixed']" :key="state" :value="state">{{ label(state) }}</option></select></label><label v-if="applicability === 'not_affected'">Why not affected?<select v-model="justification" required><option value="" disabled>Select a reason</option><option v-for="(text, code) in justifications" :key="code" :value="code">{{ text }}</option></select></label><label>Reason and evidence<textarea v-model="rationale" rows="5" required placeholder="Explain this decision for the selected consuming context."></textarea></label><details :open="Boolean(assessmentScope)"><summary>Applicability conditions</summary><label>Conditions<textarea v-model="conditions" rows="3" :required="Boolean(assessmentScope)"></textarea></label></details></fieldset><p v-if="!can('assess')" class="hint">Assessment editing is unavailable for this context.</p><div v-else class="knowledge-actions"><button type="button" :disabled="busy || !canEditAssessment" @click="mutate('draft')">Save draft</button><button class="primary" :disabled="busy || !canEditAssessment || !rationale.trim() || (assessmentScope && !conditions.trim()) || (applicability === 'not_affected' && !justification)">Submit assessment</button></div></form>

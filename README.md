@@ -436,6 +436,33 @@ policy and journal garbage collection remain planned; history is not deleted.
 
 ### Curated component metadata
 
+Native component context and annotations are available from each Knowledge finding's
+progressive **Component context, dependencies and annotations** detail. The read
+adapter `GET /api/v3/projects/{id}/states/{state}/component-context` binds the exact
+source-local component and optional consuming context to an authorized immutable
+state. It returns imported facts separately from authored annotations/provenance,
+current or historical metadata status, typed defaults and backend capabilities.
+
+Only project managers viewing the exact current product head can open the guided
+annotation editor. Existing versioned `PUT .../versions/{version}/metadata` remains
+the write authority. The editor covers cybersecurity criticality/exposure,
+runtime usage, deployment, support and provenance; advanced typed JSON retains
+mitigations, testing evidence, references and extension properties. Explicit saving
+freezes the expected product head, prior metadata revision, complete values and
+request ID. Uncertain retries preserve the exact request; conflicts require an
+explicit discard/refresh. Escape/backdrop cannot discard an uncertain capture.
+Authored annotations apply to the selected component occurrence/version and can
+change material evidence for all its consuming contexts. They do not establish
+applicability, approvals, legal clearance, architecture approval or published scores.
+
+Topology presentation is bounded to the first 50 imported direct consumers and
+50 dependencies, with full counts and explicit unresolved references/unknown graph
+coverage. It does not infer runtime reachability or completeness, add cross-part
+assembly edges, edit dependency topology, provide a full interactive graph, or
+prove generated architecture correspondence. Imported source facts remain intact;
+prior metadata revisions and human decisions remain recoverable in journal history.
+
+
 `PUT /api/v3/projects/{id}/versions/{version}/metadata` explicitly replaces
 annotations for one exact component occurrence. It requires project management,
 `request_id`, expected branch head, expected metadata revision (null initially),

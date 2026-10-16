@@ -26,6 +26,7 @@ from dtvp.api_issued_exports import router as issued_exports_router
 from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
+from dtvp.api_metadata_editor import router as metadata_editor_router
 from dtvp.api_ownership_editor import router as ownership_editor_router
 from dtvp.api_portfolio import router as portfolio_router
 from dtvp.api_proposals import router as proposal_router
@@ -108,6 +109,7 @@ def create_app(settings=None):
     app.include_router(ownership_editor_router)
     app.include_router(history_router)
     app.include_router(metadata_router)
+    app.include_router(metadata_editor_router)
     app.include_router(synchronization_router)
     app.include_router(source_jobs_router)
     app.include_router(licenses_router)
