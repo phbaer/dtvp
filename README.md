@@ -69,6 +69,9 @@ artifact bindings. Unambiguous continuity should be automatic; ambiguity require
 confirmation. This design extends the existing explicit correspondence workflow;
 automatic reconciliation remains implementation work, and identity alone never
 extends human approval into a new context or version.
+PURL and other external identity markers are optional. Incomplete components retain
+DTVP IDs and provenance; ambiguous continuity requires confirmation and never
+silently discards or transfers existing assessments.
 
 ### Rewrite completion and acceptance boundary
 

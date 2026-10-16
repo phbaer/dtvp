@@ -294,6 +294,26 @@ for that source. Explicit producer IDs can preserve lineage across upgrades but 
 not preserve exact package identity or approval automatically. Missing identity
 information is unknown, never a wildcard. Duplicate occurrences stay distinct.
 
+PURL and other external identity markers are optional. Missing markers alone do
+not block import or assessment; format-required fields still follow the intake
+contract. Assign a DTVP ID even when no usable external identity is available,
+retaining source/import/part provenance and distinct occurrences.
+
+| Available information | Continuity behavior |
+| --- | --- |
+| Strong exact package coordinates or scoped artifact digest | Automatic only for unique compatible matches without conflicting assertions |
+| Stable producer ID | Preserve lineage within the configured issuer/source stability contract; assess exact package and coverage separately |
+| Name, group/vendor and version only | Show candidates; automatic continuity requires a reviewed source identity policy |
+| Insufficient information or ambiguous/conflicting candidates | Retain distinct identity and offer explicit correspondence confirmation |
+| No usable external identifiers | Assign DTVP identity and retain provenance; no inferred cross-import continuity |
+
+Confirmed correspondence is versioned, scoped and reusable while its conditions
+remain satisfied. Optional organization-scoped IDs can be emitted in later SBOMs.
+Never silently equate incomplete tuples, such as two components named `common`.
+When a later import cannot establish continuity, retain previous assessments and
+their original component/context bindings, show historical or unresolved coverage,
+and require explicit resolution before applying them to the new occurrence.
+
 Store the matched markers, evidence, identity-policy revision and explanation.
 Changing or enriching an identity creates a new journal state; preserve previous
 assertions and confirmed aliases. Corrections/splits never rewrite tagged history.
