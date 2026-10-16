@@ -7,7 +7,7 @@ from dtvp.api import DB, Auth, project_for
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.assessments import AssessmentInput, ReviewInput, create_review, save_assessment
 from dtvp.knowledge.exports import build_vscorer_worklist, export_bytes
-from dtvp.knowledge.filters import KnowledgeFilters
+from dtvp.knowledge.filters import EvidenceFilter, KnowledgeFilters
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
 from dtvp.knowledge.license_filters import LicenseFilters
 from dtvp.knowledge.ownership import product_heads
@@ -184,6 +184,8 @@ def workspace(
     exposure: str = "",
     support_status: str = "",
     metadata_status: str = "",
+    agentyzer_evidence: EvidenceFilter = "",
+    vscorer_evidence: EvidenceFilter = "",
 ):
     project = project_for(db, actor, project_id)
     state = state_for(request, project_id, version, expected)
@@ -203,6 +205,8 @@ def workspace(
             exposure=exposure,
             support_status=support_status,
             metadata_status=metadata_status,
+            agentyzer_evidence=agentyzer_evidence,
+            vscorer_evidence=vscorer_evidence,
         )
     except ValueError as error:
         raise HTTPException(422, str(error)) from error

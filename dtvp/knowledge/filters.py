@@ -13,6 +13,7 @@ from pydantic import Field, field_validator
 from dtvp.schemas import RequestModel
 
 Band = Literal["", "critical", "high", "medium", "low", "none", "unknown"]
+EvidenceFilter = Literal["", "missing", "current", "historical_only", "eligible"]
 VERSIONS = {
     "CVSS:4.0/": "4.0",
     "CVSS:3.1/": "3.1",
@@ -223,7 +224,26 @@ def current_annotation(row, section, field, values):
     return value if value in values else "unknown"
 
 
+def received_evidence_matches(row, provider, selected):
+    key = "code_analysis" if provider == "agentyzer" else "scoring_proposals"
+    records = row.get(key, [])
+    if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+        return False
+    if provider == "vscorer":
+        records = [item for item in records if item.get("provider") == "vscorer"]
+    if selected == "missing":
+        return not records
+    if selected == "historical_only":
+        return bool(records) and all(item.get("current") is False for item in records)
+    if selected == "current":
+        return any(item.get("current") is True for item in records)
+    flag = "application_eligible" if provider == "agentyzer" else "eligible"
+    return any(item.get("current") is True and item.get(flag) is True for item in records)
+
+
 class KnowledgeFilters(RequestModel):
+    agentyzer_evidence: EvidenceFilter = ""
+    vscorer_evidence: EvidenceFilter = ""
     source_severity: Band = ""
     contextual_severity: Band = ""
     applicability: Literal[
@@ -260,6 +280,12 @@ class KnowledgeFilters(RequestModel):
         return "direct" if value == "known_direct" else value
 
     def matches(self, row):
+        for provider, selected in (
+            ("agentyzer", self.agentyzer_evidence),
+            ("vscorer", self.vscorer_evidence),
+        ):
+            if selected and not received_evidence_matches(row, provider, selected):
+                return False
         if self.metadata_status and metadata_status(row) != self.metadata_status:
             return False
         for value, section, field, allowed in (

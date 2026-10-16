@@ -969,6 +969,17 @@ nothing and makes no physical storage estimate. Explicit logical archival uses
 the separate complete-history plan described below. Retention policy and physical
 journal garbage collection remain planned; history is not deleted.
 
+Reviewer queue and project/organization portfolios support `agentyzer_evidence`
+and `vscorer_evidence` filters: `missing`, `current`, `historical_only` and
+`eligible` (empty means unrestricted). They inspect received evidence in the
+selected state, before counts and pagination. Current evidence can be ineligible;
+historical-only requires every received record to be explicitly stale. Unknown
+flags never establish eligibility or historical-only status. Agentyzer eligibility
+means application proposal eligibility; VScorer eligibility means scoring proposal
+eligibility. Neither is approval, publication or proof of provider authenticity.
+CLI workspace/portfolio accept matching `--agentyzer-evidence` and
+`--vscorer-evidence` options. No job state, receipt age or wall clock is inferred.
+
 Advanced queue and portfolio filters include authored cybersecurity `criticality`,
 `exposure`, `support_status` and `metadata_status`. UI saved views and the HTTP CLI
 (`--criticality`, `--exposure`, `--support-status`, `--metadata-status`) retain the

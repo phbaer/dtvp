@@ -22,6 +22,8 @@ WORKSPACE_FILTERS = (
     "exposure",
     "support_status",
     "metadata_status",
+    "agentyzer_evidence",
+    "vscorer_evidence",
 )
 
 

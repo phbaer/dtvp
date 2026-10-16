@@ -68,3 +68,12 @@ def test_vscorer_roundtrip_is_comparable_without_approval(analyst, bom):
     selected = workspace(analyst, project_id, provider="vscorer")
     assert [item["id"] for item in selected["items"]] == [row["id"]]
     assert selected["statistics"]["context_findings"] == 1
+    received = workspace(analyst, project_id, vscorer_evidence="eligible", limit=1)
+    assert [item["id"] for item in received["items"]] == [row["id"]]
+    assert received["statistics"]["context_findings"] == 1
+    assert received["next_offset"] is None
+    assert workspace(analyst, project_id, vscorer_evidence="historical_only")["items"] == []
+    for path in (url(project_id, "/portfolio"), "/api/v3/portfolio"):
+        result = analyst.get(path, params={"vscorer_evidence": "eligible"})
+        assert result.status_code == 200, result.text
+        assert result.json()["statistics"]["context_findings"] == 1

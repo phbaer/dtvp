@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for, visible_project_query
 from dtvp.api_workflow import team_labels
-from dtvp.knowledge.filters import KnowledgeFilters
+from dtvp.knowledge.filters import EvidenceFilter, KnowledgeFilters
 from dtvp.knowledge.journal import Name, Sha
 from dtvp.knowledge.organization_portfolio import MAX_PROJECTS, organization_portfolio
 from dtvp.knowledge.portfolio import load_portfolio
@@ -37,6 +37,8 @@ def portfolio(
     exposure: str = "",
     support_status: str = "",
     metadata_status: str = "",
+    agentyzer_evidence: EvidenceFilter = "",
+    vscorer_evidence: EvidenceFilter = "",
 ):
     project_for(db, actor, project_id)
     filters = KnowledgeFilters(
@@ -54,6 +56,8 @@ def portfolio(
         exposure=exposure,
         support_status=support_status,
         metadata_status=metadata_status,
+        agentyzer_evidence=agentyzer_evidence,
+        vscorer_evidence=vscorer_evidence,
     )
     result = load_portfolio(
         request.app.state.knowledge,
