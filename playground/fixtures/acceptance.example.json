@@ -1,0 +1,25 @@
+{
+  "format": "dtvp.acceptance-input/1",
+  "scenario": "SYNTHETIC example only; replace with representative producer inputs",
+  "fixtures": [
+    {
+      "id": "application-7.1.1",
+      "path": "release.cdx.json",
+      "sha256": "ddf5231fba422ec576b544ee069bf8caae3bd68e7b1e9508f51e743a4d045c56",
+      "producer": "synthetic playground fixture",
+      "product_line": "synthetic-demo",
+      "version": "7.1.1",
+      "part_id": "application",
+      "coverage": {
+        "packages": "unknown",
+        "dependencies": "unknown",
+        "licenses": "unknown"
+      },
+      "expected": {
+        "components": 3,
+        "findings": 2,
+        "format": "cyclonedx-json"
+      }
+    }
+  ]
+}

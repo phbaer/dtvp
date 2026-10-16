@@ -2970,3 +2970,69 @@ Browser checks passed for license review (13) and comparison (10); frontend unit
 tests (3), typecheck/build, Ruff and independent license review also passed.
 These remain synthetic contract checks; customer/deployment acceptance limits
 above still apply.
+
+### Supplied-input and deployment acceptance evidence
+
+`uv run python -m scripts.knowledge_acceptance MANIFEST --output NEW_REPORT.json`
+verifies supplied SBOMs and optionally reads a deployed native project. It never
+imports data, changes reviews, starts specialist services or grants acceptance.
+Try the explicitly synthetic example, then replace it with representative inputs:
+
+```bash
+uv run python -m scripts.knowledge_acceptance playground/fixtures/acceptance.example.json --output /tmp/dtvp-acceptance-example.json
+uv run python -m scripts.knowledge_acceptance /path/to/customer/acceptance.json --output /tmp/customer-acceptance-report.json --url https://dtvp.example --token-env DTVP_ACCEPTANCE_TOKEN
+```
+
+The `dtvp.acceptance-input/1` manifest requires `scenario` and `fixtures`. Each
+fixture declares `id`, relative `path`, exact `sha256`, `producer`, `product_line`,
+`version`, `part_id` and `coverage` (`packages`, `dependencies`, `licenses`, each
+`complete`, `partial` or `unknown`). Optional `expected` values assert exact parsed
+`components`/`findings` counts and `format`. Missing PURLs/versions and normalization
+losses are reported; unknown coverage stays explicit. One scenario covers one
+product line; fixture paths, including symlinks, must remain within the manifest
+directory. Inputs are bounded to 100 SBOMs, 64 MiB/file and 256 MiB total; the CLI
+manifest is limited to 1 MiB. Reports must be fresh files and never overwrite.
+
+Optional `deployment` contains `project_id`, up to 20 `states` entries with immutable
+`state`, `version` and associated fixture IDs in `fixtures`, plus up to 20
+`comparisons` with `before`, `after` and explicit boolean `expect_changes`. Example:
+
+```json
+{
+  "project_id": "PROJECT_ID",
+  "states": [
+    {"state": "LOWERCASE_SHA256_A", "version": "7.1.1", "fixtures": ["application-7.1.1"]},
+    {"state": "LOWERCASE_SHA256_B", "version": "7.1.2", "fixtures": ["application-7.1.2"]}
+  ],
+  "comparisons": [
+    {"before": "LOWERCASE_SHA256_A", "after": "LOWERCASE_SHA256_B", "expect_changes": true}
+  ]
+}
+```
+
+Deployment checks use GET only: exact project/state/version scope, canonical
+summary integrity, byte-identical originals and pinned comparison change counts.
+The token comes from the named environment variable and is never included in the
+report. Only a deployment origin is accepted; redirects are rejected and HTTPS
+is required outside loopback. Responses are bounded to 64 MiB. No deployment URL
+leaves its checks explicitly `not_run`; token authorization failure fails its
+configured checks rather than silently skipping them.
+
+Optional `attestations` retain separately supplied external reviews. An entry
+requires `gate`, `path`, `sha256`, `reviewer`, timezone-qualified `reviewed_at`,
+`fixture_ids` and `conclusion` (`pass`/`fail`). Gates are
+`producer_completeness`, `legacy_migration`, `consumer_round_trips`,
+`generator_document_parity`, `oidc_permissions`, `recovery_upgrade` and
+`performance_concurrency`. Exact evidence bytes are verified; external checks
+remain `not_run` with `assurance: supplied_attestation_only`, a separate
+`evidence_verification: pass` and the declared conclusion. This does not
+independently reproduce those reviews. Missing gates remain open.
+
+The machine-readable `dtvp.acceptance-report/1` reports `pass`, `fail` and
+`not_run` per check; its overall `verification` describes configured technical
+checks only. A failed technical check, invalid attestation or supplied failed
+conclusion exits 1; passing configured checks exits 0 even when external gates
+remain open. `acceptance` is always `not_granted`; neither fixture parsing nor
+successful requests establish producer completeness, document acceptance, legal
+clearance or regulatory compliance. These results are evidence for a separate
+human acceptance decision.
