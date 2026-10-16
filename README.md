@@ -968,7 +968,24 @@ uv run dtvp knowledge --url http://127.0.0.1:8900 compare-intelligence \
 
 Use `--no-evidence` for explicit null; neither flag may be omitted or combined.
 For bounded pages retain `--expected-digest REPORT_SHA --offset OFFSET` and the
-same inventory/evidence selection. This initial increment has no dedicated UI.
+same inventory/evidence selection.
+
+The existing **Advisory intelligence refresh** panel includes a collapsed,
+read-only **Compare retained inventory with advisory evidence** view. Capture
+inputs explicitly, then choose the captured evidence reference, an explicit
+no-evidence selection, or an exact retained evidence-state SHA. Comparing never
+queries an external provider, updates source ratings or assessments, or infers
+remediation. The inventory/evidence pins remain visible alongside complete
+server-derived counts; provider differences on the displayed page and exact
+before/after/inactive facts are available progressively.
+
+Pagination retains the original inventory state, evidence state (including JSON
+null) and report digest even after draft controls, the inventory workspace or
+current evidence reference change. Capture and compare again explicitly to
+replace that report. Currentness describes the evidence reference at comparison
+capture; it does not establish continuous freshness or credibility. Digest
+conflicts retain the previous page and pins. Current project authorization still
+applies on every read, and actor/project changes invalidate late responses.
 
 ### Pinned pipeline evidence summary
 

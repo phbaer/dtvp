@@ -395,7 +395,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
         <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
         <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
         <div class="knowledge-composition-tools"><KnowledgeSources :project="project" :version="version" :state="workspace.state" /><KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" /></div>
-        <KnowledgeAdvisories :project="project" :state="workspace.state" />
+        <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
         <KnowledgeReconciliation :key="`${me.id}:${project}`" :project="project" :version="version" :state="workspace.state" @locked="correspondenceLocked = $event" @changed="load(true, true)" />
       </div>
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">

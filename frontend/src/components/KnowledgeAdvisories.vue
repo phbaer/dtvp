@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
+import KnowledgeIntelligenceComparison from './KnowledgeIntelligenceComparison.vue'
 type Provider = { id: string; publisher: string; enabled: boolean; next_revision: number }
 type Plan = { expected_versions: Record<string, string>; expected_evidence: string | null; providers: Provider[]; identifiers: string[]; total: number; next_offset: number | null; capabilities: string[]; limitations: string[] }
 type Job = { id: string; status: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number; attempts: number; error: string; result: Record<string, unknown>; capabilities: string[] }
@@ -92,6 +93,7 @@ onBeforeUnmount(() => { ++sequence })
   <details class="knowledge-advisories" @toggle="toggle">
     <summary>Advisory intelligence refresh</summary>
     <section aria-label="Advisory intelligence refresh">
+      <KnowledgeIntelligenceComparison :project="project" :state="state" />
       <p class="hint">Enrich exact vulnerability IDs already reported by product baselines. No package matching, new vulnerability discovery or assessment approval is implied.</p>
       <p class="hint">Provider and advisory publisher differ: mirrors are not independent corroboration. A provider not-found response never proves remediation. Cancel stops DTVP work; an in-flight remote lookup may finish.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
