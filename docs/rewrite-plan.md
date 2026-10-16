@@ -140,6 +140,38 @@ and must retain approval boundaries. Fixtures cover repeated and out-of-order
 merge events, delayed nightly imports, partial cascades, divergent targets,
 changed inputs after preview, backports, withdrawn evidence and immutable tags.
 
+#### Automatic synchronization proposals
+
+Design decision: automatically generate or refresh synchronization proposals after
+relevant accepted imports or recorded software-integration events. Limit evaluation
+to explicitly configured source/target version relationships and affected subjects;
+version numbers or event arrival alone never establish integration or coverage.
+
+Use the existing durable job infrastructure, without introducing a separate broker
+or service. Coalesce equivalent work, bound fan-out and preserve origin/edge IDs
+so repeated events and cycles cannot create repeated proposal circulation. Each
+calculation pins source/target states, assessment/evidence revisions, mapping policy
+and an explicit synchronization basis when available. Missing proof/basis remains
+visible uncertainty, not a guessed lineage or silently applied change.
+
+Proposal generation is read-only with respect to target inventory, assessments,
+coverage, reviews and scores. Durable proposal/job records do not imply adoption.
+Present the same categorized changes and explanations in UI and CLI. Supersede
+stale suggestions explicitly when inputs advance; never silently repin a captured
+acceptance request. Failures leave target state unchanged and remain retryable.
+
+Acceptance is explicit, checks current authorization and all expected pins, and
+creates only the permitted target drafts/scope changes. Newly covered contexts or
+versions follow ordinary analyst submission and independent review. Source approval
+does not become target approval; scoring readiness is evaluated per target scope.
+Preserve unchanged approved target coverage, conflicting target edits and immutable
+release tags. Cascade proposals edge by edge using each target's actual inventory;
+acceptance on an earlier edge never approves a downstream version.
+
+Existing pinned previews/drafts and integration-event records provide the foundation.
+Automatic triggering, coalesced scheduling and proposal lifecycle are planned
+implementation, not behavior enabled by this design update.
+
 ### Authoritative state and publication
 
 The local knowledge revision journal is authoritative. Each revision describes a

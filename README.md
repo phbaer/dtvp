@@ -93,6 +93,12 @@ assessments are archived recoverably first. Physical cleanup requires an explici
 policy, dry-run impact and current reference checks; destructive collection and
 history compaction remain unimplemented.
 
+The [synchronization automation design](docs/rewrite-plan.md#automatic-synchronization-proposals)
+automatically prepares proposals after relevant accepted imports/integration events
+on configured version relationships. Acceptance and review of new coverage remain
+explicit; unchanged target approvals stay valid. Automatic scheduling/lifecycle
+remain implementation work on top of the existing pinned previews and drafts.
+
 ### Rewrite completion and acceptance boundary
 
 The bounded implementation batches are committed on `rewrite/knowledge-journal`.
