@@ -82,6 +82,11 @@ attributed evidence and propose inventory changes for explicit reconciliation.
 Source roles are provider-independent. This reconciliation/authority design remains
 implementation work.
 
+The [revalidation design](docs/rewrite-plan.md#targeted-assessment-revalidation)
+preserves approval for descriptive-only changes, revalidates affected material
+coverage and retains removed components' assessments historically. UI and CLI must
+explain each impact; unaffected contexts/versions keep their valid approvals.
+
 ### Rewrite completion and acceptance boundary
 
 The bounded implementation batches are committed on `rewrite/knowledge-journal`.

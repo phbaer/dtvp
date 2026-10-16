@@ -436,6 +436,35 @@ Identical reimports preserve coverage; material usage/component/evidence changes
 reopen affected coverage only. Extending scope does not revoke existing approval
 for unchanged coverage, but additional coverage needs review.
 
+#### Targeted assessment revalidation
+
+Design decision: classify semantic import changes against the exact assessment
+coverage and supporting conditions, rather than reopening every decision whenever
+a document or branch revision changes.
+
+| Change | Coverage behavior |
+| --- | --- |
+| Import-local reference rename, formatting or descriptive-only metadata | Preserve current approval when identity/context continuity is established |
+| Package version/build, consuming context, exposure, controls or relevant vulnerability evidence | Require revalidation of affected coverage; retain previous decision/review as history |
+| Component removed from current authoritative inventory | Mark coverage historically absent; never infer fixed/not affected |
+| Unresolved identity or uncertain material impact | Show unresolved coverage requiring resolution; never silently carry approval forward |
+
+Descriptive-only means the field does not affect the recorded conclusion,
+applicability conditions or scoring inputs. New or changed evidence is assessed
+for relevance, not ignored because it arrived as metadata. Team reassignment alone
+preserves valid decisions and historical authorship as specified above.
+
+Record a machine-readable impact reason and present the old/new relevant values
+in both UI and CLI. Preserve unaffected versions and contexts, including pinned
+older approved assessment revisions while a revision/extension awaits review.
+Revalidation must follow the ordinary analyst and independent reviewer workflow;
+it cannot automatically approve a changed conclusion or new coverage. Coordinator
+score readiness/publication is rechecked only for affected inputs and scope, while
+previously published scores and release tags remain historical records.
+
+This is the agreed semantic target; extending the current conservative impact
+checks to automatic identity reconciliation requires implementation and fixtures.
+
 Analysts assess applicability and evidence; team reviewers independently review.
 Not-affected conclusions require a specific reason and supporting explanation.
 Security coordinators publish contextual scoring once all required contexts for
