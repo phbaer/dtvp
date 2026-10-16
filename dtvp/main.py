@@ -25,6 +25,7 @@ from dtvp.api_history import router as history_router
 from dtvp.api_identity import router as identity_router
 from dtvp.api_input_quality import router as input_quality_router
 from dtvp.api_intake import router as intake_router
+from dtvp.api_intelligence_comparison import router as intelligence_comparison_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_issued_exports import router as issued_exports_router
 from dtvp.api_knowledge import router as knowledge_router
@@ -114,6 +115,7 @@ def create_app(settings=None):
     app.include_router(evidence_intake_router)
     app.include_router(identity_router)
     app.include_router(input_quality_router)
+    app.include_router(intelligence_comparison_router)
     app.include_router(proposal_router)
     app.include_router(portfolio_router)
     app.include_router(pipeline_summary_router)

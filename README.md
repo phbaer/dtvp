@@ -923,6 +923,53 @@ without changing annotations/provenance does not invalidate coverage. Baseline
 updates retain artifact pins for authored revisions and external reports; retention
 and garbage collection remain explicit future maintenance work.
 
+### Pinned composition and selected advisory comparison
+
+`POST /api/v3/projects/{id}/compare/intelligence?offset=0&limit=50` takes
+`inventory_state`, an explicit required `evidence_state` (SHA or null), and optional
+`expected_digest`. Current project read permission applies on every request.
+The composition must be committed product history in that product line; selected
+evidence must belong to the retained ancestry of its evidence reference. An object
+hash alone grants no access. Explicit null means no selected advisory catalog;
+the endpoint never silently selects the latest state.
+
+The report compares advisory-feed observations embedded in the pinned product
+state with the selected retained advisory documents, restricted to exact baseline
+SBOM/DT vulnerability identifiers. Source/publisher/document/identifier groups
+stay separate. Rows disclose added, changed, unchanged, withdrawn-from-selection
+and no-longer-selected claims, original/selected facts, artifact/source-revision
+pins and inactive selection reasons. Missing selections and source withdrawal do
+not establish publisher retraction, remediation or applicability. VDR/VEX status
+documents are excluded with counts, not applied to historical composition; aliases
+and affected ranges remain provider facts, not matching instructions.
+
+Full statistics and the deterministic `report_digest` precede pagination. Keep
+both state pins and `expected_digest` for subsequent pages; a different report
+returns 409. The digest covers immutable selected inputs and all rows, while
+`currentness` separately reports the evidence head captured for this request and
+whether the selected evidence matched it. Later head changes can update that
+currentness observation without changing the historical report or invalidating
+its digest. Current-at-capture is not source authenticity or a live guarantee.
+
+Scanning stops at explicit finite budgets: 10,000 states/frontier entries,
+20,000 records per section, 10,000 documents/statements per side, 10,000 resulting
+claim groups and 64 MiB decoded immutable object bytes. Bounds are checked before
+loading the next object and failures never silently truncate. Raw provider
+artifacts are named by retained hashes but not downloaded or all reverified by
+this comparison. No provider call, object write, new finding, package rematching,
+human assessment, approval, source Base or contextual score change occurs.
+
+CLI uses the same backend contract:
+
+```bash
+uv run dtvp knowledge --url http://127.0.0.1:8900 compare-intelligence \
+  --project PROJECT_ID --state INVENTORY_SHA --evidence-state EVIDENCE_SHA --json
+```
+
+Use `--no-evidence` for explicit null; neither flag may be omitted or combined.
+For bounded pages retain `--expected-digest REPORT_SHA --offset OFFSET` and the
+same inventory/evidence selection. This initial increment has no dedicated UI.
+
 ### Pinned pipeline evidence summary
 
 `GET /api/v3/projects/{id}/states/{sha}/evidence-summary` returns

@@ -94,6 +94,18 @@ def configure(parser):
     coverage.add_argument("--offset", type=int, default=0)
     coverage.add_argument("--limit", type=int, default=50)
     coverage.add_argument("--json", action="store_true")
+    intelligence = commands.add_parser(
+        "compare-intelligence", help="Compare pinned composition with selected advisory evidence"
+    )
+    for name in ("project", "state"):
+        intelligence.add_argument("--" + name, required=True)
+    selection = intelligence.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--evidence-state")
+    selection.add_argument("--no-evidence", action="store_true")
+    intelligence.add_argument("--expected-digest")
+    intelligence.add_argument("--offset", type=int, default=0)
+    intelligence.add_argument("--limit", type=int, default=50)
+    intelligence.add_argument("--json", action="store_true")
     quality = commands.add_parser(
         "input-quality", help="Inspect pinned producer input observations"
     )
@@ -375,6 +387,40 @@ def run(args):
                     )
                 for limitation in result.get("limitations", []):
                     print("Limit: " + limitation)
+            return
+        if args.knowledge_command == "compare-intelligence":
+            from urllib.parse import quote
+
+            result = read_response(
+                client.post(
+                    f"/api/v3/projects/{quote(args.project, safe='')}/compare/intelligence",
+                    params={"offset": args.offset, "limit": args.limit},
+                    json={
+                        "inventory_state": args.state,
+                        "evidence_state": None if args.no_evidence else args.evidence_state,
+                        "expected_digest": args.expected_digest,
+                    },
+                )
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(f"Report: {result['report_digest']} · Claim groups: {result['total']}")
+                print(
+                    "Selected evidence currently selected: "
+                    + str(result["currentness"]["selected_is_current"])
+                )
+                print("Statistics: " + json.dumps(result["statistics"], sort_keys=True))
+                for row in result["items"]:
+                    print(
+                        f"{row['vulnerability_id']}  source={row['source']} publisher={row['publisher']}  {row['status']}"
+                    )
+                for limitation in result["limitations"]:
+                    print("Limit: " + limitation)
+                if result.get("next_offset") is not None:
+                    print(
+                        f"Next offset: {result['next_offset']} (same state/evidence pins; --expected-digest {result['report_digest']})"
+                    )
             return
         if args.knowledge_command == "coverage":
             from urllib.parse import quote
