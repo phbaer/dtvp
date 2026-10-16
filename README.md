@@ -3187,3 +3187,39 @@ Source values and raw error messages are not copied into diagnostics. Limits are
 more errors retain `valid: false` with `diagnostics_truncated: true`. Validation
 does not publish or retain an import, so source-byte intake and producer ordering
 still use the normal evidence workflow.
+
+OIDC login/callback use Authlib's authorization-code flow with S256 PKCE and
+session-bound state. Authlib verifies signed ID tokens through discovered JWKS;
+DTVP explicitly pins issuer, audience and the original nonce as required claims.
+A provider's `nonce_supported=false` cannot disable DTVP's nonce requirement, and
+an `azp` claim cannot compensate for a token missing DTVP from its audience.
+Authlib's token-time validation retains its default 120-second clock leeway.
+Only validated issuer/subject identify a local user; subject/name types, control
+characters and persistence lengths are checked before database access. OIDC
+profile/group/role/admin claims never grant memberships or administrator access.
+New identities receive a local session with no team memberships; administrators
+assign local permissions explicitly. Existing local authorization remains intact.
+There is currently no separate user-disabled flag; credentials can be revoked.
+
+Expected OAuth/JWT/HTTP/JSON failures return generic sign-in messages and clear
+pending authorization state. Provider descriptions, tokens and client secrets
+are not reflected in these responses. Successful callbacks clear temporary
+state and issue Secure, SameSite=Strict cookies on HTTPS deployments; the session
+cookie is HttpOnly, with the existing separate CSRF token retained. Deployment
+issuer/client registration, proxy/public URL and actual IdP behavior still need
+operator acceptance; offline tests cannot establish production federation.
+
+The offline OIDC suite exercises real Authlib exchanges and generated RSA-signed
+JWTs against mocked discovery/token/JWKS endpoints. It verifies PKCE linkage,
+state/cookie tampering, callback replay, nonce/issuer/audience/expiry/signature,
+malformed identities, sanitized provider/transport errors, unprivileged initial
+provisioning and revoked-session denial. It does not bypass token verification
+or replace Authlib with a fake authentication implementation.
+
+Thin Authlib client extensions validate discovery, token-response and JWKS envelope
+shapes before library parsing, including required endpoints and the configured
+issuer. Malformed provider JSON/key metadata produces the same generic failures;
+key decoding and cryptographic verification remain Authlib/joserfc operations.
+Discovery endpoints must be HTTP(S) URLs without embedded credentials or fragments;
+`none` is rejected as an ID-token signing algorithm. HTTPS termination and trusted
+provider endpoint configuration remain deployment responsibilities.

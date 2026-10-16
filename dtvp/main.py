@@ -2,10 +2,8 @@ import re
 import weakref
 from contextlib import asynccontextmanager
 
-from authlib.integrations.starlette_client import OAuth
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from sqlalchemy import select
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from dtvp.api import legacy_router, router
@@ -56,13 +54,13 @@ from dtvp.api_source_jobs import router as source_jobs_router
 from dtvp.api_sync_jobs import router as sync_jobs_router
 from dtvp.api_synchronization import router as synchronization_router
 from dtvp.api_workflow import router as workflow_router
-from dtvp.auth import authenticate, issue
+from dtvp.auth import authenticate
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready, sessions
 from dtvp.knowledge.journal import Journal
 from dtvp.knowledge.maintenance_lock import RuntimeLease
 from dtvp.knowledge.projection import catch_up, is_current
-from dtvp.models import User
+from dtvp.oidc import install_oidc
 from dtvp.playground import legacy_router as legacy_playground_router
 from dtvp.playground import router as playground_router
 from dtvp.playground import seed
@@ -242,54 +240,7 @@ def _create_app(settings, lease):
         response.delete_cookie("dtvp_csrf")
         return response
 
-    oauth = OAuth()
-    if settings.oidc_issuer:
-        oauth.register(
-            name="oidc",
-            client_id=settings.oidc_client_id,
-            client_secret=settings.oidc_client_secret,
-            server_metadata_url=settings.oidc_issuer.rstrip("/")
-            + "/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid profile", "code_challenge_method": "S256"},
-        )
-
-    @app.get("/auth/login")
-    async def oidc_login(request: Request):
-        if not settings.oidc_issuer:
-            raise HTTPException(503, "OIDC is not configured")
-        return await oauth.oidc.authorize_redirect(
-            request, settings.public_url.rstrip("/") + "/auth/callback"
-        )
-
-    @app.get("/auth/callback")
-    async def oidc_callback(request: Request):
-        if not settings.oidc_issuer:
-            raise HTTPException(404)
-        token = await oauth.oidc.authorize_access_token(request)
-        info = token["userinfo"]
-        if info.get("iss") != settings.oidc_issuer or not info.get("sub"):
-            raise HTTPException(403, "Untrusted identity")
-        with factory.begin() as db:
-            user = db.scalar(
-                select(User).where(User.issuer == info["iss"], User.subject == info["sub"])
-            )
-            if not user:
-                user = User(
-                    issuer=info["iss"],
-                    subject=info["sub"],
-                    name=info.get("name", info["sub"])[:200],
-                )
-                db.add(user)
-                db.flush()
-            value, csrf, _ = issue(db, user)
-        response = RedirectResponse("/")
-        secure = settings.public_url.startswith("https://")
-        response.set_cookie(
-            "dtvp_session", value, httponly=True, secure=secure, samesite="strict", max_age=43200
-        )
-        response.set_cookie("dtvp_csrf", csrf, secure=secure, samesite="strict", max_age=43200)
-        request.session.clear()
-        return response
+    install_oidc(app, settings, factory)
 
     if settings.frontend_dir.exists():
 
