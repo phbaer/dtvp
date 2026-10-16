@@ -177,9 +177,16 @@ def _member(db, source, name, ordinal):
                     raise ValueError("Catalog JSON nesting exceeds supported depth")
             if isinstance(value, str) and len(value) > MAX_RECORD_BYTES:
                 raise ValueError("Catalog JSON token exceeds supported size")
-            if prefix == "products" and event == "start_array":
+            if prefix == "products" and event == "start_array" and len(stack) == 2:
                 products = True
-            if prefix == "products.item" and event == "start_map":
+            if (
+                prefix == "products.item"
+                and event == "start_map"
+                and len(stack) == 3
+                and stack[-2][0] == "start_array"
+            ):
+                # ijson prefixes are strings: a literal top-level key named
+                # "products.item" must never impersonate an array occurrence.
                 builder, record_size = ObjectBuilder(), 0
             elif prefix == "products.item" and builder is None:
                 raise ValueError("Catalog products must contain objects")

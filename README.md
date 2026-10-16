@@ -1924,8 +1924,9 @@ and version conflicts are checked during discovery. Publishing a policy never
 adopts CPE identities, changes SBOM inventory, assesses vulnerability applicability,
 or creates human approval. Existing candidate panels refresh explicitly against
 updated policy. Supplied-dictionary ranking is available offline through the
-pinned component ranking endpoint. Network dictionary refresh, fuzzy ranking,
-full service migration and deployment qualification remain separate work.
+pinned component ranking endpoint. Scoped official refresh and optional complete
+catalog capture are described below. Full standalone-service migration and
+deployment qualification remain separate acceptance work.
 
 
 CPE discovery now has an internal offline module. `GET/PUT
@@ -1935,8 +1936,9 @@ inputs; writes require project-management permission and an expected policy head
 attributed candidates. Omitting `policy` selects current configuration. Reviewed
 aliases and explicit CPE/PURL mappings are supported; package versions,
 qualifiers and subpaths are retained. Candidates do not establish vulnerability
-applicability or change component identity. Live feeds, fuzzy ranking and complete
-standalone CPE-service migration remain planned.
+applicability or change component identity. Optional scoped official refresh and
+local full-catalog search extend this offline foundation; complete standalone
+service/deployment parity is not established.
 The Knowledge detail offers an on-demand specialist panel: attributed CPE
 candidates with explicit refresh, VScorer input preparation after original Base
 selection, and qualified Agentyzer request downloads. Preparation contacts no
@@ -2009,8 +2011,8 @@ capture pinned in the selected committed evidence ancestry. This keeps untouched
 catalog evidence available after partial refresh and in new product branches.
 Project authorization applies; the response identifies the actual retaining state.
 Mirrors retain upstream publisher attribution and do not establish independent
-corroboration. Provider rate-limit errors fail collection without partial publication;
-broader scheduling and provider-specific rate management remain planned.
+corroboration. Provider rate-limit errors fail collection without partial publication. Optional
+known-ID scheduling and durable shared provider pacing are described below.
 
 Within **Advisory intelligence refresh**, the collapsed **External OSV package
 matching** flow lists a bounded, pinned catalog of eligible package versions.
@@ -3518,3 +3520,9 @@ reports cannot become eligible contextual application or rescoring proposals.
 The existing qualified extension path continues to require its full commit and
 artifact consistency checks. A useful unqualified report is evidence for review,
 never proof of the requested checkout or delivered binary/container contents.
+
+Catalog parsing requires an actual `products` array; dotted literal JSON keys
+cannot impersonate array records. Regression checks cover both malformed shapes.
+The combined PostgreSQL catalog/scheduler/migration/cleanup/recovery/issued-export
+matrix passed 213 checks with one optional skip; the final catalog guard suite
+passed 37 checks. These use synthetic fixtures, without live provider acquisition.

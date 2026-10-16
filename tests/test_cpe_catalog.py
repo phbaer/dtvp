@@ -294,3 +294,24 @@ def test_excessive_unknown_root_keys_fail_before_selection(tmp_path):
     with pytest.raises(ValueError, match="object key bounds"):
         catalog.import_archive(source, meta)
     assert catalog.current() is None
+
+
+@pytest.mark.parametrize("key", ["products.item", "products"])
+def test_dotted_keys_or_object_members_cannot_impersonate_product_array_occurrences(tmp_path, key):
+    catalog = Catalog(tmp_path / "catalog")
+
+    def confuse(_, raw):
+        from dtvp.knowledge.legacy_archive import strict_json
+
+        document = strict_json(raw)
+        document["products"] = []
+        if key == "products.item":
+            document[key] = product(99)
+        else:
+            document["products"] = {"item": product(99)}
+        return canonical(document)
+
+    source, meta = archive(tmp_path, groups=[[product(1)]], mutate=confuse)
+    with pytest.raises(ValueError, match="products"):
+        catalog.import_archive(source, meta)
+    assert catalog.current() is None
