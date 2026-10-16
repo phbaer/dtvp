@@ -121,3 +121,19 @@ def catch_up(engine, journal, *, rebuild=False):
             update(cursor).where(cursor.c.id == 1).values(publication_sha=head, sequence=sequence)
         )
         return {"publication": head, "sequence": sequence}
+
+
+def is_current(engine, journal):
+    """Read one guarded checkpoint; never project data or verify full history.
+
+    The writer lock prevents a journal publication/projection from moving between
+    these reads. This only establishes cursor alignment, not object completeness
+    or external evidence correctness; offline verification remains separate.
+    """
+    from dtvp.knowledge.journal import Publication
+
+    with journal.writer(), engine.connect() as connection:
+        head = journal.head()
+        position = connection.execute(select(cursor).where(cursor.c.id == 1)).first()
+        sequence = journal.load(head, Publication).sequence if head else 0
+        return bool(position and position.publication_sha == head and position.sequence == sequence)

@@ -41,7 +41,7 @@ from dtvp.auth import authenticate, issue
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready, sessions
 from dtvp.knowledge.journal import Journal
-from dtvp.knowledge.projection import catch_up
+from dtvp.knowledge.projection import catch_up, is_current
 from dtvp.models import User
 from dtvp.playground import router as playground_router
 from dtvp.playground import seed
@@ -155,6 +155,11 @@ def create_app(settings=None):
                 raise ValueError("Schema not ready")
         except Exception:
             raise HTTPException(503, "Database schema is not ready") from None
+        try:
+            if not is_current(engine, knowledge):
+                raise ValueError("Projection is not current")
+        except Exception:
+            raise HTTPException(503, "Native knowledge projection is not current") from None
         return {"status": "ready"}
 
     @app.post("/auth/logout")

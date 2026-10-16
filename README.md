@@ -1158,7 +1158,13 @@ uv run python scripts/playground.py up --skip-build
 
 ## API and consumers
 
-The API is `/api/v2`; schema: `/openapi.json`; readiness: `/readyz`.
+APIs: `/api/v3` for native knowledge and `/api/v2` for compatibility;
+schema: `/openapi.json`; readiness: `/readyz`; process liveness: `/healthz`.
+Readiness requires the current SQL schema and a native projection checkpoint
+aligned with the journal publication hash and sequence. Lag, missing checkpoints
+or an unreadable current publication return 503 without changing data. Readiness
+does not rebuild projections, inspect every retained object or verify source
+claims; offline journal verification and explicit recovery remain separate.
 Browser access uses server-side sessions and request tokens. OIDC maps verified
 issuer/subject identities to memberships. Administrators issue expiring, revocable,
 workspace/project-scoped machine credentials; tokens are returned only once.

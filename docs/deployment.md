@@ -28,7 +28,12 @@ uses one worker and database-backed leases; it does not require a broker.
 ## Automatic schema updates
 
 API and worker startup run Alembic to `head`. PostgreSQL's migration advisory
-lock serializes concurrent starts. `/readyz` opens only when the schema matches.
+lock serializes concurrent starts. `/readyz` requires the current schema and a
+native projection checkpoint matching the journal publication hash and sequence.
+Lag, missing checkpoints and unreadable current publications return 503. The
+probe reads under the journal lock but does not repair or publish anything;
+`/healthz` remains a separate process-liveness check. Checkpoint alignment does
+not replace full offline journal verification or validate evidence claims.
 Upgrading an existing schema first writes a checksummed, owner-readable JSONL
 logical data backup under `/data/migration-backups`; failure aborts startup.
 Migration revisions are frozen, transactional schema changes. Never edit an
