@@ -46,6 +46,7 @@ def test_atomic_archive_project_readable_provenance_and_historical_bundle_unchan
     analyst, app, bom
 ):
     project, endpoint, data, prior, original = seed(analyst, bom)
+    assert analyst.get(endpoint).json()["capabilities"] == ["preview", "apply"]
     response = analyst.post(endpoint + "/apply", json=data)
     assert response.status_code == 201, response.text
     assert len(response.json()["updates"]) == 2
@@ -54,6 +55,7 @@ def test_atomic_archive_project_readable_provenance_and_historical_bundle_unchan
     assert not sections and not app.state.knowledge.records(current["state"], "reviews")
     login(analyst, "viewer")
     assert analyst.get(endpoint).json()["total"] == 1
+    assert analyst.get(endpoint).json()["capabilities"] == []
     detail = analyst.get(endpoint + "/" + data["assessment_ids"][0]).json()
     assert detail["current_approval"] is False and detail["revision_total"] == 1
     assert any(item["record"].get("status") == "approved" for item in detail["records"])

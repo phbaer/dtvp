@@ -65,8 +65,16 @@ def listing(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ):
-    project_for(db, actor, project_id)
-    return list_archived(request.app.state.knowledge, project_id, offset=offset, limit=limit)
+    project = project_for(db, actor, project_id)
+    capabilities = []
+    if actor.allowed(db, project, "manage"):
+        capabilities.append("preview")
+        if actor.allowed(db, project, "write"):
+            capabilities.append("apply")
+    return {
+        **list_archived(request.app.state.knowledge, project_id, offset=offset, limit=limit),
+        "capabilities": capabilities,
+    }
 
 
 @router.get("/projects/{project_id}/maintenance/assessment-archive/{assessment_id}")

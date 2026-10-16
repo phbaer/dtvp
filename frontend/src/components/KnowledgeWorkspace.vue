@@ -24,10 +24,11 @@ import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
 import KnowledgeOwnership from './KnowledgeOwnership.vue'
 import KnowledgeBulkReview from './KnowledgeBulkReview.vue'
 import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
+import KnowledgeAssessmentArchive from './KnowledgeAssessmentArchive.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 const props = defineProps<{ me: Me }>()
-const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false)
-const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value)
+const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false)
+const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
 function bulkEligible(row: KnowledgeFinding) {
@@ -374,6 +375,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
       <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="intakeBusy" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
       <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
       <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
+      <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
       <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" />
       <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
       <KnowledgeComparison :project="project" />

@@ -741,6 +741,19 @@ historical coverage remain unchanged. Explicit forks may retain historical point
 without granting cross-version approval. Retries recheck current authorization
 before returning a prior receipt and never repin inputs or publish a second change.
 
+The collapsed **Assessment archive** product tool loads retained records only when
+opened. Readers can inspect original rationale, authorship and review records;
+management controls follow capabilities returned by the backend. Managers preview
+bounded pages against one frozen plan hash and full reference map, manually select
+up to 100 eligible IDs and provide a reason plus explicit confirmation. Changed
+preview pages require discarding the old selection before starting again.
+Captured publications retain their endpoint, request ID, selected IDs and all pins
+through conflicts, uncertain responses and delayed projections; retries send the
+identical request. Only confirmed commits with a current projection clear the
+capture. Product/version navigation stays locked until success or explicit discard.
+Actor/product changes remount the tool and ignore late responses. No archival is
+performed automatically and this UI never deletes immutable records or files.
+
 ### Curated component metadata
 
 Native component context and annotations are available from each Knowledge finding's
