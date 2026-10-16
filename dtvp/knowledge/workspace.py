@@ -133,6 +133,9 @@ def load_workspace(
     from dtvp.knowledge.target_fingerprints import TargetFingerprintBuilder
 
     fingerprints = TargetFingerprintBuilder(sections, revision.version)
+    from dtvp.knowledge.assessment_continuity import ApprovalContinuityResolver
+
+    continuity = ApprovalContinuityResolver(journal, sections, revision.version, state=state)
     has_code_analysis = any(key.startswith("code-analysis:") for key in sections["history"])
     inventory = sections["inventory"]
     components = {
@@ -185,6 +188,7 @@ def load_workspace(
                 context["id"],
                 identifier,
                 fingerprint_resolver=fingerprints.fingerprint,
+                continuity_resolver=continuity,
             )
             ratings = [
                 {
@@ -213,6 +217,7 @@ def load_workspace(
                         revision.version,
                         identifier,
                         fingerprint_resolver=fingerprints.fingerprint,
+                        continuity_resolver=continuity,
                     )
                 gate = score_gates[identifier]
             dependency_relation = "unknown"

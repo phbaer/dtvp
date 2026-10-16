@@ -50,6 +50,13 @@ class TargetFingerprintBuilder:
             if edge["ref"] in self._graph:
                 self._graph[edge["ref"]].update(edge.get("dependsOn", []))
         self._components = {ref: canonical(semantic(item)) for ref, item in components.items()}
+        pipeline = inventory.get("pipeline_configuration", {})
+        self._pipeline_configuration = (
+            pipeline.get("configuration") if pipeline.get("state") else None
+        )
+        self._pipeline_sections = sections
+        self._pipeline_components = components
+        self._pipeline_contexts = {}
         self._part_ids = {
             ref: item.get("dtvp_origin", {}).get("part_id") for ref, item in components.items()
         }
@@ -172,6 +179,19 @@ class TargetFingerprintBuilder:
                 "claims": claims,
             }
         )
+        if self._pipeline_configuration is not None:
+            if context_id not in self._pipeline_contexts:
+                from dtvp.knowledge.pipeline_config import context_material
+
+                self._pipeline_contexts[context_id] = context_material(
+                    self._pipeline_configuration,
+                    self._pipeline_sections,
+                    context,
+                    components=self._pipeline_components,
+                )
+            material = self._pipeline_contexts[context_id]
+            if material:
+                fields["pipeline_context"] = canonical(material)
         result = sha256()
         result.update(b"{")
         for index, (key, value) in enumerate(sorted(fields.items())):

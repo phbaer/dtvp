@@ -26,7 +26,19 @@ def score_key(context_id, vulnerability_id):
     return "score:" + digest(canonical([context_id, vulnerability_id]))
 
 
-def review_gate(journal, sections, version, vulnerability_id, *, fingerprint_resolver=None):
+def review_gate(
+    journal,
+    sections,
+    version,
+    vulnerability_id,
+    *,
+    fingerprint_resolver=None,
+    continuity_resolver=None,
+):
+    if continuity_resolver is None:
+        from dtvp.knowledge.assessment_continuity import ApprovalContinuityResolver
+
+        continuity_resolver = ApprovalContinuityResolver(journal, sections, version)
     findings = [
         item
         for item in sections["vulnerabilities"].values()
@@ -48,6 +60,7 @@ def review_gate(journal, sections, version, vulnerability_id, *, fingerprint_res
             context["id"],
             vulnerability_id,
             fingerprint_resolver=fingerprint_resolver,
+            continuity_resolver=continuity_resolver,
         )
         if coverage["status"] != "approved" or context["status"] != "resolved":
             missing.append(

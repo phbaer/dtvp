@@ -87,6 +87,16 @@ preserves approval for descriptive-only changes, revalidates affected material
 coverage and retains removed components' assessments historically. UI and CLI must
 explain each impact; unaffected contexts/versions keep their valid approvals.
 
+Reference-only changes can retain same-version approved coverage when unique
+stable component/root lineages, topology, claims, curated evidence and effective
+threat-model placements remain equivalent. Original `/1` targets/reviews remain
+immutable; workspace results expose the continuity source state/context. Historical
+reviewing teams remain recorded after ownership changes. Package/build/context,
+evidence/model or unknown metadata changes require review; component and advisory
+descriptions remain conservatively material. No cross-version approval transfer.
+Historical proof is request-local and bounded to 64 states/32 MiB; incomplete or
+ambiguous proof fails closed.
+
 The [retention design](docs/rewrite-plan.md#retention-and-cleanup-policy) protects
 released states, approvals, issued outputs and supporting evidence. Unused
 assessments are archived recoverably first. Physical cleanup requires an explicit

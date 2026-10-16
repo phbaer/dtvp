@@ -407,7 +407,14 @@ def create_review(journal, *, project_id, actor_id, data, authorize):
 
 
 def coverage_status(
-    journal, sections, version, context_id, vulnerability_id, *, fingerprint_resolver=None
+    journal,
+    sections,
+    version,
+    context_id,
+    vulnerability_id,
+    *,
+    fingerprint_resolver=None,
+    continuity_resolver=None,
 ):
     target = Target(version=version, context_id=context_id, vulnerability_id=vulnerability_id)
     fingerprint = (
@@ -489,6 +496,43 @@ def coverage_status(
                 "payload": review["assessment"],
             },
         }
+    # A reference rename changes /1 target bytes. Prove equivalence against the
+    # retained reviewed source; never rewrite its target or extend its version.
+    from dtvp.knowledge.assessment_continuity import approval_bridge
+
+    bridge = (
+        (
+            continuity_resolver(context_id, vulnerability_id)
+            if continuity_resolver
+            else approval_bridge(journal, sections, version, context_id, vulnerability_id)
+        )
+        if resolved and (not review or review.get("status") == "approved")
+        else None
+    )
+    if bridge:
+        historical = bridge["review"]
+        # A new authored revision is surfaced for explicit review rather than
+        # being masked by a historical bridge.
+        if not latest or latest["revision"] == historical["assessment_revision"]:
+            return {
+                **result,
+                "status": "approved",
+                "recorded": True,
+                "submitted": True,
+                "approved": True,
+                "pending_revision": False,
+                "pending_changes": [],
+                "assessment_id": historical["assessment_id"],
+                "assessment_revision": historical["assessment_revision"],
+                "historical_team_id": historical["target"]["team_id"],
+                "review": historical,
+                "continuity": {key: value for key, value in bridge.items() if key != "review"},
+                "approved_assessment": {
+                    "revision": historical["assessment_revision"],
+                    "stage": "submitted",
+                    "payload": historical["assessment"],
+                },
+            }
     matching = [
         (record, covered) for record, covered in candidates if covered["fingerprint"] == fingerprint
     ]
