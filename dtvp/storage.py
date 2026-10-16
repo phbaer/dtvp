@@ -1,4 +1,4 @@
-"""Content-addressed immutable local artifacts. Database owns all metadata."""
+"""Content-addressed immutable local bytes; callers own metadata and authority."""
 
 import hashlib
 import json
@@ -37,6 +37,20 @@ class Artifacts:
             os.fsync(root)
         finally:
             os.close(root)
+        try:
+            self.read(sha)
+        except FileNotFoundError:
+            pass
+        else:
+            # Targets are linked only after their file data is fsynced. Even
+            # when another writer just linked this target, retain the shard
+            # barrier before acknowledging reuse. Corruption is never repaired.
+            directory = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            return sha
         fd, name = tempfile.mkstemp(dir=target.parent)
         try:
             with os.fdopen(fd, "wb") as stream:

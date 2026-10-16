@@ -658,6 +658,18 @@ must end in `_recovery_test`. Both backends have passed this rehearsal. Custom
 roles/extensions, major upgrades and deployment-specific identity/remote-job
 qualification remain release gates; see the recovery instructions.
 
+Repeated artifact writes hash-verify existing content-addressed bytes and reuse
+them without creating and syncing a redundant temporary file. Both object-root
+and destination-shard directory durability barriers remain mandatory. Missing
+objects retain the temporary write, file fsync, atomic link and shard fsync
+protocol. Corrupt or unreadable existing objects fail closed without overwrite.
+Concurrent-writer and interrupted-publication tests cover this path; installation
+restore remains tested on SQLite and PostgreSQL.
+
+In an exploratory local 2,000-package/250-CVE fixture, a repeated import fell from
+26.0 to 0.6 seconds; directory fsync counts were unchanged. This filesystem-specific
+measurement is not a production performance or power-loss qualification.
+
 ### Retention maintenance preview
 
 `GET /api/v3/projects/{id}/maintenance/retention-preview` requires project management.
