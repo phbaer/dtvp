@@ -10,17 +10,9 @@ roles. Hashes establish consistency, not publisher identity or human approval.
 - `GET /api/v3/projects/{id}/states/{state}/bundle` and `/manifest` provide complete
   pinned native evidence, exact graph/consuming contexts, approved pins and retained
   history. Archive original bytes and configuration with generated outputs.
-- Generator's isolated `feat/dtvp-snapshot-integrity` branch, commit `791b186`,
-  adds `--dtvp-project-id ID --dtvp-state SHA` on the existing generation path.
-  API mode is `dtvp_knowledge`. It retains renderer/templates, validates exact
-  contexts, independent approval pins and published CVSS, archives complete inputs
-  and disables mutable enrichment during native runs. External proposals remain
-  evidence. Assembly forests retain actual roots without invented software edges;
-  omitted/missing parts and coherence limits remain visible in outputs. The native
-  UI selects project/version and explicitly pins the state; credentials remain
-  server-owned and redacted. Independent review: 96 backend tests, 14 frontend
-  tests and production build passed. This is not merged into `../generator`.
-  Richer metadata presentation and controlled-document parity remain cutover gates.
+- Generator's isolated `feat/dtvp-snapshot-integrity` branch now includes issued-input integrity (`791b186`), resource/constructor fixture isolation (`60e63c9`), offline document comparison (`20a7e93`) and pinned authored support reporting (`0ac78ed`). Native CLI/API/UI inputs use exact DTVP project/state selections and issued bundle/receipt/manifest bytes, preserve context/approval/CVSS distinctions and disable mutable enrichment. Existing renderers/templates remain in use. Authored support status, support-until and end-of-life dates retain their separate meanings, provenance and applicability; they never become an inferred support classification. Stale annotations remain historical. The isolated full suite passed 743 tests with one optional-template skip. These changes are not merged into `../generator` or deployed.
+
+  An actual HTTP run against isolated DTVP issued serializer `dtvp.knowledge-bundle-serializer/2` for a synthetic annotated state and produced Markdown/HTML/CSV/JSON support outputs. All four output hashes and the exact archived bundle were independently verified; external transport was blocked except for that DTVP endpoint. Generator retained template revision `41ea5cce0d8736078101570463f6f5dc5e79a18f`. Its consistency report raised three errors and twelve warnings (missing license/composition evidence and other missing inputs); the run does not satisfy controlled-document acceptance. PDF, customer configurations, prior-release/contextual vulnerability outputs and human approval remain unqualified. Source receipts and successful rendering establish neither supplier support verification nor regulatory acceptance.
 - `POST .../states/{state}/vscorer-input` derives schema-validated CycloneDX and
   focused strict CVE files after explicit source Base selection. Its receipt pins
   state, consuming context, component, file hashes and original Base assertions.
@@ -51,7 +43,7 @@ roles. Hashes establish consistency, not publisher identity or human approval.
 Native Agentyzer jobs now persist submission/poll/report checkpoints in operational
 SQL and publish bound evidence through the journal. Unknown POST outcomes never
 automatically repeat; lost in-memory remote jobs still require explicit reconciliation.
-Native follow-ups, complete CPE migration/refresh and semantic identity
+Native follow-ups, complete CPE migration/refresh and automatic semantic identity
 reconciliation, full legal qualification and architecture approval remain planned.
 Production acceptance also requires machine authorization, archived reproducible
 inputs, failure/retry handling and controlled consumer fixture qualification.

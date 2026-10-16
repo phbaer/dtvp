@@ -47,6 +47,11 @@ provenance; complete service migration and refresh remain planned.
 The concept's [integration status](docs/devsecops-evidence-concept.md#reviewed-integration-increments)
 records isolated sibling fixes, validation and remaining cutover gates. Native
 consumer commands and v2 compatibility boundaries are in [consumer contracts](docs/consumers.md).
+Generator’s isolated native adapter now retains authored support annotations and
+provides a reproducible offline renderer comparison. Its full suite passes 743
+tests (one optional skip). An actual synthetic DTVP HTTP run produced four support
+formats and byte-exact archived inputs; three missing-input errors and twelve
+warnings remain, so this does not establish controlled-document acceptance.
 Its [pipeline examples](docs/devsecops-evidence-concept.md#exemplary-pipeline-integration)
 map PR/nightly builds, legacy C/C++, containers, supplier inputs and parallel
 versions to intake, review, release gates, documentation and monitoring.
