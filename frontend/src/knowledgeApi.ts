@@ -44,6 +44,7 @@ export type KnowledgeFinding = {
     rationale: string; provenance: { source: string; reference: string }
     annotations: { cybersecurity: { criticality: string; exposure: string; mitigations: string[]; testing_evidence: string[] }; deployment: { environment: string; usage: string; configuration: string }; support: { status: string; supplier: string; support_until: string | null; end_of_life: string | null }; notes: string; properties: Record<string, string> }
   } }
+  supplemental_component_evidence?: unknown[]
   scoring_proposals?: KnowledgeProposal[]
   code_analysis?: KnowledgeCodeAnalysis[]
   capabilities: string[]; evidence?: unknown[]; [key: string]: unknown

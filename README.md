@@ -2806,3 +2806,11 @@ role in pipeline configuration. The import must supply that exact
 retains previous source, policy and reason. The new source starts its own build
 counter. Existing history/assessments remain retained, and source-bound identities
 are revalidated. An ordinary import cannot silently change inventory authority.
+
+The advanced observations panel imports original SBOM files with user/CI metadata,
+browses digest-consistent provenance pages, previews server-side conflicts/proposals
+and explicitly publishes selected/adopted inventory. Captured uploads/apply requests
+retain exact pins and preview through uncertain outcomes or projection lag. Actor
+changes invalidate late responses; intake and selection drafts cannot replace one
+another silently. Ordinary assessment screens remain focused on the selected team
+and finding; supplemental component evidence expands on demand.
