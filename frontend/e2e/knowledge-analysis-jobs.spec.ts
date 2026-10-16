@@ -4,9 +4,9 @@ const stateSha = 'a'.repeat(64), nextState = 'b'.repeat(64), contextId = 'c'.rep
 const vulnerability = 'CVE-2099-1234'
 const job = (id: string, status = 'submission_unknown', capabilities: string[] = []) => ({ id, status, version: '7.1.2', context_id: contextId, vulnerability_id: vulnerability, state: stateSha, attempts: 1, error: status === 'submission_unknown' ? 'Remote submission response was lost' : '', result: {}, created_at: '2026-10-15T12:00:00Z', requires_explicit_reconciliation: status === 'submission_unknown', capabilities })
 
-async function fixture(page: Page, options: { readonly?: boolean; createResponses?: number[]; knownFailed?: boolean } = {}) {
+async function fixture(page: Page, options: { readonly?: boolean; createResponses?: number[]; knownFailed?: boolean; reconcile?: boolean } = {}) {
   const reads: { path: string; query: URLSearchParams }[] = [], writes: { path: string; body: Record<string, unknown> }[] = []
-  let state = stateSha, creates = 0
+  let state = stateSha, creates = 0, reconciles = 0
   const row = { id: 'finding', context_id: contextId, vulnerability_id: vulnerability, component: { name: 'Parser', version: '2.0', purl: 'pkg:generic/parser@2.0' }, context: { root_ref: 'application', component_ref: 'parser', team_id: 'team', status: 'resolved' }, description: 'Advisory.', source_ratings: [], coverage: { status: 'unassessed', assessment: null }, published_score: null, capabilities: options.readonly ? [] : ['assess'] }
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
@@ -18,6 +18,7 @@ async function fixture(page: Page, options: { readonly?: boolean; createResponse
         if (status !== 202) return route.fulfill({ status, json: { detail: status === 409 ? 'Baseline changed; retain guidance and reload before a new request' : 'Request outcome uncertain; retry the identical request ID' } })
         return route.fulfill({ status, json: job('requested-job', 'queued', ['cancel']) })
       }
+      if (path.endsWith('/reconcile')) { reconciles++; return route.fulfill({ status: reconciles === 1 ? 503 : 200, json: reconciles === 1 ? { detail: 'Authenticated observation unavailable; no attachment' } : { ...job('unknown-job', 'queued', ['cancel']), result: { reconciliation_observation_sha256: 'e'.repeat(64) } } }) }
       if (path.endsWith('/retry')) return route.fulfill({ status: 202, json: job('known-job', 'queued', ['cancel']) })
       if (path.endsWith('/cancel')) return route.fulfill({ json: job('known-job', 'cancelled') })
       return route.fulfill({ status: 403, json: { detail: 'Unexpected mutation' } })
@@ -26,7 +27,7 @@ async function fixture(page: Page, options: { readonly?: boolean; createResponse
     if (path.endsWith('/analysis-jobs')) {
       reads.push({ path, query: new URLSearchParams(url.search) })
       const later = url.searchParams.get('offset') === '20'
-      result = { items: [options.knownFailed ? job('known-job', 'failed', options.readonly ? [] : ['retry']) : job(later ? 'older-job' : 'unknown-job')], next_offset: later ? null : 20, capabilities: options.readonly ? [] : ['submit'] }
+      result = { items: [options.knownFailed ? job('known-job', 'failed', options.readonly ? [] : ['retry']) : job(later ? 'older-job' : 'unknown-job', 'submission_unknown', options.reconcile ? ['reconcile', 'cancel'] : [])], next_offset: later ? null : 20, capabilities: options.readonly ? [] : ['submit'] }
     } else if (path.includes('/analysis-jobs/')) { reads.push({ path, query: new URLSearchParams(url.search) }); result = job(path.split('/').at(-1)!) }
     else if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
     else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Job product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
@@ -133,4 +134,22 @@ test('a changed input state clears request guidance and requires fresh source pr
   await expect(state.jobs.getByLabel('Analysis guidance (optional)', { exact: true })).toBeEmpty()
   await expect(state.jobs.getByRole('button', { name: 'Queue Agentyzer analysis', exact: true })).toBeDisabled()
   expect(state.writes.filter(write => write.path.endsWith('/analysis-jobs'))).toHaveLength(0)
+})
+
+
+test('explicit completed remote verification freezes ID and UUID and never queues another analysis POST', async ({ page }) => {
+  const state = await fixture(page, { reconcile: true })
+  await load(page)
+  const form = page.getByRole('form', { name: 'Reconcile analysis job unknown-job', exact: true })
+  await form.getByLabel('Completed remote job ID', { exact: true }).fill('remote-123')
+  await form.getByRole('checkbox').check()
+  await form.getByRole('button', { name: 'Verify and reconcile completed job', exact: true }).click()
+  await expect(state.jobs.getByRole('alert')).toContainText('Exact remote ID and request ID are retained')
+  await expect(form.getByLabel('Completed remote job ID', { exact: true })).toHaveAttribute('readonly', '')
+  await form.getByRole('button', { name: 'Retry exact remote verification', exact: true }).click()
+  await expect(state.jobs.getByRole('status')).toContainText('no analysis POST, assessment or approval was created')
+  const writes = state.writes.filter(item => item.path.endsWith('/reconcile'))
+  expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1])
+  expect(writes[0]!.body.remote_id).toBe('remote-123')
+  expect(state.writes.filter(item => item.path.endsWith('/analysis-jobs'))).toHaveLength(0)
 })

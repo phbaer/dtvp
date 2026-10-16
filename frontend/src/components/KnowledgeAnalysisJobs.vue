@@ -8,6 +8,7 @@ type JobPage = { items: AnalysisJob[]; next_offset: number | null; capabilities:
 const props = defineProps<{ project: string; state: string; version: string; contextId: string; vulnerabilityId: string; sourceReady: boolean }>()
 const items = ref<AnalysisJob[]>([]), recent = ref<AnalysisJob | null>(null), capabilities = ref<string[]>([])
 const loaded = ref(false), listBusy = ref(false), createBusy = ref(false), actionBusy = ref(''), guidance = ref(''), error = ref(''), createError = ref(''), notice = ref(''), requestRecorded = ref(false)
+const reconcileRemote = ref<Record<string, string>>({}), reconcileConfirmed = ref<Record<string, boolean>>({}), reconcileCaptured = ref<Record<string, { request_id: string; remote_id: string }>>({})
 const offset = ref(0), nextOffset = ref<number | null>(null), previous = ref<number[]>([])
 let sequence = 0, listSequence = 0
 let attempt: { signature: string; requestId: string } | null = null
@@ -16,7 +17,7 @@ const collection = () => `${endpoint()}/versions/${encodeURIComponent(props.vers
 const visibleJobs = computed(() => recent.value && !items.value.some(item => item.id === recent.value!.id) ? [{ job: recent.value, recent: true }, ...items.value.map(job => ({ job, recent: false }))] : items.value.map(job => ({ job, recent: false })))
 const label = (value: string) => value.replaceAll('_', ' ')
 const message = (value: unknown) => value instanceof Error ? value.message : 'Analysis job request failed'
-function reset() { ++sequence; ++listSequence; items.value = []; recent.value = null; capabilities.value = []; loaded.value = false; listBusy.value = false; createBusy.value = false; actionBusy.value = ''; guidance.value = ''; error.value = ''; createError.value = ''; notice.value = ''; requestRecorded.value = false; offset.value = 0; nextOffset.value = null; previous.value = []; attempt = null }
+function reset() { reconcileRemote.value = {}; reconcileConfirmed.value = {}; reconcileCaptured.value = {}; ++sequence; ++listSequence; items.value = []; recent.value = null; capabilities.value = []; loaded.value = false; listBusy.value = false; createBusy.value = false; actionBusy.value = ''; guidance.value = ''; error.value = ''; createError.value = ''; notice.value = ''; requestRecorded.value = false; offset.value = 0; nextOffset.value = null; previous.value = []; attempt = null }
 async function loadJobs(selectedOffset = offset.value) {
   if (createBusy.value || actionBusy.value) return false
   const scope = sequence, request = ++listSequence
@@ -47,6 +48,25 @@ async function inspect(job: AnalysisJob, action?: 'retry' | 'cancel') {
   } catch (failure) { if (scope === sequence) error.value = message(failure) }
   finally { if (scope === sequence) actionBusy.value = '' }
 }
+async function reconcile(job: AnalysisJob) {
+  if (actionBusy.value || listBusy.value || createBusy.value || !job.capabilities.includes('reconcile')) return
+  if (!reconcileCaptured.value[job.id]) {
+    const remote = reconcileRemote.value[job.id]?.trim() || ''
+    if (!reconcileConfirmed.value[job.id] || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(remote)) return
+    reconcileCaptured.value[job.id] = { request_id: crypto.randomUUID(), remote_id: remote }
+  }
+  const captured = reconcileCaptured.value[job.id]!, scope = sequence
+  actionBusy.value = job.id; error.value = ''
+  try {
+    const result = await knowledgeApi<AnalysisJob>(`${endpoint()}/analysis-jobs/${encodeURIComponent(job.id)}/reconcile`, send(captured))
+    if (scope !== sequence) return
+    if (result.requires_explicit_reconciliation || !result.result.reconciliation_observation_sha256) throw new Error('No authenticated completed-job binding was accepted.')
+    update(result); delete reconcileCaptured.value[job.id]
+    notice.value = 'Completed remote job bound to the exact issued input. Its retained report is queued for evidence import; no analysis POST, assessment or approval was created.'
+  } catch (failure) { if (scope === sequence) error.value = `${message(failure)} Exact remote ID and request ID are retained for safe verification retry.` }
+  finally { if (scope === sequence) actionBusy.value = '' }
+}
+function discardReconcile(id: string) { if (actionBusy.value) return; delete reconcileCaptured.value[id]; reconcileConfirmed.value[id] = false; error.value = '' }
 async function enqueue() {
   if (createBusy.value || listBusy.value || actionBusy.value || requestRecorded.value || !props.sourceReady || !capabilities.value.includes('submit')) return
   const body = { expected: props.state, context_id: props.contextId, vulnerability_id: props.vulnerabilityId, user_guidance: guidance.value.trim() }, signature = JSON.stringify(body)
@@ -84,6 +104,12 @@ onBeforeUnmount(() => { ++sequence; ++listSequence })
       <small v-if="entry.recent">Requested job</small>
       <strong>{{ label(entry.job.status) }}</strong><small>{{ entry.job.created_at }} · {{ entry.job.attempts }} attempts</small>
       <p v-if="entry.job.requires_explicit_reconciliation" class="job-reconciliation">Submission outcome is unknown. This job needs explicit reconciliation; refreshing status does not resubmit it.</p>
+      <form v-if="entry.job.capabilities.includes('reconcile')" :aria-label="`Reconcile analysis job ${entry.job.id}`" @submit.prevent="reconcile(entry.job)">
+        <p class="hint">Explicit recovery uses the configured private authenticated endpoint. Only a completed job with the exact repository, executed commit and issued DTVP input binding can be attached. Missing proof stays unknown; no analysis is resubmitted.</p>
+        <label>Completed remote job ID<input v-model="reconcileRemote[entry.job.id]" required maxlength="200" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,199}" :readonly="!!reconcileCaptured[entry.job.id]" :disabled="Boolean(actionBusy) || listBusy || createBusy"></label>
+        <label class="job-confirm"><input v-model="reconcileConfirmed[entry.job.id]" type="checkbox" required :disabled="Boolean(actionBusy) || !!reconcileCaptured[entry.job.id]"> I explicitly selected this completed remote job for the recorded request.</label>
+        <button :disabled="Boolean(actionBusy) || listBusy || createBusy || (!reconcileCaptured[entry.job.id] && !reconcileConfirmed[entry.job.id])">{{ reconcileCaptured[entry.job.id] ? 'Retry exact remote verification' : 'Verify and reconcile completed job' }}</button><button v-if="reconcileCaptured[entry.job.id]" type="button" :disabled="Boolean(actionBusy)" @click="discardReconcile(entry.job.id)">Discard captured reconciliation</button>
+      </form>
       <p v-if="entry.job.error">{{ entry.job.error }}</p>
       <div class="job-actions"><button :disabled="Boolean(actionBusy) || listBusy || createBusy" @click="inspect(entry.job)">Refresh job status</button><button v-if="entry.job.capabilities.includes('retry') && !entry.job.requires_explicit_reconciliation" :disabled="Boolean(actionBusy) || listBusy || createBusy" @click="inspect(entry.job, 'retry')">Retry known job</button><button v-if="entry.job.capabilities.includes('cancel')" :disabled="Boolean(actionBusy) || listBusy || createBusy" @click="inspect(entry.job, 'cancel')">Cancel DTVP job</button></div>
       <p v-if="entry.job.capabilities.includes('cancel')" class="hint">Cancellation stops local processing; it does not confirm cancellation at Agentyzer.</p>
@@ -98,7 +124,8 @@ onBeforeUnmount(() => { ++sequence; ++listSequence })
 summary { cursor: pointer; overflow-wrap: anywhere; }
 form { margin-block: .75rem; }
 label { display: grid; gap: .3rem; }
-textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; }
+input,textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; }
+.job-confirm { display:flex; align-items:start; gap:.4rem; margin-block:.6rem }.job-confirm input { width:auto }
 article { border-top: 1px solid var(--border, #64748b33); padding-block: .65rem; }
 strong, small { display: block; overflow-wrap: anywhere; }
 small { opacity: .75; }

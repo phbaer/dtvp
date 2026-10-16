@@ -549,6 +549,26 @@ for absent findings by default, with optional recorded `team_id`, `absent_only`,
 Recorded team labels/targets are preserved across reassignment; these records are
 historical evidence, not current approvals or proof of remediation.
 
+Native Agentyzer jobs support explicit actor-only reconciliation of unknown POST
+outcomes against the additive private authenticated Agentyzer completed-job
+endpoint. Original private correlation (unique 256-bit nonce and issued/request
+SHA-256) is required; legacy unknown jobs stay fail closed. Current permissions,
+credential, repository/endpoint, material pins and SQL lease are rechecked before
+and after GET. No analysis POST is retried. The authenticated exact public report
+is durably checkpointed and imported through existing proposal-only semantics.
+A sanitized transport summary/hashes are archived, never the nonce/private proof;
+this is receipt consistency, not provider authenticity or cryptographic attestation.
+Configure matching server-owned `DTVP_AGENTYZER_TOKEN` and upstream
+`AGENTYZER_RECONCILIATION_TOKEN` (minimum 32 printable ASCII non-space characters).
+The native jobs detail provides explicit frozen remote-ID verification/retry.
+See [Agentyzer integration](docs/agentyzer.md) for contracts, operational-backup needs and limitations.
+
+Set `DTVP_AGENTYZER_RECONCILIATION_ENABLED=true` explicitly (default false).
+A strong existing token alone leaves the previous POST body unchanged; only new
+opted-in jobs gain private proof. The isolated sibling implementation is commit
+`a10b5d4` on `fix/immutable-source-binding` in `/tmp/agentyzer-source-binding`;
+it has not been merged, pushed or deployed.
+
 ### Explicit local v2 snapshot migration rehearsal
 
 `POST /api/v3/projects/{target}/versions/{version}/migration/v2/preview`

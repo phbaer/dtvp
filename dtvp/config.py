@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     agentyzer_enabled: bool = False
     agentyzer_url: str = ""
     agentyzer_token: str = ""
+    agentyzer_reconciliation_enabled: bool = False
     agentyzer_timeout_seconds: int = 3600
 
     @model_validator(mode="after")

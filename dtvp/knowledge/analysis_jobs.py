@@ -1,6 +1,7 @@
 """Durable native Agentyzer orchestration; ambiguous remote writes never repeat."""
 
 import re
+import secrets
 from datetime import timedelta
 from urllib.parse import quote
 from uuid import NAMESPACE_URL, uuid5
@@ -12,7 +13,7 @@ from sqlalchemy import select
 from dtvp.auth import aware
 from dtvp.jobs import actor_for
 from dtvp.knowledge.agentyzer import derive_analysis_input
-from dtvp.knowledge.agentyzer_results import AgentyzerResultInput, import_agentyzer_result
+from dtvp.knowledge.agentyzer_results import AgentyzerResultInput, _json, import_agentyzer_result
 from dtvp.knowledge.assessments import target_fingerprint
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
 from dtvp.knowledge.workspace import load_sections
@@ -31,6 +32,36 @@ class AnalysisJobInput(RequestModel):
     context_id: Sha
     vulnerability_id: Name
     user_guidance: str = Field(default="", max_length=6000)
+
+
+def private_protocol(settings):
+    token = settings.agentyzer_token
+    return bool(
+        settings.agentyzer_reconciliation_enabled
+        and token
+        and len(token) >= 32
+        and all(33 <= ord(char) <= 126 for char in token)
+    )
+
+
+def public_evidence(value, correlation=None):
+    """Reject private association material before any returned evidence is retained."""
+    raw = _json(value)
+    pending = [value]
+    while pending:
+        selected = pending.pop()
+        if isinstance(selected, dict):
+            if (
+                "dtvp_binding" in selected
+                or selected.get("format") == "dtvp.analysis-correlation/1"
+            ):
+                raise ValueError("Private binding fields must not enter returned evidence")
+            pending.extend(selected.values())
+        elif isinstance(selected, list):
+            pending.extend(selected)
+    if correlation and correlation["nonce"].encode() in raw:
+        raise ValueError("Private correlation material must not enter returned evidence")
+    return raw
 
 
 def _endpoint(settings):
@@ -113,7 +144,7 @@ def enqueue_analysis(db, journal, settings, *, project_id, version, actor, data)
     if _repository(project) != request["component_name"]:
         raise PermissionError("Repository is not authorized by the project's Agentyzer binding")
     if issued is None:
-        issue_export(
+        issued = issue_export(
             journal,
             project_id=project_id,
             actor_id=actor.user.id,
@@ -138,6 +169,20 @@ def enqueue_analysis(db, journal, settings, *, project_id, version, actor, data)
             "request": request,
             "endpoint_digest": endpoint,
             "submission_started": False,
+            **(
+                {
+                    "correlation": {
+                        "format": "dtvp.analysis-correlation/1",
+                        "job_id": identity,
+                        "nonce": secrets.token_hex(32),
+                        "input_receipt_sha256": digest(canonical(derived["receipt"])),
+                        "issued_receipt_sha256": issued["receipt_sha256"],
+                        "request_sha256": digest(canonical(request)),
+                    }
+                }
+                if private_protocol(settings)
+                else {}
+            ),
         },
     )
     db.add(job)
@@ -246,7 +291,18 @@ def execute_analysis(factory, journal, settings, job_id, token):
                         return
                     _validate(db, journal, settings, job)
                 submitted = read_json(
-                    http, "POST", base + "/assess", headers=headers, json=payload["request"]
+                    http,
+                    "POST",
+                    base + "/assess",
+                    headers=headers,
+                    json={
+                        **payload["request"],
+                        **(
+                            {"dtvp_binding": payload["correlation"]}
+                            if payload.get("correlation")
+                            else {}
+                        ),
+                    },
                 )
                 remote = submitted.get("job_id") if isinstance(submitted, dict) else None
                 if not isinstance(remote, str) or not REMOTE_ID.fullmatch(remote):
@@ -327,6 +383,7 @@ def execute_analysis(factory, journal, settings, job_id, token):
                     "job": native_job,
                     "report": response,
                 }
+    public_evidence(envelope, payload.get("correlation"))
     report_sha = journal.store(envelope)
     with factory.begin() as db:
         job = _locked(db, job_id, token)

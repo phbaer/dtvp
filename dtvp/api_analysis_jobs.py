@@ -1,5 +1,6 @@
 """Explicit native analysis jobs; operational state stays separate from knowledge."""
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
 
@@ -13,6 +14,7 @@ from dtvp.knowledge.analysis_jobs import (
     job_view,
     retry_analysis,
 )
+from dtvp.knowledge.analysis_reconciliation import ReconcileInput, configured, reconcile_analysis
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 from dtvp.models import Job
 
@@ -37,16 +39,23 @@ def allowed_actions(db, actor, project):
     return all(actor.allowed(db, project, cap) for cap in ("read", "snapshot", "evidence"))
 
 
-def view(db, actor, selected):
+def view(db, actor, selected, settings=None):
     project = project_for(db, actor, selected.project_id)
     actions = []
     if selected.actor_id == actor.user.id and allowed_actions(db, actor, project):
-        if selected.status in {"queued", "running"}:
+        if selected.status in {"queued", "running", "submission_unknown"}:
             actions.append("cancel")
         if selected.status in {"failed", "import_pending"} and (
             selected.payload.get("remote_id") or selected.payload.get("report_sha256")
         ):
             actions.append("retry")
+        if (
+            selected.status == "submission_unknown"
+            and selected.payload.get("correlation")
+            and settings
+            and configured(settings)
+        ):
+            actions.append("reconcile")
     return {**job_view(selected), "capabilities": actions}
 
 
@@ -86,6 +95,7 @@ def enqueue(
 def jobs(
     project_id: str,
     version: Name,
+    request: Request,
     db: DB,
     actor: Auth,
     offset: int = Query(0, ge=0),
@@ -112,15 +122,15 @@ def jobs(
         )
     rows = list(db.scalars(query.offset(offset).limit(limit + 1)))
     return {
-        "items": [view(db, actor, job) for job in rows[:limit]],
+        "items": [view(db, actor, job, request.app.state.settings) for job in rows[:limit]],
         "next_offset": offset + limit if len(rows) > limit else None,
         "capabilities": ["submit"] if allowed_actions(db, actor, project) else [],
     }
 
 
 @router.get("/projects/{project_id}/analysis-jobs/{job_id}")
-def job(project_id: str, job_id: str, db: DB, actor: Auth):
-    return view(db, actor, selected_job(db, actor, project_id, job_id))
+def job(project_id: str, job_id: str, request: Request, db: DB, actor: Auth):
+    return view(db, actor, selected_job(db, actor, project_id, job_id), request.app.state.settings)
 
 
 @router.post("/projects/{project_id}/analysis-jobs/{job_id}/retry", status_code=202)
@@ -150,7 +160,35 @@ def cancel(project_id: str, job_id: str, db: DB, actor: Auth):
     selected = selected_job(db, actor, project_id, job_id, "evidence", lock=True)
     if selected.actor_id != actor.user.id:
         raise HTTPException(403, "Only the submitting user can cancel this analysis")
-    if selected.status in {"queued", "running"}:
+    if selected.status in {"queued", "running", "submission_unknown"}:
         selected.status = "cancelled"
         selected.lease_until = None
     return view(db, actor, selected)
+
+
+@router.post("/projects/{project_id}/analysis-jobs/{job_id}/reconcile")
+def reconcile(
+    project_id: str, job_id: str, data: ReconcileInput, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id, "evidence")
+    try:
+        selected = reconcile_analysis(
+            request.app.state.sessions,
+            request.app.state.knowledge,
+            request.app.state.settings,
+            project_id=project_id,
+            job_id=job_id,
+            actor_id=actor.user.id,
+            credential_id=actor.credential.id,
+            data=data,
+        )
+        return view(db, actor, selected, request.app.state.settings)
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(403, str(error)) from error
+    except httpx.HTTPError, ValueError, TypeError:
+        raise HTTPException(
+            502,
+            "Authenticated remote observation unavailable or inconsistent; nothing was attached",
+        ) from None
