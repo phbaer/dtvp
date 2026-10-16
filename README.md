@@ -596,6 +596,27 @@ actor capabilities without granting access from team ownership. The HTTP CLI use
 with `--json` for the complete server response. Review and score publication stay
 separate from selecting assessment coverage.
 
+### Interactive advisory-change playground
+
+Against an already running isolated playground:
+
+```bash
+uv run python scripts/knowledge_intelligence_demo.py
+# Optional private playground:
+uv run python scripts/knowledge_intelligence_demo.py --url http://127.0.0.1:8900
+```
+
+The API-only script verifies playground mode, creates a separate clearly synthetic
+project and retains an immutable pre-update tag. It imports an invented provider
+update (including a zero rating) and a contradictory second provider. It verifies
+one changed and one added claim group, the unchanged original SBOM rating, and
+absence of assessments, reviews and scores. Output includes the historical inventory
+SHA, selected evidence SHA, report digest and workspace URL. Paste those pins into
+**Choose retained inventory state** in the advisory comparison panel. Ownership
+and discovery/license coverage remain unknown; no external provider or human
+review is simulated as real. Existing exact-name projects, including partial seeds
+and interactive edits, are skipped without resetting or repairing them.
+
 ### Statistics across authorized projects
 
 `GET /api/v3/portfolio` captures one complete current-reference selection across
