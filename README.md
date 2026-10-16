@@ -133,6 +133,18 @@ Select inputs atomically with `POST .../versions/{version}/assembly`:
 }
 ```
 
+The Knowledge workspace's **Assemble product** editor also supports a new version
+before its first baseline. Search source parts and explicitly choose immutable
+states; existing pins stay selected even when newer source imports arrive.
+Preview the exact selection, removals, withdrawals, required-part policy and
+producer-declared coherence before publication. Edited selections default to
+unverified coherence. The preview describes structure only; publication evaluates
+current ownership and evidence, and never transfers approvals or infers links
+between parts. Import and assembly buffers prevent competing edits and preserve
+the exact request across uncertain responses. The guided API uses
+`GET .../assembly-target`, `GET .../assembly-parts`, and
+`POST .../versions/{version}/assembly-preview` / `assembly-apply`.
+
 The complete declaration retains missing required parts as incomplete candidates.
 `GET .../states/{state}/assembly` returns pinned selections and collection evidence.
 Omitting prior parts requires exact `removed_parts` and `removal_reason`; clearing

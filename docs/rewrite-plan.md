@@ -531,6 +531,13 @@ required parts or unverified coherence remain candidates; release tags require a
 nonempty selection and explicit producer-declared coherence, not a claim of
 verified completeness or completed human review. API comparison exposes part
 selection changes; `scripts/assembly_demo.py` exercises a two-part update.
+The native editor now provides searched, explicitly pinned constituent selection,
+new-version bootstrap, structural preview, reasoned removals/withdrawals/policy
+changes and explicit coherence declarations. Preview is read-only and excludes
+current ownership/evidence/approval synthesis; apply uses the existing guarded
+publication and receipt identity. Unknown or nonproduct predecessor objects are
+rejected before dereferencing. No automatic latest-part selection or approval
+transfer occurs.
 Initial limits: delivery parts only, same-version source inputs, no overlapping
 evidence-view reconciliation, nested assembly or cross-part relationship mapping.
 

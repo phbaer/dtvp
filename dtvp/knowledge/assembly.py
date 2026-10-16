@@ -93,7 +93,7 @@ def selected_inventory(journal, project_id, version, part):
     return inventory
 
 
-def publish_assembly(journal, *, project_id, version, actor_id, data):
+def assembly_request_identity(project_id, version, actor_id, data):
     operation = {
         "operation": "assembly.select/1",
         "project_id": project_id,
@@ -101,12 +101,11 @@ def publish_assembly(journal, *, project_id, version, actor_id, data):
         "actor_id": actor_id,
         **data.model_dump(mode="json"),
     }
-    fingerprint = digest(canonical(operation))
-    scoped_request = digest(canonical([project_id, actor_id, data.request_id]))
-    with journal.writer():
-        receipt = journal.receipt(scoped_request, fingerprint)
-    if receipt:
-        return receipt
+    return digest(canonical([project_id, actor_id, data.request_id])), digest(canonical(operation))
+
+
+def build_assembly_candidate(journal, *, project_id, version, data):
+    """Pure structural candidate; excludes current ownership/evidence/review synthesis."""
     ref = Ref(project_id=project_id, name=version)
     if journal.resolve(ref) != data.expected:
         raise Conflict("Branch changed; reload before selecting assembly")
@@ -254,6 +253,31 @@ def publish_assembly(journal, *, project_id, version, actor_id, data):
     parents = list(
         dict.fromkeys(([parent] if parent else []) + [p.state for p in data.parts if p.state])
     )
+    return {
+        "sections": sections,
+        "parents": parents,
+        "artifacts": sorted(
+            set(artifacts) | set(journal.state(parent).artifacts if parent else [])
+        ),
+        "previous_kind": "assembly" if old_manifest else "single_baseline" if parent else "none",
+        "changed_requirements": sorted(
+            key
+            for key in old_parts.keys() & new_parts.keys()
+            if new_parts[key].required != old_parts[key]["required"]
+            or new_parts[key].role != old_parts[key]["role"]
+        ),
+    }
+
+
+def publish_assembly(journal, *, project_id, version, actor_id, data):
+    scoped_request, fingerprint = assembly_request_identity(project_id, version, actor_id, data)
+    with journal.writer():
+        receipt = journal.receipt(scoped_request, fingerprint)
+    if receipt:
+        return receipt
+    candidate = build_assembly_candidate(journal, project_id=project_id, version=version, data=data)
+    sections, parents = candidate["sections"], candidate["parents"]
+    ref = Ref(project_id=project_id, name=version)
     from dtvp.knowledge.ownership import current_policy, policy_ref, resolve_ownership
 
     policy_state, config = current_policy(journal, project_id)
@@ -272,7 +296,7 @@ def publish_assembly(journal, *, project_id, version, actor_id, data):
         reason="Select product assembly",
         sections=sections,
         parents=parents,
-        artifacts=sorted(set(artifacts) | set(journal.state(parent).artifacts if parent else [])),
+        artifacts=candidate["artifacts"],
     )
     return journal.publish(
         request_id=scoped_request,

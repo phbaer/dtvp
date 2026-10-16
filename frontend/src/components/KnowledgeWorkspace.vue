@@ -12,6 +12,7 @@ import KnowledgeAnalysisEvidence from './KnowledgeAnalysisEvidence.vue'
 import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
 import KnowledgeIntake from './KnowledgeIntake.vue'
+import KnowledgeAssembly from './KnowledgeAssembly.vue'
 import KnowledgeOwnership from './KnowledgeOwnership.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
@@ -20,7 +21,8 @@ import KnowledgePortfolio from './KnowledgePortfolio.vue'
 import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
 import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
 const props = defineProps<{ me: Me }>()
-const intakeLocked = ref(false)
+const intakeBusy = ref(false), assemblyLocked = ref(false)
+const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value)
 const project = ref(''), projectName = ref(''), version = ref(''), team = ref(''), lifecycle = ref(''), query = ref('')
 const filterLabels: Record<string, string> = { source_severity: 'Source severity', contextual_severity: 'Published severity', applicability: 'Applicability', scoring_status: 'Scoring status', team_review: 'Team assessment', provider: 'Evidence provider', cvss_version: 'Source CVSS version', dependency: 'Dependency relationship', source_conflict: 'Source discrepancies', component: 'Component' }
 const emptyFilters = () => Object.fromEntries(Object.keys(filterLabels).map(key => [key, '']))
@@ -275,7 +277,8 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <p class="hint">Filters and counts use the full server result. Unknown evidence stays unknown; outdated scores are excluded from published severity.</p>
     </details>
     <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy || intakeLocked" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
-    <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" @locked="intakeLocked = $event" @imported="onCompositionImported" />
+    <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="intakeBusy" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
+    <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
     <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
     <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
     <KnowledgeComparison :project="project" />

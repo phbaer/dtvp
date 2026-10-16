@@ -4,7 +4,7 @@ import { knowledgeApi } from '../knowledgeApi'
 
 type Target = { project_id: string; version: string; part_id: string | null; kind: 'product' | 'part'; state: string | null; source_authority: string; scope_template?: Record<string, unknown>; blocked_reasons: string[]; baseline: { source: string | null; build_number: number | null; occurred_at: string | null; collection: unknown }; capabilities: string[]; max_upload_bytes: number; formats: string[] }
 type Frozen = { project: string; version: string; part: string; metadata: Record<string, unknown>; raw: Uint8Array<ArrayBuffer>; filename: string; sha: string }
-const props = defineProps<{ project: string; version: string }>()
+const props = defineProps<{ project: string; version: string; disabled?: boolean }>()
 const emit = defineEmits<{ locked: [value: boolean]; imported: [value: { version: string; part_id: string | null }] }>()
 const opened = ref(false), busy = ref(false), target = ref<Target | null>(null), error = ref(''), notice = ref('')
 const selectedVersion = ref(''), mode = ref('product'), part = ref(''), source = ref(''), build = ref(''), observed = ref(''), context = ref(''), predecessor = ref(''), replace = ref(false)
@@ -28,7 +28,7 @@ async function suggestions() {
 }
 function search() { changed(); clearTimeout(timer); timer = setTimeout(() => void suggestions(), 200) }
 async function inspect() {
-  if (busy.value || frozen.value || !selectedVersion.value.trim() || mode.value === 'part' && !part.value.trim()) return
+  if (busy.value || props.disabled || frozen.value || !selectedVersion.value.trim() || mode.value === 'part' && !part.value.trim()) return
   const current = ++sequence
   busy.value = true; error.value = ''; notice.value = ''
   try {
@@ -42,7 +42,7 @@ async function inspect() {
 }
 function selectedFile(event: Event) { file.value = (event.target as HTMLInputElement).files?.[0] || null; error.value = '' }
 async function prepare() {
-  if (busy.value || frozen.value || !target.value?.capabilities.includes('import') || !file.value || !replace.value) return
+  if (busy.value || props.disabled || frozen.value || !target.value?.capabilities.includes('import') || !file.value || !replace.value) return
   const current = sequence, chosen = target.value, original = file.value
   busy.value = true; error.value = ''; emit('locked', true)
   try {
@@ -87,7 +87,7 @@ onBeforeUnmount(() => { ++sequence; clearTimeout(timer); emit('locked', false) }
     <summary>Import composition</summary>
     <section aria-label="Native composition intake">
       <p class="hint">Import original CycloneDX or SPDX files into an existing or new product version. Complete source documents replace the selected baseline; missing components do not establish remediation.</p>
-      <form aria-label="Select composition target" @submit.prevent="inspect"><fieldset :disabled="busy || !!frozen">
+      <form aria-label="Select composition target" @submit.prevent="inspect"><fieldset :disabled="busy || !!frozen || disabled">
         <label>Product version (existing or new)<input v-model="selectedVersion" list="intake-versions" required maxlength="200" @input="search"><datalist id="intake-versions"><option v-for="value in versionOptions" :key="value" :value="value" /></datalist></label>
         <label>Import target<select v-model="mode" @change="search"><option value="product">Complete product baseline</option><option value="part">Isolated source part</option></select></label>
         <label v-if="mode === 'part'">Source part ID<input v-model="part" list="intake-parts" required maxlength="200" @input="search"><datalist id="intake-parts"><option v-for="value in partOptions" :key="value" :value="value" /></datalist></label>
@@ -99,7 +99,7 @@ onBeforeUnmount(() => { ++sequence; clearTimeout(timer); emit('locked', false) }
         <p v-if="target.baseline.build_number != null">Last accepted source sequence: {{ target.baseline.build_number }}. Enter the actual next source sequence; retries keep the original value.</p>
         <ul v-if="target.blocked_reasons.length"><li v-for="reason in target.blocked_reasons" :key="reason">{{ ({ assembled_product_requires_explicit_part_selection_not_baseline_replacement: 'This product is assembled. Import a source part, then select it explicitly when assembling.', connector_owned_source_requires_explicit_authority_policy_to_replace_with_file: 'This source is connector-owned. File replacement requires an explicit authority policy; it cannot be changed here.', reserved_product_version_name: 'Product version names beginning with @ are reserved.' } as Record<string, string>)[reason] || reason.replaceAll('_', ' ') }}</li></ul>
         <p v-else-if="!target.capabilities.includes('import')">Your current permissions allow viewing this target only.</p>
-        <form v-if="target.capabilities.includes('import') && !frozen" aria-label="Prepare composition import" @submit.prevent="prepare"><fieldset :disabled="busy">
+        <form v-if="target.capabilities.includes('import') && !frozen" aria-label="Prepare composition import" @submit.prevent="prepare"><fieldset :disabled="busy || disabled">
           <label>Original SBOM file<input :key="inputKey" type="file" required accept=".json,.xml,.cdx,.spdx" @change="selectedFile"></label>
           <p class="hint">{{ target.formats.join(' · ') }}. Upload limit: {{ target.max_upload_bytes }} bytes.</p>
           <label>Source identity<input v-model="source" required maxlength="200" :readonly="!!target.baseline.source" placeholder="Stable pipeline or file-source name"></label>
