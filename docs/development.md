@@ -31,11 +31,23 @@ Set `DTVP_TEST_DATABASE_URL` to an isolated database ending in `_test` to check
 PostgreSQL schema migrations, concurrent startup and restart persistence. The
 test resets that database's public schema and refuses an unmarked database.
 
-`npm run test:unit` covers API request/error handling. `npm run test:ui` runs
-Chromium against the actual playground on port 8900; override with `DTVP_UI_URL`.
-It follows import → assessment → independent approval → consumer snapshot →
-evidence change and tests themes/team isolation/mobile layout. No application
-requests are mocked. Keep browser versions aligned with the npm lockfile.
+`npm run test:unit` covers API request/error handling. Set `DTVP_UI_URL` to an
+explicit disposable playground before browser commands; there is no default URL.
+`npm run test:ui` combines mocked transport/UI contract checks with live legacy
+import, review, snapshot, theme, isolation and mobile flows.
+
+`npm run test:integration` uses the separate `frontend/integration/` configuration
+and real native HTTP/storage without mocked responses. It creates a unique synthetic
+project, imports byte-exact parallel-version SBOMs, configures ownership, submits
+an analyst decision, independently approves it and explicitly publishes a coordinator
+score. Assertions retain original Base severity/bytes, per-vulnerability review
+gates and independent version scope. Playground mode is required before resource
+writes; existing projects are not reset. It has passed on SQLite and PostgreSQL.
+
+The one-command `uv run python scripts/playground.py test` runs this lane after
+legacy browser cases. Its PostgreSQL stack is disposable. Native journal data blocks
+the legacy SQL reset intentionally, so keep that ordering when running both lanes
+manually. Keep browser versions aligned with the npm lockfile.
 
 ## Shared scenarios
 

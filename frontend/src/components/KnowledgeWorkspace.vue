@@ -113,7 +113,7 @@ async function load(reset = true, keep = false, refreshHead = false) {
   if (reset) { offset.value = 0; previous.value = [] }
   if (!keep) close()
   try {
-    const params = new URLSearchParams({ offset: String(offset.value), limit: '30', q: query.value, team_id: team.value, lifecycle: lifecycle.value, ...Object.fromEntries(Object.entries(filters.value).filter(([, value]) => value !== '')) })
+    const params = new URLSearchParams({ offset: String(offset.value), limit: '30', q: query.value, ...(team.value ? { team_id: team.value } : {}), lifecycle: lifecycle.value, ...Object.fromEntries(Object.entries(filters.value).filter(([, value]) => value !== '')) })
     if (!reset && workspace.value?.state && !refreshHead) params.set('expected', workspace.value.state)
     const result = await knowledgeApi<KnowledgeWorkspace>(`${scope.value}/workspace?${params}`)
     if (current === sequence) { workspace.value = result; knownTeamLabels.value = { ...knownTeamLabels.value, ...result.team_labels }; syncViewUrl() }

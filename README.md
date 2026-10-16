@@ -1376,13 +1376,24 @@ npm ci --include=optional
 npm run build
 npm run test:unit
 npm run test:ui                 # requires DTVP_UI_URL pointing to a disposable playground
+npm run test:integration        # real native workflow; same explicit disposable URL
 ```
 
 `DTVP_TEST_DATABASE_URL` enables destructive integration checks against an
 explicitly disposable PostgreSQL database whose name ends in `_test`.
-Fast tests use SQLite only as an isolated test adapter. Browser tests use the
-actual PostgreSQL/auth/API stack, without mocked application requests.
-`uv run python scripts/playground.py test` runs backend/build/unit/browser checks.
+Fast tests use SQLite only as an isolated test adapter. The browser suite combines
+mocked transport/UI contract checks with live legacy workflows. The separate
+`test:integration` lane uses real native HTTP/storage: exact-byte intake, version
+comparison, analyst submission, independent review, coordinator score publication,
+source preservation and parallel-version isolation. It also covers the coordinator's
+all-team queue. This lane has passed against SQLite and PostgreSQL.
+
+`uv run python scripts/playground.py test` runs backend/build/unit/browser checks,
+then the real native integration lane against its disposable PostgreSQL playground.
+Native integration creates uniquely named synthetic projects without resetting
+existing data; it verifies playground mode before project writes. It runs after
+legacy reset-dependent cases because a populated journal intentionally blocks the
+legacy SQL reset. Keep manual integration runs on an explicitly disposable target.
 CI runs the same API, PostgreSQL and browser gates on pushes and pull requests.
 
 For separate processes, set the configuration in [development](docs/development.md),

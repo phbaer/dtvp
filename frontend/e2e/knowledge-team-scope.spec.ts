@@ -34,17 +34,17 @@ test('single analyst team is the initial scope and explicit all-team scope survi
   await page.reload()
   await expect(page.getByLabel('Filtered workspace statistics')).toBeVisible()
   await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('')
-  expect(queries.at(-1)!.get('team_id')).toBe('')
+  expect(queries.at(-1)!.get('team_id')).toBeNull()
 })
 
 test('multiple analyst teams require explicit scope instead of guessing one', async ({ page }) => {
   const queries = await fixture(page, ['Platform', 'Operations'])
   await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('')
-  expect(queries.at(-1)!.get('team_id')).toBe('')
+  expect(queries.at(-1)!.get('team_id')).toBeNull()
 })
 
 test('an explicit shared view overrides the single-team default', async ({ page }) => {
   const queries = await fixture(page, ['Platform'], '&k_project=product&k_version=1&k_team=')
   await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('')
-  expect(queries.at(-1)!.get('team_id')).toBe('')
+  expect(queries.at(-1)!.get('team_id')).toBeNull()
 })

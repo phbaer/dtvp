@@ -83,6 +83,7 @@ def run_test_stack(compose, skip_build, test_env):
             ["npm", "run", "test:unit"],
             ["npx", "playwright", "install", "chromium"],
             ["npm", "run", "test:ui"],
+            ["npm", "run", "test:integration"],
         ]:
             subprocess.run(
                 command,
