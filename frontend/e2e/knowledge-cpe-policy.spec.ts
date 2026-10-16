@@ -49,7 +49,7 @@ test('preview and explicit full-replacement confirmation precede publication;503
   advance(); await panel.getByRole('button', { name: 'Refresh current CPE policy' }).click()
   await expect(panel).toContainText('request still uses its original policy state')
   fail(0); await panel.getByRole('button', { name: 'Retry identical CPE policy publication' }).click()
-  await expect(panel.getByRole('status')).toContainText('No component identity, vulnerability assessment or approval was adopted')
+  await expect(panel.getByRole('status').filter({ hasText: 'No component identity, vulnerability assessment or approval was adopted' })).toContainText('No component identity, vulnerability assessment or approval was adopted')
   expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1]); expect(writes[0]).toEqual(previews[0])
   expect(writes[0]).toMatchObject({ expected: sha('a'), rules: {} })
 })

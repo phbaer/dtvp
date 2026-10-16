@@ -175,6 +175,10 @@ the exact request across uncertain responses. The guided API uses
 `GET .../assembly-target`, `GET .../assembly-parts`, and
 `POST .../versions/{version}/assembly-preview` / `assembly-apply`.
 
+Assembly publication feedback survives the switch to the newly assembled version
+after a successful workspace refresh, and clears when another product is selected.
+Composition tools do not query version catalogs before a product is selected.
+
 The complete declaration retains missing required parts as incomplete candidates.
 `GET .../states/{state}/assembly` returns pinned selections and collection evidence.
 Omitting prior parts requires exact `removed_parts` and `removal_reason`; clearing

@@ -84,7 +84,7 @@ test('changing queue scope during an uncertain request never resumes automatic n
   await page.getByRole('combobox', { name: 'Review status', exact: true }).selectOption('submitted')
   await expect(page.getByRole('region', { name: 'Context finding detail', exact: true })).toHaveCount(0)
   f.outcome('current'); await page.getByRole('button', { name: 'Retry exact assessment workflow request' }).click()
-  await expect(page.getByRole('status')).toContainText('current queue retained')
+  await expect(page.getByRole('status').filter({ hasText: 'current queue retained' })).toContainText('current queue retained')
   await expect(page.getByRole('region', { name: 'Context finding detail', exact: true })).toHaveCount(0)
   expect(f.writes[0]).toEqual(f.writes[1])
 })
@@ -96,7 +96,7 @@ test('the end of the visible queue retains position rather than selecting anothe
   await f.detail.getByLabel('Reason and evidence', { exact: true }).fill('Last current page context assessed')
   await f.detail.getByRole('button', { name: 'Submit and next', exact: true }).click()
   await expect(f.detail.getByRole('heading', { name: 'CVE-2099-31', exact: true })).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('No next finding remains on this page; queue position retained')
+  await expect(page.getByRole('status').filter({ hasText: 'No next finding remains on this page; queue position retained' })).toContainText('No next finding remains on this page; queue position retained')
   expect(f.writes).toHaveLength(1)
 })
 

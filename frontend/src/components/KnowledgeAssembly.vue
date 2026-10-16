@@ -7,7 +7,7 @@ type Target = { state: string | null; predecessor: string | null; previous_kind:
 type Preview = { preview_digest: string; readiness: string; missing_required_parts: string[]; selected_part_count: number; counts: Record<string, number>; selection: Part[]; changes: unknown; limitations: string[] }
 type Frozen = { project: string; version: string; input: Record<string, unknown>; preview?: Preview }
 const props = defineProps<{ project: string; version: string; disabled?: boolean }>()
-const emit = defineEmits<{ locked: [value: boolean]; assembled: [value: { version: string; part_id: null }] }>()
+const emit = defineEmits<{ locked: [value: boolean]; assembled: [value: { version: string; part_id: null; kind: 'assembly' }] }>()
 const busy = ref(false), error = ref(''), notice = ref(''), version = ref(''), predecessor = ref('')
 const target = ref<Target | null>(null), rows = ref<Row[]>([]), choices = ref<{ part_id: string; state: string; source?: string }[]>([])
 const query = ref(''), next = ref<number | null>(null), missing = ref(''), versionOptions = ref<string[]>([])
@@ -30,6 +30,7 @@ async function search(offset = 0) {
   } catch (value) { if (current === sequence) error.value = failure(value) }
 }
 async function versions() {
+  if (!props.project) { versionOptions.value = []; return }
   const current = sequence
   try { const value = await knowledgeApi<{ items: { version: string }[] }>(`${base()}/versions?${new URLSearchParams({ q: version.value, limit: '20' })}`); if (current === sequence) versionOptions.value = value.items.map(item => item.version) } catch { /* Inspect remains authoritative. */ }
 }
@@ -71,7 +72,7 @@ async function apply() {
   try {
     const result = await knowledgeApi<{ committed: boolean | null; projection?: string }>(`/projects/${encodeURIComponent(capture.project)}/versions/${encodeURIComponent(capture.version)}/assembly-apply`, { method: 'POST', body: JSON.stringify({ assembly: capture.input, preview_digest: capture.preview.preview_digest }) })
     if (result.committed !== true) throw new Error('Publication is uncertain; retry the identical captured assembly.')
-    frozen.value = null; target.value = null; emit('locked', false); notice.value = 'Product assembly published. Source observations remain distinct; current coverage is calculated by the backend.'; emit('assembled', { version: capture.version, part_id: null })
+    frozen.value = null; target.value = null; emit('locked', false); notice.value = 'Product assembly published. Source observations remain distinct; current coverage is calculated by the backend.'; emit('assembled', { version: capture.version, part_id: null, kind: 'assembly' })
   } catch (value) { error.value = `${failure(value)}. Exact selection, preview and request ID retained for retry; no source pin was advanced.` }
   finally { busy.value = false }
 }

@@ -55,7 +55,7 @@ test('explicit queue selection uses latest submitted revision, excludes self/dra
   await expect(panel.getByRole('button', { name: 'Approve 1 selected targets' })).toBeDisabled()
   await panel.getByRole('checkbox', { name: 'I reviewed the evidence', exact: false }).check()
   await panel.getByRole('button', { name: 'Approve 1 selected targets' }).click()
-  await expect(panel.getByRole('status')).toContainText('1 exact review targets committed')
+  await expect(panel.getByRole('status').filter({ hasText: '1 exact review targets committed' })).toContainText('1 exact review targets committed')
   expect(posts.find(row => row.path.endsWith('/apply'))!.body.selected).toEqual(['0'.repeat(64)])
 })
 test('uncertain and conflicting retries keep exact targets, UUID and heads through queue navigation', async ({ page }) => {
@@ -75,7 +75,7 @@ test('uncertain and conflicting retries keep exact targets, UUID and heads throu
   await expect(panel.getByRole('alert')).toContainText('check any earlier uncertain outcome')
   fail(0)
   await panel.getByRole('button', { name: 'Retry exact captured review' }).click()
-  await expect(panel.getByRole('status')).toContainText('committed for product / 7.1.1')
+  await expect(panel.getByRole('status').filter({ hasText: 'committed for product / 7.1.1' })).toContainText('committed for product / 7.1.1')
   const attempts = posts.filter(row => row.path.endsWith('/apply'))
   expect(attempts).toHaveLength(3)
   expect(attempts[0]!.body).toEqual(attempts[1]!.body)

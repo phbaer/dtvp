@@ -138,9 +138,11 @@ async function metadataChanged() {
   await load(true, true)
   if (row && workspace.value) await open(row)
 }
-async function onCompositionImported(value: { version: string; part_id: string | null }) {
+async function onCompositionImported(value: { version: string; part_id: string | null; kind?: 'assembly' }) {
   if (value.part_id) { notice.value = 'Source part imported; the assembled product remains unchanged.'; return }
-  await chooseProject({ id: project.value, name: projectName.value }, value.version)
+  const generation = actorGeneration, selectedProject = project.value
+  await chooseProject({ id: selectedProject, name: projectName.value }, value.version)
+  if (generation === actorGeneration && project.value === selectedProject && version.value === value.version && workspace.value && !error.value && value.kind === 'assembly') notice.value = 'Product assembly published. Source observations remain distinct; current coverage is calculated by the backend.'
 }
 async function seedDemo(scenario: 'workflow' | 'specialists' = 'workflow') {
   if (intakeLocked.value) return

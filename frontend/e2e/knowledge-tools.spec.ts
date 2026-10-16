@@ -19,12 +19,13 @@ async function fixture(page: Page, inventory = true) {
   await page.getByRole('option', { name: 'Tools product', exact: true }).click()
   const product = page.getByRole('group', { name: 'Product tools', exact: true }), state = page.getByRole('group', { name: 'Pinned state tools', exact: true })
   await expect(product.locator(':scope > details')).toHaveCount(6)
+  expect(reads.filter(path => path.startsWith('/api/v3/projects//'))).toEqual([])
   return { product, state, reads, writes }
 }
 test('closed utilities form compact rows; open panels span width and retain their existing inputs', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { product, state, reads, writes } = await fixture(page)
-  await expect(state.locator(':scope > details')).toHaveCount(6)
+  await expect(state.locator(':scope > details')).toHaveCount(7)
   await expect(state.locator(':scope > .knowledge-composition-tools > details')).toHaveCount(2)
   const cards = product.locator(':scope > details'), first = (await cards.nth(0).boundingBox())!, second = (await cards.nth(1).boundingBox())!
   expect(first.y).toBe(second.y); expect(second.x).toBeGreaterThan(first.x)

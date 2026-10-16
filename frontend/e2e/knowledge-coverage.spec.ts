@@ -69,7 +69,7 @@ test('shared assessment requires conditions and retains full scope plus UUID on 
   expect(writes[0]!.body).toMatchObject({ expected_versions: { '7.1.1': 'source-head', '7.1.2': '7.1.2-head' }, expected_revision: 'revision-one', targets: [{ version: '7.1.1', context_id: 'context', vulnerability_id: 'CVE-2099-1234' }, { version: '7.1.2', context_id: 'context', vulnerability_id: 'CVE-2099-1234' }] })
   fail(0)
   await page.getByRole('button', { name: 'Retry exact assessment workflow request', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Assessment submitted')
+  await expect(page.getByRole('status').filter({ hasText: 'Assessment submitted' })).toContainText('Assessment submitted')
   expect(writes[2]!.body).toEqual(writes[0]!.body)
   await detail.getByRole('button', { name: 'assessment', exact: true }).click()
   await expect(detail.getByLabel('Cross-version assessment scope')).not.toContainText('additional')
