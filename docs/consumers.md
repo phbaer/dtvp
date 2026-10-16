@@ -10,7 +10,7 @@ roles. Hashes establish consistency, not publisher identity or human approval.
 - `GET /api/v3/projects/{id}/states/{state}/bundle` and `/manifest` provide complete
   pinned native evidence, exact graph/consuming contexts, approved pins and retained
   history. Archive original bytes and configuration with generated outputs.
-- Generator's isolated `feat/dtvp-snapshot-integrity` branch, commit `354d644`,
+- Generator's isolated `feat/dtvp-snapshot-integrity` branch, commit `791b186`,
   adds `--dtvp-project-id ID --dtvp-state SHA` on the existing generation path.
   API mode is `dtvp_knowledge`. It retains renderer/templates, validates exact
   contexts, independent approval pins and published CVSS, archives complete inputs
@@ -60,8 +60,11 @@ serializers. Explicit `POST .../states/{state}/exports/bundle` creates a frozen
 bundle issuance; authorized file URLs preserve bytes across upgrades. Specialist
 preparation returns optional issuance metadata while native receipts remain unchanged.
 Older unissued receipts retain reproduction compatibility limits. Generator’s
-current isolated adapter still uses direct state bundle reads; adopting issuance
-and controlled output qualification remain cutover work. Source receipts establish
+isolated adapter now explicitly issues native inputs, validates the source receipt,
+scope and frozen file digests, and archives issuance/receipt/bundle/manifest bytes.
+It constructs same-origin file paths and never falls back to direct native reads.
+Actual current DTVP issuance to Generator passed with byte-exact archived files.
+Controlled output qualification remains cutover work. Source receipts establish
 consistency, not provider authenticity or human approval.
 
 Native Dependency-Track intake uses per-version bindings and durable GET-only

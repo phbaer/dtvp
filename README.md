@@ -567,7 +567,9 @@ use the authorized state artifact route. CLI uploads preserve the same exact byt
 and explicit metadata: `knowledge document-register --project ID --version VERSION
 --file report.pdf --metadata document.json` saves a draft; add `--submit` for review.
 The CLI never creates request IDs or replaces concurrency pins. Generator
-qualification and adoption of issued inputs remain separate cutover work.
+qualification remains separate cutover work. Generator’s isolated integration
+branch now consumes issued inputs and preserves exact input archives; see
+[consumer delivery evidence](docs/consumers.md).
 
 ### Native analysis jobs
 
