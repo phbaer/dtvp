@@ -549,6 +549,78 @@ for absent findings by default, with optional recorded `team_id`, `absent_only`,
 Recorded team labels/targets are preserved across reassignment; these records are
 historical evidence, not current approvals or proof of remediation.
 
+### Explicit local v2 snapshot migration rehearsal
+
+`POST /api/v3/projects/{target}/versions/{version}/migration/v2/preview`
+previews an existing local immutable `dtvp.snapshot/1` snapshot. The same body,
+plus its returned `preview_digest`, is accepted by `/migration/v2/apply`.
+Use the generic authenticated `knowledge request` CLI or HTTP API; no external
+archive upload or migration wizard is available in this slice.
+
+Example request (replace IDs, digest and configuration pins):
+
+```json
+{
+  "request_id": "cutover-rehearsal-1",
+  "snapshot_id": "existing-local-snapshot-id",
+  "snapshot_sha": "<snapshot sha256>",
+  "expected": null,
+  "expected_policy": null,
+  "expected_evidence": null,
+  "source": "pipeline/main",
+  "build_number": 0,
+  "occurred_at": "2026-10-16T03:00:00Z",
+  "acknowledge_historical_claims": true
+}
+```
+
+Read current ownership/evidence selections first and supply their actual hashes
+(`null` only when absent). An optional explicit `context` uses the existing
+`CollectionContext` schema; omitted coverage stays unknown. Choose the intended
+future pipeline source identifier and a first native build number explicitly;
+legacy source labels do not configure future authority or build ordering.
+
+Both preview and apply reauthorize source-project read/snapshot access and
+target-project manage/write access. SQL snapshot/release/revision membership,
+manifest and bundle/SBOM hashes, and every captured source artifact are checked
+before conversion. A target branch must be absent. Preview writes no journal
+objects or SQL projections. Apply performs one atomic publication with empty-head,
+ownership-policy and evidence-selection compare-and-swap checks. Exact request
+replay precedes input-artifact rereads and stale-head checks after current
+authorization, including uncertain publication and pending projection recovery.
+
+The exact selected original SBOM supplies native inventory through the native
+parser, preserving original format, license evidence and relationship semantics.
+The v2 normalized SBOM remains historical evidence inside the exact retained
+bundle; its containment-derived dependency edges are not promoted into native
+dependencies. All listed original source bytes remain retained artifacts. Original
+metadata, owner labels, decisions, approval claims,
+rescoring history and unmatched/inactive findings remain typed historical evidence.
+No legacy owner becomes a native permission and no decision/approval/score becomes
+a native human record. Current native ownership and evidence policy apply explicitly.
+
+Captured source observations and selected-original SBOM findings use exact declared
+component IDs/refs and vulnerability IDs. Source ratings admit only validated
+original CVSS 3/4 Base vectors and mathematically matching Base scores. Unsupported,
+contextual or inconsistent ratings remain archived; mapped active findings retain
+unknown-rating queue observations. All such observations are labelled historical
+and unverified, including selected-original source claims; no past source assertion
+is relabelled as a fresh future-pipeline observation. Explicit inactive targets stay
+historical. Unsupported originals fail closed;
+reference drift is exposed as unresolved without name/PURL identity guessing.
+Preview identifies legacy-derived edges that were not adopted.
+DT tagged and plain documentation remains readable even when Base ratings are unknown.
+Preview exposes full counts, capture coverage/conversion losses and bounded first
+200 mapping/unresolved details; the complete evidence remains in the original bundle.
+
+Limits: local installation only, up to 200 source revisions, 64 MiB bundle and
+256 MiB total original source bytes. Missing or corrupt originals fail closed.
+External archive intake, v1 project/Git archive conversion, ownership/identity
+reconciliation and complete legacy recovery remain deferred. In particular,
+`dtvp.snapshot/1` includes captured decisions but only the latest decision's
+approval, so older approvals may be absent. No snapshot-completeness or regulatory
+compliance claim is made.
+
 ### Offline journal verification
 
 `uv run dtvp verify-knowledge --directory /path/to/artifacts/knowledge` verifies an

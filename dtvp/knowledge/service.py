@@ -25,6 +25,50 @@ def part_ref(project_id, version, part_id):
     )
 
 
+def inventory_sections(
+    document,
+    *,
+    artifact_sha,
+    source,
+    build_number,
+    occurred_at,
+    collection,
+    representation,
+    version=None,
+    part_id=None,
+    source_provenance=None,
+):
+    """Pure coherent-baseline construction shared by intake and explicit migration."""
+    relations = relationships(document)
+    # Source-local keys are deliberate in the first slice; identity reconciliation
+    # and context-aware assessment carryover are not implemented by this importer.
+    inventory = {
+        "baseline": dict(
+            source=source,
+            **({"source_provenance": source_provenance} if source_provenance else {}),
+            build_number=build_number,
+            occurred_at=occurred_at,
+            artifact_sha=artifact_sha,
+            parser=document["parser"],
+            format=document["format"],
+            losses=document["losses"],
+            representation=representation,
+            **({"part_id": part_id, "product_version": version} if part_id else {}),
+            **collection_summary(document, collection),
+        ),
+        **{component_key(c["bom-ref"]): c for c in document["components"]},
+        "dependencies": {"edges": dependency_edges(document, relations)},
+        "relationships": {"items": relations},
+        "root": document["bom"].get("metadata", {}).get("component", {}),
+    }
+    # Source claims remain separate from future human assessments.
+    vulnerabilities = {
+        digest(canonical([source, item])): {"source": source, **item}
+        for item in document["findings"]
+    }
+    return inventory, vulnerabilities
+
+
 def import_inventory(
     journal,
     *,
@@ -138,33 +182,18 @@ def import_inventory(
             if build_number <= baseline["build_number"]:
                 raise Conflict("Build is not newer than the accepted baseline")
     document = parse(raw)
-    relations = relationships(document)
-    # Source-local keys are deliberate in the first slice; identity reconciliation
-    # and context-aware assessment carryover are not implemented by this importer.
-    sections["inventory"] = {
-        "baseline": dict(
-            source=source,
-            **({"source_provenance": source_provenance} if source_provenance else {}),
-            build_number=build_number,
-            occurred_at=occurred_at,
-            artifact_sha=journal.objects.put(raw),
-            parser=document["parser"],
-            format=document["format"],
-            losses=document["losses"],
-            representation=representation,
-            **({"part_id": part_id, "product_version": version} if part_id else {}),
-            **collection_summary(document, collection),
-        ),
-        **{component_key(c["bom-ref"]): c for c in document["components"]},
-        "dependencies": {"edges": dependency_edges(document, relations)},
-        "relationships": {"items": relations},
-        "root": document["bom"].get("metadata", {}).get("component", {}),
-    }
-    # Source claims remain separate from future human assessments.
-    sections["vulnerabilities"] = {
-        digest(canonical([source, item])): {"source": source, **item}
-        for item in document["findings"]
-    }
+    sections["inventory"], sections["vulnerabilities"] = inventory_sections(
+        document,
+        artifact_sha=journal.objects.put(raw),
+        source=source,
+        build_number=build_number,
+        occurred_at=occurred_at,
+        collection=collection,
+        representation=representation,
+        version=version,
+        part_id=part_id,
+        source_provenance=source_provenance,
+    )
     old_inventory = journal.records(parent, "inventory") if parent else {}
     sections["history"] = {
         **sections["history"],

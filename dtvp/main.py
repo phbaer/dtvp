@@ -28,6 +28,7 @@ from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_metadata_editor import router as metadata_editor_router
+from dtvp.api_migration import router as migration_router
 from dtvp.api_ownership_editor import router as ownership_editor_router
 from dtvp.api_portfolio import router as portfolio_router
 from dtvp.api_proposals import router as proposal_router
@@ -83,6 +84,7 @@ def create_app(settings=None):
         https_only=settings.public_url.startswith("https://"),
         same_site="lax",
     )
+    app.include_router(migration_router)
     app.include_router(router)
     app.include_router(advisory_jobs_router)
     app.include_router(inventory_router)
