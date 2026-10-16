@@ -6,8 +6,8 @@ import { send } from '../api'
 type Reference = { kind: 'branch' | 'tag'; name: string; state: string; version: string; created_at: string }
 type Revision = { state: string; version: string; created_at: string; reason: string; actor_id: string; parents: string[] }
 type Choice = { id: string; state: string; label: string }
-type Change = { category: string; key: string | string[]; change: string; classifications: string[]; before: Record<string, unknown> | null; after: Record<string, unknown> | null }
-type Comparison = { before: string; after: string; before_version: string; after_version: string; items: Change[]; total: number; next_offset: number | null; summary: { by_category: Record<string, number>; by_classification: Record<string, number> }; retention: { before: { retained_assessments: number; retained_absent_assessments: number }; after: { retained_assessments: number; retained_absent_assessments: number } }; limitations: string[] }
+type Change = { changed_fields?: string[]; category: string; key: string | string[]; change: string; classifications: string[]; before: Record<string, unknown> | null; after: Record<string, unknown> | null }
+type Comparison = { observation_evidence?: { provenance_only_groups: number }; before: string; after: string; before_version: string; after_version: string; items: Change[]; total: number; next_offset: number | null; summary: { by_category: Record<string, number>; by_classification: Record<string, number> }; retention: { before: { retained_assessments: number; retained_absent_assessments: number }; after: { retained_assessments: number; retained_absent_assessments: number } }; limitations: string[] }
 type SyncRow = { id: string; category: string; vulnerability_id?: string; source_context_id?: string; target_context_id?: string; source?: { assessment_revision?: string }; draft_allowed?: boolean; reasons: string[]; requires_new_target_review: boolean; [key: string]: unknown }
 type SyncPreview = { source: string; target: string; basis: string | null; preview_digest: string; mode: string; total: number; next_offset: number | null; items: SyncRow[]; limitations: string[] }
 const synchronization = ref<SyncPreview | null>(null), syncBusy = ref(false), syncOffset = ref(0), syncPrevious = ref<number[]>([])
@@ -127,6 +127,7 @@ async function paginate(forward: boolean) {
 }
 function title(change: Change) {
   const item = change.after || change.before
+  if (change.category === 'observation_evidence') return `${item?.component_ref || 'Component'} · ${item?.source || 'Source'}${item?.part_id ? ` · ${item.part_id}` : ''}`
   if (change.category === 'context_finding') return `${item?.vulnerability_id || 'Finding'} · ${item?.component_ref || ''}`
   return String(item?.name || (Array.isArray(change.key) ? change.key.join(' → ') : change.key))
 }
@@ -193,10 +194,12 @@ onBeforeUnmount(() => { ++syncSequence; ++projectSequence; ++comparisonSequence;
       <template v-if="result">
         <div class="comparison-summary" aria-label="Comparison totals"><strong>{{ result.total }} changes</strong><span v-for="(count, category) in result.summary.by_category" :key="category">{{ human(String(category)) }}: {{ count }}</span></div>
         <p v-if="result.total === 0" role="status">No differences between these pinned states.</p>
+        <p v-if="result.observation_evidence?.provenance_only_groups" class="hint">{{ result.observation_evidence.provenance_only_groups }} source groups changed only import provenance; excluded from evidence changes.</p>
         <p class="hint comparison-limitation">Exact source-local references; changed references appear as additions/removals. Removed findings do not prove remediation.</p>
         <div class="comparison-rows" aria-label="Historical changes">
           <details v-for="(change, index) in result.items" :key="`${change.category}:${JSON.stringify(change.key)}:${index}`" class="comparison-row">
             <summary><span class="comparison-change">{{ human(change.change) }}</span><strong>{{ title(change) }}</strong><small>{{ human(change.category) }} · {{ change.classifications.map(human).join(', ') }}</small></summary>
+            <p v-if="change.category === 'observation_evidence'" class="hint">Attributed source evidence · changed fields: {{ (change.changed_fields || []).map(human).join(', ') }}. Inventory and human decisions remain separate.</p>
             <div class="comparison-values"><div><h4>Before</h4><pre>{{ change.before === null ? 'Absent in this state' : JSON.stringify(change.before, null, 2) }}</pre></div><div><h4>After</h4><pre>{{ change.after === null ? 'Absent in this state' : JSON.stringify(change.after, null, 2) }}</pre></div></div>
           </details>
         </div>

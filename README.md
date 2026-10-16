@@ -2876,3 +2876,24 @@ customer SBOM correctness, license clearance or controlled-document acceptance.
 Explicit observation adoption rejects collisions with existing occurrence references
 or live/retired lineage identities before publication. Authority nodes and retained
 identity history cannot be overwritten by an adopted source occurrence.
+
+Historical `/compare/details` now includes attributed `observation_evidence`
+changes independently of component payloads, dependency topology and human decisions.
+Rows are scoped by canonical target occurrence, delivery part and source, retaining
+source facts, exact before/after provenance and changed field names. Identical
+packages in different parts/consuming occurrences are never merged. The existing
+paginated UI/CLI display these rows; totals and source-group diagnostics describe the
+complete pinned comparison, not the loaded page.
+
+Only typed source-state/local-reference/component-origin pointers are excluded from
+material evidence equality. Duplicate/order-only assertion repeats are deduplicated;
+unknown component facts and extra source-claim attributes remain material. Import-
+provenance-only changes are counted separately without inflating material deltas.
+Literal `licenses` changes carry `source_license`; generic SPDX-style properties
+remain attributed material property changes without guessing parser authenticity.
+Missing/withdrawn evidence does not prove remediation or licensing clearance.
+
+Observation comparison fails closed above 100,000 assertions per state/scoped
+comparison groups or 32 MiB of normalized input per state/output. Existing immutable
+export `/1` serializers are unchanged. Disposable comparison cache keys now use
+`dtvp.historical-comparison/2`, preventing reuse of older synthesis results.

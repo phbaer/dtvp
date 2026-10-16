@@ -7,11 +7,15 @@ from dtvp.knowledge.journal import Ref
 from dtvp.knowledge.workspace import load_sections, load_workspace
 from dtvp.storage import canonical, digest
 
+MAX_OBSERVATION_ASSERTIONS = 100_000
+MAX_OBSERVATION_BYTES = 32 * 1024 * 1024
+
 LIMITATIONS = [
     "Identity uses exact source-local component/context references; names and PURLs never merge occurrences.",
     "Changed references appear as removal/addition, not a verified component migration.",
     "Missing claims/components do not prove remediation; retained assessments remain historical evidence.",
     "Historical states are read from the journal, without changing PostgreSQL or current branch heads.",
+    "Attributed observation evidence remains source claims; composition, topology and human decisions are compared separately. Source-state and local-reference-only churn is excluded from evidence change counts.",
 ]
 
 
@@ -185,6 +189,142 @@ def baseline_semantics(inventory):
     }
 
 
+def observation_groups(inventory):
+    """Compare typed source facts independently of observation-local provenance."""
+    register = inventory.get("observation_assertions")
+    if register is None:
+        return {}
+    if (
+        not isinstance(register, dict)
+        or register.get("format") != "dtvp.observation-assertions/1"
+        or not isinstance(register.get("components"), dict)
+    ):
+        raise ValueError("Unsupported observation evidence comparison register")
+    groups, count, size = {}, 0, 0
+    for target, assertions in register["components"].items():
+        if not isinstance(target, str) or not isinstance(assertions, list):
+            raise ValueError("Malformed observation evidence comparison scope")
+        for assertion in assertions:
+            count += 1
+            if count > MAX_OBSERVATION_ASSERTIONS:
+                raise ValueError("Observation evidence comparison exceeds 100000 assertions")
+            if (
+                not isinstance(assertion, dict)
+                or not isinstance(assertion.get("component"), dict)
+                or not isinstance(assertion.get("source"), str)
+                or not assertion["source"]
+                or assertion.get("part_id") is not None
+                and not isinstance(assertion["part_id"], str)
+            ):
+                raise ValueError("Malformed attributed observation evidence")
+            raw = canonical(assertion)
+            size += len(raw)
+            if size > MAX_OBSERVATION_BYTES:
+                raise ValueError("Observation evidence comparison exceeds 32 MiB")
+            # Only typed import-local component reference/origin is provenance.
+            # Unknown component facts, source and part remain material evidence.
+            facts = {
+                key: value
+                for key, value in assertion["component"].items()
+                if key not in {"bom-ref", "dtvp_origin"}
+            }
+            key = (target, assertion.get("part_id"), assertion["source"])
+            entry = groups.setdefault(key, {"facts": {}, "provenance": {}, "claims": {}})
+            entry["facts"][canonical(facts)] = facts
+            attributes = {
+                key: value
+                for key, value in assertion.items()
+                if key not in {"source", "part_id", "state", "ref", "component"}
+            }
+            claim = {"component": facts, "attributes": attributes}
+            entry["claims"][canonical(claim)] = claim
+            provenance = {key: assertion.get(key) for key in ("state", "ref")}
+            provenance["component_ref"] = assertion["component"].get("bom-ref")
+            provenance["component_origin"] = assertion["component"].get("dtvp_origin")
+            entry["provenance"][canonical(provenance)] = provenance
+    return {
+        key: {
+            "component_ref": key[0],
+            "part_id": key[1],
+            "source": key[2],
+            "facts": [entry["facts"][raw] for raw in sorted(entry["facts"])],
+            "provenance": [entry["provenance"][raw] for raw in sorted(entry["provenance"])],
+            "facts_digest": digest(
+                canonical([entry["claims"][raw] for raw in sorted(entry["claims"])])
+            ),
+            "claims": [entry["claims"][raw] for raw in sorted(entry["claims"])],
+        }
+        for key, entry in groups.items()
+    }
+
+
+def observation_changes(old, new):
+    left, right = observation_groups(old), observation_groups(new)
+    keys = left.keys() | right.keys()
+    if len(keys) > MAX_OBSERVATION_ASSERTIONS:
+        raise ValueError("Observation evidence comparison exceeds 100000 scoped groups")
+    rows, size, provenance_only = [], 0, 0
+    for key in sorted(keys, key=canonical):
+        before, after = left.get(key), right.get(key)
+        if (
+            before is not None
+            and after is not None
+            and before["facts_digest"] == after["facts_digest"]
+        ):
+            provenance_only += before["provenance"] != after["provenance"]
+            continue
+        fields = sorted(
+            {
+                field
+                for entry in (before, after)
+                if entry
+                for facts in entry["facts"]
+                for field in facts
+            }
+        )
+
+        def values(entry, field):
+            return (
+                None
+                if entry is None
+                else sorted({canonical(facts[field]) for facts in entry["facts"] if field in facts})
+            )
+
+        changed_fields = [
+            field for field in fields if values(before, field) != values(after, field)
+        ]
+        if (
+            before is not None
+            and after is not None
+            and {canonical(claim["attributes"]) for claim in before["claims"]}
+            != {canonical(claim["attributes"]) for claim in after["claims"]}
+        ):
+            changed_fields.append("source_attributes")
+        change = "added" if before is None else "removed" if after is None else "changed"
+        classifications = ([change] if change != "changed" else []) + ["evidence", "material"]
+        if "licenses" in changed_fields:
+            classifications.append("source_license")
+        row = {
+            "category": "observation_evidence",
+            "key": list(key),
+            "change": change,
+            "classifications": classifications,
+            "changed_fields": changed_fields,
+            "before": before,
+            "after": after,
+        }
+        size += len(canonical(row))
+        if size > MAX_OBSERVATION_BYTES:
+            raise ValueError("Observation evidence comparison output exceeds 32 MiB")
+        rows.append(row)
+    return rows, {
+        "scoped_groups_before": len(left),
+        "scoped_groups_after": len(right),
+        "provenance_only_groups": provenance_only,
+        "identity_basis": "canonical_target_reference_with_source_and_part_scope",
+    }
+
+
 def compare_states(journal, project_id, before, after, offset=0, limit=50):
     """One deterministic row page with full-set totals and explicit change classes."""
     page([], offset, limit)
@@ -278,8 +418,11 @@ def _compare_states(journal, project_id, before, after, reachable):
         if baseline_semantics(old["inventory"]) == baseline_semantics(new["inventory"])
         else ["material"],
     )
+    evidence_rows, evidence_summary = observation_changes(old["inventory"], new["inventory"])
+    rows.extend(evidence_rows)
     return {
         "project_id": project_id,
+        "observation_evidence": evidence_summary,
         "before": before,
         "after": after,
         "before_version": reachable[before].version,

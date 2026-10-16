@@ -9,7 +9,7 @@ from weakref import WeakKeyDictionary
 from dtvp.storage import canonical, digest
 
 # Bump whenever historical comparison/coverage/score synthesis semantics change.
-ALGORITHM_VERSION = "dtvp.historical-comparison/1"
+ALGORITHM_VERSION = "dtvp.historical-comparison/2"
 MAX_BYTES = 32 * 1024 * 1024
 MAX_ENTRY_BYTES = 8 * 1024 * 1024
 MAX_ENTRIES = 16

@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 const before = 'a'.repeat(64), after = 'b'.repeat(64), historic = 'c'.repeat(64)
 const sourceContext = 'e'.repeat(64), targetContext = 'f'.repeat(64), assessmentRevision = '1'.repeat(64), updatedAfter = '2'.repeat(64)
-async function fixture(page: Page, options: { draftAllowed?: boolean; draftResponses?: number[] } = {}) {
+async function fixture(page: Page, options: { draftAllowed?: boolean; draftResponses?: number[]; observation?: boolean; provenanceOnly?: boolean } = {}) {
   const requests: URLSearchParams[] = [], historyRequests: URLSearchParams[] = [], mutations: string[] = []
   const drafts: Record<string, unknown>[] = []
   let created = false
@@ -43,6 +43,14 @@ async function fixture(page: Page, options: { draftAllowed?: boolean; draftRespo
         summary: { by_category: { component: 12, dependency: 18, context_finding: 1 }, by_classification: { material: 30, ownership: 1, assessment: 1 } },
         retention: { before: { retained_assessments: 4, retained_absent_assessments: 0 }, after: { retained_assessments: 4, retained_absent_assessments: 2 } },
         limitations: ['Names and PURLs never merge distinct source occurrences.', 'Historical comparison does not change branch heads.'],
+      }
+      if (options.observation || options.provenanceOnly) {
+        const facts = (license: string) => ({ component_ref: 'application::lib', source: 'binary-scanner', part_id: 'application', facts: [{ name: 'Library', licenses: [{ expression: license }] }], provenance: [{ state: after, ref: 'scanner-local' }] })
+        result = { ...(result as Record<string, unknown>),
+          items: options.provenanceOnly ? [] : [{ category: 'observation_evidence', key: ['application::lib', 'application', 'binary-scanner'], change: 'changed', classifications: ['evidence', 'material', 'source_license'], changed_fields: ['licenses'], before: facts('MIT'), after: facts('Apache-2.0') }],
+          total: options.provenanceOnly ? 0 : 1, next_offset: null,
+          summary: { by_category: options.provenanceOnly ? {} : { observation_evidence: 1 }, by_classification: options.provenanceOnly ? {} : { evidence: 1, material: 1, source_license: 1 } },
+          observation_evidence: { provenance_only_groups: options.provenanceOnly ? 1 : 0 } }
       }
     }
     await route.fulfill({ json: result })
@@ -192,4 +200,31 @@ test('changing draft content after an uncertain response uses a new request iden
   await expect(page.getByRole('status').filter({ hasText: 'Target draft created.' })).toBeVisible()
   expect(state.drafts[1]?.request_id).not.toBe(state.drafts[0]?.request_id)
   expect(state.drafts[1]?.reason).toBe('Revised rationale')
+})
+
+
+test('attributed license evidence changes show canonical occurrence and source without claiming composition or approval changes', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const state = await fixture(page, { observation: true })
+  await page.getByText('Compare versions and history', { exact: true }).click()
+  const comparison = page.getByLabel('Historical state comparison')
+  await comparison.getByRole('button', { name: 'Compare states', exact: true }).click()
+  await expect(comparison.getByLabel('Comparison totals')).toContainText('observation evidence: 1')
+  await comparison.getByText('application::lib · binary-scanner · application', { exact: true }).click()
+  await expect(comparison).toContainText('changed fields: licenses')
+  await expect(comparison).toContainText('Inventory and human decisions remain separate')
+  await expect(comparison.locator('pre').first()).toContainText('MIT')
+  await expect(comparison.locator('pre').nth(1)).toContainText('Apache-2.0')
+  expect(state.mutations).toHaveLength(0)
+  expect(await page.locator('body').evaluate(row => row.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('nightly source provenance changes do not inflate material evidence totals', async ({ page }) => {
+  const state = await fixture(page, { provenanceOnly: true })
+  await page.getByText('Compare versions and history', { exact: true }).click()
+  const comparison = page.getByLabel('Historical state comparison')
+  await comparison.getByRole('button', { name: 'Compare states', exact: true }).click()
+  await expect(comparison.getByLabel('Comparison totals')).toContainText('0 changes')
+  await expect(comparison).toContainText('1 source groups changed only import provenance')
+  expect(state.mutations).toHaveLength(0)
 })
