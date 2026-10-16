@@ -51,6 +51,8 @@ def rehearse(client, *, simulate_reviews=False, output=None):
     steps = []
 
     def retain(name, raw):
+        if not name or Path(name).name != name or "/" in name or "\\" in name:
+            raise ValueError("Unexpected consumer artifact filename")
         files[name] = raw
         if output is not None:
             with (output / name).open("xb") as stream:

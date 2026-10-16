@@ -91,7 +91,8 @@ inputs and checks that scoring is blocked before review. The default leaves revi
 to the interactive workspace. `--simulate-reviews` explicitly exercises separate
 analyst/reviewer/coordinator personas for one vulnerability; it is test evidence,
 not actual human acceptance. Other findings remain open and no license clearance
-is created. Exact issued consumer files are downloaded and checked, repeat issuance
+is created. Consumer filenames are confined to the chosen output directory.
+Exact issued consumer files are downloaded and checked, repeat issuance
 and historical summaries are verified, and local hashes/receipts are recorded.
 Use a new output directory for every run. Captured requests and session identity
 are written as the run progresses, so failed/uncertain publications can be inspected

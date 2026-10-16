@@ -81,3 +81,22 @@ def test_corrupt_export_fails_and_retains_partial_rehearsal_for_inspection(
     assert (output / "application-import-metadata.json").is_file()
     assert (output / "issuance.json").is_file()
     assert not list(output.glob("issued-*"))
+
+
+def test_specialist_artifact_names_cannot_escape_output_directory(client, tmp_path, monkeypatch):
+    native = client.post
+
+    def unsafe_file(path, *args, **kwargs):
+        response = native(path, *args, **kwargs)
+        if path.endswith("/vscorer-input"):
+            data = response.json()
+            data["files"] = {"../../unexpected.json": "{}"}
+            return httpx.Response(200, json=data, request=response.request)
+        return response
+
+    monkeypatch.setattr(client, "post", unsafe_file)
+    output = tmp_path / "safe"
+    output.mkdir()
+    with pytest.raises(ValueError, match="artifact filename"):
+        rehearse(client, output=output)
+    assert not (tmp_path / "unexpected.json").exists()
