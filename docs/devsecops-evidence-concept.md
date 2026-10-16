@@ -523,7 +523,10 @@ Assessment/review workflows now persist exact contextual/version targets and
 independent decisions. Coordinator score publication requires all current contexts
 for that vulnerability/version to be approved. Initial combined workspace, HTTP
 CLI and guided Knowledge UI share these backend rules. Explicit occurrence
-correspondence and local v2 snapshot migration rehearsal are implemented; automatic
+correspondence, explicit linked target drafts, finite numeric release selection
+and local v2 snapshot migration rehearsal are implemented. Pinned composition can
+be compared with explicitly selected retained advisory claims without changing
+historical assessments; UI and CLI use the same read-only backend. Automatic
 semantic identity reuse, external/v1 archive migration and complete cutover
 qualification remain separate work.
 
@@ -547,7 +550,7 @@ explicit consistency limitation. Neither integration creates human approvals.
 
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,
-continuous range/exclusion syntax beyond explicit reviewed targets, extended
+dynamic future-version coverage beyond finite explicit range selection, extended
 evidence synthesis and VDR/VEX conformance, native specialist follow-up conversations,
 and broader architecture modeling/rendering qualification. Issued exports and
 independent controlled-document registration/review are implemented; they do not

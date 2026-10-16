@@ -1259,8 +1259,9 @@ alias validity for every future component/version. Component-specific alias cycl
 and version conflicts are checked during discovery. Publishing a policy never
 adopts CPE identities, changes SBOM inventory, assesses vulnerability applicability,
 or creates human approval. Existing candidate panels refresh explicitly against
-updated policy. Network refresh/ranking, full service migration and deployment
-qualification remain separate work.
+updated policy. Supplied-dictionary ranking is available offline through the
+pinned component ranking endpoint. Network dictionary refresh, fuzzy ranking,
+full service migration and deployment qualification remain separate work.
 
 
 CPE discovery now has an internal offline module. `GET/PUT

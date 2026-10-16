@@ -606,8 +606,20 @@ The native coverage matrix now compares a pinned source target with every curren
 version, preserving separate consuming contexts, absent targets and independent
 decisions. API, CLI and the assessment UI share server classifications and a
 complete preview digest across pages. Shared draft/submission targets are explicit;
-reviews and publication never inherit across versions. Continuous applicability
-ranges and semantic cross-import identity reconciliation remain planned.
+reviews and publication never inherit across versions. Closed numeric release
+bounds and exact include/exclude selectors now narrow the finite captured candidate
+set through API, CLI and UI. They never approve future versions or create dynamic
+applicability ranges. Explicit correspondence can create a new target-author draft
+from an independently approved historical source, with both component and context
+assertions, unchanged material, recorded ancestry and a new target review. Automatic
+semantic cross-import identity reconciliation remains deferred.
+
+Pinned inventory can also be compared with explicitly selected retained advisory
+evidence through API, CLI and a collapsed advisory panel. Provider claims and
+selection changes remain attributed; no package matching, applicability adoption
+or historical assessment rewrite occurs. Digests bind complete immutable reports
+while evidence-reference currentness remains a separate observation. Component
+neighborhoods support pinned search and paging beyond the initial 50 neighbors.
 
 Explicit bulk review now provides backend preview/apply and a queue selection UI.
 Each independent review pins the latest submitted revision and an explicit
@@ -721,10 +733,10 @@ native approvals. Opt-in authenticated Agentyzer remote-ID reconciliation now
 verifies completed jobs with private correlation and exact issued-input pins.
 Neither feature establishes complete legacy cutover or deployed sibling parity.
 
-Still deferred: automatic semantic cross-import/context identity reuse; continuous
-range/exclusion expressions beyond explicit reviewed version targets; extended
+Still deferred: automatic semantic cross-import/context identity reuse; dynamic
+future-version applicability coverage beyond finite explicit range selection; extended
 evidence synthesis and VDR/VEX scope/schema/signature support; verified cascading
-synchronization; current-intelligence comparison; destructive journal retention/GC;
+synchronization; destructive journal retention/GC;
 external/v1 archive migration and complete cutover qualification; native Agentyzer
 follow-up conversations; complete CPE-service migration/refresh; extended license
 and architecture-model qualification; serializer upgrade compatibility; and
