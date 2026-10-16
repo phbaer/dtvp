@@ -388,6 +388,24 @@ captured requests and draft inputs remain mounted; no additional disclosure laye
 or permission shortcut is introduced. Narrow screens use one readable column.
 Empty products finish loading and retain product tools before a first baseline.
 
+### Coordinator score publication
+
+Coordinator score previews bind the exact selected context, source state/Base vector,
+proposed vector and rationale. Editing inputs invalidates the preview. Publication
+captures the complete preview token and request ID; failed, uncertain or
+projection-pending outcomes retain that exact request in a visible retry buffer.
+Source inputs and competing single-finding mutations stay disabled while that
+publication is captured. Retry never regenerates a preview or repins a head.
+Explicit local discard does not undo or prove absence of an uncertain commit.
+
+Only `committed: true` with a current projection triggers authoritative refresh.
+Changing queue scope or context keeps the current view and never reopens the old
+context. Actor epochs and request signatures discard late preview/publication
+responses, including actor roundtrips, at each asynchronous continuation. The
+backend remains authoritative for coordinator permissions, source Base validation
+and required independent reviews; proposals never grant approval or publish scores
+implicitly.
+
 ### Guided queue progression
 
 Native single-finding actions offer explicit **Submit and next**, **Approve and next**

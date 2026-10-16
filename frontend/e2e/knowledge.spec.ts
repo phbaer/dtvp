@@ -152,7 +152,7 @@ test('coordinator previews required-review gate before explicit contextual score
   fixtureState.uncertain()
   await editor.getByRole('button', { name: 'Publish contextual score', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Publication uncertain')
-  await editor.getByRole('button', { name: 'Publish contextual score', exact: true }).click()
+  await page.getByRole('button', { name: 'Retry exact score publication', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('Contextual score published')
   const previews = fixtureState.writes.filter(item => item.path.endsWith('/scoring/preview'))
   const publications = fixtureState.writes.filter(item => item.path.endsWith('/scoring/publish'))
