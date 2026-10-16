@@ -1052,20 +1052,48 @@ authenticated Agentyzer extension; no approval or source override is inherited.
 External v1 ZIP inspection and its streamed CLI are read-only and preserve
 explicit normalization/history losses without restoring data or permissions.
 
-Still deferred: automatic semantic cross-import/context identity reuse; dynamic
-future-version applicability coverage beyond finite explicit range selection;
-full VDR/VEX schema/signature qualification beyond named consumed-field profiles;
-automatic cascading synchronization; destructive journal retention/GC; complete
-legacy cutover; full national CPE dictionary refresh/reviewed history reconstruction;
-extended license and architecture-model requirements; and controlled
-document/production recovery acceptance. These require scoped contracts or
-representative acceptance fixtures rather than automatic inference. The v2 runtime
-still owns its own metadata in PostgreSQL. First-slice inventory keys remain
-source-local references; no implicit assessment inheritance or scope approval
-is inferred from them. JSON-object imports retain their canonical representation;
-multipart file intake retains original bytes. Advanced assembly reconciliation and
-byte-preserving normalized export round trips remain separate work. These limitations
-must be resolved in subsequent slices before replacing v2 or declaring cutover.
+Current implementation boundaries (reconciled with README):
+
+- Stable lineage matching and proven same-version reference continuity ship;
+  semantic guesses never merge ambiguous occurrences or extend approval into a new
+  context. Finite version selection and explicit target review remain the coverage
+  contract. Future versions need newly pinned review; this is a preserved approval
+  boundary, not an automatic inheritance task.
+- Configured version relationships schedule durable synchronization proposals.
+  Explicit draft adoption and target submission/review ship. Unattended approval
+  or cascading application is outside the agreed proposal-only automation contract.
+- Offline collection of genuinely unreferenced objects ships, including SQL job
+  roots, stopped-writer exclusion and recovery copies. Online deletion and pruning
+  reachable history need a separate retention/checkpoint contract; current ancestry
+  is protected rather than silently eligible for compaction.
+- Reviewed, sanitized single-version v1 archive publication and bounded local v2
+  migration ship. Full customer migration and consumer cutover require representative
+  data and operator/deployment evidence. Disabling compatibility does not establish
+  migration completion or delete retained SQL history.
+- Source-preserving originals, attributed observations, explicit graph reconciliation,
+  controlled documents and material license review ship. Normalized exports do not
+  promise byte-identical recreation of every upstream format/extension; original
+  artifacts are the lossless representation. Any new transformation must name its
+  supported format and losses.
+- Optional complete NVD CPE archive capture, verified local indexing and bounded
+  candidate export ship separately from scoped official CPE refresh. Synthetic
+  archives qualify the contract; current national-feed resource/latency acceptance
+  remains operator work. CyBeats intake uses documented read queries and separately
+  supplied standard SBOM exports; no complete vendor download contract is assumed.
+- Official offline schema and deployment-key JWS checks are optional read-only
+  tools. They do not establish publisher authenticity beyond their explicit trust
+  policy, license clearance or human approval. Additional licensing/model rules
+  need named requirements and representative fixtures.
+- Source-pinned mocked specialist contracts distinguish current minimal VScorer
+  operator binding from the older qualified extension. Current Agentyzer reports
+  without checkout proof remain retained but ineligible for contextual application
+  or scoring. Mock success cannot supply missing provider facts.
+- Deployed specialist interoperability, controlled Generator document parity,
+  production OIDC, capacity, recovery and engine-upgrade acceptance remain external
+  qualification gates. Synthetic checks never grant them.
+
+The README records current adapters, conformance tooling and verification commands;
+older implementation-stage paragraphs below are historical, not an open-task list.
 
 ## Historical plan and refactoring record (superseded)
 

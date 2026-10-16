@@ -3612,3 +3612,21 @@ Generator acceptance attestations in the consolidated acceptance runner still
 remain external `not_run` gates. The adapter must be reconciled with subsequent
 default VSBOM/template changes before cutover; these mocked parser checks do not
 claim that current default Generator already supports native DTVP input.
+
+Final rewrite verification checkpoint (2026-10-16): the complete backend regression
+run passed 1,949 tests with 37 optional environment-dependent skips. Separate
+PostgreSQL catalog/scheduler/migration/recovery/root/export checks passed 213 tests
+with one skip; SQLite/PostgreSQL CyBeats checks passed 58. Final focused catalog
+and CyBeats guard/signing checks passed 37 and 40 respectively. Current specialist
+source-pinned mocks and the actual isolated Generator parser checks passed as
+described above. These overlapping suites are not additive coverage totals.
+Frontend typecheck/build and all three unit tests passed; feature-specific browser
+checks are recorded with their implementation sections. Ruff and diff checks pass.
+
+The [rewrite boundaries](docs/rewrite-plan.md#agreed-ground-up-design)
+and [consumer contracts](docs/consumers.md#native-journal-backed-v3) distinguish
+implemented behavior from human approval and deployment acceptance. Generator's
+native adapter remains on its isolated branch; current Agentyzer lacks checkout
+proof. Representative migration/document parity, production identity, capacity and
+engine-upgrade qualification remain operator acceptance tasks. Mocked results
+never grant these gates or silently extend assessment approval.

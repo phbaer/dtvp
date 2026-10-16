@@ -1,6 +1,10 @@
 # API and adapter contract
 
-The executable schema is `/openapi.json`; endpoints use `/api/v2`.
+The executable schema is `/openapi.json`. Native journal workflows use `/api/v3`;
+the [README](../README.md#ground-up-redesign) is the current native API guide.
+The resource table and ingestion examples below describe `/api/v2` compatibility
+contracts. With `DTVP_LEGACY_REVIEW_ENABLED=false`, compatibility review routes
+are unavailable; shared identity/catalog/job services retain their existing paths.
 Machine access uses `Authorization: Bearer TOKEN`. Cookie mutations require
 `X-CSRF-Token` and a matching browser Origin. Credentials are hashed, expiring,
 revocable and scoped; membership/sharing is rechecked for every read/write/job.
@@ -63,8 +67,11 @@ between requests; publication is atomic and rejects changed release inventory.
 OSV cannot supply trustworthy variant matching for qualified PURLs in this adapter;
 those remain unsupported. NVD/CIRCL records preserve upstream content. Use
 `dtvp.evidence/1` to import other official/vendor advisory evidence while a native
-feed adapter is being verified. EUVD/JVN native adapters, broader scan kinds and
-automatic scheduling remain extension work.
+feed adapter is being verified. Native `/api/v3` known-ID enrichment now includes
+EUVD (exact CVE/EUVD) and MyJVN (exact JVNDB); unsupported IDs remain explicit.
+These adapters do not establish package matching or automatic assessment approval.
+Optional journal-pinned known-ID schedules use the native advisory-schedule API;
+manual and scheduled jobs share durable provider pacing. See the README for bounds.
 
 Job failures retain unknown coverage and require explicit retry. A successful
 empty match response never records `not_affected`. No import, job or approval
