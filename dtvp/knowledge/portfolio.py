@@ -33,7 +33,7 @@ def _summary(rows):
             (approved_record, approved, approved_revisions),
         ):
             if identifier := _logical_id(record):
-                logical.add(identifier)
+                logical.add((row.get("project_id"), identifier))
                 revisions.add(record["revision"])
     approved_targets = sum(bool(row["coverage"].get("approved")) for row in rows)
     unresolved = sum(row["context"].get("status") != "resolved" for row in rows)
@@ -107,8 +107,16 @@ def _state_evidence(journal, state, workspace):
     }
 
 
-def load_portfolio(
-    journal, project_id, *, versions=None, team_id=None, q="", lifecycle="", filters=None
+def collect_portfolio(
+    journal,
+    project_id,
+    *,
+    versions=None,
+    team_id=None,
+    q="",
+    lifecycle="",
+    filters=None,
+    references=None,
 ):
     """Callers authorize the project; team filters never grant access.
 
@@ -117,7 +125,7 @@ def load_portfolio(
     """
     if lifecycle and lifecycle not in LIFECYCLES:
         raise ValueError("Unknown assessment lifecycle")
-    references = journal.references()
+    references = journal.references() if references is None else references
     available = {}
     for key, state in references.items():
         ref = Ref.model_validate_json(key)
@@ -154,7 +162,7 @@ def load_portfolio(
             candidates.add(context["team_id"])
         for team in sorted(candidates):
             teams[team].append(row)
-    return {
+    result = {
         "format": FORMAT,
         "project_id": project_id,
         "heads": heads,
@@ -166,3 +174,20 @@ def load_portfolio(
         "team_counts_overlap": True,
         "limitations": list(LIMITATIONS),
     }
+
+    return result, rows
+
+
+def load_portfolio(
+    journal, project_id, *, versions=None, team_id=None, q="", lifecycle="", filters=None
+):
+    result, _ = collect_portfolio(
+        journal,
+        project_id,
+        versions=versions,
+        team_id=team_id,
+        q=q,
+        lifecycle=lifecycle,
+        filters=filters,
+    )
+    return result

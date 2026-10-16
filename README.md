@@ -596,6 +596,31 @@ actor capabilities without granting access from team ownership. The HTTP CLI use
 with `--json` for the complete server response. Review and score publication stay
 separate from selecting assessment coverage.
 
+### Statistics across authorized projects
+
+`GET /api/v3/portfolio` captures one complete current-reference selection across
+explicit repeated `project=ID` values or all currently readable projects. Current
+project and machine-token authorization applies before journal reads. The same
+`q`, `lifecycle`, `team_id` and native finding filters scope the full workload.
+No tenant filter grants access. Limits are 100 projects, 1,000 current product
+versions, 250,000 section-record pointers, 64 MiB unique input objects and 100,000
+potential context findings, checked before workspace synthesis. Larger selections
+fail visibly; choose fewer projects instead of accepting truncated totals.
+
+Global totals, team workloads and both severity distributions precede project
+paging (`offset`, `limit` 1–100). Unique vulnerability identifiers deduplicate
+across projects; logical assessment identifiers remain project-scoped. Every
+version/context still contributes its own review target. Conflicting team groups
+can overlap and are not additive. Source coverage and retained-history counts
+remain explicitly unfiltered state-level facts, separate from filtered workload.
+
+Retain the complete `heads_digest` as `expected_heads` alongside the same project
+selection and filters on subsequent pages. Changed projects or heads return 409;
+no automatic repinning occurs. Project rows sort by immutable project ID so a
+renamed display label cannot reorder a pinned selection. CLI consumers can use
+`knowledge request GET /api/v3/portfolio` with the same query parameters. This
+read-only report creates no assessments, approvals or completeness claims.
+
 ### Current-version portfolio statistics
 
 The Knowledge tab offers a collapsed portfolio panel. It inherits workspace
