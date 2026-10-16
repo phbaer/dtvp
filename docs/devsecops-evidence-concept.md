@@ -527,8 +527,10 @@ correspondence, explicit linked target drafts, finite numeric release selection
 and local v2 snapshot migration rehearsal are implemented. Pinned composition can
 be compared with explicitly selected retained advisory claims without changing
 historical assessments; UI and CLI use the same read-only backend. Automatic
-semantic identity reuse, external/v1 archive migration and complete cutover
-qualification remain separate work.
+semantic identity reuse, native publication from v1 archives and complete cutover
+qualification remain separate work. V1 ZIP inspection and streamed CLI dry runs
+now expose exact pins, normalization limits and partial-history losses without
+persisting data, creating permissions or replaying native approvals.
 
 VDR/VEX evidence now has standalone durable selection, explicit producer ordering,
 withdrawal and baseline reapplication. Initial JSON semantic subsets preserve
@@ -543,6 +545,14 @@ Opt-in actor-only reconciliation can verify an explicitly selected completed job
 through private authenticated correlation and exact issued-input pins; legacy
 unbound jobs remain unresolved. This is receipt consistency, not cryptographic
 provider attestation, and the sibling implementation still requires deployment.
+Exact-parent native follow-ups now create separate, source-bound proposed evidence
+with frozen retries and current authorization. They require the explicitly enabled
+authenticated sibling extension; legacy unbound follow-ups are not a fallback.
+
+Native cross-project statistics use one bounded authorized project/head selection;
+global CVE counts, project-scoped logical decisions and per-context review workload
+remain distinct, with complete counts before project paging.
+
 Native DT intake uses dedicated per-version bindings and GET-only durable collection.
 Exact raw responses and frozen captures are retained before publication; SBOM export
 claims and finding claims remain separate. Nontransactional DT reads remain an
@@ -550,9 +560,12 @@ explicit consistency limitation. Neither integration creates human approvals.
 
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,
-dynamic future-version coverage beyond finite explicit range selection, extended
-evidence synthesis and VDR/VEX conformance, native specialist follow-up conversations,
-and broader architecture modeling/rendering qualification. Issued exports and
+dynamic future-version coverage beyond finite explicit range selection, selected
+VDR/VEX conformance profiles, native publication from reviewed legacy captures,
+and broader architecture modeling/rendering acceptance. General archive apply
+first needs a disclosure contract: a single-version, operator-reviewed sanitized
+export is the recommended simple initial scope, not an automatic secret-free
+guarantee or complete legacy backup. Issued exports and
 independent controlled-document registration/review are implemented; they do not
 establish renderer parity, architecture acceptance or regulatory compliance.
 Source license evidence now has a separate human disposition/review workflow with
@@ -571,7 +584,7 @@ end-to-end qualification.
 | `cpeservice`, `feat/dtvp-evidence-contract`, `98049fc` | Truthful rule/identity provenance, requested/resolved identifiers and deterministic result digest. 213 tests passed. | Internal DTVP offline catalog/rule proposals now exist; complete mapping-history migration and dictionary refresh remain planned; bounded offline supplied-dictionary ranking now ships. Candidates are not applicability. |
 | `generator`, `feat/dtvp-snapshot-integrity`, `791b186` / `60e63c9` / `20a7e93` / `0ac78ed` | Exact issued native inputs and byte-preserved receipts/bundle/manifest; isolated fixture repair; offline renderer comparisons; separately attributed authored support facts with no inferred support classification. Full suite: 743 passed, one optional-template skip. Actual isolated DTVP HTTP issuance produced four support formats with independently verified output/bundle hashes and pinned template revision. | Isolated/unmerged changes; live synthetic report has three errors and twelve warnings. Customer controlled-document parity, missing-input resolution, PDF, previous-release/context-specific vulnerability outputs and human acceptance remain gates. |
 | `vscorer`, `feat/dtvp-context-binding`, `3994254` | Optional exact context/component/CVE/Base receipt survives native intake and proposal responses. Independent Python/architecture reviews approved; 27 final checks passed and real DTVP-derived inputs were accepted. | No remote authenticity claim; production auth, serializer upgrade compatibility and controlled round-trip qualification remain. |
-| `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` / `a10b5d4` | Exact Git-commit source binding and additive private authenticated completed-job correlation; public request/report paths exclude private binding. The native DTVP adapter retains exact issued-input/request pins and never repeats unknown analysis POSTs. | These isolated changes are not merged or deployed. Upstream process-local job retention, deployed authentication/endpoint compatibility and source-to-binary/submodule/LFS verification remain qualification gaps. |
+| `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` / `a10b5d4` / `9bb5985` | Exact Git-commit source binding, private authenticated completed-job correlation and authenticated exact-parent/source-bound follow-ups; public request/report paths exclude private binding. DTVP retains issued-input and parent/report pins and never repeats unknown POSTs automatically. Latest isolated sibling suite: 517 passed. | These isolated changes are not merged or deployed. Process-local remote retention, deployed auth/endpoint compatibility and source-to-binary/submodule/LFS verification remain acceptance gaps; follow-up evidence never grants human approval. |
 
 Generator's synthetic offline renderer rehearsal compared the legacy and native adapters under the same pinned templates. SBOM mode produced nine byte-identical artifacts. Full mode compared 40 text/vector artifacts: 32 were byte-identical, two differed only in absolute per-run resource paths, and six contained substantive end-of-life differences because native inputs preserve unknown dates rather than legacy extrapolation. No compared outputs were missing. This diagnostic report records differences; it does not waive them or establish customer document parity.
 

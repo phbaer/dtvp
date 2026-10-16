@@ -476,7 +476,10 @@ rebuild. Fault injection covers every publication boundary and replay twice.
 Keep interactive playground data isolated from test resets. No real provider
 credentials, model downloads or external services are needed for core scenarios.
 
-### Next implementation gates
+### Original implementation sequence
+
+The gates below record the agreed build order. Delivered behavior is described
+in the current status paragraphs that follow; they are not all remaining tasks.
 
 1. Capture v1 parity fixtures and a reuse inventory against `main`, this branch and
    uncommitted work. Review semantic differences before removing old behavior.
@@ -581,8 +584,9 @@ guided assessment/independent review/coordinator scoring, ten advanced filters,
 user-local saved views, shared URLs and readable retained/legacy evidence. HTTP CLI
 uses the same backend contracts. A populated isolated workflow demo preserves
 interactive edits. Product refs/history and bounded semantic comparisons use
-immutable journal states with an actor-independent historical cache; current
-intelligence reevaluation remains planned.
+immutable journal states with an actor-independent historical cache. A separate
+manual comparison now binds historical composition and selected retained advisory
+evidence; it does not rematch packages or reevaluate human assessments.
 
 Explicit synchronization now extends source-author content into target-only drafts
 under exact source/target/preview pins. Existing target decisions cannot be overwritten;
@@ -673,8 +677,10 @@ Native project portfolio statistics now aggregate a pinned set of current versio
 heads, with shared logical decisions distinct from per-version/context work.
 Filters scope all decision counts; unfiltered collection/history evidence remains
 separate. Source/current published severity and outdated scores stay distinct.
-The authorized API and CLI share this read model; broader cross-project portfolio
-views and large-inventory performance qualification remain planned.
+The authorized API and CLI share this read model. Bounded cross-project portfolio
+API/UI now capture one authorized project/head selection, count before project
+paging and preserve project-scoped logical IDs. Larger concurrent workloads still
+need deployment qualification.
 
 Native workspace fingerprint construction now indexes each immutable read once
 and reuses bounded canonical dependency-root encodings. Pre-optimization golden
@@ -708,8 +714,9 @@ and metadata-free DT histories remain unverified source claims.
 Historical semantic comparisons now cache bounded actor-independent derived bytes
 per journal instance and algorithm version. Every page still checks current access
 and committed membership; cache hits do not attest full object integrity. No SQL
-history or temporary tables are retained. Current-intelligence comparison and
-broader concurrent-load qualification remain separate work.
+history or temporary tables are retained. Manual pinned advisory comparison is
+available separately from this historical cache; broader concurrent-load
+qualification remains separate work.
 
 Native management now includes guided pinned product assembly, v1-compatible
 ownership editing, supplied offline CPE policy previews and component-context
@@ -733,14 +740,19 @@ native approvals. Opt-in authenticated Agentyzer remote-ID reconciliation now
 verifies completed jobs with private correlation and exact issued-input pins.
 Neither feature establishes complete legacy cutover or deployed sibling parity.
 
+Native exact-parent follow-up jobs and their guided UI now require the optional
+authenticated Agentyzer extension; no approval or source override is inherited.
+External v1 ZIP inspection and its streamed CLI are read-only and preserve
+explicit normalization/history losses without restoring data or permissions.
+
 Still deferred: automatic semantic cross-import/context identity reuse; dynamic
-future-version applicability coverage beyond finite explicit range selection; extended
-evidence synthesis and VDR/VEX scope/schema/signature support; verified cascading
-synchronization; destructive journal retention/GC;
-external/v1 archive migration and complete cutover qualification; native Agentyzer
-follow-up conversations; complete CPE-service migration/refresh; extended license
-and architecture-model qualification; serializer upgrade compatibility; and
-controlled-document/production recovery qualification. The v2 runtime
+future-version applicability coverage beyond finite explicit range selection;
+extended VDR/VEX profiles; verified cascading synchronization; destructive journal
+retention/GC; native publication from v1 archives and complete legacy cutover;
+complete CPE dictionary refresh/mapping-history migration; extended license and
+architecture-model requirements; serializer-upgrade compatibility; and controlled
+document/production recovery acceptance. These require scoped contracts or
+representative acceptance fixtures rather than automatic inference. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain
 source-local references; no implicit assessment inheritance or scope approval
 is inferred from them. JSON-object imports retain their canonical representation;

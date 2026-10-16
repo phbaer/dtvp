@@ -43,8 +43,11 @@ roles. Hashes establish consistency, not publisher identity or human approval.
 Native Agentyzer jobs now persist submission/poll/report checkpoints in operational
 SQL and publish bound evidence through the journal. Unknown POST outcomes never
 automatically repeat; lost in-memory remote jobs still require explicit reconciliation.
-Native follow-ups, complete CPE migration/refresh and automatic semantic identity
-reconciliation, full legal qualification and architecture approval remain planned.
+Exact parent/report-bound native follow-ups are implemented with the optional
+authenticated Agentyzer extension and never fall back to legacy unbound follow-ups.
+Complete CPE dictionary refresh/mapping-history migration, automatic semantic
+identity reconciliation, legal qualification and architecture acceptance remain
+separate scoped work.
 Production acceptance also requires machine authorization, archived reproducible
 inputs, failure/retry handling and controlled consumer fixture qualification.
 Newly issued input receipts resolve retained bytes instead of rerunning current

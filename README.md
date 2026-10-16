@@ -750,7 +750,7 @@ See [Agentyzer integration](docs/agentyzer.md) for contracts, operational-backup
 
 Set `DTVP_AGENTYZER_RECONCILIATION_ENABLED=true` explicitly (default false).
 A strong existing token alone leaves the previous POST body unchanged; only new
-opted-in jobs gain private proof. The isolated sibling implementation is commit
+opted-in jobs gain private proof. The isolated sibling completed-job reconciliation increment is commit
 `a10b5d4` on `fix/immutable-source-binding` in `/tmp/agentyzer-source-binding`;
 it has not been merged, pushed or deployed.
 
@@ -859,8 +859,10 @@ production inspection require no old runtime, Git, DT or customer data.
 `POST /api/v3/projects/{target}/versions/{version}/migration/v2/preview`
 previews an existing local immutable `dtvp.snapshot/1` snapshot. The same body,
 plus its returned `preview_digest`, is accepted by `/migration/v2/apply`.
-Use the generic authenticated `knowledge request` CLI or HTTP API; no external
-archive upload or migration wizard is available in this slice.
+Use the generic authenticated `knowledge request` CLI or HTTP API for this local
+snapshot contract. External v1 ZIP inspection has its separate bounded dry run
+and streamed CLI described above; no general archive apply or migration wizard
+is provided.
 
 Example request (replace IDs, digest and configuration pins):
 
@@ -920,8 +922,9 @@ Preview exposes full counts, capture coverage/conversion losses and bounded firs
 
 Limits: local installation only, up to 200 source revisions, 64 MiB bundle and
 256 MiB total original source bytes. Missing or corrupt originals fail closed.
-External archive intake, v1 project/Git archive conversion, ownership/identity
-reconciliation and complete legacy recovery remain deferred. In particular,
+External v1 archive inspection is implemented as the separate read-only dry run.
+Native publication from those archives, Git history conversion, ownership/identity
+reconciliation and complete legacy recovery still require explicit contracts. In particular,
 `dtvp.snapshot/1` includes captured decisions but only the latest decision's
 approval, so older approvals may be absent. No snapshot-completeness or regulatory
 compliance claim is made.
@@ -1365,8 +1368,9 @@ dependency and contextual-finding changes with full-set counts. Classifications
 separate material evidence, bookkeeping, ownership, assessment, review and scoring.
 Retained absent assessments stay visible. Comparisons read immutable journal
 states without loading historical data into live PostgreSQL tables. Historical
-comparisons use the bounded actor-independent cache described above; current
-intelligence reevaluation remains planned. Exact source-local references determine
+comparisons use the bounded actor-independent cache described above. The separate
+pinned advisory comparison inspects selected retained claims without rematching
+or reevaluating historical assessments. Exact source-local references determine
 identity: changed references appear as remove/add, never a name-based match or
 proof of remediation.
 
@@ -1606,8 +1610,9 @@ filters and bounded paging. `GET .../analysis-jobs/{id}` shows safe status; expl
 permissions. Cancel stops local work, not a claimed remote cancellation. Unknown
 submissions need reconciliation or a deliberately new request. Operational SQL
 backups remain necessary for jobs. Opt-in actor-only authenticated remote-ID
-reconciliation is implemented as described above; native follow-up conversations
-remain planned.
+reconciliation and exact parent/report-bound follow-up jobs are implemented as
+described above. Follow-ups require the optional authenticated sibling extension;
+legacy unbound follow-ups are never a silent fallback.
 The specialist panel shows bounded jobs for the selected context/vulnerability.
 Qualified input preparation precedes an explicit queue action. Status refresh,
 retry and local cancellation are explicit; backend capabilities control actions.
