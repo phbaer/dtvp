@@ -174,6 +174,41 @@ Explore a repeatable two-part nightly update against the running playground:
 uv run python scripts/assembly_demo.py
 ```
 
+### Pinned composition input observations
+
+`GET /api/v3/projects/{id}/states/{state}/input-quality` provides a read-only,
+source-attributed report for a committed product or constituent input state,
+including retained source history before assembly. Current project read permission
+is required. Unknown object hashes, arbitrary artifact blobs, and other projects'
+objects do not grant access. The endpoint accepts bounded `offset`/`limit` plus
+`q` and exact machine-readable `code` filters. `statistics` always describes the
+complete pinned imported model; `total` describes matching observations before
+pagination. `report_digest` binds the full report and all observation rows,
+independently of presentation filters and page size.
+
+The report preserves each selected source's collection scope, producer coverage,
+format, source/artifact/state pins and normalization losses. Component occurrences,
+metadata roots and constituent roots have explicit roles, with per-source counts.
+It reports absent name/version/package identifiers, observed PURL/version conflicts,
+reported dependency edges and unresolved references. Preserved source relationships
+remain separate from dependency topology. Existing license evidence interpretation
+keeps reported declarations, missing data, NOASSERTION, explicit NONE and malformed
+or unknown-format evidence distinct. Withdrawn/empty inventories and incomplete or
+unverified assemblies remain explicit; zero findings is not a clean-product claim.
+
+CLI uses the same backend report:
+
+```bash
+uv run dtvp knowledge --url http://127.0.0.1:8900 input-quality \
+  --project PROJECT_ID --state STATE_SHA --limit 50
+```
+
+Use `--json` for the machine-readable report, or `--code`/`--q` to inspect a subset.
+There is no aggregate quality score, correctness verification, automatic release
+block, vulnerability assessment, or license/legal conclusion. CI may apply its own
+explicit policy to observation codes. A reported complete SBOM remains the
+producer's declaration; the report cannot find components omitted by that producer.
+
 ### Assessment read performance
 
 Native workspaces reuse a request-local dependency/evidence fingerprint builder.
