@@ -77,6 +77,27 @@ Platform project, tags a state and prints their delta. It is repeatable and does
 not reset existing playground work. Use `--url` for another playground address.
 Open the Knowledge tab to browse these inventories.
 
+For a complete synthetic pipeline rehearsal against that playground:
+
+```bash
+uv run python scripts/knowledge_pipeline_rehearsal.py --output /tmp/dtvp-pipeline-rehearsal
+# On a separate run, explicitly simulate the independent review roles:
+uv run python scripts/knowledge_pipeline_rehearsal.py --simulate-reviews --output /tmp/dtvp-pipeline-reviewed
+```
+
+Each run creates a new clearly marked synthetic project, imports two original SBOM
+files as delivery parts, previews/publishes their assembly, derives pinned VScorer
+inputs and checks that scoring is blocked before review. The default leaves review
+to the interactive workspace. `--simulate-reviews` explicitly exercises separate
+analyst/reviewer/coordinator personas for one vulnerability; it is test evidence,
+not actual human acceptance. Other findings remain open and no license clearance
+is created. Exact issued consumer files are downloaded and checked, repeat issuance
+and historical summaries are verified, and local hashes/receipts are recorded.
+Use a new output directory for every run. Captured requests and session identity
+are written as the run progresses, so failed/uncertain publications can be inspected
+without repinning or resetting work. No specialist service or Generator renderer
+is invoked; deployed round trips and customer document acceptance remain separate.
+
 For a larger native playground dataset, run the API-only seeder against an already
 running isolated playground:
 
