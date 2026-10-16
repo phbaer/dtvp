@@ -87,6 +87,12 @@ preserves approval for descriptive-only changes, revalidates affected material
 coverage and retains removed components' assessments historically. UI and CLI must
 explain each impact; unaffected contexts/versions keep their valid approvals.
 
+The [retention design](docs/rewrite-plan.md#retention-and-cleanup-policy) protects
+released states, approvals, issued outputs and supporting evidence. Unused
+assessments are archived recoverably first. Physical cleanup requires an explicit
+policy, dry-run impact and current reference checks; destructive collection and
+history compaction remain unimplemented.
+
 ### Rewrite completion and acceptance boundary
 
 The bounded implementation batches are committed on `rewrite/knowledge-journal`.

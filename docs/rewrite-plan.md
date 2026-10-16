@@ -640,6 +640,35 @@ retained assessment/review/publication evidence and active publications/comparis
 Historical absence is not garbage. Unreferenced objects and eligible draft history
 can be collected under policy; deliberate removal differs from corrupt/missing data.
 
+#### Retention and cleanup policy
+
+Design decision: protect released states, approvals, issued documents and their
+supporting evidence. Archive unused assessments logically first; retain their
+original bindings and allow recovery. Disappearance from active inventory alone
+never makes an assessment disposable.
+
+Physical collection is explicit maintenance under a versioned retention policy,
+not an import side effect. No default expiry for approved evidence or releases is
+inferred from this decision. Protect active branch/tag roots, retained decisions,
+issued consumer/document receipts, supporting source bytes and transitive objects
+needed to interpret them or reconstruct protected states. Include operational
+jobs, active comparisons and in-flight publications among retention references.
+
+A dry run shared by API/CLI/UI lists eligible objects, reasons, retained roots,
+policy revision and recoverability impact. Execute only under explicit maintenance
+authority after rechecking current roots, policy and active operations; a stale
+preview cannot authorize deletion. Concurrently referenced objects are excluded.
+Only genuinely unreferenced, policy-eligible objects can be physically deleted.
+
+Journal ancestry/transaction references count as references. Age alone cannot make
+reachable draft history collectible; any future compaction needs its own compatible
+checkpoint/pruning contract and recovery qualification. Do not break history links
+to make an object appear unreferenced. Record cleanup results and distinguish
+intentional collection from corruption. Backup retention remains a separate policy.
+
+Logical archive and read-only diagnostics already exist; destructive collection
+and any draft-history compaction remain future implementation, not enabled here.
+
 One-command playground and automated checks use the same synthetic inputs and
 production APIs. Required scenarios include recursive delegation, multiple usage
 contexts, parallel nightly versions, cascading synchronization, range coverage/
