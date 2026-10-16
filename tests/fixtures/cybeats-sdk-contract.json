@@ -1,0 +1,54 @@
+{
+  "repository": "https://github.com/cybeats/sbom-studio-action",
+  "commit": "f55fb85ef1d0533f5554a436f8a61b0435353aaf",
+  "files": {
+    "service/request.service.js": {
+      "url": "https://raw.githubusercontent.com/cybeats/sbom-studio-action/f55fb85ef1d0533f5554a436f8a61b0435353aaf/service/request.service.js",
+      "sha256": "b55b754ede500fd8ee4e18b0b2ad3a9a2665f2fb1b5309e50f695f5bbad0b76e",
+      "bytes": 3620
+    },
+    "service/sha.service.js": {
+      "url": "https://raw.githubusercontent.com/cybeats/sbom-studio-action/f55fb85ef1d0533f5554a436f8a61b0435353aaf/service/sha.service.js",
+      "sha256": "2976f3c27f0af711cfab3224eef1b75370b34f68d851405ec88c4964c85dc6c4",
+      "bytes": 1113
+    },
+    "service/import.service.js": {
+      "url": "https://raw.githubusercontent.com/cybeats/sbom-studio-action/f55fb85ef1d0533f5554a436f8a61b0435353aaf/service/import.service.js",
+      "sha256": "51da9555453584f3740171f89788637df2966abe95fbe667fa48102b90cc3827",
+      "bytes": 543
+    },
+    "service/dependency.vulnerabilities.service.js": {
+      "url": "https://raw.githubusercontent.com/cybeats/sbom-studio-action/f55fb85ef1d0533f5554a436f8a61b0435353aaf/service/dependency.vulnerabilities.service.js",
+      "sha256": "7f3f4447e45f55d2d79cbfb6af28acc6fd08c3daebf556cead6f848ef6d598b2",
+      "bytes": 350
+    },
+    "index.js": {
+      "url": "https://raw.githubusercontent.com/cybeats/sbom-studio-action/f55fb85ef1d0533f5554a436f8a61b0435353aaf/index.js",
+      "sha256": "15eeb84c797b0850d7456351ed8ec9916b7e468e94ef6bffaaf245476305daf8",
+      "bytes": 12483
+    }
+  },
+  "limitations": "Reviewed public action SDK source; not deployed provider compatibility or a complete SBOM export API.",
+  "format": "dtvp.cybeats-reviewed-sdk-contract/1",
+  "operations": [
+    {
+      "operation": "import_status",
+      "path": "/v1/sboms/imports/getbykey",
+      "field": "id"
+    },
+    {
+      "operation": "vulnerability_report",
+      "path": "/v1/sboms/componentcatalog/software",
+      "field": "importId"
+    }
+  ],
+  "signing_vector": {
+    "timestamp": 1700000000,
+    "import_id": "synthetic-import-123",
+    "access_key": "test-access-key",
+    "secret_key": "test-secret-key",
+    "body": "{\"id\":\"synthetic-import-123\"}",
+    "signature": "M0iunti94VjsjzXA9GTjjb-D8BJmvJnF0OudIVt9CHg",
+    "verification": "Independently calculated with Node.js createHmac using the reviewed vendor timestamp + JSON.stringify(body) algorithm."
+  }
+}

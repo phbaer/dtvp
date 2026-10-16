@@ -2475,8 +2475,8 @@ Base vector. DTVP approval remains separate; lower severity never proves unaffec
 
 CycloneDX 1.5/1.6 JSON/XML and SPDX 2.3 JSON use one versioned ingestion path.
 The envelope preserves source/event IDs, timestamps, pipeline context and raw
-provider data. CyBeats uses standard SBOM exports; its proprietary API requires
-a verified deployment contract before adding a native connector.
+provider data. CyBeats uses supplied standard SBOM exports and optional SDK-derived
+read captures, described below. Actual deployment behavior remains unqualified.
 
 The DT connector is read-only. OSV supplies optional package/version matching;
 NVD and Luxembourg's CIRCL supply optional advisory enrichment. Provider requests
@@ -3526,3 +3526,61 @@ cannot impersonate array records. Regression checks cover both malformed shapes.
 The combined PostgreSQL catalog/scheduler/migration/cleanup/recovery/issued-export
 matrix passed 213 checks with one optional skip; the final catalog guard suite
 passed 37 checks. These use synthetic fixtures, without live provider acquisition.
+
+
+
+### CyBeats read captures with explicit supplied exports
+
+Optional CyBeats integration follows the vendor's public
+[request/signing code](https://github.com/cybeats/sbom-studio-action/tree/main/service),
+[import lookup](https://github.com/cybeats/sbom-studio-action/blob/main/service/import.service.js)
+and [software vulnerability query](https://github.com/cybeats/sbom-studio-action/blob/main/service/dependency.vulnerabilities.service.js).
+These document two signed **POST read queries**, not a complete SBOM download API.
+DTVP does not invent an export endpoint or upload/scan/writeback operation.
+Composition comes from a separately supplied CycloneDX/SPDX export whose association
+with the source import ID is an explicit operator declaration. Returned reports
+remain opaque attributed artifacts; aggregate vulnerability IDs, scores and counts
+are never converted into component findings, approvals or applicability decisions.
+
+Enable `cybeats` in `DTVP_PROVIDERS_ENABLED` and configure `DTVP_CYBEATS_URL` as an
+HTTPS origin plus `DTVP_CYBEATS_ACCESS_KEY`/`DTVP_CYBEATS_SECRET_ACCESS_KEY`.
+Credentials stay server-side. Managers bind each version through
+`PUT /api/v3/projects/{id}/versions/{version}/connectors/cybeats`, supplying
+`import_id` and exact `expected_import_id` (explicit null initially).
+`POST .../sources/cybeats/capture` with `expected_import_id` performs only the two
+SDK queries. Request bodies are signed using timestamp plus the exact transmitted
+JSON bytes; redirects/retries are disabled. Every query rechecks the current
+credential, project management permission, source binding and provider enablement;
+completion rechecks them before returning captured bytes. Responses are bounded
+at 4 MiB each and retain their exact decoded HTTP bodies, hashes and source path.
+
+`POST .../sources/cybeats/import` accepts multipart `file` (original SBOM),
+`capture_file` (exact capture JSON) and `metadata` (JSON). Metadata uses the native
+inventory import fields, `source: "cybeats"`, `expected_import_id`, exact
+`capture_sha256`, and `acknowledge_project_reader_disclosure: true`.
+The capture is at most 12 MiB; the supplied SBOM at most 16 MiB, also subject to
+installation upload limits. Current manager/write permission is required; new
+publications recheck the configured origin/import binding and normal inventory
+CAS/build/source-role rules. Acknowledgement explicitly allows project readers to
+retrieve the retained raw capture, decoded reports and original SBOM.
+
+Uploaded captures are **caller-supplied unverified claims**. Hash/readiness checks
+prove internal consistency, not provider authenticity or that the supplied SBOM
+was exported from that source. Known configured source credentials echoed literally
+in capture/report JSON are rejected before return or publication; this is not a
+promise to discover every secret or sanitize arbitrary metadata. Operators must
+review the disclosure they authorize. Request headers are not retained. Exact
+successful retries recover their original receipt after provider/binding changes,
+under current manager/write authorization; new requests use current bindings and
+configuration. Failures do not silently rebind, refetch or approve anything.
+
+Mocked SDK-signing and HTTP tests cover raw-byte retention, malformed captures,
+known credential echoes, per-query revocation, source CAS and exact receipt replay.
+No live customer CyBeats deployment or full remote-export contract has been
+qualified. Such acceptance requires the deployment's actual API/schema and a
+representative supplied SBOM; the public action SDK alone does not establish it.
+
+The reviewed public action SDK is pinned to commit `f55fb85ef1d0533f5554a436f8a61b0435353aaf`
+in `tests/fixtures/cybeats-sdk-contract.json`, with SHA-256/size for its five reviewed
+signing/query/entry-point files and a frozen synthetic signing vector. The pin
+records this reviewed contract; deployment compatibility remains an acceptance gate.

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     providers_enabled: list[str] = []
     dt_url: str = ""
     dt_api_key: str = ""
+    cybeats_url: str = ""
+    cybeats_access_key: str = ""
+    cybeats_secret_access_key: str = ""
     vscorer_url: str = ""
     agentyzer_enabled: bool = False
     agentyzer_url: str = ""

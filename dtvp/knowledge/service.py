@@ -88,6 +88,7 @@ def import_inventory(
     additional_artifacts=(),
     expected_configuration=None,
     authority_change_reason="",
+    authorize_new=None,
 ):
     """Replace a complete baseline, preserving all other knowledge sections.
 
@@ -150,6 +151,8 @@ def import_inventory(
         receipt = journal.receipt(scoped_request, fingerprint)
     if receipt:
         return receipt
+    if authorize_new is not None:
+        authorize_new()
     ref = (
         part_ref(project_id, version, part_id)
         if part_id
@@ -279,6 +282,8 @@ def import_inventory(
             | set(additional_artifacts)
         ),
     )
+    if authorize_new is not None:
+        authorize_new()
     return journal.publish(
         request_id=scoped_request,
         fingerprint=fingerprint,
