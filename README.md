@@ -163,6 +163,22 @@ This is metadata propagation, not overlapping-observation reconciliation. Assemb
 component payloads/origins, namespaced references, dependency graphs and assessment
 target fingerprints remain unchanged; lineage does not extend approval coverage.
 
+### Same-subject observation reconciliation kernel
+
+The pure `propose_observation` kernel compares individual delivery-part inventories.
+Matching currently requires an identical known producer-declared artifact digest,
+collection boundary and delivery-part scope. It returns unique occurrence mappings,
+attributed supplemental metadata/conflicts and duplicate typed-edge support.
+Additional components or topology remain explicit proposals; authoritative inventory,
+consuming contexts and approvals are unchanged. Inputs remain immutable and report
+records/bytes/diagnostics are bounded.
+
+This kernel is not yet connected to public observation intake or a publication API.
+Legacy/manual inputs often lack artifact digests. Whether explicit operator/pipeline
+same-part/build declarations may bind those observations, and how that assurance is
+represented, is the next design discussion; unknown subject identity currently
+blocks reconciliation rather than silently combining builds.
+
 ### Read-only global orphan audit
 
 Instance operators can inspect storage reachability across all projects and all

@@ -298,6 +298,21 @@ Preview node/edge consolidations, conflicts, additions/removals, unresolved iden
 and assessment impact before atomic publication. Version the reconciliation policy
 and explicit mappings; UI, CLI and exports use the same backend-derived graph.
 
+Implementation status: stable lineage metadata now persists through accepted
+single/constituent imports and explicit predecessor branches, and propagates into
+assemblies without changing graph references or assessment fingerprints. A pure
+observation reconciliation kernel now produces bounded mappings, supplemental
+claims, duplicate-edge provenance and explicit inventory/topology proposals for
+same-digest/same-boundary individual parts. Automatic graph publication, subject
+binding/intake and contextual approval continuity remain subsequent work.
+
+Open subject-binding decision: legacy inputs without an artifact digest cannot
+establish same-artifact identity using the current kernel. Consider an explicitly
+authorized same-part/build declaration, visibly producer/operator-declared rather
+than digest-bound. Never infer that binding from similar package lists or upload
+arrival. Intake must distinguish this weaker assurance from supplied artifact
+coordinates and keep contradictory subject information unresolved.
+
 #### Inventory authority and enrichment
 
 Design decision: one explicitly pipeline-designated inventory source governs each
