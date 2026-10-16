@@ -9,6 +9,7 @@ type CpeResult = { inventory_state: string; policy_state: string | null; proposa
 type VScorerResult = { eligible: boolean; sbom: unknown; cves: unknown; dtvp_source: { state: string; artifacts: { sbom_sha256: string; cves_sha256: string } } | null; coverage: { included: string[]; excluded: { vulnerability_id: string; reason: string }[]; verification: string; remote_authenticity: string }; files?: Record<string, string> }
 type AgentyzerResult = { ready_to_submit: boolean; request: unknown; receipt: { state: string; request_sha256: string | null }; coverage: { reasons: string[]; limitations: string[]; source_verification: string; repository_authorization: string } }
 const props = defineProps<{ project: string; state: string; version: string; finding: KnowledgeFinding }>()
+const emit = defineEmits<{ locked: [boolean] }>()
 const cpe = ref<CpeResult | null>(null), vscorer = ref<VScorerResult | null>(null), agentyzer = ref<AgentyzerResult | null>(null)
 const cpeBusy = ref(false), vscorerBusy = ref(false), agentyzerBusy = ref(false)
 const cpeError = ref(''), vscorerError = ref(''), agentyzerError = ref(''), sourceBase = ref(''), exactFiles = ref(false)
@@ -72,7 +73,7 @@ function download(text: string, name: string) {
 function downloadJson(value: unknown, name: string) { download(JSON.stringify(value, null, 2), name) }
 watch(() => [props.project, props.state, props.finding.context_id, props.finding.vulnerability_id, componentRef.value], reset)
 watch(sourceBase, () => { ++vectorSequence; vscorer.value = null; exactFiles.value = false; vscorerError.value = ''; vscorerBusy.value = false })
-onBeforeUnmount(() => { ++sequence; ++vectorSequence })
+onBeforeUnmount(() => { ++sequence; ++vectorSequence; emit('locked', false) })
 </script>
 
 <template>
@@ -119,7 +120,7 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence })
         <details><summary>Agentyzer source pin and request</summary><pre>{{ JSON.stringify({ receipt: agentyzer.receipt, request: agentyzer.request }, null, 2) }}</pre></details>
         <button @click="downloadJson(agentyzer, 'dtvp-agentyzer-input.json')">Download Agentyzer input JSON</button>
       </template>
-      <KnowledgeAnalysisJobs :project="project" :state="state" :version="version" :context-id="finding.context_id" :vulnerability-id="finding.vulnerability_id" :source-ready="agentyzer?.ready_to_submit === true" />
+      <KnowledgeAnalysisJobs :project="project" :state="state" :version="version" :context-id="finding.context_id" :vulnerability-id="finding.vulnerability_id" :source-ready="agentyzer?.ready_to_submit === true" @locked="emit('locked', $event)" />
     </details>
   </details>
 </template>

@@ -28,8 +28,8 @@ import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
 import KnowledgeAssessmentArchive from './KnowledgeAssessmentArchive.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 const props = defineProps<{ me: Me }>()
-const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false)
-const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value)
+const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false)
+const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
 function bulkEligible(row: KnowledgeFinding) {
@@ -107,7 +107,7 @@ const ratingSource = (rating: KnowledgeFinding['source_ratings'][number]) => (ty
 const sourceScore = (row: KnowledgeFinding) => row.source_ratings.filter(r => r.score != null).map(r => r.score!.toFixed(1)).join(' / ') || (typeof row.source_severity === 'string' ? label(row.source_severity) : 'Unknown')
 const selectedIndex = computed(() => workspace.value?.items.findIndex(item => item.id === selected.value?.id) ?? -1)
 function fail(err: unknown) { error.value = err instanceof ApiError && err.status === 409 ? 'The baseline or assessment changed. Refresh before retrying; your text is retained.' : err instanceof Error ? err.message : 'Request failed' }
-function close() { if (metadataLocked.value) return; assessmentScope.value = null; selected.value = null; confirmed.value = false; scorePreview.value = null; ++scoreSequence }
+function close() { if (metadataLocked.value || analysisFollowUpLocked.value) return; assessmentScope.value = null; selected.value = null; confirmed.value = false; scorePreview.value = null; ++scoreSequence }
 async function load(reset = true, keep = false, refreshHead = false) {
   if (metadataLocked.value) return
   const current = ++sequence
@@ -170,7 +170,7 @@ async function loadVersions(append = false) {
 function searchVersions() { clearTimeout(versionTimer); versionTimer = setTimeout(() => { void loadVersions() }, 200) }
 function chooseVersion(value: string) { if (intakeLocked.value) return; version.value = value; versionMenu.value = false; void load() }
 async function open(row: KnowledgeFinding) {
-  if (metadataLocked.value) return
+  if (metadataLocked.value || analysisFollowUpLocked.value) return
   ++scoreSequence; scorePreview.value = null
   const current = ++sequence; busy.value = true; error.value = ''; notice.value = ''
   try {
@@ -186,6 +186,7 @@ async function open(row: KnowledgeFinding) {
   finally { if (current === sequence) busy.value = false }
 }
 async function paginate(next: boolean) {
+  if (analysisFollowUpLocked.value) return
   if (next) { previous.value.push(offset.value); offset.value = workspace.value!.next_offset! }
   else offset.value = previous.value.pop() || 0
   await load(false)
@@ -334,7 +335,7 @@ async function copyView() {
 }
 watch(() => [project.value, version.value, workspace.value?.state, team.value, lifecycle.value, query.value, JSON.stringify(filters.value), props.me.id], () => { bulkSelection.value = {} })
 watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
-watch(() => props.me.id, () => { ++actorGeneration; ++scoreSequence; pendingRequest.value = null; pendingScore.value = null; scorePreview.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
+watch(() => props.me.id, () => { analysisFollowUpLocked.value = false; ++actorGeneration; ++scoreSequence; pendingRequest.value = null; pendingScore.value = null; scorePreview.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
 onMounted(() => {
   try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
@@ -403,10 +404,10 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">
         <section class="knowledge-queue" aria-label="Context finding queue"><div ref="queueElement" class="table-wrap"><table><thead><tr><th v-if="workspace.items.some(row => row.capabilities?.includes('approve')) || bulkRows.length || bulkLocked">Review</th><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td v-if="workspace.items.some(item => item.capabilities?.includes('approve')) || bulkRows.length || bulkLocked"><input type="checkbox" :aria-label="`Select ${row.vulnerability_id} in ${row.context.root_ref} for bulk review`" :checked="!!bulkSelection[row.id]" :disabled="busy || bulkLocked || !bulkEligible(row) || (!bulkSelection[row.id] && bulkRows.length >= 100)" @change="toggleBulk(row)"></td><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small></td><td>{{ sourceScore(row) }}</td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
         <section v-if="selected" class="knowledge-detail" aria-label="Context finding detail">
-          <header><div><h2>{{ selected.vulnerability_id }}</h2><p>{{ selected.component.name }} {{ selected.component.version }}</p></div><button aria-label="Close context finding" :disabled="busy" @click="close()">×</button></header><p class="hint">{{ teamName(selected.context.team_id) }} · {{ label(selected.coverage.status) }}</p>
+          <header><div><h2>{{ selected.vulnerability_id }}</h2><p>{{ selected.component.name }} {{ selected.component.version }}</p></div><button aria-label="Close context finding" :disabled="busy || analysisFollowUpLocked" @click="close()">×</button></header><p class="hint">{{ teamName(selected.context.team_id) }} · {{ label(selected.coverage.status) }}</p>
           <div class="knowledge-score-pair"><span>Source <strong>{{ sourceScore(selected) }}</strong></span><span>Published <strong>{{ selected.published_score?.score.toFixed(1) ?? 'Not published' }}</strong><small v-if="selected.published_score?.current === false"> · Outdated</small></span></div>
           <KnowledgeAnalysisEvidence v-if="selected.code_analysis?.length" :items="selected.code_analysis" />
-          <KnowledgeSpecialists :project="project" :state="workspace.state" :version="version" :finding="selected" />
+          <KnowledgeSpecialists :key="`${me.id}:${project}:${version}:${selected.context_id}:${selected.vulnerability_id}`" :project="project" :state="workspace.state" :version="version" :finding="selected" @locked="analysisFollowUpLocked = $event" />
           <details v-if="selected.scoring_proposals?.length" class="knowledge-pane"><summary>External scoring proposals ({{ selected.scoring_proposals.length }})</summary><div class="table-wrap"><table aria-label="External scoring comparison"><thead><tr><th>Provider</th><th>Source Base</th><th>Proposed</th><th>Status</th><th v-if="can('rescore')">Action</th></tr></thead><tbody><tr v-for="proposal in selected.scoring_proposals" :key="proposal.id"><td>{{ proposal.source_label }}<small>{{ proposal.provider }}</small></td><td>{{ proposal.proposal?.base_score.toFixed(1) ?? 'Unknown' }}</td><td>{{ proposal.proposal?.score.toFixed(1) ?? 'Withheld' }}</td><td>{{ proposal.eligible ? 'Ready for coordinator preview' : proposal.ineligibility_reasons.map(label).join(' · ') }}<small>{{ proposal.current ? 'Current evidence' : 'Historical evidence' }}</small></td><td v-if="can('rescore')"><button :disabled="busy || !!pendingScore || !!pendingRequest || !proposal.eligible" @click="useProposal(proposal)">Use proposal</button></td></tr></tbody></table></div><p class="hint">External proposals do not approve assessments or publish scores. Artifact consistency does not verify provider identity.</p><details><summary>Proposal vectors and provenance</summary><pre>{{ JSON.stringify(selected.scoring_proposals, null, 2) }}</pre></details></details>
           <details v-if="selected.curated_metadata" class="knowledge-pane"><summary>Curated component context · {{ label(selected.curated_metadata.status) }}</summary><p v-if="!selected.curated_metadata.applicable" class="warning">Historical annotations require reconciliation with this component/version before use.</p><dl><dt>Criticality / exposure</dt><dd>{{ label(selected.curated_metadata.payload.annotations.cybersecurity.criticality) }} · {{ label(selected.curated_metadata.payload.annotations.cybersecurity.exposure) }}</dd><dt>Deployment</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.environment || 'Unknown' }}</dd><dt>Usage</dt><dd>{{ selected.curated_metadata.payload.annotations.deployment.usage || 'Unknown' }}</dd><dt>Support</dt><dd>{{ label(selected.curated_metadata.payload.annotations.support.status) }}</dd><dt>Source</dt><dd>{{ selected.curated_metadata.payload.provenance.source }} · {{ selected.curated_metadata.payload.provenance.reference }}</dd></dl><p>{{ selected.curated_metadata.payload.rationale }}</p><details><summary>Mitigations, testing and supporting details</summary><pre>{{ JSON.stringify(selected.curated_metadata.payload.annotations, null, 2) }}</pre></details></details>
           <KnowledgeComponentMetadata :key="`${me.id}:${project}:${version}:${selected.context.component_ref}`" :project="project" :state="workspace.state" :version="version" :component-ref="String(selected.context.component_ref || '')" :context-id="selected.context_id" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" @refresh="metadataChanged" />

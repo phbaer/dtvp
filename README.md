@@ -767,6 +767,27 @@ The isolated upstream extension is `9bb5985` on `fix/immutable-source-binding`;
 follow-ups retain their existing upstream behavior; DTVP’s native bound mode
 requires the explicit authenticated extension and never falls back to them.
 
+Completed native Agentyzer jobs expose **Ask a bound follow-up** only when the
+backend grants that capability. The UI captures the selected parent report and
+workspace head when the analyst opens the question, requires an explicit question
+and confirmation, and queues a separate source-bound job. Additional guidance is
+optional; repository, commit, model and vulnerability overrides are unavailable.
+The backend's authenticated parent/source proof remains authoritative.
+
+The question lives outside the paged job list, so workspace refreshes and list
+resets retain it. A changed workspace head blocks a first enqueue until explicit
+discard/reselection. After an uncertain response, the exact endpoint, expected
+head, parent report, question, guidance and request ID remain frozen through
+503/409 and later state changes. A matching returned child job confirms local
+recording; remote processing and evidence publication still have separate states.
+Refresh status explicitly. Unknown remote submissions retain the existing
+completed-job reconciliation workflow and are never automatically resubmitted.
+
+An active question prevents competing context/product/version and job edits.
+Actor/context teardown invalidates late responses. Discard does not cancel a job
+that may already have been recorded. A follow-up report never creates a human
+assessment, review or contextual score publication automatically.
+
 ### External v1 project archive dry run
 
 Managers can inspect an exported `dtvp.project-archive/v1` ZIP without restoring it:

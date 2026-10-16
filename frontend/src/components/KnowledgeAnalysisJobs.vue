@@ -2,10 +2,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
+import KnowledgeAnalysisFollowUp from './KnowledgeAnalysisFollowUp.vue'
 
 type AnalysisJob = { id: string; status: string; version: string; context_id: string; vulnerability_id: string; state: string; attempts: number; error: string; result: Record<string, unknown>; created_at: string; requires_explicit_reconciliation: boolean; capabilities: string[] }
 type JobPage = { items: AnalysisJob[]; next_offset: number | null; capabilities: string[] }
 const props = defineProps<{ project: string; state: string; version: string; contextId: string; vulnerabilityId: string; sourceReady: boolean }>()
+const emit = defineEmits<{ locked: [boolean] }>()
+const followUp = ref<InstanceType<typeof KnowledgeAnalysisFollowUp>>(), followUpLocked = ref(false)
 const items = ref<AnalysisJob[]>([]), recent = ref<AnalysisJob | null>(null), capabilities = ref<string[]>([])
 const loaded = ref(false), listBusy = ref(false), createBusy = ref(false), actionBusy = ref(''), guidance = ref(''), error = ref(''), createError = ref(''), notice = ref(''), requestRecorded = ref(false)
 const reconcileRemote = ref<Record<string, string>>({}), reconcileConfirmed = ref<Record<string, boolean>>({}), reconcileCaptured = ref<Record<string, { request_id: string; remote_id: string }>>({})
@@ -83,12 +86,14 @@ async function enqueue() {
 }
 function newRequest() { requestRecorded.value = false; attempt = null; createError.value = ''; notice.value = '' }
 watch(() => [props.project, props.state, props.version, props.contextId, props.vulnerabilityId], reset)
-onBeforeUnmount(() => { ++sequence; ++listSequence })
+onBeforeUnmount(() => { ++sequence; ++listSequence; emit('locked', false) })
 </script>
 
 <template>
   <details class="analysis-jobs">
     <summary>Agentyzer analysis jobs</summary>
+    <KnowledgeAnalysisFollowUp ref="followUp" :project="project" :state="state" :version="version" :disabled="createBusy || listBusy || !!actionBusy" @locked="followUpLocked = $event; emit('locked', $event)" @recorded="recent = $event as AnalysisJob" />
+    <fieldset class="analysis-job-controls" :disabled="followUpLocked">
     <p class="hint">Jobs use this product version, consuming context and vulnerability. Status refreshes are read-only; work is queued only by an explicit request.</p>
     <button :disabled="listBusy || createBusy || Boolean(actionBusy)" @click="loadJobs()">{{ listBusy ? 'Loading jobs…' : loaded ? 'Refresh jobs' : 'Load analysis jobs' }}</button>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
@@ -110,16 +115,19 @@ onBeforeUnmount(() => { ++sequence; ++listSequence })
         <label class="job-confirm"><input v-model="reconcileConfirmed[entry.job.id]" type="checkbox" required :disabled="Boolean(actionBusy) || !!reconcileCaptured[entry.job.id]"> I explicitly selected this completed remote job for the recorded request.</label>
         <button :disabled="Boolean(actionBusy) || listBusy || createBusy || (!reconcileCaptured[entry.job.id] && !reconcileConfirmed[entry.job.id])">{{ reconcileCaptured[entry.job.id] ? 'Retry exact remote verification' : 'Verify and reconcile completed job' }}</button><button v-if="reconcileCaptured[entry.job.id]" type="button" :disabled="Boolean(actionBusy)" @click="discardReconcile(entry.job.id)">Discard captured reconciliation</button>
       </form>
+      <button v-if="entry.job.capabilities.includes('follow_up')" type="button" :disabled="Boolean(actionBusy) || listBusy || createBusy" @click="followUp?.start(entry.job)">Ask a bound follow-up</button>
       <p v-if="entry.job.error">{{ entry.job.error }}</p>
       <div class="job-actions"><button :disabled="Boolean(actionBusy) || listBusy || createBusy" @click="inspect(entry.job)">Refresh job status</button><button v-if="entry.job.capabilities.includes('retry') && !entry.job.requires_explicit_reconciliation" :disabled="Boolean(actionBusy) || listBusy || createBusy" @click="inspect(entry.job, 'retry')">Retry known job</button><button v-if="entry.job.capabilities.includes('cancel')" :disabled="Boolean(actionBusy) || listBusy || createBusy" @click="inspect(entry.job, 'cancel')">Cancel DTVP job</button></div>
       <p v-if="entry.job.capabilities.includes('cancel')" class="hint">Cancellation stops local processing; it does not confirm cancellation at Agentyzer.</p>
       <details><summary>Job input and result pins</summary><dl><dt>Job</dt><dd><code>{{ entry.job.id }}</code></dd><dt>Input state</dt><dd><code>{{ entry.job.state }}</code></dd><dt>Product version</dt><dd>{{ entry.job.version }}</dd><dt>Context</dt><dd><code>{{ entry.job.context_id }}</code></dd><dt>Vulnerability</dt><dd>{{ entry.job.vulnerability_id }}</dd></dl><pre>{{ JSON.stringify(entry.job.result, null, 2) }}</pre></details>
     </article>
     <nav v-if="loaded" class="job-actions" aria-label="Analysis job pages"><button :disabled="listBusy || createBusy || Boolean(actionBusy) || !previous.length" @click="page(false)">Previous jobs</button><button :disabled="listBusy || createBusy || Boolean(actionBusy) || nextOffset === null" @click="page(true)">Next jobs</button></nav>
+    </fieldset>
   </details>
 </template>
 
 <style scoped>
+.analysis-job-controls { border: 0; padding: 0; min-width: 0; }
 .analysis-jobs { margin-top: .8rem; min-width: 0; }
 summary { cursor: pointer; overflow-wrap: anywhere; }
 form { margin-block: .75rem; }
