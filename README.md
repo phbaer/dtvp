@@ -1804,6 +1804,27 @@ do not add global references per finding. Exact bytes and source parents remain
 journal-owned and recoverable. Uncertain issuance requires the identical retry.
 Hashes establish consistency, not external provider identity or approval.
 
+Frozen consumer compatibility fixtures now exercise current readers against actual
+older code: `b5ff695687f2ff7a0e1fe90a3d2ff4afa6dbc1fc` (before the annotation
+register) and `3480f645439010bc197ad87dfe43c7c28dd930fe` (register `/2` transition).
+Each synthetic journal retains issued knowledge-bundle, VScorer and Agentyzer files,
+source inputs and authored support annotations; it contains no human approvals or
+credentials. Per-member/file SHA-256 and source-code provenance accompany the ZIPs.
+The manual producer imports only an exact archived source tree and fixes journal,
+issuance and annotation clocks; it never patches serializers. These are reconstructed
+fixtures in the current Python environment, not historical production captures or
+full old-runtime acceptance. Tests do not regenerate them or require Git/network.
+
+Current reader, cached preparation and current-auth HTTP downloads preserve every
+issued byte while today's serializers, derivation and annotation builders are
+unavailable. `/1` output is not enriched with `/2` metadata; corrupt/missing captures
+fail closed. This qualifies known issued formats, not arbitrary future formats or
+older unissued receipts. Controlled consumer/document acceptance remains separate.
+Fixture producer: `tests/fixtures/issued-serializer-compat/generate.py`, with
+`--source-root` pointing at `git archive` output of the recorded commit and fresh
+`--work`/`--output` paths. The checked-in ZIP/provenance/expected triplets are the
+regression inputs; manual regeneration requires reviewing all changed hashes.
+
 ### Controlled generated documents
 
 Native document registration stores exact output bytes, an issued input receipt,
