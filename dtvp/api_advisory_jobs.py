@@ -92,7 +92,7 @@ def refresh_inputs(
         "next_offset": offset + limit if offset + limit < len(identifiers) else None,
         "capabilities": ["refresh"] if actor.allowed(db, project, "evidence") else [],
         "limitations": [
-            "Only baseline-known exact IDs can be enriched; no package matching or approval is performed.",
+            "Only exact IDs claimed by baseline observations or active exact package-matching sources can be enriched; this refresh performs no package matching or approval.",
             "Provider not-found never proves remediation; source and publisher attribution remain distinct.",
         ],
     }

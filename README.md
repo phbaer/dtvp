@@ -854,6 +854,20 @@ Contract references: [OpenVEX 0.2.0](https://github.com/openvex/spec/blob/main/O
 The supported version bounds describe this implementation; newer standard versions
 are not implicitly accepted by these named profiles.
 
+### Native OSV package/version matching
+
+Native matching is now a distinct, explicit leased workflow; it does not reuse known-ID advisory refresh as a matcher or manufacture VEX applicability decisions. Enable `osv` in `DTVP_PROVIDERS_ENABLED` on API and worker to permit fixed-endpoint OSV queries. The default remains disabled. `GET /api/v3/projects/{project}/osv-matching` returns one captured product-head/evidence selection, paginated eligible PURLs, a selection digest, explicit unsupported-occurrence counts and the next source revision. Managers of pipeline evidence select at most20 distinct canonical versioned PURLs from those pinned inventories and `POST .../osv-jobs` with `request_id`, exact `expected_versions`, `expected_evidence`, `purls` and nonnegative `revision`. Current read/evidence authority is required; no package is selected automatically. Qualified/subpath, unversioned, contradictory and unselected occurrences retain unknown coverage.
+
+Queries use OSV's official [`POST /v1/query`](https://google.github.io/osv.dev/post-v1-query/) contract: the version appears only in the PURL, and empty result pages with `next_page_token` are followed. This is an exact **input-coordinate** contract; OSV's version interpretation and reported affected ranges are provider claims. DTVP evaluates no local version ranges, merges no alias identities and infers no binary/build identity or human applicability.
+
+Each completed package query checkpoints its exact identity-encoded response bytes and progress manifest before the next package request. Queries require HTTP200, no redirects, up to20 pages each /200 pages total, at most4MiB per page /32MiB captured response bytes and2,000 matches per package. The entire observation interval is bounded to900seconds. Chunk guards periodically recheck current authorization, exact heads/evidence, deadline and lease ownership, with forced checks after each body; expired workers cannot renew lost leases. A failed partial job publishes nothing and reports remaining coverage unknown. Explicit retry resumes completed frozen queries without refetching them. Once the complete capture is frozen, publication retries never contact OSV or repin heads.
+
+One independently revisioned source document per PURL preserves unrelated query results. A completed no-match refresh retires only the previous claim from that same query source; it does not establish remediation. Provider-withdrawn records remain exact historical evidence and do not seed active occurrences or known-ID enrichment. Source claims are marked `external-match`, unverified and applicability-unassessed. Separate component/part-root occurrences and usage contexts remain separate. Source documents reapply only to current eligible exact PURLs; changed, qualified or contradictory package versions do not inherit them. No assessment, review, coordinator score or approval is created. Active exact matching claims may supply exact known IDs to NVD/CIRCL enrichment; VEX-only and advisory-only feedback cannot expand that identifier set, and aliases are not identity merges.
+
+Before publication, immutable input bytes/pointers and potential expansion are admitted: at most64MiB input objects /250,000 pointers,100,000 source observations and100,000 potential contextual findings, with bounded per-version vulnerability records. Exceeding a limit fails before candidate snapshots or branch changes. Evidence and every captured product branch publish atomically under the original heads, including protection against newly added branches. Exact publication fingerprints bind the complete capture digest.
+
+Readers use `GET .../osv-jobs`, `.../{job}`, and `.../{job}/artifacts/{sha}` for current-scope job status and exact checkpoint/capture/response objects. Only the submitting, currently authorized actor can cancel or retry. Artifact responses include `X-Content-SHA256`. Generic native CLI JSON requests use the same endpoints. Previously issued artifacts and tagged history remain unchanged. Real provider/deployment acceptance and broad ecosystem coverage remain separate gates; mocked qualification does not establish complete vulnerability discovery.
+
 ### Recorded software-integration observations
 
 Native integration observations support the first bounded cascading-development
@@ -1739,11 +1753,13 @@ removed baseline findings are not resurrected. VEX-only claims are not enrichmen
 seeds in this initial subset. Contradictory ratings and original Base facts stay
 separate. Material fact changes require review revalidation; withdrawal can restore
 still-valid pinned coverage. Native NVD/CIRCL enrichment is available through
-explicit durable jobs; native package matching/OSV jobs and extended non-US
-adapters remain planned. V2 connectors retain their separate runtime.
+explicit durable jobs. Native OSV package/version matching is available separately
+with explicit query selection and unknown-coverage diagnostics; extended non-US
+adapters remain separate work. V2 connectors retain their separate runtime.
 
 `GET /api/v3/projects/{id}/advisory-refresh` returns a bounded searchable list of
-baseline-known CVE IDs, enabled providers, next producer ordinals and complete
+known source CVE IDs (baseline or active exact package matches), enabled providers,
+next producer ordinals and complete
 pinned version/evidence selections. The collapsed Knowledge refresh panel selects
 up to 20 IDs explicitly. `POST .../advisory-jobs` requires those pins, provider,
 IDs, explicit revision and request ID. GET job/status and POST retry/cancel use

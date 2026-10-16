@@ -70,7 +70,11 @@ def baseline_identifiers(journal, project_id, expected_versions, *, require_curr
         revision = journal.verify_state(state)
         if revision.project_id != project_id or revision.version != version:
             raise ValueError("Advisory input belongs to another product version")
-        for key, value in load_sections(journal, state)["vulnerabilities"].items():
+        sections = load_sections(journal, state)
+        from dtvp.knowledge.vex import matching_source_refs
+
+        result.update(matching_source_refs(sections))
+        for key, value in sections["vulnerabilities"].items():
             if (
                 not key.startswith(("external-evidence:", "evidence-document:"))
                 and value.get("ref")

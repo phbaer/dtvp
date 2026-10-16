@@ -350,6 +350,10 @@ def parse_evidence(raw, *, validation_profile=None):
             from dtvp.knowledge.advisory_documents import advisory_document
 
             result = advisory_document(document)
+        elif document.get("format") == "dtvp.package-matching/1":
+            from dtvp.knowledge.osv_matching import matching_document
+
+            result = matching_document(document)
         elif document.get("bomFormat") == "CycloneDX":
             result = cdx(document)
         elif "@context" in document and "statements" in document:
@@ -360,7 +364,10 @@ def parse_evidence(raw, *, validation_profile=None):
             raise ValueError("Unsupported evidence document format")
     except (TypeError, AttributeError, KeyError) as error:
         raise ValueError("Malformed evidence document structure") from error
-    if not result["statements"] and result["format"] != "dtvp.advisory-feed/1":
+    if not result["statements"] and result["format"] not in {
+        "dtvp.advisory-feed/1",
+        "dtvp.package-matching/1",
+    }:
         raise ValueError("Evidence document contains no supported statement records")
     if conformance is not None:
         if any(item["unresolved_reasons"] for item in result["statements"]):
@@ -443,6 +450,7 @@ def reconcile_evidence(sections):
         if key.startswith("external-evidence:"):
             del findings[key]
     indexed = components(sections)
+    package_index = package_match_index(sections)
     # Snapshot baseline pairs before applying documents: feeds cannot amplify
     # themselves or VEX-only claims across reapplication/nightly imports.
     baseline_refs = {}
@@ -453,6 +461,8 @@ def reconcile_evidence(sections):
             and item.get("identifier")
         ):
             baseline_refs.setdefault(item["identifier"], set()).add(item["ref"])
+    for identifier, references in matching_source_refs(sections).items():
+        baseline_refs.setdefault(identifier, set()).update(references)
     for key, record in list(findings.items()):
         if not key.startswith("evidence-document:"):
             continue
@@ -472,6 +482,8 @@ def reconcile_evidence(sections):
             if advisory_only:
                 matches = set(baseline_refs.get(item["vulnerability_id"], ()))
                 unresolved = [] if matches else ["identifier_not_claimed_by_baseline"]
+            elif document["format"] == "dtvp.package-matching/1":
+                matches, unresolved = resolve_package_match(item, package_index)
             else:
                 matches, unresolved = resolve_statement(item, sha, sections["inventory"], indexed)
             applications.append(
@@ -486,7 +498,22 @@ def reconcile_evidence(sections):
                 identity = digest(canonical([sha, index, ref]))
                 raw_advisory = item["raw"].get("vulnerability", item["raw"])
                 findings["external-evidence:" + identity] = {
-                    "kind": "external-advisory" if advisory_only else "external-status",
+                    "kind": "external-match"
+                    if document["format"] == "dtvp.package-matching/1"
+                    else "external-advisory"
+                    if advisory_only
+                    else "external-status",
+                    **(
+                        {
+                            "package_matching": {
+                                "format": document["format"],
+                                "purl": document["matching_coverage"]["purl"],
+                                "verification": "provider_claim_unverified",
+                            }
+                        }
+                        if document["format"] == "dtvp.package-matching/1"
+                        else {}
+                    ),
                     "identifier": item["vulnerability_id"],
                     "ref": ref,
                     "source": text(record.get("source")) or "imported-evidence",
@@ -542,3 +569,52 @@ def preview_evidence(sections, document_record):
         "contradictions": contradictions,
         "trust": "unverified",
     }
+
+
+def matching_source_refs(sections):
+    """Preindex only active package-match sources against actual current inventory.
+
+    VEX and advisory-only documents never grow this known-identifier set.
+    """
+    result = {}
+    indexed = package_match_index(sections)
+    for key, record in sections["vulnerabilities"].items():
+        if not key.startswith("evidence-document:") or record.get("active", True) is False:
+            continue
+        document = record.get("document", {})
+        if document.get("format") != "dtvp.package-matching/1":
+            continue
+        for item in document["statements"]:
+            matches, _ = resolve_package_match(item, indexed)
+            if matches:
+                result.setdefault(item["vulnerability_id"], set()).update(matches)
+    return result
+
+
+def package_match_index(sections):
+    """Index eligible current coordinates once, preserving distinct occurrences."""
+    indexed = {}
+    for key, component in sections["inventory"].items():
+        if key != "root" and not key.startswith(("component:", "part-root:")):
+            continue
+        raw = component.get("purl")
+        try:
+            package = PackageURL.from_string(raw) if isinstance(raw, str) else None
+        except ValueError:
+            continue
+        if not package or not package.version or package.qualifiers or package.subpath:
+            continue
+        if component.get("version") and component["version"] != package.version:
+            continue
+        if component.get("bom-ref"):
+            indexed.setdefault(package.to_string(), set()).add(component["bom-ref"])
+    return indexed
+
+
+def resolve_package_match(item, indexed):
+    if item["unresolved_reasons"]:
+        return set(), item["unresolved_reasons"]
+    matches = set()
+    for purl in item["purls"]:
+        matches.update(indexed.get(purl, ()))
+    return matches, [] if matches else ["matching_package_not_present_or_ineligible"]

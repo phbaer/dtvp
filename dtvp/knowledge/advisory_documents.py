@@ -7,7 +7,7 @@ from dtvp.parsers import validate_advisory
 FORMAT = "dtvp.advisory-feed/1"
 MAX_ITEMS = 10_000
 LIMITATIONS = [
-    "Only exact identifiers already claimed by baseline SBOM/DT component observations are enriched; VEX-only identifiers are excluded.",
+    "Only exact identifiers claimed by baseline SBOM/DT observations or active exact package-matching source observations are enriched; VEX-only and advisory-only feedback are excluded.",
     "Aliases, affected ranges, package coordinates and provider claims are retained evidence, not vulnerability matching or applicability conclusions.",
     "Publisher identity, provider authenticity, signatures and source CVSS arithmetic are not verified; original Base assertions are never replaced.",
 ]

@@ -82,13 +82,20 @@ def actor_for(db, job):
 def execute(factory, artifacts, settings, job_id, token):
     with factory() as db:
         kind, engine = db.get(Job, job_id).kind, db.get_bind()
-    if kind in {"analyse-native", "import-dt-native", "refresh-advisories-native"}:
+    if kind in {
+        "analyse-native",
+        "import-dt-native",
+        "refresh-advisories-native",
+        "match-osv-native",
+    }:
         from dtvp.knowledge.journal import Journal
         from dtvp.knowledge.projection import catch_up
 
         journal = Journal(artifacts.root / "knowledge")
         if kind == "analyse-native":
             from dtvp.knowledge.analysis_jobs import execute_analysis as execute_native
+        elif kind == "match-osv-native":
+            from dtvp.knowledge.osv_jobs import execute_matching as execute_native
         elif kind == "refresh-advisories-native":
             from dtvp.knowledge.advisory_jobs import execute_advisory_refresh as execute_native
         else:
