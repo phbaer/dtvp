@@ -223,8 +223,9 @@ and collision/failure fixtures precede trusted automation. See the
 Native file-intake and assembly UIs now capture explicit source/part selections
 and collection scope. Inputs retain subject digest, source/build identity,
 target/platform/configuration, collector version/method and coverage limitations;
-overlapping-view reconciliation and cross-part topology editing remain deferred. Complete inventory replacement is within declared scope; it is
-not verified discovery of every product component. Source, binary, container and
+explicit pinned cross-part topology edits are supported; overlapping-view
+reconciliation remains deferred. Complete inventory replacement is within declared
+scope; it is not verified discovery of every product component. Source, binary, container and
 build evidence must not silently overwrite incompatible scopes. Preserve typed
 containment/dependency/communication relations and declared/observed/concluded
 distinctions across security, license and architecture workflows.
@@ -326,8 +327,8 @@ can use proposal rationale as evidence but do not perform final rescoring.
 
 Use imported matches and pluggable matchers, including advisory sources outside
 the US; retain unsupported matching as unknown. A comprehensive custom matcher
-is deferred. Clinical safety/risk acceptance is distinct from CVSS and exploitation
-probability. Preserve v1 SSVC semantics/resources through explicit policy decisions.
+is deferred. Clinical safety/risk acceptance is outside DTVP scope. Preserve v1
+SSVC semantics/resources through explicit cybersecurity policy decisions.
 
 ### VDR and VEX ingestion and application
 
@@ -544,7 +545,8 @@ publication and receipt identity. Unknown or nonproduct predecessor objects are
 rejected before dereferencing. No automatic latest-part selection or approval
 transfer occurs.
 Initial limits: delivery parts only, same-version source inputs, no overlapping
-evidence-view reconciliation, nested assembly or cross-part relationship mapping.
+evidence-view reconciliation or nested assembly. Explicit pinned cross-part
+DEPENDS_ON/CONTAINS relationships now ship; no identity merging is inferred.
 
 Ownership now has a product policy reference and derived consuming contexts in
 each complete version state. V1 selectors retain namespace/case/PURL specificity,
@@ -597,8 +599,8 @@ Known-ID advisory feed documents now enrich baseline-reported identifiers throug
 the durable product evidence lifecycle. Provider facts remain independent; unknown
 IDs are unresolved and removed baseline findings cannot self-resurrect. Explicit
 native NVD/CIRCL refresh now uses durable GET-only jobs and frozen captures;
-additional providers, provider-specific rate policies and new package/version
-matching remain separate work.
+optional exact-PURL OSV matching now adds independently retained provider claims.
+Additional providers and provider-specific rate policies remain separate work.
 
 Native DT collection now uses per-version bindings and GET-only durable jobs.
 Complete captures and exact response bytes are checkpointed before publication;
@@ -664,8 +666,10 @@ version/evidence pins, bounded GET-only collection and raw-response checkpoints.
 Partial catalogs preserve untouched facts; not-found never clears baseline claims.
 UI and generic HTTP CLI share server capabilities and publication contracts.
 Raw capture recovery follows committed selected evidence ancestry, including
-retained catalog entries in fresh branches. Native package matching, scheduling,
-provider-specific throttling and additional non-US adapters remain planned.
+retained catalog entries in fresh branches. Optional exact-PURL OSV matching now
+ships with bounded collection and durable raw captures; it never creates human
+approvals. Scheduling, provider-specific throttling and additional non-US adapters
+remain separate scope.
 
 Issued native exports now retain exact serializer-versioned bundle/manifest/input
 bytes and unchanged consumer receipts in a sharded per-project journal index.
@@ -747,10 +751,10 @@ explicit normalization/history losses without restoring data or permissions.
 
 Still deferred: automatic semantic cross-import/context identity reuse; dynamic
 future-version applicability coverage beyond finite explicit range selection;
-extended VDR/VEX profiles; verified cascading synchronization; destructive journal
-retention/GC; native publication from v1 archives and complete legacy cutover;
-complete CPE dictionary refresh/mapping-history migration; extended license and
-architecture-model requirements; serializer-upgrade compatibility; and controlled
+full VDR/VEX schema/signature qualification beyond named consumed-field profiles;
+automatic cascading synchronization; destructive journal retention/GC; complete
+legacy cutover; full national CPE dictionary refresh/reviewed history reconstruction;
+extended license and architecture-model requirements; and controlled
 document/production recovery acceptance. These require scoped contracts or
 representative acceptance fixtures rather than automatic inference. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain

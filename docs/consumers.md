@@ -45,8 +45,9 @@ SQL and publish bound evidence through the journal. Unknown POST outcomes never
 automatically repeat; lost in-memory remote jobs still require explicit reconciliation.
 Exact parent/report-bound native follow-ups are implemented with the optional
 authenticated Agentyzer extension and never fall back to legacy unbound follow-ups.
-Complete CPE dictionary refresh/mapping-history migration, automatic semantic
-identity reconciliation, legal qualification and architecture acceptance remain
+Bounded offline dictionaries and historical CSV claim import now ship; full national
+dictionary refresh and reviewed mapping-history reconstruction remain outside that
+contract. Automatic semantic identity reconciliation, legal qualification and architecture acceptance remain
 separate scoped work.
 Production acceptance also requires machine authorization, archived reproducible
 inputs, failure/retry handling and controlled consumer fixture qualification.
@@ -71,7 +72,9 @@ consistency. This is source intake, with no implicit writeback.
 Native advisory feed documents provide exact known-ID enrichment through the
 product evidence lifecycle. They retain provider facts independently, without
 package/version matching, applicability adoption or new findings. Unknown IDs
-remain unresolved; live native provider refresh remains separate connector work.
+remain unresolved. Durable NVD/CIRCL known-ID refresh and optional exact-PURL OSV
+matching now ship. OSV claims remain independent of human applicability decisions;
+unsupported coordinates retain unknown coverage.
 
 ## V2 compatibility contracts
 
@@ -136,4 +139,6 @@ advisory identity, analysis coverage and the complete original response. Missing
 code references or partial source coverage cannot establish non-applicability.
 V2 supports native `/assess` submission, durable local jobs, remote polling and
 follow-ups with qualified repository/commit binding. Journal-backed v3 orchestration
-remains connector work. The DTVP image and playground do not build or start Agentyzer.
+and exact-parent follow-ups now ship with explicit authenticated sibling contracts;
+deployed compatibility and operational retention still require acceptance.
+The DTVP image and playground do not build or start Agentyzer.

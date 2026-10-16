@@ -63,6 +63,27 @@ Its [pipeline examples](docs/devsecops-evidence-concept.md#exemplary-pipeline-in
 map PR/nightly builds, legacy C/C++, containers, supplier inputs and parallel
 versions to intake, review, release gates, documentation and monitoring.
 
+### Rewrite completion and acceptance boundary
+
+The bounded implementation batches are committed on `rewrite/knowledge-journal`.
+They include explicit assembly relationships, named VDR/VEX consumed-field profiles,
+curated CPE source/history intake, software integration events with optional Git
+parent-path verification, external OSV matching, frozen consumer compatibility
+fixtures and an isolated PostgreSQL 17-to-18 upgrade rehearsal. Knowledge is the
+native entry point; compatibility services remain available for deliberate migration.
+The original unrelated working changes remain parked in stash
+`097bded5bc26361775f12b08295d3fc2a38e1a13`; they were not restored into this rewrite.
+
+Remaining acceptance requires representative producer/customer inputs, sanitized
+legacy migration rehearsals, deployed sibling authorization/round trips, Generator
+controlled-document parity and production recovery/performance qualification.
+The synthetic Generator rehearsal still reports three errors and twelve warnings;
+it is not document acceptance. These gates require deployment or representative
+inputs, rather than inferred approval from local tests. Broader semantic identity,
+automatic cascading synchronization, full national dictionaries, expanded modeling
+and destructive retention need separately scoped contracts. The historical plan
+is retained for traceability and is not a fresh implementation backlog.
+
 ### Explore the new core
 
 Team selectors retain v1 semantics: namespace/name matching, known-empty versus

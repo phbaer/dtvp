@@ -149,7 +149,8 @@ package dependencies alone do not establish service communication architecture.
 The main gate is coherent subject selection: an image tag is insufficient to
 freeze a release, and unrelated platform builds must not become one apparent
 installation. Initial native delivery-part selection is implemented; overlapping
-evidence views and cross-part relationship mapping remain planned. Legacy combined SBOMs can bridge
+evidence views remain deferred. Explicit pinned cross-part relationships now ship
+without inferred identity merging. Legacy combined SBOMs can bridge
 intake but cannot restore provenance already discarded by an assembler.
 
 ### Example 4: supplier binary or externally maintained subsystem
@@ -527,8 +528,8 @@ correspondence, explicit linked target drafts, finite numeric release selection
 and local v2 snapshot migration rehearsal are implemented. Pinned composition can
 be compared with explicitly selected retained advisory claims without changing
 historical assessments; UI and CLI use the same read-only backend. Automatic
-semantic identity reuse, native publication from v1 archives and complete cutover
-qualification remain separate work. V1 ZIP inspection and streamed CLI dry runs
+semantic identity reuse and complete cutover qualification remain separate work.
+V1 ZIP inspection and streamed CLI dry runs
 now expose exact pins, normalization limits and partial-history losses without
 persisting data, creating permissions or replaying native approvals.
 
@@ -559,9 +560,10 @@ claims and finding claims remain separate. Nontransactional DT reads remain an
 explicit consistency limitation. Neither integration creates human approvals.
 
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
-source reuse, cross-part relationship mapping, stable cross-import/context identity,
-dynamic future-version coverage beyond finite explicit range selection, selected
-VDR/VEX conformance profiles and broader architecture modeling/rendering acceptance.
+source reuse, stable cross-import/context identity, dynamic future-version coverage
+beyond finite explicit range selection and broader architecture modeling/rendering
+acceptance. Explicit cross-part relationships and named consumed-field VDR/VEX
+profiles now ship; the latter do not establish full schema or signature conformance.
 Reviewed, sanitized single-version v1 exports now have explicit preview/publication
 under separate operator-review, sanitization and project-reader-disclosure
 acknowledgments. Exact submitted ZIP/member bytes remain readable project artifacts;
@@ -583,7 +585,7 @@ end-to-end qualification.
 | Repository / branch | Verified increment | Remaining gate |
 | --- | --- | --- |
 | `cdxcombine`, `fix/strict-evidence-assembly`, `ea0e672` | Required inputs, references and validation fail closed; atomic output and scoped reference mapping. 52 tests passed, one optional-fixture skip. | Conversion still loses some metadata; native DTVP assembly retains original constituents and remains the preferred new path. |
-| `cpeservice`, `feat/dtvp-evidence-contract`, `98049fc` | Truthful rule/identity provenance, requested/resolved identifiers and deterministic result digest. 213 tests passed. | Internal DTVP offline catalog/rule proposals now exist; complete mapping-history migration and dictionary refresh remain planned; bounded offline supplied-dictionary ranking now ships. Candidates are not applicability. |
+| `cpeservice`, `feat/dtvp-evidence-contract`, `98049fc` | Truthful rule/identity provenance, requested/resolved identifiers and deterministic result digest. 213 tests passed. | Internal DTVP offline catalog/rule proposals now exist; bounded historical CSV claims, raw source retention and offline supplied-dictionary ranking now ship. Full reviewed history reconstruction and national dictionary refresh remain separate scope. Candidates are not applicability. |
 | `generator`, `feat/dtvp-snapshot-integrity`, `791b186` / `60e63c9` / `20a7e93` / `0ac78ed` | Exact issued native inputs and byte-preserved receipts/bundle/manifest; isolated fixture repair; offline renderer comparisons; separately attributed authored support facts with no inferred support classification. Full suite: 743 passed, one optional-template skip. Actual isolated DTVP HTTP issuance produced four support formats with independently verified output/bundle hashes and pinned template revision. | Isolated/unmerged changes; live synthetic report has three errors and twelve warnings. Customer controlled-document parity, missing-input resolution, PDF, previous-release/context-specific vulnerability outputs and human acceptance remain gates. |
 | `vscorer`, `feat/dtvp-context-binding`, `3994254` | Optional exact context/component/CVE/Base receipt survives native intake and proposal responses. Independent Python/architecture reviews approved; 27 final checks passed and real DTVP-derived inputs were accepted. | No remote authenticity claim; production auth, serializer upgrade compatibility and controlled round-trip qualification remain. |
 | `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` / `a10b5d4` / `9bb5985` | Exact Git-commit source binding, private authenticated completed-job correlation and authenticated exact-parent/source-bound follow-ups; public request/report paths exclude private binding. DTVP retains issued-input and parent/report pins and never repeats unknown POSTs automatically. Latest isolated sibling suite: 517 passed. | These isolated changes are not merged or deployed. Process-local remote retention, deployed auth/endpoint compatibility and source-to-binary/submodule/LFS verification remain acceptance gaps; follow-up evidence never grants human approval. |
@@ -595,7 +597,8 @@ A separate actual HTTP rehearsal used the current native serializer and authored
 DTVP's v2 adapter additionally requires producer-qualified repository/commit
 binding before external Agentyzer proposals become eligible. Reports without it
 remain evidence. This closes an eligibility gap in the existing workflow; it
-does not implement journal-backed v3 analysis orchestration.
+is separate from the subsequently delivered journal-backed v3 orchestration and
+authenticated exact-parent follow-ups described above.
 The adapter change is `d0a55ab`: full working-tree suite 107 passed with one
 unconfigured PostgreSQL skip; a separate disposable PostgreSQL integration test
 passed. Isolated staged validation also passed, excluding earlier UI experiments.
