@@ -2843,3 +2843,7 @@ retains declarations without installing mappings or changing scores. They are
 normal branches of the sibling repositories; default checkouts remain untouched.
 See [consumer contracts](docs/consumers.md#pinned-pipeline-metadata) for validation
 and remaining customer/document/deployment acceptance limits.
+
+Pipeline and synchronization tools follow the existing compact closed-card and
+full-width expanded layout, including narrow screens. Unfinished observation
+intake/reconciliation blocks competing baseline imports and assembly edits.

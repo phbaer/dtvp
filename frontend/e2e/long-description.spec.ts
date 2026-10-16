@@ -11,7 +11,9 @@ test('long vulnerability evidence stays readable while recording a not-affected 
   const bom = JSON.parse(readFileSync('../playground/fixtures/release.cdx.json', 'utf8'))
   const description = Array.from({ length: 35 }, (_, i) => `Deployment context paragraph ${i + 1}. ${'Evidence about code paths and verified configuration. '.repeat(8)}`).join('\n\n')
   bom.vulnerabilities[0].description = description
-  await page.getByText('Import SBOM', { exact: true }).locator('input').setInputFiles({ name: 'long-description.cdx.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bom)) })
+  const upload = page.getByText('Import SBOM', { exact: true }).locator('input')
+  await expect(upload).toBeEnabled()
+  await upload.setInputFiles({ name: 'long-description.cdx.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bom)) })
   await expect(page.getByRole('status')).toContainText('SBOM imported')
   await page.getByRole('button', { name: 'Review', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2099-20001', exact: true }).click()

@@ -385,14 +385,14 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
     </details>
     <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy || intakeLocked" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
     <div class="knowledge-tools" role="group" aria-label="Product tools">
-      <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="intakeBusy || pipelineConfigurationLocked || syncAutomationLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
-      <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
+      <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="intakeBusy || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
+      <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
       <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
       <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
       <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" @locked="cpeLocked = $event" />
       <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
-      <KnowledgePipelineConfiguration v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :state="workspace?.state || ''" :disabled="busy || baseIntakeLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="pipelineConfigurationLocked = $event" @refresh="load(true, true)" />
-      <KnowledgeSyncAutomation v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="syncAutomationLocked = $event" @refresh="load(true, true)" />
+      <KnowledgePipelineConfiguration class="knowledge-tool-group" v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :state="workspace?.state || ''" :disabled="busy || baseIntakeLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="pipelineConfigurationLocked = $event" @refresh="load(true, true)" />
+      <KnowledgeSyncAutomation class="knowledge-tool-group" v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="syncAutomationLocked = $event" @refresh="load(true, true)" />
       <KnowledgeObservations v-if="project && version && workspace?.state" :key="`${me.id}:${project}:${version}`" :project="project" :version="version" :state="workspace.state" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="observationsLocked = $event" @refresh="load(true, true)" />
       <KnowledgeComparison :project="project" />
     </div>
@@ -454,12 +454,13 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
 /* Existing panels stay mounted; only their direct disclosure roots join the toolbar. */
 .knowledge-tools { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr)); align-items:start; gap:8px; margin:12px 0; min-width:0 }
 .knowledge-tools:empty { display:none }
+.knowledge-tools > :deep(.knowledge-tool-group) { display:contents }
 .knowledge-composition-tools { display:grid; gap:8px; min-width:0 }
 .knowledge-composition-tools:has(> details[open]) { grid-column:1 / -1 }
 .knowledge-composition-tools > :deep(details) { margin:0; min-width:0; background:var(--surface) }
-.knowledge-workspace .knowledge-tools > :deep(details) { margin:0; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface) }
-.knowledge-workspace .knowledge-tools > :deep(details[open]) { grid-column:1 / -1 }
-.knowledge-workspace .knowledge-tools > :deep(details > summary) { font-size:.82rem; line-height:1.4; overflow-wrap:anywhere; cursor:pointer }
+.knowledge-workspace .knowledge-tools > :deep(details), .knowledge-workspace .knowledge-tools > :deep(.knowledge-tool-group > details) { margin:0; min-width:0; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface) }
+.knowledge-workspace .knowledge-tools > :deep(details[open]), .knowledge-workspace .knowledge-tools > :deep(.knowledge-tool-group > details[open]) { grid-column:1 / -1; padding:10px 12px }
+.knowledge-workspace .knowledge-tools > :deep(details > summary), .knowledge-workspace .knowledge-tools > :deep(.knowledge-tool-group > details > summary) { font-size:.82rem; line-height:1.4; overflow-wrap:anywhere; cursor:pointer }
 @media(max-width:550px) { .knowledge-tools { grid-template-columns:minmax(0,1fr) } }
 
 .knowledge-advanced,.knowledge-views { margin:12px 0; font-size:.85rem }.knowledge-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px 14px; margin-top:12px }.knowledge-advanced fieldset { border:0; margin:0; padding:0; min-width:0 }.knowledge-views ul { list-style:none; padding:0; display:flex; gap:8px; flex-wrap:wrap }.knowledge-views li { display:flex; gap:4px }.knowledge-views .knowledge-actions { justify-content:flex-start }.knowledge-views label { margin:8px 0 0; min-width:160px }
