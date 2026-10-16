@@ -2897,3 +2897,10 @@ Observation comparison fails closed above 100,000 assertions per state/scoped
 comparison groups or 32 MiB of normalized input per state/output. Existing immutable
 export `/1` serializers are unchanged. Disposable comparison cache keys now use
 `dtvp.historical-comparison/2`, preventing reuse of older synthesis results.
+
+License review keeps authority evidence and filters separate from additional
+selected-source claims. A collapsed summary expands into reported facts, parser
+format and pinned source attribution. Validated source artifacts can be opened
+through the selected product state. Adopted observation occurrences explicitly
+have no authority license claim. Source differences do not establish compatibility
+or clearance; human conclusions and independent review remain explicit.
