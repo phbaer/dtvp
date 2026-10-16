@@ -182,6 +182,11 @@ class _NormalizedState:
             for key in ("from", "to"):
                 if key in edge:
                     edge[key] = _reference(edge[key], mapping)
+        assertions = normalized_inventory.get("observation_assertions", {}).get("components")
+        if assertions is not None:
+            normalized_inventory["observation_assertions"]["components"] = {
+                _reference(ref, mapping): values for ref, values in assertions.items()
+            }
         transformed["vulnerabilities"] = {
             key: _claim(item, mapping, ledger) for key, item in sections["vulnerabilities"].items()
         }

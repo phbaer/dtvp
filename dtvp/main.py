@@ -39,6 +39,7 @@ from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_metadata_editor import router as metadata_editor_router
 from dtvp.api_migration import router as migration_router
+from dtvp.api_observations import router as observations_router
 from dtvp.api_osv_matching import router as osv_matching_router
 from dtvp.api_ownership_editor import router as ownership_editor_router
 from dtvp.api_pipeline_config import router as pipeline_config_router
@@ -156,6 +157,7 @@ def _create_app(settings, lease):
     app.include_router(pipeline_summary_router)
     app.include_router(pipeline_config_router)
     app.include_router(osv_matching_router)
+    app.include_router(observations_router)
     app.include_router(ownership_editor_router)
     app.include_router(history_router)
     app.include_router(metadata_router)

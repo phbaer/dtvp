@@ -37,6 +37,15 @@ def component_rows(sections):
                     for key in ("type", "name", "group", "version", "purl", "cpe", "dtvp_origin")
                     if key in component
                 },
+                **(
+                    {
+                        "supplemental_component_evidence": inventory["observation_assertions"][
+                            "components"
+                        ][ref]
+                    }
+                    if ref in inventory.get("observation_assertions", {}).get("components", {})
+                    else {}
+                ),
                 "context_count": len(values),
                 "team_ids": sorted(
                     {team for value in values for team in value.get("team_scope", {})}

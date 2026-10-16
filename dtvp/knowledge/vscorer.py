@@ -63,7 +63,7 @@ def derive_context_inputs(journal, state, context_id, component_ref, base_select
 
     def native_component(component):
         value = copy.deepcopy(component)
-        for key in ("dtvp_origin", "components"):
+        for key in ("dtvp_origin", "dtvp_observations", "dtvp_observation_conflicts", "components"):
             if key in value:
                 value.pop(key)
                 conversions.append(

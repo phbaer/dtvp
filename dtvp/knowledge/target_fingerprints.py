@@ -57,6 +57,28 @@ class TargetFingerprintBuilder:
         self._pipeline_sections = sections
         self._pipeline_components = components
         self._pipeline_contexts = {}
+        self._observation_assertions = {}
+        for ref, assertions in (
+            inventory.get("observation_assertions", {}).get("components", {}).items()
+        ):
+            values = set()
+            for assertion in assertions:
+                facts = {
+                    key: value
+                    for key, value in assertion["component"].items()
+                    if key not in {"bom-ref", "dtvp_origin"}
+                }
+                values.add(
+                    canonical(
+                        {
+                            "source": assertion["source"],
+                            "part_id": assertion.get("part_id"),
+                            "component": facts,
+                        }
+                    )
+                )
+            if values:
+                self._observation_assertions[ref] = _array(sorted(values))
         self._part_ids = {
             ref: item.get("dtvp_origin", {}).get("part_id") for ref, item in components.items()
         }
@@ -139,6 +161,13 @@ class TargetFingerprintBuilder:
             "scope": self._scope,
             "parts": _array(sorted(value for part_id, value in self._parts if part_id in part_ids)),
         }
+        assertions = [
+            (canonical(ref), self._observation_assertions[ref])
+            for ref in refs
+            if ref in self._observation_assertions
+        ]
+        if assertions:
+            fields["observation_assertions"] = _object(assertions)
         curated = [(canonical(ref), self._curated[ref]) for ref in refs if ref in self._curated]
         if curated:
             fields["curated_metadata"] = _object(curated)

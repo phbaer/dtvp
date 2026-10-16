@@ -273,6 +273,16 @@ def load_workspace(
                 "context": context,
                 "dependency_relation": dependency_relation,
                 "sourcefacts": observations,
+                **(
+                    {
+                        "supplemental_component_evidence": sections["inventory"][
+                            "observation_assertions"
+                        ]["components"][ref]
+                    }
+                    if ref
+                    in sections["inventory"].get("observation_assertions", {}).get("components", {})
+                    else {}
+                ),
                 "source_ratings": ratings,
                 "source_severity": source_severity(ratings),
                 "description": descriptions[0]["text"] if descriptions else "",

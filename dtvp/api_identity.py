@@ -126,6 +126,15 @@ def vscorer_inputs(
         **result,
         **({"issuance": project_issuance(request, issued)} if issued else {}),
         "files": {
+            **(
+                {
+                    "pipeline-context.json": journal.objects.read(
+                        issued["files"]["pipeline-context.json"]["sha256"]
+                    ).decode()
+                }
+                if issued and "pipeline-context.json" in issued["files"]
+                else {}
+            ),
             "sbom.cdx.json": journal.objects.read(issued["files"]["sbom.json"]["sha256"]).decode()
             if issued
             else canonical(result["sbom"]).decode(),

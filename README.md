@@ -67,7 +67,7 @@ The [component identity design](docs/rewrite-plan.md#component-identity-markers-
 now specifies stable DTVP IDs, ecosystem-aware package markers, exact variants and
 artifact bindings. Unambiguous continuity should be automatic; ambiguity requires
 confirmation. This design extends the existing explicit correspondence workflow;
-automatic reconciliation remains implementation work, and identity alone never
+stable lineage reconciliation and guarded same-version continuity now ship. Identity alone never
 extends human approval into a new context or version.
 PURL and other external identity markers are optional. Incomplete components retain
 DTVP IDs and provenance; ambiguous continuity requires confirmation and never
@@ -79,8 +79,8 @@ observations should form one provenance-preserving graph without collapsing usag
 contexts or accumulating obsolete nightly inventory. The pipeline explicitly
 designates inventory authority per delivery part/scope; other sources enrich
 attributed evidence and propose inventory changes for explicit reconciliation.
-Source roles are provider-independent. This reconciliation/authority design remains
-implementation work.
+Source roles are provider-independent. Bounded observation intake, reconciliation
+and explicit selection/adoption now implement this design; nested assemblies remain outside this contract.
 
 The [revalidation design](docs/rewrite-plan.md#targeted-assessment-revalidation)
 preserves approval for descriptive-only changes, revalidates affected material
@@ -2280,7 +2280,7 @@ without changing the baseline.
 Reassignment and inventory changes preserve existing assessment/review records
 and immutable tagged states. Current contexts are recomputed, not silently
 treated as renewed approvals. Context IDs remain based on source-local refs;
-cross-import semantic identity remains planned. Exact contextual assessment coverage
+unique strong lineage matches support guarded same-version reference continuity. Exact contextual assessment coverage
 is available through the Knowledge workspace, HTTP API and CLI. Run the isolated scenario:
 
 ```bash
@@ -2701,3 +2701,37 @@ pin the exact configuration in their immutable inventory. Optional
 `expected_configuration` rejects stale CI declarations. Assembly previews include
 the configuration pin; apply rejects changes even between preview verification
 and publication. A configuration edit alone changes no existing product state.
+
+### Overlapping observations
+
+`POST .../versions/{version}/observation-files` accepts original SBOM bytes plus
+JSON metadata; `/observation-imports` accepts JSON documents. Intake publishes
+only an attributed source layer. It pins the current product/configuration and
+checks the configured source role, delivery part, collection boundary and either
+shared artifact digest or exact-file-bound `SubjectDeclaration`. Producer-declared
+same-build relationships remain distinct from digest-bound subjects. Original
+bytes and full reconciliation reports remain authorized historical artifacts.
+
+`GET .../observation-sources` provides bounded source pages; `/observation-selection`
+reads the current selection. POST `/observation-selection/preview` computes a
+read-only reconciliation; POST `/observation-selection` requires its exact digest.
+Publication rebuilds from the authoritative baseline plus the selected layers,
+retaining current assessments/reviews/history. Omitted sources and removed adopted
+components/relationships require an explicit reason. Retained historical layers
+never accumulate into the latest inventory automatically.
+
+Unique strong identities within the same delivery part/role/installation map to
+existing occurrences. Supplementary component facts remain attributed assertions;
+authoritative fields are never overwritten. New components and topology require
+explicit adoption. Independently adopted equivalent observations can share one
+node with both origins; conflicting identity/placement or ambiguous occurrences
+remain separate. Metadata conflicts remain visible. Typed containment remains
+separate from dependency topology and consuming contexts are not collapsed.
+
+Workspace findings and component inventory expose supplemental component evidence;
+assessment fingerprints include its effective facts within the consuming tree.
+Capture-state/local-reference changes alone are immaterial; changed security facts
+require renewed review. Full original files remain retrievable. Preview samples
+are limited to 20 entries/list; full reports remain retained artifacts. Selection
+is bounded to 200 sources, 2,000 adoptions/source, 100,000 candidate records and
+64 MiB normalized candidate/report limits, failing without partial publication.
