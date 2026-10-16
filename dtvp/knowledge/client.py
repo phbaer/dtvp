@@ -64,6 +64,15 @@ def configure(parser):
     command.add_argument("--token-env", default="DTVP_API_TOKEN")
     command.add_argument("--persona", help="Synthetic playground login only")
     commands = command.add_subparsers(dest="knowledge_command", required=True)
+    identity = commands.add_parser(
+        "identity-matches", help="Compare pinned component identity candidates"
+    )
+    identity.add_argument("--project", required=True)
+    identity.add_argument("--source", required=True)
+    identity.add_argument("--target", required=True)
+    identity.add_argument("--offset", type=int, default=0)
+    identity.add_argument("--limit", type=int, default=50)
+    identity.add_argument("--json", action="store_true")
     workspace = commands.add_parser("workspace", help="Show contextual findings and review status")
     workspace.add_argument("--project", required=True)
     workspace.add_argument("--version", required=True)
@@ -297,6 +306,34 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "identity-matches":
+            from urllib.parse import quote
+
+            path = f"/api/v3/projects/{quote(args.project, safe='')}/states/{quote(args.target, safe='')}/identity-matches"
+            result = read_response(
+                client.get(
+                    path, params={"source": args.source, "offset": args.offset, "limit": args.limit}
+                )
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(f"Identity report: {result['report_digest']}")
+                print(
+                    f"Matched: {result['summary']['matched']} · Unresolved: {result['summary']['unresolved']}"
+                )
+                for row in result["items"]:
+                    print(f"{row['basis']}: {row['source_id']} -> {row['target_id']}")
+                for row in result.get("unresolved", []):
+                    print(f"Unresolved {row['current_ref']}: {row['reason']}")
+                if result.get("diagnostics_truncated"):
+                    print("Unresolved diagnostics truncated; summary counts are complete.")
+                if result.get("next_offset") is not None:
+                    print(f"Next offset: {result['next_offset']}")
+                print(
+                    "Read-only: inventory, contextual coverage and human approvals are unchanged."
+                )
+            return
         if args.knowledge_command == "legacy-archive-preview":
             from urllib.parse import quote
 

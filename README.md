@@ -99,6 +99,31 @@ on configured version relationships. Acceptance and review of new coverage remai
 explicit; unchanged target approvals stay valid. Automatic scheduling/lifecycle
 remain implementation work on top of the existing pinned previews and drafts.
 
+### Automatic identity comparison (first implementation slice)
+
+`GET /api/v3/projects/{id}/states/{target}/identity-matches?source=STATE` compares
+pinned committed product states using unique exact versioned PURLs or conservative
+component-artifact digest matches. Full qualifiers/subpath remain significant;
+contradictory coordinates/hashes and duplicate occurrences block matching. Missing
+fields stay unresolved rather than blocking import. Matching is separated by
+part and root/component role; changed collection boundaries block candidates.
+The report includes complete counts, a page-independent digest, up to 200 matches
+per page and a bounded sample of 100 unresolved diagnostics.
+
+The Knowledge correspondence panel offers **Component identity continuity** after
+selecting a pinned source. It loads only on request and preserves exact report pins
+while paging. CLI uses the same server report:
+
+```bash
+uv run dtvp knowledge identity-matches --project PROJECT --source SOURCE_SHA --target TARGET_SHA --json
+```
+
+This slice discovers compatible identity candidates; it does not yet persist a
+stable identity registry, rewrite graph references, merge observations or carry
+approvals across changed references. Existing explicit correspondence/adoption
+workflows remain separate. Source-local occurrence and assessment semantics are
+unchanged.
+
 ### Rewrite completion and acceptance boundary
 
 The bounded implementation batches are committed on `rewrite/knowledge-journal`.

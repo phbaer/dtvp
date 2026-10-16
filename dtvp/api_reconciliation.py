@@ -6,6 +6,7 @@ from pydantic import Field
 from dtvp.api import DB, Auth, project_for
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.comparison import reachable_states
+from dtvp.knowledge.identity_matches import identity_matches
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 from dtvp.knowledge.reconciliation import (
     Pair,
@@ -25,6 +26,27 @@ class PreviewInput(RequestModel):
     source: Sha
     target: Sha
     pairs: list[Pair] = Field(min_length=1, max_length=100)
+
+
+@router.get("/projects/{project_id}/states/{state}/identity-matches")
+def automatic_matches(
+    project_id: str,
+    state: Sha,
+    source: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, source, project_id)
+    require_state(journal, state, project_id)
+    try:
+        return identity_matches(journal, project_id, source, state, offset=offset, limit=limit)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @router.post("/projects/{project_id}/reconciliation/preview")
