@@ -2852,3 +2852,22 @@ VScorer preparation also exposes the exact optional `pipeline-context.json` file
 in the UI. Both its receipt pin and exact byte hash must match before any native
 input downloads become available; missing, changed or unpinned metadata fails
 closed. Legacy three-file derivations retain their existing behavior.
+
+### Rewrite increment verification (2026-10-16)
+
+The broad backend run recorded 1,604 passed, 33 optional skips and one demo
+error-order failure from code loaded before its concurrent fix. A fresh final
+82-case changed-contract regression run passed, including that exact case. The
+SQLite/PostgreSQL qualification run passed 107 checks (one SQLite-only skip);
+additional observation/rehearsal and final review-fix runs passed 15 and 12 checks.
+The broad browser run recorded 221 passed and three failures; compact wrapper
+layout and upload readiness corrections were followed by 18 passing final browser
+regressions covering all failures. Optional specialist metadata downloads added
+nine passing checks. Frontend unit tests, typecheck/build and the real native
+PostgreSQL browser workflow also passed. A final real-HTTP pipeline rehearsal
+retained exact inputs and verified four issued consumer files without simulated
+human reviews. Disposable services/databases were removed; the existing playground
+and parked unrelated changes were preserved.
+
+These checks qualify the bounded contracts exercised, not production deployment,
+customer SBOM correctness, license clearance or controlled-document acceptance.
