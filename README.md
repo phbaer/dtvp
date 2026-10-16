@@ -3146,3 +3146,44 @@ prove a delayed request failed. Duplicate names remain constrained per owning
 team by the database. Five focused browser checks and frontend typecheck/build
 verify native creation, uncertain-result recovery, draft/mobile behavior,
 read-only access and actor roundtrips.
+
+### Optional official VDR/VEX JSON Schema checks
+
+`POST /api/v3/projects/{id}/evidence/schema-validation` accepts a JSON object
+with `document` and `validation_profile`. It requires project evidence permission
+and returns a read-only `dtvp.official-schema-validation/1` report. Profiles:
+
+- `cyclonedx-1.5-json-schema/1`
+- `cyclonedx-1.6-json-schema/1`
+- `openvex-0.2.0-json-schema/1`
+- `csaf-2.0-json-schema/1`
+
+This opt-in check validates the whole document against the selected official
+JSON Schema, including locally resolved references and enabled format checks.
+The existing `dtvp-*-exact/1` consumed-field profiles and import/application
+semantics remain unchanged. A schema-valid document can still contain unsupported
+ranges, relationships or statement semantics; schema validity never expands
+product/context scope or creates an approval. CSAF's additional normative semantic
+tests and VEX-profile rules are separate from its JSON Schema and are not claimed
+by this report. Cryptographic signature verification is always `not_performed`,
+even when a signature's JSON structure passes.
+
+The exact vendored [OASIS CSAF 2.0 schema](https://docs.oasis-open.org/csaf/csaf/v2.0/os/schemas/csaf_json_schema.json),
+its three [FIRST CVSS schema dependencies](https://www.first.org/cvss/), and the
+[official OpenVEX 0.2.0 schema at a pinned commit](https://github.com/openvex/spec/blob/61b5f885d0f481f48683c93345e49ef1a6e9fdff/openvex_json_schema.json)
+ship under `dtvp/knowledge/schema_resources`, with exact source hashes and retained
+license/notices. OpenVEX's `v0.2.0` release tag contains no JSON Schema; the bundle
+explicitly identifies the maintained official 0.2.0 schema revision instead.
+CycloneDX uses the versioned local schema snapshots in the locked official Python
+library. Reports identify every resource, its exact SHA-256, library version and
+the complete local resource-set digest. Runtime resolution is closed: no schema,
+document URL, JSON-LD context or external reference is fetched.
+
+Reports contain canonical document and report digests, schema dialect/ID, bounded
+JSON-pointer diagnostics, explicit truncation and trust/semantic limitations.
+Source values and raw error messages are not copied into diagnostics. Limits are
+32 MiB canonical JSON, 100,000 tree nodes, depth 64, 64 KiB per text/key value and
+64 displayed diagnostics. Exceeding input/evaluation bounds fails explicitly;
+more errors retain `valid: false` with `diagnostics_truncated: true`. Validation
+does not publish or retain an import, so source-byte intake and producer ordering
+still use the normal evidence workflow.

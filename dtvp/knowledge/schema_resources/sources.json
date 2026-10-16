@@ -1,0 +1,45 @@
+{
+  "format": "dtvp.official-schema-resources/1",
+  "resources": [
+    {
+      "file": "csaf-2.0.schema.json",
+      "source": "https://docs.oasis-open.org/csaf/csaf/v2.0/os/schemas/csaf_json_schema.json",
+      "sha256": "29c114b35b0a30831f1674f2ab8b3ed9b2890cfeaa63b924ac6ed9d70ef44262",
+      "license": "OASIS-CSAF-NOTICES.txt",
+      "schema_id": "https://docs.oasis-open.org/csaf/csaf/v2.0/csaf_json_schema.json"
+    },
+    {
+      "file": "openvex-0.2.0.schema.json",
+      "source": "https://raw.githubusercontent.com/openvex/spec/61b5f885d0f481f48683c93345e49ef1a6e9fdff/openvex_json_schema.json",
+      "sha256": "9373597734ed1d3ea5161a8b46d3866c4a8cfe76fd632fdd16aef01fb34b3238",
+      "license": "OpenVEX-LICENSE.txt",
+      "schema_id": "https://github.com/openvex/spec/openvex_json_schema_0.2.0.json"
+    },
+    {
+      "file": "cvss-v2.0.json",
+      "source": "https://www.first.org/cvss/cvss-v2.0.json",
+      "sha256": "cd1a7c0815b7a47dc12fb7dded10622b96d562841f7bc6d2d8765c5d937a28f2",
+      "license": "embedded license array",
+      "schema_id": "https://www.first.org/cvss/cvss-v2.0.json?20170531"
+    },
+    {
+      "file": "cvss-v3.0.json",
+      "source": "https://www.first.org/cvss/cvss-v3.0.json",
+      "sha256": "b2b587e5dfa6d9a4be89e25cb593df04f14e7ffbe8fe5b167ceee17b6097d919",
+      "license": "embedded license array",
+      "schema_id": "https://www.first.org/cvss/cvss-v3.0.json?20170531"
+    },
+    {
+      "file": "cvss-v3.1.json",
+      "source": "https://www.first.org/cvss/cvss-v3.1.json",
+      "sha256": "77ff3df106e4588e2bb5c9cf0237f962c62d35c5002443c4bf7cc7ca16ee171f",
+      "license": "embedded license array",
+      "schema_id": "https://www.first.org/cvss/cvss-v3.1.json?20211103"
+    }
+  ],
+  "notes": [
+    "Schema files are unchanged exact upstream bytes; URLs are provenance only and are never fetched at runtime.",
+    "OpenVEX v0.2.0 release tag contains no JSON schema; this is the maintained official 0.2.0 schema pinned to commit 61b5f885d0f481f48683c93345e49ef1a6e9fdff.",
+    "CSAF schema validation is not the additional normative CSAF semantic tests or VEX profile validation."
+  ]
+}

@@ -134,3 +134,17 @@ def inspect_conformance(project_id: str, data: ConformanceInput, db: DB, actor: 
             report["valid"] = False
             report["diagnostics"] = [{"path": "/", "code": "unsupported_statement_semantics"}]
     return report
+
+
+class SchemaValidationInput(RequestModel):
+    document: dict
+    validation_profile: str
+
+
+@router.post("/projects/{project_id}/evidence/schema-validation")
+def inspect_schema(project_id: str, data: SchemaValidationInput, db: DB, actor: Auth):
+    """Opt-in read-only official schema check; never changes the intake contract."""
+    project_for(db, actor, project_id, "evidence")
+    from dtvp.knowledge.schema_validation import validate_schema
+
+    return validate_schema(data.document, data.validation_profile)
