@@ -18,7 +18,7 @@ async function fixture(page: Page, inventory = true) {
   await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
   await page.getByRole('option', { name: 'Tools product', exact: true }).click()
   const product = page.getByRole('group', { name: 'Product tools', exact: true }), state = page.getByRole('group', { name: 'Pinned state tools', exact: true })
-  await expect(product.locator(':scope > details')).toHaveCount(6)
+  await expect(product.locator(':scope > details')).toHaveCount(7)
   expect(reads.filter(path => path.startsWith('/api/v3/projects//'))).toEqual([])
   return { product, state, reads, writes }
 }

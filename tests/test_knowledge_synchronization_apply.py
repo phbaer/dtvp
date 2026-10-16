@@ -308,7 +308,11 @@ def test_source_head_guard_is_atomic_without_writing_source_branch(journal, monk
     monkeypatch.setattr(Journal, "publish", race)
     with pytest.raises(Conflict, match="Referenced policy changed"):
         apply(journal, data)
-    assert invoked == [((Ref(project_id="project", name=SOURCE), data.source),)]
+    from dtvp.knowledge.assessment_archive import archive_ref
+
+    assert invoked == [
+        ((Ref(project_id="project", name=SOURCE), data.source), (archive_ref("project"), None))
+    ]
     assert head(journal, TARGET) == old_target
     assert head(journal) != data.source
 
