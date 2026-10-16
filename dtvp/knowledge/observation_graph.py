@@ -5,6 +5,7 @@ from copy import deepcopy
 
 from dtvp.knowledge.component_identity import reconcile_components
 from dtvp.knowledge.composition import CollectionContext
+from dtvp.knowledge.pipeline_metadata import SubjectDeclaration, declaration_reasons
 from dtvp.storage import canonical, digest
 
 MAX_ENTRIES = 100_000
@@ -156,11 +157,12 @@ def _edges(inventory):
     return edges
 
 
-def propose_observation(authority_inventory, observation_inventory):
+def propose_observation(authority_inventory, observation_inventory, *, subject_declaration=None):
     """Return attributed candidates only; caller pins product/version/source states.
 
     Inputs must represent one explicit part, not assembled overlapping scopes.
-    Same producer-declared artifact digest is required, not proof of authenticity.
+    Same artifact digest or an explicit user/CI same-build declaration is required.
+    Neither provides independent proof of producer authenticity.
     Reports never insert components, change topology, or extend human coverage.
     """
     _bounded([authority_inventory, observation_inventory])
@@ -172,21 +174,36 @@ def propose_observation(authority_inventory, observation_inventory):
     if any(not isinstance(item, dict) for item in baselines):
         raise ValueError("Invalid observation baseline")
     contexts = [CollectionContext.model_validate(item.get("collection", {})) for item in baselines]
+    declaration = (
+        SubjectDeclaration.model_validate(subject_declaration)
+        if subject_declaration is not None
+        else None
+    )
     blocked = []
     if any(item.get("kind") == "assembly" for item in baselines):
         blocked.append("individual_delivery_part_required")
     if baselines[0].get("part_id") != baselines[1].get("part_id"):
         blocked.append("delivery_part_changed")
-    if any(context.subject_digest is None for context in contexts):
-        blocked.append("subject_digest_unknown")
-    elif contexts[0].subject_digest != contexts[1].subject_digest:
+    if declaration is not None:
+        blocked.extend(declaration_reasons(declaration, baselines))
+    known_digests = [context.subject_digest for context in contexts if context.subject_digest]
+    digest_bound = len(known_digests) == 2 and known_digests[0] == known_digests[1]
+    if len(known_digests) == 2 and not digest_bound:
         blocked.append("subject_digest_changed")
+    elif not digest_bound and declaration is None:
+        blocked.append("subject_digest_unknown")
     if contexts[0].boundary() != contexts[1].boundary():
         blocked.append("collection_scope_changed")
     report = {
         "format": "dtvp.observation-graph/1",
         "policy": "dtvp.component-identity/1",
         "status": "blocked" if blocked else "proposals_only",
+        "subject_assurance": "unresolved"
+        if blocked
+        else "digest_bound"
+        if digest_bound
+        else "producer_declared",
+        **({"subject_declaration": declaration.model_dump(mode="json")} if declaration else {}),
         "blocked_reasons": blocked,
         "input_digests": [
             digest(canonical(item)) for item in (authority_inventory, observation_inventory)
@@ -202,6 +219,7 @@ def propose_observation(authority_inventory, observation_inventory):
         "limitations": [
             "Authority inventory remains unchanged; observations cannot add or remove inventory implicitly.",
             "Subject binding is producer-declared, not verification of delivered artifact or completeness.",
+            "Build declarations are supplied by the user/CI; the caller must authorize their product/version scope.",
             "Component correspondence never merges consuming contexts or transfers assessments/approvals.",
             "Missing observation edges do not propose deletion of authoritative topology.",
         ],

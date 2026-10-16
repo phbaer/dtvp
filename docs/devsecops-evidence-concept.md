@@ -223,6 +223,15 @@ claims are complete. Supply-chain provenance helps bind outputs to their build
 and source, but does not itself enumerate shipped composition.
 [SLSA provenance](https://slsa.dev/spec/v1.2/provenance).
 
+CI owners/users also supply versioned source roles, same-part/build declarations
+and component/context-to-threat-model mappings, using curated configuration as in
+Generator. DTVP validates those relationships and retains their exact provenance;
+it does not ask vulnerability reviewers to reconstruct producer knowledge. Legacy
+same-build declarations are visibly producer-declared and bound to exact SBOM
+files; supplied delivered-artifact digests provide a distinct digest-bound level.
+Neither constitutes independent build/identity attestation. Model revisions and
+mapping resolutions must be pinned for consistent Generator/VScorer inputs.
+
 SBOM correctness is the producer's responsibility at this interface: inputs must
 describe the delivered subject as accurately as possible. DTVP validates supported
 structure, reference integrity, identity consistency, declared scope and conflicting

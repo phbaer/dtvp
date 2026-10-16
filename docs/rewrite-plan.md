@@ -306,12 +306,53 @@ claims, duplicate-edge provenance and explicit inventory/topology proposals for
 same-digest/same-boundary individual parts. Automatic graph publication, subject
 binding/intake and contextual approval continuity remain subsequent work.
 
-Open subject-binding decision: legacy inputs without an artifact digest cannot
-establish same-artifact identity using the current kernel. Consider an explicitly
-authorized same-part/build declaration, visibly producer/operator-declared rather
-than digest-bound. Never infer that binding from similar package lists or upload
-arrival. Intake must distinguish this weaker assurance from supplied artifact
-coordinates and keep contradictory subject information unresolved.
+#### User/CI-supplied metadata and subject declarations
+
+Design decision: the CI owner/user supplies product/version, delivery-part and
+same-build relationships as metadata. DTVP validates and retains these inputs;
+it does not routinely ask reviewers to reconstruct relationships the producer
+already knows. Missing or conflicting bindings produce machine-readable intake
+diagnostics for the producer. Manual intake can supply the same explicit metadata.
+Never infer subject binding from similar component lists or upload arrival.
+
+Keep reusable curated configuration (source roles, part identifiers, component/
+threat-model mappings) separate from per-build facts (selected configuration
+revision, build ID, exact SBOM bytes and optional delivered-artifact digest).
+Pipelines can version their configuration in their existing repository; DTVP
+retains the exact submitted revision/content in its own journal. This is authored
+input, not a disposable cache or an independent corroborating analysis.
+
+For legacy inputs without delivered-artifact digests, accept an explicit same-part/
+build declaration. The kernel now accepts `dtvp.subject-declaration/1` with product,
+version, optional part, subject/build IDs and SHA-256 of each original authority/
+observation SBOM. These file hashes bind the declaration to exact input documents;
+they are not hashes of the delivered binary. Intake must authenticate/authorize the
+sender and verify declared product/version against the selected target before
+publication; user-supplied fields cannot identify the authenticated author or grant
+permissions. Persist authenticated origin separately when the intake is connected.
+
+Reconciliation reports `producer_declared`, `digest_bound` or `unresolved` subject
+assurance. Both observations must supply the same delivered-artifact digest for
+`digest_bound`; one known digest plus a declaration remains `producer_declared`.
+Contradictory known digests, scope or changed bound SBOMs block reconciliation.
+Neither assurance level verifies external producer identity or grants human approval.
+The pure kernel/schema are implemented; durable observation intake/publication and
+its CI metadata manifest remain subsequent implementation.
+
+Threat-model mappings are part of that user/CI-authored configuration. Preserve
+Generator's existing item/component mappings and `threatmodel_id`/`threatmodel_ids`
+compatibility: its current collector accepts entity names, so do not reinterpret
+legacy names as GUIDs. Prefer stable entity IDs with an exact model revision when
+available, retaining display names and original selectors. Support many-to-many
+component/context-to-entity relations and explicit external/nonsoftware entities;
+a package used in different consuming contexts can have different mappings.
+
+Pin model/configuration revisions and resolved mappings in consumer inputs so
+Generator and VScorer consume consistent context. DTVP validates resolvable targets,
+selector ambiguity and coverage; it must not invent mappings or infer architecture
+from dependency edges. Missing mappings remain explicit and affect only workflows
+whose configured policy requires them. Mapping changes retain history and trigger
+revalidation of affected context/scoring inputs, not automatic approval.
 
 #### Inventory authority and enrichment
 
