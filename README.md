@@ -335,6 +335,17 @@ viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Workspace tools
+
+Knowledge workspace utilities use two compact responsive toolbars: product-level
+intake, assembly, ownership, CPE policy, evidence and comparison; pinned-state
+license, portfolio, documentation, source/advisory, correspondence and retained
+assessment views. Existing disclosure summaries remain directly accessible.
+Opening a panel expands it to full toolbar width. Other component instances,
+captured requests and draft inputs remain mounted; no additional disclosure layer
+or permission shortcut is introduced. Narrow screens use one readable column.
+Empty products finish loading and retain product tools before a first baseline.
+
 ### Guided queue progression
 
 Native single-finding actions offer explicit **Submit and next**, **Approve and next**
