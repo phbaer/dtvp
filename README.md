@@ -124,6 +124,29 @@ approvals across changed references. Existing explicit correspondence/adoption
 workflows remain separate. Source-local occurrence and assessment semantics are
 unchanged.
 
+### Read-only global orphan audit
+
+Instance operators can inspect storage reachability across all projects and all
+retained publications, ancestry, tags, source/issued artifacts and stored references:
+
+```bash
+uv run python -m dtvp.knowledge.garbage_collection --journal data/artifacts/knowledge --min-age-days 30
+```
+
+Select the actual existing journal directory. The command never initializes a new
+journal or deletes objects. It validates stored hashes, bounds scans to 100,000
+entries/256 MiB, and rejects detected storage changes. It holds the publication lock
+while scanning; use a quiet maintenance window. `--operational-root SHA` can add
+known pending-job roots, but these hints never establish complete operational
+coverage. `--offset`/`--limit` page unreachable observations. Modification age is
+not time since last use, and no default expiry is configured.
+
+Every item reports `eligible_for_deletion: false`; `execution_supported` and
+`operational_references_complete` remain false. Journal-unreachable bytes may be
+staged inputs or SQL-backed job checkpoints. The observation digest is not a
+permission to delete. Physical cleanup needs a maintenance/staging coordination
+contract and complete operational reference discovery before it can be enabled.
+
 ### Rewrite completion and acceptance boundary
 
 The bounded implementation batches are committed on `rewrite/knowledge-journal`.

@@ -701,6 +701,15 @@ intentional collection from corruption. Backup retention remains a separate poli
 Logical archive and read-only diagnostics already exist; destructive collection
 and any draft-history compaction remain future implementation, not enabled here.
 
+Implementation finding: object staging occurs outside the publication lock, and
+SQL-backed jobs retain unpublished raw/progress/capture objects. Even an old
+unreachable digest can be reused by an in-flight operation. Age plus a writer lock
+is therefore insufficient for collection. A global integrity-checked orphan audit
+now exposes reachability only, with deletion always disabled. Physical collection
+requires a choice between stopped-service maintenance with complete operational
+root discovery, or a shared staging/maintenance barrier with durable pins/leases.
+Neither option may discard retryable job evidence merely because it is unpublished.
+
 One-command playground and automated checks use the same synthetic inputs and
 production APIs. Required scenarios include recursive delegation, multiple usage
 contexts, parallel nightly versions, cascading synchronization, range coverage/
