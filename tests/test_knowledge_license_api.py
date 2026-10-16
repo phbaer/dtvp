@@ -18,3 +18,28 @@ def test_license_worklist_is_pinned_bounded_and_does_not_clear(analyst, bom):
     assert all(row["clearance"] == "not_assessed" for row in result["items"])
     assert workspace(analyst, project_id)["state"] == state
     assert analyst.get(path, params={"limit": 201}).status_code == 422
+
+
+def test_license_filters_apply_before_counts_and_validate(analyst, bom):
+    bom["components"][0]["licenses"] = [{"license": {"id": "MIT"}}]
+    project_id, _ = setup(analyst, bom)
+    state = workspace(analyst, project_id)["state"]
+    path = url(project_id, f"/states/{state}/license-worklist")
+    result = analyst.get(
+        path,
+        params={
+            "q": "MIT",
+            "evidence_status": "reported",
+            "approved_disposition": "missing",
+            "limit": 1,
+        },
+    ).json()
+    assert result["total"] == result["statistics"]["components"] == len(result["items"]) == 1
+    assert analyst.get(path, params={"approved_disposition": "allowed"}).json()["total"] == 0
+    for params in (
+        {"q": "x" * 501},
+        {"review_status": "accepted"},
+        {"evidence_status": "clear"},
+        {"approved_disposition": "permitted"},
+    ):
+        assert analyst.get(path, params=params).status_code == 422

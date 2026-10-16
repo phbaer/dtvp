@@ -88,6 +88,7 @@ def test_license_roles_independent_pins_pending_and_material_revalidation(analys
             "expected": approved_state,
             "expected_revision": revision,
             "rationale": "Pending additional usage review.",
+            "disposition": "allowed",
         },
     )
     assert draft.status_code == 201, draft.text
@@ -99,6 +100,16 @@ def test_license_roles_independent_pins_pending_and_material_revalidation(analys
     )
     assert pending["license_review"]["approved"] is True
     assert pending["license_review"]["pending"] is True
+    filtered = analyst.get(
+        url(project_id, f"/states/{pending_state}/license-worklist"),
+        params={"review_status": "pending", "approved_disposition": "restricted", "limit": 1},
+    ).json()
+    assert filtered["total"] == filtered["statistics"]["components"] == 1
+    assert filtered["items"][0]["component_ref"] == component
+    assert analyst.get(
+        url(project_id, f"/states/{pending_state}/license-worklist"),
+        params={"approved_disposition": "allowed"},
+    ).json()["total"] == 0
     login(analyst)
     bom["components"][0]["licenses"] = [{"expression": "LicenseRef-Changed-Supplier-Terms"}]
     changed = imported(

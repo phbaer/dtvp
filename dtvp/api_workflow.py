@@ -1,6 +1,6 @@
 """Presentation adapters for shared journal-backed assessment workflows."""
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
@@ -9,6 +9,7 @@ from dtvp.knowledge.assessments import AssessmentInput, ReviewInput, create_revi
 from dtvp.knowledge.exports import build_vscorer_worklist, export_bytes
 from dtvp.knowledge.filters import KnowledgeFilters
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
+from dtvp.knowledge.license_filters import LicenseFilters
 from dtvp.knowledge.ownership import product_heads
 from dtvp.knowledge.scoring import (
     ScoreInput,
@@ -64,6 +65,7 @@ def licenses(
     actor: Auth,
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    filters: LicenseFilters = Depends(),
 ):
     from dtvp.knowledge.comparison import product_state
     from dtvp.knowledge.licenses import license_worklist
@@ -72,7 +74,7 @@ def licenses(
     journal = request.app.state.knowledge
     require_state(journal, state, project_id)
     product_state(journal, state, project_id)
-    result = license_worklist(journal, state, offset, limit)
+    result = license_worklist(journal, state, offset, limit, filters=filters)
     project = project_for(db, actor, project_id)
     result["capabilities"] = [
         cap for cap in ("license_assess", "license_approve") if actor.allowed(db, project, cap)

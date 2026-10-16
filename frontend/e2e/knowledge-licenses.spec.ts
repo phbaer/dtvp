@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 const initial = 'a'.repeat(64), advanced = 'b'.repeat(64), revision = 'c'.repeat(64)
 async function fixture(page: Page, capabilities: string[], alreadySubmitted = false) {
-  let state = initial, failure = 0, submitted = alreadySubmitted
+  let state = initial, failure = 0, submitted = alreadySubmitted, projection = 'current'
   const posts: { path: string; body: Record<string, unknown> }[] = [], reads: string[] = []
   const payload = { concluded_expression: 'MIT', disposition: 'restricted', obligations: ['Preserve notice'], conditions: 'Customer deployment only', evidence: [{ reference: 'review:123' }], distribution: 'Binary customer delivery', modification: 'Unmodified', linking: 'Dynamic', rationale: 'Actual delivery and supplier terms checked', provenance: { source: 'license-specialist', reference: 'ticket:123' }, actor_id: 'independent-author' }
   const row = () => ({ component_ref: 'library', component: { name: 'Library', version: '1.0', purl: 'pkg:generic/library@1' }, source: { source: 'supplier', artifact_sha: 'f'.repeat(64) }, evidence: { status: 'reported', facts: [{ source_field: 'licenses', value: { expression: 'Apache-2.0' } }], limitations: [] }, license_review: { status: submitted ? 'submitted' : 'unassessed', assessment: submitted ? { revision, stage: 'submitted', payload } : null, approved: false } })
@@ -12,7 +12,7 @@ async function fixture(page: Page, capabilities: string[], alreadySubmitted = fa
       posts.push({ path, body: route.request().postDataJSON() as Record<string, unknown> })
       if (failure) return route.fulfill({ status: failure, json: { detail: failure === 409 ? 'Changed baseline' : 'Temporary unavailable; retry same request' } })
       submitted = path.endsWith('/submit') || submitted; state = advanced
-      return route.fulfill({ status: 201, json: { state } })
+      return route.fulfill({ status: 201, json: { state, committed: true, projection } })
     }
     let result: unknown = { items: [], next_cursor: null }
     if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Team', capabilities: ['read'] }] }
@@ -33,7 +33,7 @@ async function fixture(page: Page, capabilities: string[], alreadySubmitted = fa
   const panel = page.getByRole('region', { name: 'License evidence and review' })
   await expect(panel.getByLabel('License component total')).toHaveText('21 components in this pinned state')
   await panel.getByRole('button', { name: /^Library / }).click()
-  return { panel, posts, reads, fail: (status: number) => { failure = status }, submit: () => { submitted = true } }
+  return { panel, posts, reads, fail: (status: number) => { failure = status }, submit: () => { submitted = true }, advance: () => { state = advanced }, projection: (value: string) => { projection = value } }
 }
 async function fill(page: Page) {
   await page.getByLabel('Concluded license expression', { exact: true }).fill('MIT')
@@ -66,7 +66,7 @@ test('license draft retains inputs and request identity on unavailable retry', a
   await expect(panel.getByRole('alert')).toContainText('Temporary unavailable')
   await expect(page.getByLabel('Decision rationale', { exact: true })).toHaveValue('Actual delivery and supplier terms checked')
   fail(0)
-  await panel.getByRole('button', { name: 'Save license draft', exact: true }).click()
+  await panel.getByRole('button', { name: 'Retry exact license request', exact: true }).click()
   await expect(panel).toContainText('License draft saved.')
   expect(posts).toHaveLength(2)
   expect(posts[1]!.body).toEqual(posts[0]!.body)
@@ -81,9 +81,10 @@ test('conflicts preserve conclusion and explicit submission never approves autom
   await expect(panel.getByRole('alert')).toContainText('your input is retained')
   await expect(page.getByLabel('Concluded license expression', { exact: true })).toHaveValue('MIT')
   fail(0)
-  await panel.getByRole('button', { name: 'Submit license disposition', exact: true }).click()
+  await panel.getByRole('button', { name: 'Retry exact license request', exact: true }).click()
   await expect(panel).toContainText('Submitted for independent license review.')
   expect(posts.every(post => post.path.endsWith('/licenses/submit'))).toBe(true)
+  await panel.getByRole('button', { name: /^Library / }).click()
   await expect(panel).toContainText('Apache-2.0')
   await expect(panel.getByRole('button', { name: 'Approve license disposition', exact: true })).toHaveCount(0)
 })
@@ -98,4 +99,76 @@ test('independent reviewer sees submitted human assumptions and sends exact revi
   await expect.poll(() => posts.length).toBe(1)
   expect(posts[0]!.path).toContain('/licenses/reviews')
   expect(posts[0]!.body).toMatchObject({ revision, action: 'approve', component_ref: 'library', expected: initial })
+})
+
+
+test('draft and review buffers block row paging and filters until explicit discard', async ({ page }) => {
+  const { panel, reads } = await fixture(page, ['license_assess'])
+  await fill(page)
+  await expect(panel.getByRole('button', { name: 'Next license components', exact: true })).toBeDisabled()
+  await expect(panel.getByRole('button', { name: 'Apply license filters', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await panel.getByRole('button', { name: 'Discard license input', exact: true }).click()
+  await panel.getByLabel('Search license evidence', { exact: true }).fill('Apache')
+  await panel.getByRole('combobox', { name: 'License evidence status', exact: true }).selectOption('reported')
+  await panel.getByRole('combobox', { name: 'License review status', exact: true }).selectOption('unassessed')
+  await panel.getByRole('combobox', { name: 'Approved license disposition', exact: true }).selectOption('missing')
+  expect(reads).toHaveLength(1)
+  await panel.getByRole('button', { name: 'Apply license filters', exact: true }).click()
+  await expect.poll(() => reads.length).toBe(2)
+  const query = new URL('http://test' + reads[1]).searchParams
+  expect(Object.fromEntries(query)).toMatchObject({ q: 'Apache', evidence_status: 'reported', review_status: 'unassessed', approved_disposition: 'missing', offset: '0' })
+  await panel.getByRole('button', { name: 'Next license components', exact: true }).click()
+  await expect.poll(() => reads.length).toBe(3)
+  expect(new URL('http://test' + reads[2]).searchParams.get('q')).toBe('Apache')
+})
+
+test('review rationale is retained and prevents silent paging', async ({ page }) => {
+  const { panel, posts, fail } = await fixture(page, ['license_approve'], true)
+  await panel.getByLabel('License review rationale', { exact: true }).fill('Independent review in progress')
+  await expect(panel.getByRole('button', { name: 'Next license components', exact: true })).toBeDisabled()
+  fail(503)
+  await panel.getByRole('button', { name: 'Approve license disposition', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Retry exact license request', exact: true })).toBeVisible()
+  await expect(panel.getByLabel('License review rationale', { exact: true })).toHaveValue('Independent review in progress')
+  await expect(panel.getByLabel('License review rationale', { exact: true })).toBeDisabled()
+  fail(0)
+  await panel.getByRole('button', { name: 'Retry exact license request', exact: true }).click()
+  await expect.poll(() => posts.length).toBe(2)
+  expect(posts[1]!.body).toEqual(posts[0]!.body)
+})
+
+
+test('a dirty first submission remains pinned after an external workspace refresh', async ({ page }) => {
+  const { panel, posts, reads, advance, fail } = await fixture(page, ['license_assess'])
+  await fill(page)
+  advance()
+  await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click()
+  await expect(panel).toContainText('retained input stays bound to its original source')
+  expect(reads).toHaveLength(1)
+  await expect(page.getByLabel('Decision rationale', { exact: true })).toHaveValue('Actual delivery and supplier terms checked')
+  fail(409)
+  await panel.getByRole('button', { name: 'Submit license disposition', exact: true }).click()
+  await expect.poll(() => posts.length).toBe(1)
+  expect(posts[0]!.body.expected).toBe(initial)
+  await panel.getByRole('button', { name: 'Retry exact license request', exact: true }).click()
+  await expect.poll(() => posts.length).toBe(2)
+  expect(posts[1]!.body).toEqual(posts[0]!.body)
+  await panel.getByRole('button', { name: 'Discard license input', exact: true }).click()
+  await expect.poll(() => reads.length).toBe(2)
+  expect(reads[1]).toContain(advanced)
+})
+
+
+test('projection-pending publication retains the exact request until confirmed', async ({ page }) => {
+  const { panel, posts, projection } = await fixture(page, ['license_assess'])
+  await fill(page); projection('pending')
+  await panel.getByRole('button', { name: 'Save license draft', exact: true }).click()
+  await expect(panel.getByRole('alert')).toContainText('not confirmed with a current projection')
+  await expect(panel.getByLabel('Decision rationale', { exact: true })).toHaveValue('Actual delivery and supplier terms checked')
+  projection('current')
+  await panel.getByRole('button', { name: 'Retry exact license request', exact: true }).click()
+  await expect(panel).toContainText('License draft saved.')
+  expect(posts).toHaveLength(2)
+  expect(posts[1]!.body).toEqual(posts[0]!.body)
 })

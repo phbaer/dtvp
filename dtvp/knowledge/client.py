@@ -94,6 +94,14 @@ def configure(parser):
     quality.add_argument("--offset", type=int, default=0)
     quality.add_argument("--limit", type=int, default=50)
     quality.add_argument("--json", action="store_true")
+    licenses = commands.add_parser("licenses", help="Browse pinned license evidence and approvals")
+    for name in ("project", "state"):
+        licenses.add_argument("--" + name, required=True)
+    for name in ("q", "evidence-status", "review-status", "approved-disposition"):
+        licenses.add_argument("--" + name, default="")
+    licenses.add_argument("--offset", type=int, default=0)
+    licenses.add_argument("--limit", type=int, default=50)
+    licenses.add_argument("--json", action="store_true")
     summary = commands.add_parser(
         "evidence-summary", help="Read pinned pipeline evidence counts without a release verdict"
     )
@@ -229,10 +237,50 @@ def run(args):
                 print(json.dumps(result, indent=2))
             else:
                 print(f"State: {result['state']} · Evidence summary: {result['summary_digest']}")
-                for section in ("inventory", "vulnerabilities", "licenses", "documents", "retained"):
+                for section in (
+                    "inventory",
+                    "vulnerabilities",
+                    "licenses",
+                    "documents",
+                    "retained",
+                ):
                     print(section + ": " + json.dumps(result[section], sort_keys=True))
                 for limitation in result["limitations"]:
                     print(f"Limit [{limitation['code']}]: {limitation['description']}")
+            return
+        if args.knowledge_command == "licenses":
+            from urllib.parse import quote
+
+            result = read_response(
+                client.get(
+                    f"/api/v3/projects/{quote(args.project, safe='')}/states/{quote(args.state, safe='')}/license-worklist",
+                    params={
+                        name: getattr(args, name)
+                        for name in (
+                            "q",
+                            "evidence_status",
+                            "review_status",
+                            "approved_disposition",
+                            "offset",
+                            "limit",
+                        )
+                    },
+                )
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(f"State: {result['state']} · Matching components: {result['total']}")
+                print("Selection statistics: " + json.dumps(result["statistics"], sort_keys=True))
+                for row in result["items"]:
+                    review = row["license_review"]
+                    approved = review.get("approved_assessment") if review.get("approved") else None
+                    disposition = approved["payload"]["disposition"] if approved else "missing"
+                    print(
+                        f"{row['component_ref']}  {row['component'].get('name') or ''}  source={row['evidence']['status']} review={review['status']} approved_disposition={disposition}"
+                    )
+                if result.get("next_offset") is not None:
+                    print(f"Next offset: {result['next_offset']} (same --state {result['state']})")
             return
         if args.knowledge_command == "input-quality":
             from urllib.parse import quote

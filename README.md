@@ -906,6 +906,31 @@ parity. Compatibility fixtures cover sibling cpeservice homonyms, scoped npm
 identity, incompatible Go/type-definition products, shared monorepos, ambiguity
 and deprecated/malformed records.
 
+The pinned license worklist supports `q` (at most 500 characters),
+`evidence_status`, `review_status` and `approved_disposition`; all predicates
+combine before statistics and pagination. Search spans component identity,
+attributed source facts and recorded human review text. Evidence statuses are
+`reported`, `explicit_none`, `unknown`, `not_reported` and `malformed`. Review
+statuses follow the native license register; `pending` selects a new revision
+while a valid earlier approval remains. Approved disposition is
+`allowed`/`restricted`/`prohibited`/`unresolved`, or `missing` when no current
+approval exists. A pending conclusion never substitutes for the pinned approved
+one. Empty filters preserve the existing worklist and consumer representations.
+
+```bash
+uv run dtvp knowledge licenses --project PROJECT_ID --state STATE_SHA \
+  --q MIT --evidence-status reported --review-status pending \
+  --approved-disposition restricted --limit 20 --json
+```
+
+The license panel applies its compact search/filters explicitly. Dirty conclusions,
+independent-review rationale and uncertain publication requests prevent silent
+row/page/product/version changes; discard is explicit. A workspace refresh retains
+the original selected source head and revision, including before the first submit.
+Retries preserve the exact endpoint, body, request ID and concurrency pins. Buffers
+clear only after a committed publication with a current projection, or explicit
+discard; changing actor remounts the panel and drops the prior actor's buffers.
+
 ### Explicit occurrence correspondence
 
 The collapsed Knowledge correspondence panel links explicitly selected component

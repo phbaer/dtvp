@@ -103,7 +103,7 @@ def component_licenses(component, baseline):
     return {"status": status, "facts": facts, "limitations": problems}
 
 
-def license_worklist(journal, state, offset=0, limit=50, *, paginate=True):
+def license_worklist(journal, state, offset=0, limit=50, *, paginate=True, filters=None):
     revision = journal.verify_state(state)
     sections = load_sections(journal, state)
     inventory = sections["inventory"]
@@ -139,6 +139,8 @@ def license_worklist(journal, state, offset=0, limit=50, *, paginate=True):
                 "license_review": reviewed,
             }
         )
+    if filters is not None:
+        rows = [row for row in rows if filters.matches(row)]
     return {
         "format": "dtvp.license-worklist/1",
         "state": state,

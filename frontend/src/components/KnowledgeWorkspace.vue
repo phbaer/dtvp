@@ -26,8 +26,8 @@ import KnowledgeBulkReview from './KnowledgeBulkReview.vue'
 import KnowledgeCpePolicy from './KnowledgeCpePolicy.vue'
 import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 const props = defineProps<{ me: Me }>()
-const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false)
-const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value)
+const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false)
+const intakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
 function bulkEligible(row: KnowledgeFinding) {
@@ -389,7 +389,7 @@ onBeforeUnmount(() => { ++actorGeneration; ++sequence; ++versionSequence; clearT
       <div class="knowledge-tools" role="group" aria-label="Pinned state tools">
         <KnowledgeComponents :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" />
         <KnowledgeRetained v-if="workspace.statistics.retained_absent_assessments" :project="project" :state="workspace.state" :team="team" />
-        <KnowledgeLicenses :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
+        <KnowledgeLicenses :key="me.id" :project="project" :version="version" :state="workspace.state" @locked="licenseLocked = $event" @changed="load(true, true)" />
         <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
         <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
         <div class="knowledge-composition-tools"><KnowledgeSources :project="project" :version="version" :state="workspace.state" /><KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" /></div>
