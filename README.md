@@ -771,6 +771,56 @@ declarations remain separate; a pending prohibited decision never replaces the
 retained approved disposition implicitly. No-record bundles retain their prior
 bytes. Previously issued inputs always retain their exact archived representation.
 
+Offline supplied-dictionary ranking is available through `POST
+/api/v3/projects/{id}/states/{state}/cpe/rank`. Project readers submit an exact
+component reference and up to 2,000 supplied records; no network call, journal
+write, inventory change or identity adoption occurs. The state must be committed
+product history, including assembled part roots. Optional `policy` pins a retained
+CPE policy; omission explicitly uses current configuration, independently of the
+historical inventory date. Existing exact discovery endpoints remain unchanged.
+
+Example body:
+
+```json
+{
+  "component_ref": "component-ref",
+  "records": [{
+    "cpeName": "cpe:2.3:a:vendor:product:*:*:*:*:*:node.js:*:*",
+    "cpeNameId": "supplied-dictionary-id",
+    "deprecated": false,
+    "source": "organization-supplied-nvd-extract",
+    "publisher": "claimed publisher",
+    "refs": [{"ref": "https://www.npmjs.com/package/product"}]
+  }],
+  "offset": 0,
+  "limit": 50
+}
+```
+
+The complete request is limited to 2 MiB **before JSON decoding**, with bounded
+strings and at most 50 references per record. Extract each selected NVD product's
+`cpe` object and add explicit `source` attribution; the endpoint does not accept a
+whole dictionary/feed envelope or download one. CLI users can call the route via
+the generic native JSON request command. Candidate and rejection pages share an
+offset/limit (1–200); `counts` and `content_digest` describe the full report before
+paging. Ordering evidence is exposed by named tuple dimensions, never a confidence
+percentage. An equal top rank across different CPE identities reports ambiguity;
+`selection` always remains null.
+
+Ranking reuses supplied policy mappings/aliases and tests exact package registry
+references, supplied VCS repository plus product name, or namespace/vendor plus
+product name. Deprecated, incompatible ecosystem/part, explicit version conflict
+and contradictory supplied repository claims are excluded. Original CPE bindings,
+versions and platform constraints are retained. Unknown package versions remain
+explicitly unknown; a wildcard dictionary version is not an exact version match.
+Publisher, dictionary and URL claims remain unverified. URL agreement is not proof
+of binary/build identity or vulnerability applicability. There is no general
+name-only matching, live registry/NVD refresh, Java vendor inference, deprecated
+replacement traversal, automatic mapping approval or full standalone-service
+parity. Compatibility fixtures cover sibling cpeservice homonyms, scoped npm
+identity, incompatible Go/type-definition products, shared monorepos, ambiguity
+and deprecated/malformed records.
+
 ### Explicit occurrence correspondence
 
 The collapsed Knowledge correspondence panel links explicitly selected component
