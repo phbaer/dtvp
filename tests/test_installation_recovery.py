@@ -1,17 +1,23 @@
 """Quiesced full-installation rehearsal, distinct from rebuilding projections.
 
-SQLite exercises the offline restore sequence locally; PostgreSQL dump/restore
-and production identity/provider qualification remain deployment acceptance gates.
+SQLite runs by default; an explicitly configured disposable PostgreSQL pair
+exercises actual Docker pg_dump/pg_restore. Production configuration and remote
+identity/provider qualification remain deployment acceptance gates.
 """
 
+import os
 import shutil
 import sqlite3
+import subprocess
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
+from sqlalchemy.engine import make_url
 
 from dtvp.config import Settings
+from dtvp.db import engine_for
 from dtvp.knowledge.projection import catch_up, cursor, heads, records
 from dtvp.knowledge.verification import verify_journal
 from dtvp.main import create_app
@@ -20,13 +26,82 @@ from tests.conftest import login
 from tests.test_workflow_api import reviewed, setup, url, workspace
 
 
-def configured(directory):
+def configured(directory, database_url=None):
     return Settings(
         _env_file=None,
         playground=True,
-        database_url=f"sqlite:///{directory / 'operational.sqlite'}",
+        database_url=database_url or f"sqlite:///{directory / 'operational.sqlite'}",
         artifact_dir=directory / "artifacts",
         frontend_dir=directory / "absent",
+    )
+
+
+PG_ENV = ("DTVP_RECOVERY_SOURCE_URL", "DTVP_RECOVERY_TARGET_URL", "DTVP_RECOVERY_CONTAINER")
+
+
+def postgres_pair():
+    source, target = (make_url(os.environ[key]) for key in PG_ENV[:2])
+    if (
+        not source.drivername.startswith("postgresql")
+        or not target.drivername.startswith("postgresql")
+        or not (source.database or "").endswith("_recovery_test")
+        or not (target.database or "").endswith("_recovery_test")
+        or source.database == target.database
+        or (source.host, source.port, source.username)
+        != (target.host, target.port, target.username)
+    ):
+        pytest.fail("Recovery needs distinct disposable *_recovery_test databases on one server")
+    return source, target
+
+
+def restore_database(backend, source, candidate):
+    if backend == "sqlite":
+        with sqlite3.connect(source / "operational.sqlite") as old:
+            with sqlite3.connect(candidate / "operational.sqlite") as restored:
+                old.backup(restored)
+        return
+    old, restored = postgres_pair()
+    container = os.environ["DTVP_RECOVERY_CONTAINER"]
+    # Passwords never enter argv or captured output. These opt-in disposable
+    # containers must permit their application user to run local socket tools.
+    dump = subprocess.run(
+        [
+            "docker",
+            "exec",
+            container,
+            "pg_dump",
+            "-U",
+            old.username,
+            "-d",
+            old.database,
+            "--format=custom",
+            "--no-owner",
+            "--no-acl",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            container,
+            "pg_restore",
+            "-U",
+            restored.username,
+            "-d",
+            restored.database,
+            "--clean",
+            "--if-exists",
+            "--exit-on-error",
+            "--single-transaction",
+            "--no-owner",
+            "--no-acl",
+        ],
+        input=dump,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -58,12 +133,26 @@ def operational_rows(app):
         }
 
 
+@pytest.mark.parametrize(
+    "backend", ["sqlite"] + (["postgres"] if all(os.getenv(key) for key in PG_ENV) else [])
+)
 def test_offline_installation_restore_preserves_permissions_jobs_history_and_issued_bytes(
-    tmp_path, bom
+    tmp_path, bom, backend
 ):
     source, candidate = tmp_path / "source", tmp_path / "candidate"
     source.mkdir()
-    original = create_app(configured(source))
+    source_url = target_url = None
+    if backend == "postgres":
+        postgres_pair()
+        source_url, target_url = (os.environ[key] for key in PG_ENV[:2])
+        # Only the explicitly opted-in disposable source is reset; restore writes
+        # only to its separately named disposable candidate database.
+        engine = engine_for(source_url)
+        with engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
+        engine.dispose()
+    original = create_app(configured(source, source_url))
     with TestClient(original) as client:
         project_id, _ = setup(client, bom, versions=("7.1.1", "7.1.2"))
         reviewed(client, project_id)
@@ -106,12 +195,10 @@ def test_offline_installation_restore_preserves_permissions_jobs_history_and_iss
     # All writers stopped. Original backup remains unchanged throughout rehearsal.
     source_files = tree_hashes(source / "artifacts")
     candidate.mkdir()
-    with sqlite3.connect(source / "operational.sqlite") as old:
-        with sqlite3.connect(candidate / "operational.sqlite") as restored:
-            old.backup(restored)
+    restore_database(backend, source, candidate)
     shutil.copytree(source / "artifacts", candidate / "artifacts")
     assert tree_hashes(candidate / "artifacts") == source_files
-    restored = create_app(configured(candidate))
+    restored = create_app(configured(candidate, target_url))
     assert restored.state.knowledge.head() == original_head
     assert restored.state.knowledge.references() == references
     assert verify_journal(restored.state.knowledge) == verification
@@ -140,3 +227,4 @@ def test_offline_installation_restore_preserves_permissions_jobs_history_and_iss
         assert client.get(url(project_id, "/versions/7.1.1/workspace")).status_code == 404
         assert client.get(issued["files"]["bundle.json"]["url"]).status_code == 404
     assert tree_hashes(source / "artifacts") == source_files
+    assert operational_rows(original) == before_rows

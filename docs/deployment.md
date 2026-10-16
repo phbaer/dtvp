@@ -100,8 +100,25 @@ artifact directory into a separate candidate. It verifies the complete journal,
 rebuilds only native projections and checks preserved credentials, memberships,
 uncertain remote-job outcomes, tags, exact reviews and issued artifact bytes,
 including denied cross-team reads. The source artifact copy remains unchanged.
-This qualifies the local recovery sequence, not PostgreSQL dump/restore,
-production identity-provider access or remote service reconciliation.
+SQLite runs by default. To exercise actual PostgreSQL custom-format dump and
+single-transaction restore, explicitly provide two existing disposable databases
+on the same server and its Docker container:
+
+```bash
+DTVP_RECOVERY_SOURCE_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:PORT/source_recovery_test' \
+DTVP_RECOVERY_TARGET_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:PORT/candidate_recovery_test' \
+DTVP_RECOVERY_CONTAINER='disposable-postgres-container' \
+uv run pytest -q tests/test_installation_recovery.py
+```
+
+Both names must end in `_recovery_test` and differ. The test resets the source
+schema and replaces the candidate database contents. The container must allow
+its application user to run local socket `pg_dump`/`pg_restore`; credentials never
+enter command arguments. The container's databases must correspond to the URLs.
+This path has passed on disposable PostgreSQL 18 alongside SQLite. It exercises
+application-owned data, not custom roles/extensions, major-version conversion,
+production identity-provider access or remote service reconciliation. Those remain
+deployment-specific qualification gates.
 
 ## Legacy migration
 

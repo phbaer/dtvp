@@ -415,9 +415,11 @@ Operational SQL data still requires its own backup; see [recovery](docs/deployme
 SQLite installation restore: operational accounts/credentials/permissions and
 uncertain jobs, the complete artifact journal, tags, independent reviews and
 issued consumer bytes. It rebuilds only native projections and checks denied
-cross-team access. This is a repeatable local workflow check; PostgreSQL
-backup/restore and deployment-specific identity/remote-job qualification remain
-release gates.
+cross-team access. Explicit disposable PostgreSQL source/candidate URLs and a
+Docker container also exercise real `pg_dump`/`pg_restore`; both database names
+must end in `_recovery_test`. Both backends have passed this rehearsal. Custom
+roles/extensions, major upgrades and deployment-specific identity/remote-job
+qualification remain release gates; see the recovery instructions.
 
 ### Retention maintenance preview
 
