@@ -11,6 +11,7 @@ import KnowledgeLicenses from './KnowledgeLicenses.vue'
 import KnowledgeAnalysisEvidence from './KnowledgeAnalysisEvidence.vue'
 import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
+import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
 import KnowledgeDocuments from './KnowledgeDocuments.vue'
 import KnowledgePortfolio from './KnowledgePortfolio.vue'
@@ -266,6 +267,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
       <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
+      <KnowledgeAdvisories :project="project" :state="workspace.state" />
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">
         <section class="knowledge-queue" aria-label="Context finding queue"><div class="table-wrap"><table><thead><tr><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small></td><td>{{ sourceScore(row) }}</td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
         <section v-if="selected" class="knowledge-detail" aria-label="Context finding detail">

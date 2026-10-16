@@ -7,6 +7,7 @@ from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
 from dtvp.api import router
+from dtvp.api_advisory_jobs import router as advisory_jobs_router
 from dtvp.api_agentyzer_results import router as agentyzer_results_router
 from dtvp.api_analysis import router as analysis_router
 from dtvp.api_analysis_jobs import router as analysis_jobs_router
@@ -73,6 +74,7 @@ def create_app(settings=None):
         same_site="lax",
     )
     app.include_router(router)
+    app.include_router(advisory_jobs_router)
     app.include_router(inventory_router)
     app.include_router(issued_exports_router)
     app.include_router(knowledge_router)

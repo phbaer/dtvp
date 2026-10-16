@@ -597,6 +597,14 @@ complete preview digest across pages. Shared draft/submission targets are explic
 reviews and publication never inherit across versions. Continuous applicability
 ranges and semantic cross-import identity reconciliation remain planned.
 
+Native NVD/CIRCL exact-ID enrichment now has explicit durable jobs, frozen complete
+version/evidence pins, bounded GET-only collection and raw-response checkpoints.
+Partial catalogs preserve untouched facts; not-found never clears baseline claims.
+UI and generic HTTP CLI share server capabilities and publication contracts.
+Raw capture recovery follows committed selected evidence ancestry, including
+retained catalog entries in fresh branches. Native package matching, scheduling,
+provider-specific throttling and additional non-US adapters remain planned.
+
 Issued native exports now retain exact serializer-versioned bundle/manifest/input
 bytes and unchanged consumer receipts in a sharded per-project journal index.
 Preparation reuses issued selectors before recomputing; returned evidence resolves

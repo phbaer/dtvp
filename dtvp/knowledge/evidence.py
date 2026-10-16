@@ -11,6 +11,8 @@ from dtvp.knowledge.vex import parse_evidence, reconcile_evidence
 from dtvp.schemas import RequestModel
 from dtvp.storage import canonical, digest
 
+MAX_ADDITIONAL_ARTIFACT_BYTES = 128 * 1024 * 1024
+
 
 class EvidenceInput(RequestModel):
     request_id: Name
@@ -59,7 +61,7 @@ def apply_current_evidence(journal, sections, project_id):
     return state
 
 
-def prepare(journal, project_id, actor_id, operation, data, raw=None):
+def prepare(journal, project_id, actor_id, operation, data, raw=None, additional_artifacts=()):
     fingerprint = digest(
         canonical(
             [
@@ -69,6 +71,7 @@ def prepare(journal, project_id, actor_id, operation, data, raw=None):
                 data.model_dump(mode="json"),
                 digest(raw) if raw is not None else None,
             ]
+            + ([additional_artifacts] if additional_artifacts else [])
         )
     )
     request_id = digest(canonical([project_id, actor_id, data.request_id]))
@@ -97,7 +100,13 @@ def publish_documents(
 ):
     sections = {name: {} for name in SECTIONS}
     sections["vulnerabilities"] = documents
-    artifacts = sorted({record["artifact_sha"] for record in documents.values()})
+    artifacts = sorted(
+        {
+            sha
+            for record in documents.values()
+            for sha in [record["artifact_sha"], *record.get("additional_artifacts", [])]
+        }
+    )
     evidence_state = journal.snapshot(
         project_id=project_id,
         version="@evidence",
@@ -139,7 +148,7 @@ def publish_documents(
     )
 
 
-def import_evidence(journal, *, project_id, actor_id, data, raw=None):
+def import_evidence(journal, *, project_id, actor_id, data, raw=None, additional_artifacts=()):
     """Select a producer-ordered revision, never infer ordering from arrival time.
 
     JSON requests retain canonical bytes; an optional original file must describe
@@ -147,10 +156,25 @@ def import_evidence(journal, *, project_id, actor_id, data, raw=None):
     document identity. Missing document IDs use content identity and cannot imply
     supersession of other documents.
     """
+    if (
+        not isinstance(additional_artifacts, (list, tuple, set))
+        or len(additional_artifacts) > 256
+        or any(not isinstance(sha, str) for sha in additional_artifacts)
+    ):
+        raise ValueError("Additional evidence artifacts require at most 256 content identifiers")
+    additional_artifacts = sorted(set(additional_artifacts))
+    total = 0
+    for sha in additional_artifacts:
+        try:
+            total += len(journal.objects.read(sha))
+        except (OSError, ValueError) as error:
+            raise ValueError("Additional evidence artifact unavailable or corrupt") from error
+        if total > MAX_ADDITIONAL_ARTIFACT_BYTES:
+            raise ValueError("Additional evidence artifacts exceed the 128 MiB budget")
     original_file = raw is not None
     raw = canonical(data.document) if raw is None else raw
     request_id, fingerprint, receipt = prepare(
-        journal, project_id, actor_id, "evidence.import/1", data, raw
+        journal, project_id, actor_id, "evidence.import/1", data, raw, additional_artifacts
     )
     if receipt:
         return receipt
@@ -177,6 +201,7 @@ def import_evidence(journal, *, project_id, actor_id, data, raw=None):
     original = journal.objects.put(raw)
     documents[key] = {
         "document": normalized,
+        **({"additional_artifacts": additional_artifacts} if additional_artifacts else {}),
         "artifact_sha": original,
         "source": data.source,
         "source_revision": data.revision,
@@ -233,3 +258,36 @@ def withdraw_evidence(journal, *, project_id, actor_id, data):
         fingerprint=fingerprint,
         reason="Withdraw product vulnerability evidence",
     )
+
+
+def resolve_evidence_artifact(journal, project_id, evidence_state, artifact):
+    """Resolve a raw/capture pin only within committed selected evidence ancestry.
+
+    Product/source/export references never grant access to an evidence object.
+    Missing or corrupt committed nodes propagate journal corruption, not fallback.
+    """
+    from dtvp.knowledge.journal import CorruptJournal
+
+    def lineage(root):
+        pending, seen = [root] if root else [], set()
+        while pending:
+            state = pending.pop()
+            if state in seen:
+                continue
+            seen.add(state)
+            revision = journal.verify_state(state)
+            if revision.project_id != project_id or revision.version != "@evidence":
+                raise CorruptJournal("Evidence reference has incompatible product scope")
+            yield state, revision
+            for parent in revision.parents:
+                value = journal.state(parent)
+                if value.project_id == project_id and value.version == "@evidence":
+                    pending.append(parent)
+
+    live = journal.resolve(evidence_ref(project_id))
+    if not any(state == evidence_state for state, _ in lineage(live)):
+        return None
+    for state, revision in lineage(evidence_state):
+        if artifact in revision.artifacts:
+            return state
+    return None

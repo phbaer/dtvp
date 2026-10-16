@@ -351,7 +351,7 @@ def parse_evidence(raw):
             raise ValueError("Unsupported evidence document format")
     except (TypeError, AttributeError, KeyError) as error:
         raise ValueError("Malformed evidence document structure") from error
-    if not result["statements"]:
+    if not result["statements"] and result["format"] != "dtvp.advisory-feed/1":
         raise ValueError("Evidence document contains no supported statement records")
     result.update(
         original_sha=digest(raw),

@@ -12,6 +12,7 @@ from dtvp.knowledge.evidence import (
     current_evidence,
     evidence_ref,
     import_evidence,
+    resolve_evidence_artifact,
     withdraw_evidence,
 )
 from dtvp.knowledge.journal import SECTIONS, CommitUncertain, Conflict, Sha
@@ -21,6 +22,35 @@ from dtvp.knowledge.workspace import load_sections
 from dtvp.storage import canonical, digest
 
 router = APIRouter(prefix="/api/v3")
+
+
+@router.get("/projects/{project_id}/evidence/artifacts/{artifact}")
+def retained_evidence_artifact(
+    project_id: str,
+    artifact: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    expected_evidence: Sha | None = None,
+):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    selected = expected_evidence or journal.resolve(evidence_ref(project_id))
+    pinned = (
+        resolve_evidence_artifact(journal, project_id, selected, artifact) if selected else None
+    )
+    if pinned is None:
+        raise HTTPException(404, "Artifact is not retained in this evidence selection")
+    return Response(
+        journal.objects.read(artifact),
+        media_type="application/octet-stream",
+        headers={
+            "X-Content-SHA256": artifact,
+            "X-Knowledge-State": pinned,
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": 'attachment; filename="dtvp-evidence-artifact"',
+        },
+    )
 
 
 @router.get("/projects/{project_id}/evidence")

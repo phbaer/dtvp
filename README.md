@@ -528,8 +528,33 @@ provider status into DTVP applicability. Unknown identifiers stay unresolved;
 removed baseline findings are not resurrected. VEX-only claims are not enrichment
 seeds in this initial subset. Contradictory ratings and original Base facts stay
 separate. Material fact changes require review revalidation; withdrawal can restore
-still-valid pinned coverage. Native live NVD/CIRCL/OSV refresh jobs and extended
-non-US adapters remain planned; v2 connectors retain their separate runtime.
+still-valid pinned coverage. Native NVD/CIRCL enrichment is available through
+explicit durable jobs; native package matching/OSV jobs and extended non-US
+adapters remain planned. V2 connectors retain their separate runtime.
+
+`GET /api/v3/projects/{id}/advisory-refresh` returns a bounded searchable list of
+baseline-known CVE IDs, enabled providers, next producer ordinals and complete
+pinned version/evidence selections. The collapsed Knowledge refresh panel selects
+up to 20 IDs explicitly. `POST .../advisory-jobs` requires those pins, provider,
+IDs, explicit revision and request ID. GET job/status and POST retry/cancel use
+current project permissions and requesting-actor authority. The generic HTTP CLI
+can submit the same JSON through `knowledge request`.
+
+Workers recheck permissions and provider enablement before each fixed-endpoint
+GET, retain exact decoded response bodies, and checkpoint before atomic evidence
+publication. Partial refresh preserves untouched catalog entries. Not-found may
+withdraw that provider's prior fact but never removes a baseline finding or proves
+remediation. A changed target requires a new explicit request; retries never
+replace pins or refetch a completed capture. NVD and CIRCL must be enabled through
+`DTVP_PROVIDERS_ENABLED` on API and worker. No provider requests occur implicitly.
+
+`GET .../evidence/artifacts/{sha}?expected_evidence=SHA` retrieves a raw response or
+capture pinned in the selected committed evidence ancestry. This keeps untouched
+catalog evidence available after partial refresh and in new product branches.
+Project authorization applies; the response identifies the actual retaining state.
+Mirrors retain upstream publisher attribution and do not establish independent
+corroboration. Provider rate-limit errors fail collection without partial publication;
+broader scheduling and provider-specific rate management remain planned.
 
 ### Issued consumer exports
 
