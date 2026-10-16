@@ -23,6 +23,8 @@ from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_portfolio import router as portfolio_router
 from dtvp.api_proposals import router as proposal_router
+from dtvp.api_reconciliation import router as reconciliation_router
+from dtvp.api_reconciliation_catalog import router as reconciliation_catalog_router
 from dtvp.api_rescoring import router as rescoring_router
 from dtvp.api_source_jobs import router as source_jobs_router
 from dtvp.api_synchronization import router as synchronization_router
@@ -85,6 +87,8 @@ def create_app(settings=None):
     app.include_router(agentyzer_results_router)
     app.include_router(statistics_router)
     app.include_router(rescoring_router)
+    app.include_router(reconciliation_router)
+    app.include_router(reconciliation_catalog_router)
     app.include_router(workflow_router)
     app.include_router(evidence_router)
     app.include_router(identity_router)

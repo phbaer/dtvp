@@ -597,6 +597,13 @@ complete preview digest across pages. Shared draft/submission targets are explic
 reviews and publication never inherit across versions. Continuous applicability
 ranges and semantic cross-import identity reconciliation remain planned.
 
+Explicit cross-import occurrence correspondence now has a server preview,
+attributed versioned confirmation/retraction and bounded UI selectors over committed
+states. PURL/component versions and normalized checksum evidence are checked
+conservatively; consuming-root material is disclosed. Source references and all
+human decisions remain unchanged. Assertions are not an identity map or applicability
+proof; semantic merging, cross-assertion conflict resolution and reuse remain gates.
+
 Native NVD/CIRCL exact-ID enrichment now has explicit durable jobs, frozen complete
 version/evidence pins, bounded GET-only collection and raw-response checkpoints.
 Partial catalogs preserve untouched facts; not-found never clears baseline claims.

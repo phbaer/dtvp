@@ -407,6 +407,30 @@ declarations remain separate; a pending prohibited decision never replaces the
 retained approved disposition implicitly. No-record bundles retain their prior
 bytes. Previously issued inputs always retain their exact archived representation.
 
+### Explicit occurrence correspondence
+
+The collapsed Knowledge correspondence panel links explicitly selected component
+occurrences or consuming contexts across committed product states. Source refs,
+history and occurrence selectors are bounded/searchable. The server previews exact
+PURL/version/hash facts and consuming-tree differences. Contradictory coordinates,
+same-version checksum conflicts and malformed checksum evidence block confirmation.
+Component links and usage-context links remain separate. Nothing is paired by name.
+
+`POST /api/v3/projects/{id}/reconciliation/preview` accepts exact `source`, `target`
+and 1–100 typed pairs. Confirm with `POST .../versions/{version}/reconciliations/{id}/confirm`
+using expected target head/revision, preview digest, source, pairs, rationale,
+evidence and request ID. Explicit `/retract` retains previous assertions; paged
+`.../states/{state}/reconciliations` returns the registry. The generic HTTP CLI
+uses these same JSON contracts. State-scoped `/reconciliation-candidates` supplies
+bounded exact component/context IDs, including historical ownership.
+
+Assertions retain source/target pins, author and immutable revision history. They
+do not merge identities, transfer decisions or grant reviewed coverage. A preview
+is a consistency check, not proof of equivalence. One-to-one pairs are enforced
+within an assertion; separate assertions may conflict and are not a global identity
+map. Semantic reconciliation, cross-assertion conflict resolution and controlled
+assessment reuse remain separate work.
+
 ### Historical state comparison
 
 `GET /api/v3/projects/{id}/refs` lists product branches and immutable tags.

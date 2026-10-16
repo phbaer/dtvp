@@ -15,6 +15,7 @@ import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
 import KnowledgeDocuments from './KnowledgeDocuments.vue'
 import KnowledgePortfolio from './KnowledgePortfolio.vue'
+import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
 const props = defineProps<{ me: Me }>()
 const project = ref(''), projectName = ref(''), version = ref(''), team = ref(''), lifecycle = ref(''), query = ref('')
 const filterLabels: Record<string, string> = { source_severity: 'Source severity', contextual_severity: 'Published severity', applicability: 'Applicability', scoring_status: 'Scoring status', team_review: 'Team assessment', provider: 'Evidence provider', cvss_version: 'Source CVSS version', dependency: 'Dependency relationship', source_conflict: 'Source discrepancies', component: 'Component' }
@@ -273,6 +274,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <KnowledgeLicenses :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
       <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
+      <KnowledgeReconciliation :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
       <KnowledgeAdvisories :project="project" :state="workspace.state" />
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">
