@@ -31,7 +31,7 @@ def login(client, persona):
         raise ValueError("Refusing rehearsal writes outside an isolated playground")
 
 
-def rehearse(client, *, simulate_reviews=False, output=None):
+def rehearse(client, *, simulate_reviews=False, keep_observations=False, output=None):
     """Use backend workflows only; return a report and exact consumer artifact bytes."""
     login(client, "administrator")
     teams = checked(client.get("/api/v2/workspaces"))
@@ -77,7 +77,10 @@ def rehearse(client, *, simulate_reviews=False, output=None):
 
     def publication(endpoint, payload, method="POST"):
         # Keep a recoverable exact declaration before a possibly uncertain publication.
-        record(f"request-{len(steps):02d}", {"endpoint": endpoint, "method": method, "payload": payload})
+        record(
+            f"request-{len(steps):02d}",
+            {"endpoint": endpoint, "method": method, "payload": payload},
+        )
         result = checked(client.request(method, endpoint, json=payload))
         steps.append({"endpoint": endpoint, "method": method, "result": result})
         if result.get("committed") is not True or result.get("projection") != "current":
@@ -238,6 +241,9 @@ def rehearse(client, *, simulate_reviews=False, output=None):
     source_state = None
     selected_head = authority
     for build in (1, 2):
+        observed["components"][0]["licenses"] = [
+            {"license": {"id": "Apache-2.0" if build == 1 else "BSD-3-Clause"}}
+        ]
         observed["components"][0]["description"] = (
             f"Synthetic scanner supplemental evidence revision {build}"
         )
@@ -311,6 +317,23 @@ def rehearse(client, *, simulate_reviews=False, output=None):
             for item in inventory["items"]
         ):
             raise RuntimeError("Observation silently duplicated or adopted inventory")
+        record(
+            f"observation-{build}-licenses",
+            checked(client.get(path + f"/states/{selected_head}/license-worklist")),
+        )
+    record(
+        "observation-evidence-comparison",
+        checked(
+            client.get(
+                path + "/compare/details",
+                params={
+                    "before": selection_states[0],
+                    "after": selection_states[1],
+                    "limit": 200,
+                },
+            )
+        ),
+    )
     historical_observation = record(
         "selected-observation-summary",
         checked(client.get(path + f"/states/{selected_head}/evidence-summary")),
@@ -326,15 +349,19 @@ def rehearse(client, *, simulate_reviews=False, output=None):
         "observation-withdrawal-preview",
         checked(client.post(product + "/observation-selection/preview", json=withdrawal)),
     )
-    initial = publication(
-        product + "/observation-selection",
-        {**withdrawal, "preview_digest": withdrawal_preview["preview_digest"]},
-    )
-    selection_states.append(initial)
-    if checked(client.get(product + "/observation-selection"))["selection"]["sources"]:
-        raise RuntimeError(
-            "Explicit observation withdrawal did not restore authoritative inventory"
+    if keep_observations:
+        initial = selected_head
+    else:
+        initial = publication(
+            product + "/observation-selection",
+            {**withdrawal, "preview_digest": withdrawal_preview["preview_digest"]},
         )
+        selection_states.append(initial)
+    if (
+        bool(checked(client.get(product + "/observation-selection"))["selection"]["sources"])
+        != keep_observations
+    ):
+        raise RuntimeError("Observation selection did not retain the requested playground state")
     initial_summary = record(
         "before-review", checked(client.get(path + f"/states/{initial}/evidence-summary"))
     )
@@ -470,7 +497,7 @@ def rehearse(client, *, simulate_reviews=False, output=None):
         "overlap": {
             "subject_assurance": "producer_declared",
             "inventory_implicitly_adopted": False,
-            "withdrawn": True,
+            "withdrawn": not keep_observations,
             "historical_source_bytes_verified": len(observation_files),
         },
         "final_state": final,
@@ -498,6 +525,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8900")
     parser.add_argument(
+        "--keep-observations",
+        action="store_true",
+        help="Keep selected scanner evidence visible for interactive exploration; withdrawal remains a preview",
+    )
+    parser.add_argument(
         "--simulate-reviews",
         action="store_true",
         help="Explicitly simulate independent playground roles; never real human approval",
@@ -511,7 +543,12 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False, mode=0o700)
     with httpx.Client(base_url=args.url, timeout=60, follow_redirects=False) as client:
-        report, _ = rehearse(client, simulate_reviews=args.simulate_reviews, output=args.output)
+        report, _ = rehearse(
+            client,
+            simulate_reviews=args.simulate_reviews,
+            keep_observations=args.keep_observations,
+            output=args.output,
+        )
     (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

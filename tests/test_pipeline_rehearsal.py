@@ -89,6 +89,36 @@ def test_nonplayground_server_is_rejected_before_resource_writes():
     assert calls == ["/api/v2/playground/login", "/api/v2/me"]
 
 
+def test_playground_can_keep_scanner_evidence_selected_without_simulated_reviews(client):
+    report, files = rehearse(client, keep_observations=True)
+    assert report["simulated_reviews"] is False
+    assert report["initial_state"] == report["final_state"]
+    assert report["overlap"]["withdrawn"] is False
+    assert len(report["selection_states"]) == 2
+    path = f"/api/v3/projects/{report['project_id']}/versions/7.1.1/observation-selection"
+    selection = client.get(path).json()["selection"]
+    assert len(selection["sources"]) == 1
+    bundle = json.loads(files["issued-bundle.json"])
+    assert bundle["inventory"]["other_records"]["observation_assertions"]["components"]
+    assert not json.loads(files["scoring-before-review.json"])["eligible"]
+    for build, expression in ((1, "Apache-2.0"), (2, "BSD-3-Clause")):
+        worklist = json.loads(files[f"observation-{build}-licenses.json"])
+        row = next(item for item in worklist["items"] if item["component"]["name"] == "demo-http")
+        assert row["evidence"]["facts"][0]["value"]["license"]["id"] == "MIT"
+        supplemental = row["supplemental_evidence"]
+        assert supplemental["source_claims_differ"]
+        assert expression in json.dumps(supplemental["reported_values"])
+        assert row["clearance"] == "not_assessed"
+    comparison = json.loads(files["observation-evidence-comparison.json"])
+    evidence_changes = [
+        row for row in comparison["items"] if row["category"] == "observation_evidence"
+    ]
+    assert any(
+        "licenses" in row["changed_fields"] and "source_license" in row["classifications"]
+        for row in evidence_changes
+    )
+
+
 def test_corrupt_export_fails_and_retains_partial_rehearsal_for_inspection(
     client, tmp_path, monkeypatch
 ):

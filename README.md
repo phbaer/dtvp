@@ -2947,3 +2947,26 @@ unchanged LicenseRef token with changed document terms requires new review;
 unchanged definitions across known nightly document-ID/timestamp changes do not.
 
 Malformed or unsupported source evidence fails without truncation.
+
+For interactive overlapping-source exploration, run the pipeline rehearsal with
+`--keep-observations`. It retains the selected scanner layer instead of applying
+its withdrawal preview. Synthetic scanner license claims deliberately differ from
+the authoritative MIT declaration; originals and both scanner revisions remain
+available. No reviews or license clearances are simulated by that option.
+
+```bash
+uv run python scripts/knowledge_pipeline_rehearsal.py --keep-observations --output /tmp/dtvp-pipeline-exploration
+```
+
+The rehearsal records pinned license worklists for both scanner revisions and an
+observation-evidence comparison. Authority MIT remains distinct from supplemental
+Apache-2.0/BSD-3-Clause claims; the comparison exposes the changed source license
+without manufacturing a clearance or assessment.
+
+Supplemental-evidence increment verification: 77 affected backend/API checks passed
+with SQLite/PostgreSQL enabled, including the retained-observation rehearsal.
+A separate 49-check comparison/export regression and 11 adoption checks passed.
+Browser checks passed for license review (13) and comparison (10); frontend unit
+tests (3), typecheck/build, Ruff and independent license review also passed.
+These remain synthetic contract checks; customer/deployment acceptance limits
+above still apply.
