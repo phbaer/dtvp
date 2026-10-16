@@ -7,6 +7,13 @@ from dtvp.api import DB, Auth, project_for
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.api_workflow import authorize_team
 from dtvp.knowledge.assessments import load_sections
+from dtvp.knowledge.correspondence_drafts import (
+    CorrespondenceDraftInput,
+    CorrespondenceDraftPreview,
+    apply_correspondence_draft,
+    correspondence_draft_candidates,
+    preview_correspondence_draft,
+)
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Ref, Sha
 from dtvp.knowledge.synchronization import synchronization_preview
 from dtvp.knowledge.synchronization_apply import SynchronizationApplyInput, apply_synchronization
@@ -89,3 +96,65 @@ def draft(project_id: str, data: SynchronizationApplyInput, request: Request, db
     except CommitUncertain as error:
         return uncertain_response(error, data.request_id)
     return projected_response(request, receipt)
+
+
+@router.post("/projects/{project_id}/correspondence-drafts/preview")
+def correspondence_preview(
+    project_id: str, data: CorrespondenceDraftPreview, request: Request, db: DB, actor: Auth
+):
+    project = project_for(db, actor, project_id)
+    try:
+        result = preview_correspondence_draft(
+            request.app.state.knowledge, project_id=project_id, data=data
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    result["draft_allowed"] = bool(
+        actor.allowed(db, project, "assess")
+        and actor.workspace(result["target_scope"]["team_id"], "assess")
+    )
+    return result
+
+
+@router.post("/projects/{project_id}/correspondence-drafts", status_code=201)
+def correspondence_draft(
+    project_id: str, data: CorrespondenceDraftInput, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id, "assess")
+    try:
+        receipt = apply_correspondence_draft(
+            request.app.state.knowledge,
+            project_id=project_id,
+            actor_id=actor.user.id,
+            data=data,
+            authorize=authorize_team(db, actor, project_id),
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(403, str(error)) from error
+    except CommitUncertain as error:
+        return uncertain_response(error, data.request_id)
+    return projected_response(request, receipt)
+
+
+@router.get("/projects/{project_id}/states/{state}/correspondence-draft-candidates")
+def correspondence_candidates(
+    project_id: str,
+    state: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    q: str = Query("", max_length=500),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    project_for(db, actor, project_id)
+    return correspondence_draft_candidates(
+        request.app.state.knowledge,
+        project_id=project_id,
+        state=state,
+        q=q,
+        offset=offset,
+        limit=limit,
+    )

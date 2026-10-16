@@ -75,6 +75,12 @@ def configure(parser):
     sync.add_argument("--offset", type=int, default=0)
     sync.add_argument("--limit", type=int, default=50)
     sync.add_argument("--json", action="store_true")
+    adopted = commands.add_parser(
+        "correspondence-draft", help="Preview or explicitly create a linked target draft"
+    )
+    adopted.add_argument("--project", required=True)
+    adopted.add_argument("--input", required=True, help="Exact JSON preview or apply request")
+    adopted.add_argument("--apply", action="store_true", help="Publish one new unsubmitted draft")
     coverage = commands.add_parser(
         "coverage", help="Compare explicit assessment targets across current versions"
     )
@@ -449,6 +455,18 @@ def run(args):
                         files={"file": (Path(args.file).name, source, "application/octet-stream")},
                     )
                 )
+            print(json.dumps(result, indent=2))
+            return
+        if args.knowledge_command == "correspondence-draft":
+            from urllib.parse import quote
+
+            body = json.loads(Path(args.input).read_text())
+            if not isinstance(body, dict):
+                raise ValueError("Correspondence draft input must be a JSON object")
+            path = f"/api/v3/projects/{quote(args.project, safe='')}/correspondence-drafts"
+            result = read_response(
+                client.post(path + ("" if args.apply else "/preview"), json=body)
+            )
             print(json.dumps(result, indent=2))
             return
         if args.knowledge_command == "synchronization":

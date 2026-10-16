@@ -474,6 +474,53 @@ filter changes clear only the uncaptured queue selection. The generic HTTP CLI
 uses the same API. Approval never publishes contextual scores or changes source
 claims. A changed candidate head or selected exclusion blocks the entire batch.
 
+### Explicit correspondence-linked assessment drafts
+
+Explicit confirmed occurrence correspondence can now prepare a **new adopted target
+draft**, separately from the existing same-lineage shared-assessment extension.
+`POST /api/v3/projects/{id}/correspondence-drafts/preview` takes pinned source and
+current target states, exact source/target contexts and vulnerability, an independently
+approved source assessment revision, explicitly selected assertion IDs/revisions and
+the current ownership-policy pin. Both component and consuming-context correspondence
+are required. Active competing mappings, retractions and changed captured occurrence
+material block adoption; no name/PURL matching, transitive mapping or identity merge
+occurs. A historical source state remains usable, including an earlier nightly state
+of the same version, without requiring its branch to remain at that head.
+
+`POST .../correspondence-drafts` additionally requires a new assessment identifier,
+request ID, preview digest, target conditions and adoption reason. The currently
+authorized target analyst becomes the new draft's author; immutable evidence retains
+the original source author/revision and both assertion and state pins. Existing target
+content, source approval, ownership and published scores are preserved. Every adoption
+needs independent target review and the normal coordinator scoring gate. Target/policy
+CAS and exact uncertain-write replay retain frozen request inputs. Existing shared
+assessment lineage checks and synchronization receipt formats remain unchanged.
+
+CLI uses the same backend requests, with JSON files containing the exact fields:
+
+```bash
+uv run python -m dtvp.cli knowledge --persona analyst correspondence-draft \
+  --project PROJECT --input preview.json
+uv run python -m dtvp.cli knowledge --persona analyst correspondence-draft \
+  --project PROJECT --input apply.json --apply
+```
+
+The second command explicitly publishes one unsubmitted draft. A dedicated guided UI
+for this new adoption operation remains planned; existing correspondence and ordinary
+synchronization screens retain their current contracts.
+
+Adopted drafts retain original source evidence by the exact immutable assessment
+revision, plus evidence count and digest. Source evidence is neither duplicated nor
+truncated, so a source with the maximum 100 evidence entries remains usable. The
+selected preview exposes the full original source assessment before adoption.
+Captured correspondence targets must remain ancestors of the selected target; the
+selected/captured source states must share comparable same-version ancestry and
+unchanged occurrence/usage material. Equal-looking unrelated histories do not qualify.
+The bounded historical source selector is
+`GET /api/v3/projects/{id}/states/{state}/correspondence-draft-candidates` with
+`q`, `offset` and `limit` (maximum 200). Candidate payloads contain summary text only;
+exact rationale/evidence are retrieved by the explicitly selected preview.
+
 ### Cross-version assessment scope
 
 Cross-version candidates optionally accept a closed numeric release selection:
