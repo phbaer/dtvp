@@ -26,7 +26,15 @@ MAX_RECORDS = 100_000
 
 
 def _bound_candidate(sections):
+    from dtvp.knowledge.component_lineages import MAX_IDENTITIES, MAX_LEDGER_BYTES
+
     inventory = sections["inventory"]
+    ledger = inventory.get("identity", {})
+    if (
+        len(ledger.get("entries", {})) + len(ledger.get("tombstones", {})) > MAX_IDENTITIES
+        or len(canonical(ledger)) > MAX_LEDGER_BYTES
+    ):
+        raise ValueError("Observation identity ledger exceeds its retained bound")
     if (
         sum(key == "root" or key.startswith(("component:", "part-root:")) for key in inventory)
         > MAX_RECORDS
@@ -122,7 +130,10 @@ def _current(journal, project_id, version, expected, expected_configuration):
     configuration, config = current_config(journal, project_id)
     if configuration != expected_configuration:
         raise Conflict("Pipeline configuration changed")
-    return load_sections(journal, expected), config if configuration else None
+    sections = load_sections(journal, expected)
+    if sections["inventory"].get("baseline", {}).get("withdrawn"):
+        raise Conflict("Withdrawn inventory cannot receive observation imports or selections")
+    return sections, config if configuration else None
 
 
 def _base(journal, project_id, version, expected, sections):
@@ -372,6 +383,16 @@ def build_selection(journal, *, project_id, version, data):
         journal, project_id, version, data.expected, data.expected_configuration
     )
     authority_state, base = _base(journal, project_id, version, data.expected, sections)
+    base_inventory = base["inventory"]
+    if base_inventory.get("baseline", {}).get("kind") == "assembly":
+        for part in base_inventory["assembly"]["parts"]:
+            if part.get("state"):
+                authority = authority_inventory(journal, base, part["part_id"])
+                validate_source_role(
+                    configuration, part["part_id"], authority["baseline"]["source"], "authority"
+                )
+    else:
+        validate_source_role(configuration, None, base_inventory["baseline"]["source"], "authority")
     previous = sections["inventory"].get("observations", {}).get("sources", {})
     selected_keys = {source_key(item.part_id, item.source) for item in data.sources}
     if previous.keys() - selected_keys and not data.removal_reason.strip():
@@ -395,6 +416,29 @@ def build_selection(journal, *, project_id, version, data):
         deepcopy(base["inventory"]),
         deepcopy(base["vulnerabilities"]),
     )
+    if "identity" not in sections["inventory"]:
+        from dtvp.knowledge.assembly_lineages import assemble_lineages
+        from dtvp.knowledge.component_lineages import reconcile_lineages
+
+        if base_inventory.get("baseline", {}).get("kind") == "assembly":
+            sections["inventory"]["identity"] = assemble_lineages(
+                [
+                    (
+                        part["part_id"],
+                        part["state"],
+                        load_sections(journal, part["state"])["inventory"],
+                    )
+                    for part in base_inventory["assembly"]["parts"]
+                    if part.get("state")
+                ],
+                project_id=project_id,
+                version=version,
+                qualify=namespaced_ref,
+            )
+        else:
+            sections["inventory"]["identity"] = reconcile_lineages(
+                {}, sections["inventory"], project_id=project_id, version=version
+            )
     output, reports, parents, artifacts = (
         {},
         [],
@@ -486,7 +530,11 @@ def build_selection(journal, *, project_id, version, data):
             sections["inventory"][component_key(target)] = item
             sections["inventory"].setdefault("identity", {}).setdefault("entries", {})[target] = {
                 **deepcopy(entry),
-                "source": item["dtvp_origin"],
+                "role": "component",
+                "source": {
+                    **item["dtvp_origin"],
+                    "artifact_sha": source["inventory"]["baseline"]["artifact_sha"],
+                },
             }
         proposed = {
             (item["observation"]["from"], item["observation"]["to"], item["observation"]["kind"])
@@ -609,7 +657,7 @@ def build_selection(journal, *, project_id, version, data):
     preview["preview_digest"] = digest(canonical(preview))
     return {
         "sections": sections,
-        "parents": sorted(set(parents)),
+        "parents": list(dict.fromkeys(parents)),
         "artifacts": sorted(artifacts),
         "preview": preview,
         "checks": [

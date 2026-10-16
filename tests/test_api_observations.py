@@ -186,6 +186,25 @@ def test_part_observation_qualifies_only_selected_tree_and_removal_restores_asse
         if value.get("dtvp_origin", {}).get("part_id") == "service"
     }
     assert {key: sections["inventory"][key] for key in service_components} == service_components
+    # A subsequent assembly must accept every adopted entry's source provenance.
+    from dtvp.knowledge.assembly import AssemblyInput, build_assembly_candidate
+
+    candidate = build_assembly_candidate(
+        journal,
+        project_id=project,
+        version="1",
+        data=AssemblyInput.model_validate(
+            assembly(
+                [selection("engine", part_a), selection("service", part_b)],
+                expected=merged,
+                request_id="reselect-after-adoption",
+            )
+        ),
+    )
+    assert any(
+        entry["source"].get("artifact_sha")
+        for entry in candidate["sections"]["inventory"]["identity"]["tombstones"].values()
+    )
     sections["assessments"]["retained-part"] = {"historical": "part assessment"}
     with_decision = journal.snapshot(
         project_id=project,

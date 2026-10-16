@@ -2826,3 +2826,11 @@ explicit withdrawal preserve historical summaries and byte-exact source download
 Native issued bundles and VScorer input files are checked for pinned model metadata.
 This remains synthetic contract validation, with no claim of real model authenticity,
 producer completeness, license clearance or document acceptance.
+
+Observation publication preserves the target revision as its first parent and
+validates the complete live/retired identity ledger before accepting more nodes.
+Adopted observation roots become ordinary live occurrences while retaining their
+original source role; assembled provenance includes original artifact identity.
+Pre-ledger inputs bootstrap complete lineage metadata. Withdrawn inventories
+cannot receive observations, and even an empty observation selection must satisfy
+the configured authority for every available delivery part.
