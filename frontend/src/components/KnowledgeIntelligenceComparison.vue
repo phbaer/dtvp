@@ -8,7 +8,7 @@ type Report = { inventory_state: string; inventory_version: string; evidence_sta
 const props = defineProps<{ project: string; state: string }>()
 const busy = ref(false), error = ref(''), inputs = ref<{ inventory: string; evidence: string | null } | null>(null), mode = ref(''), historical = ref('')
 const report = ref<Report | null>(null), applied = ref<Pins | null>(null), offset = ref(0), previous = ref<number[]>([])
-const valid = computed(() => !!inputs.value && (mode.value === 'none' || mode.value === 'captured' || (mode.value === 'historical' && /^[a-f0-9]{64}$/.test(historical.value))))
+const valid = computed(() => !!inputs.value && /^[a-f0-9]{64}$/.test(inputs.value.inventory) && (mode.value === 'none' || mode.value === 'captured' || (mode.value === 'historical' && /^[a-f0-9]{64}$/.test(historical.value))))
 const moved = computed(() => !!report.value && props.state !== report.value.inventory_state)
 const human = (text: string) => text.replaceAll('_', ' ')
 const providers = computed(() => {
@@ -56,6 +56,7 @@ onBeforeUnmount(() => { ++sequence })
       <button type="button" :disabled="busy" @click="capture">Capture intelligence comparison inputs</button>
       <form v-if="inputs" @submit.prevent="compare()">
         <p class="hint">Inventory input <code>{{ inputs.inventory }}</code></p>
+        <details><summary>Choose retained inventory state</summary><label>Retained inventory SHA-256<input v-model="inputs.inventory" maxlength="64" pattern="[a-f0-9]{64}" :disabled="busy" spellcheck="false"></label><button type="button" :disabled="busy" @click="inputs.inventory = state">Use workspace inventory state</button><p class="hint">Select an exact committed product state from version history. Comparing never restores or changes that state; displayed report pages keep their original pins.</p></details>
         <label>Advisory evidence snapshot<select v-model="mode" :disabled="busy"><option value="">Select explicitly</option><option value="captured">Captured current reference · {{ inputs.evidence?.slice(0, 12) || 'no evidence' }}</option><option value="none">No advisory evidence</option><option value="historical">Exact retained evidence state</option></select></label>
         <label v-if="mode === 'historical'">Retained advisory evidence SHA-256<input v-model="historical" maxlength="64" :disabled="busy" spellcheck="false"></label>
         <button :disabled="busy || !valid">Compare pinned advisory evidence</button>

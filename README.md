@@ -1015,8 +1015,11 @@ same inventory/evidence selection.
 
 The existing **Advisory intelligence refresh** panel includes a collapsed,
 read-only **Compare retained inventory with advisory evidence** view. Capture
-inputs explicitly, then choose the captured evidence reference, an explicit
-no-evidence selection, or an exact retained evidence-state SHA. Comparing never
+inputs explicitly, optionally select an exact committed inventory SHA under
+**Choose retained inventory state**, then choose the captured evidence reference,
+an explicit no-evidence selection, or an exact retained evidence-state SHA.
+**Use workspace inventory state** changes only the next comparison input; it
+never repins displayed report pages. Comparing never
 queries an external provider, updates source ratings or assessments, or infers
 remediation. The inventory/evidence pins remain visible alongside complete
 server-derived counts; provider differences on the displayed page and exact
