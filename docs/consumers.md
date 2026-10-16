@@ -76,6 +76,41 @@ remain unresolved. Durable NVD/CIRCL known-ID refresh and optional exact-PURL OS
 matching now ship. OSV claims remain independent of human applicability decisions;
 unsupported coordinates retain unknown coverage.
 
+### Pinned pipeline metadata
+
+New product states can pin `inventory.pipeline_configuration.state`. Native bundles
+then include the exact retained configuration and a complete digest-bound
+`pipeline_context` register. Rows keep component, consuming root/context, many-to-many
+model/entity IDs and separate legacy labels. Configuration edits never repin issued
+inputs or manufacture architecture/scoring approval.
+
+Generator's isolated `feat/dtvp-snapshot-integrity`, commit `da3cba0`, validates that
+register against its inventory/configuration and renders registered
+`native-model-placements` Markdown/HTML/CSV/JSON supplements through the existing
+sealed workflow. Contexts remain separate; entity names never become inferred GUIDs.
+Missing/unmapped metadata remains diagnostic. Full suite: 757 passed, one optional
+skip; actual DTVP-issued fixture accepted. This does not verify a full model file,
+invent architecture topology or satisfy controlled-document acceptance.
+
+Focused VScorer derivations include separately issued `pipeline-context.json`, with
+its exact bytes bound by `dtvp_source.artifacts.pipeline_context_sha256`. Metadata
+captures use serializer `/3`; frozen `/1` and `/2` captures remain exact. Consumers
+must either handle the additional bound artifact or reject the new receipt;
+ignoring a required artifact pin is not a compatibility fallback.
+
+VScorer's isolated `feat/dtvp-context-binding`, commit `6b481ae`, accepts the
+optional artifact through REST intake. It verifies its exact file hash, focused
+context and uploaded TM7/entity consistency, freezes full declarations once and
+retains compact source facts. Unknown/ambiguous models remain diagnostic. This
+records placement declarations; it does not install mappings, credit controls or
+change scores. Existing mapping/review requirements remain. Independent Python
+review (`assessment_continuity`) and architecture review (`root`) approved after
+strict metadata-type validation was corrected. Final metadata checks: 29 passed;
+architecture/source-manifest checks: 28 passed. Actual DTVP-issued artifacts passed
+receipt verification; a deliberately different TM7 produced explicit diagnostics.
+Both consumer changes are local branches in their original Git repositories,
+checked out separately under `/tmp`; neither is merged, pushed or deployed.
+
 ## V2 compatibility contracts
 
 The following UUID snapshot contracts describe the existing v2 runtime and prior

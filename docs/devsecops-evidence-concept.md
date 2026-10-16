@@ -536,8 +536,9 @@ CLI and guided Knowledge UI share these backend rules. Explicit occurrence
 correspondence, explicit linked target drafts, finite numeric release selection
 and local v2 snapshot migration rehearsal are implemented. Pinned composition can
 be compared with explicitly selected retained advisory claims without changing
-historical assessments; UI and CLI use the same read-only backend. Automatic
-semantic identity reuse and complete cutover qualification remain separate work.
+historical assessments; UI and CLI use the same read-only backend. Unique strong identities now support bounded same-version reference continuity;
+new version/context approval remains explicit. Complete cutover qualification
+remains separate work.
 V1 ZIP inspection and streamed CLI dry runs
 now expose exact pins, normalization limits and partial-history losses without
 persisting data, creating permissions or replaying native approvals.
@@ -568,10 +569,14 @@ Exact raw responses and frozen captures are retained before publication; SBOM ex
 claims and finding claims remain separate. Nontransactional DT reads remain an
 explicit consistency limitation. Neither integration creates human approvals.
 
-Still planned: overlapping-view/advanced assembly reconciliation, cross-version
-source reuse, stable cross-import/context identity, dynamic future-version coverage
-beyond finite explicit range selection and broader architecture modeling/rendering
-acceptance. Explicit cross-part relationships and named consumed-field VDR/VEX
+Pinned overlapping-view intake/reconciliation and explicit component/topology
+adoption now ship, alongside stable lineage metadata, conservative same-version
+assessment continuity and versioned user/CI source/model declarations. Configured
+version relationships schedule durable read-only synchronization proposals through
+the existing worker. Current UI/CLI expose these backend workflows; exact historical
+inputs and removed assessments remain retained. Dynamic future-version approval
+beyond finite explicit scope, cross-version source reuse and broader architecture
+modeling/rendering acceptance remain outside these contracts. Explicit cross-part relationships and named consumed-field VDR/VEX
 profiles now ship; the latter do not establish full schema or signature conformance.
 Reviewed, sanitized single-version v1 exports now have explicit preview/publication
 under separate operator-review, sanitization and project-reader-disclosure
@@ -611,3 +616,15 @@ authenticated exact-parent follow-ups described above.
 The adapter change is `d0a55ab`: full working-tree suite 107 passed with one
 unconfigured PostgreSQL skip; a separate disposable PostgreSQL integration test
 passed. Isolated staged validation also passed, excluding earlier UI experiments.
+
+Latest pipeline metadata increments: Generator `da3cba0` validates the complete
+pinned context/model register and emits sealed mapping supplements while keeping
+legacy labels distinct from entity IDs (757 tests passed, one optional skip).
+VScorer `6b481ae` validates a separately bound metadata artifact against source
+pins and the uploaded TM7, preserving declared placements and diagnostics without
+installing mappings or changing scores. Final metadata checks: 29 passed;
+architecture/source-manifest checks: 28 passed, with independent Python and
+architecture approval. Both accepted actual DTVP-issued synthetic inputs. These
+are local, unmerged sibling branches, not deployed integrations or customer
+controlled-document acceptance. DTVP's complete authoritative graph and explicit
+review scope remain the integration boundary.
