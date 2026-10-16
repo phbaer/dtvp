@@ -439,6 +439,10 @@ def build_selection(journal, *, project_id, version, data):
             sections["inventory"]["identity"] = reconcile_lineages(
                 {}, sections["inventory"], project_id=project_id, version=version
             )
+    ledger = sections["inventory"]["identity"]
+    reserved_lineages = {item["lineage_id"] for item in ledger["entries"].values()} | set(
+        ledger.get("tombstones", {})
+    )
     output, reports, parents, artifacts = (
         {},
         [],
@@ -527,6 +531,11 @@ def build_selection(journal, *, project_id, version, data):
                 if conflicts:
                     retained["dtvp_observation_conflicts"] = sorted(conflicts)
                 continue
+            if target in ledger["entries"] or component_key(target) in sections["inventory"]:
+                raise ValueError("Observation adoption collides with an existing occurrence")
+            if entry["lineage_id"] in reserved_lineages:
+                raise ValueError("Observation adoption collides with a retained lineage identity")
+            reserved_lineages.add(entry["lineage_id"])
             sections["inventory"][component_key(target)] = item
             sections["inventory"].setdefault("identity", {}).setdefault("entries", {})[target] = {
                 **deepcopy(entry),

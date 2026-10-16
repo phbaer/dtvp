@@ -2871,3 +2871,8 @@ and parked unrelated changes were preserved.
 
 These checks qualify the bounded contracts exercised, not production deployment,
 customer SBOM correctness, license clearance or controlled-document acceptance.
+
+
+Explicit observation adoption rejects collisions with existing occurrence references
+or live/retired lineage identities before publication. Authority nodes and retained
+identity history cannot be overwritten by an adopted source occurrence.
