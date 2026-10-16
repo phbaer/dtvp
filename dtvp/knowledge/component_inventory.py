@@ -31,6 +31,7 @@ def component_rows(sections):
         rows.append(
             {
                 "component_ref": ref,
+                "identity": inventory.get("identity", {}).get("entries", {}).get(ref),
                 "component": {
                     key: component[key]
                     for key in ("type", "name", "group", "version", "purl", "cpe", "dtvp_origin")

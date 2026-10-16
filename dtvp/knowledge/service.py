@@ -40,8 +40,7 @@ def inventory_sections(
 ):
     """Pure coherent-baseline construction shared by intake and explicit migration."""
     relations = relationships(document)
-    # Source-local keys are deliberate in the first slice; identity reconciliation
-    # and context-aware assessment carryover are not implemented by this importer.
+    # Source-local keys remain exact; lineage metadata never rewrites references.
     inventory = {
         "baseline": dict(
             source=source,
@@ -182,6 +181,7 @@ def import_inventory(
             if build_number <= baseline["build_number"]:
                 raise Conflict("Build is not newer than the accepted baseline")
     document = parse(raw)
+    previous_inventory = sections["inventory"]
     sections["inventory"], sections["vulnerabilities"] = inventory_sections(
         document,
         artifact_sha=journal.objects.put(raw),
@@ -193,6 +193,17 @@ def import_inventory(
         version=version,
         part_id=part_id,
         source_provenance=source_provenance,
+    )
+    from dtvp.knowledge.component_lineages import reconcile_lineages
+
+    sections["inventory"]["identity"] = reconcile_lineages(
+        previous_inventory,
+        sections["inventory"],
+        project_id=project_id,
+        version=version,
+        previous_state=parent,
+        previous_version=journal.state(parent).version if parent else None,
+        explicit_predecessor=predecessor is not None,
     )
     old_inventory = journal.records(parent, "inventory") if parent else {}
     sections["history"] = {

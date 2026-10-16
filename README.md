@@ -118,11 +118,36 @@ while paging. CLI uses the same server report:
 uv run dtvp knowledge identity-matches --project PROJECT --source SOURCE_SHA --target TARGET_SHA --json
 ```
 
-This slice discovers compatible identity candidates; it does not yet persist a
-stable identity registry, rewrite graph references, merge observations or carry
-approvals across changed references. Existing explicit correspondence/adoption
+This report discovers compatible identity candidates. Accepted imports additionally
+retain the stable lineage metadata described below; neither mechanism rewrites
+graph references, merges observations or carries approvals across changed references. Existing explicit correspondence/adoption
 workflows remain separate. Source-local occurrence and assessment semantics are
 unchanged.
+
+### Stable import identity metadata
+
+Accepted single-baseline and constituent imports now retain an additive
+`inventory.identity` ledger (`dtvp.component-lineages/1`, matching policy
+`dtvp.component-identity/1`). Component inventory read rows expose the corresponding
+`identity` object; historical states and assembled inventories without a ledger
+return `null`. Import-local component payloads, references, dependency edges and
+assessment target fingerprints are unchanged.
+
+Within the same product/version/source/part and collection boundary, unique
+compatible exact-package or scoped strong-artifact matches continue stable lineage
+IDs, including renamed source references. Existing pre-ledger states bootstrap IDs
+deterministically from their original source artifact, reference and occurrence role.
+Missing/ambiguous/conflicting markers retain distinct IDs with unresolved status;
+names and references alone never establish cross-import correspondence. Removed IDs
+remain tombstones linked to their last retained state/artifact. Reappearance does
+not silently restore a removed lineage. New product versions continue exact matched lineage IDs only through an explicit
+predecessor, with unchanged project/source/part/boundary. Independent branches never
+inherit IDs implicitly; shared lineage does not extend approved version coverage.
+
+The ledger is bounded to 100,000 current-plus-retired identities and 32 MiB; imports
+fail closed rather than truncating retained links. It records identity continuity
+only: it does not merge overlapping observations, rewrite references, establish
+context equivalence or carry assessments/approvals across changed targets.
 
 ### Read-only global orphan audit
 
