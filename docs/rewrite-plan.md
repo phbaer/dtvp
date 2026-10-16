@@ -698,17 +698,20 @@ checkpoint/pruning contract and recovery qualification. Do not break history lin
 to make an object appear unreferenced. Record cleanup results and distinguish
 intentional collection from corruption. Backup retention remains a separate policy.
 
-Logical archive and read-only diagnostics already exist; destructive collection
-and any draft-history compaction remain future implementation, not enabled here.
+Logical archive and read-only diagnostics already exist. Bounded offline collection
+of genuinely unreferenced objects now ships; draft-history compaction remains deferred.
 
 Implementation finding: object staging occurs outside the publication lock, and
 SQL-backed jobs retain unpublished raw/progress/capture objects. Even an old
 unreachable digest can be reused by an in-flight operation. Age plus a writer lock
 is therefore insufficient for collection. A global integrity-checked orphan audit
-now exposes reachability only, with deletion always disabled. Physical collection
-requires a choice between stopped-service maintenance with complete operational
-root discovery, or a shared staging/maintenance barrier with durable pins/leases.
-Neither option may discard retryable job evidence merely because it is unpublished.
+exposes reachability only, with deletion always disabled in that audit. Agreed
+choice: stopped-service maintenance for physical collection. Shared runtime leases
+exclude managed API/worker/local CLI processes while an exclusive maintenance lease
+protects SQL-root discovery and bounded deletion. Current-schema SQL snapshots and
+projection checks, operational table locks, exact stale-plan detection and verified
+recovery copies precede unlink. All job statuses remain retention roots. No online
+collection or history compaction is enabled; independent writers must stay stopped.
 
 One-command playground and automated checks use the same synthetic inputs and
 production APIs. Required scenarios include recursive delegation, multiple usage

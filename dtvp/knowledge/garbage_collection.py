@@ -74,6 +74,7 @@ def preview_unreferenced_objects(
     limit=50,
     max_objects=100_000,
     max_bytes=256 * 1024 * 1024,
+    age_filtered=False,
 ):
     """Inspect all projects/history; caller must enforce instance-wide authority.
 
@@ -167,6 +168,7 @@ def preview_unreferenced_objects(
             "inventory": inventory,
             "protected": sorted(protected),
             "ignored_staging_files": ignored,
+            "age_filtered": age_filtered,
         }
         items = []
         for sha in sorted(inventory.keys() - protected):
@@ -182,6 +184,7 @@ def preview_unreferenced_objects(
                     "eligible_for_deletion": False,
                 }
             )
+        listed = [item for item in items if item["age_matches_policy"]] if age_filtered else items
         return {
             "format": facts["format"],
             "head": head,
@@ -192,9 +195,9 @@ def preview_unreferenced_objects(
             "operational_references_complete": False,
             "execution_supported": False,
             "blockers": list(BLOCKERS),
-            "items": items[offset : offset + limit],
-            "total": len(items),
-            "next_offset": offset + limit if offset + limit < len(items) else None,
+            "items": listed[offset : offset + limit],
+            "total": len(listed),
+            "next_offset": offset + limit if offset + limit < len(listed) else None,
             "statistics": {
                 "objects": len(inventory),
                 "protected_objects": len(protected),

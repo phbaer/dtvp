@@ -90,8 +90,8 @@ explain each impact; unaffected contexts/versions keep their valid approvals.
 The [retention design](docs/rewrite-plan.md#retention-and-cleanup-policy) protects
 released states, approvals, issued outputs and supporting evidence. Unused
 assessments are archived recoverably first. Physical cleanup requires an explicit
-policy, dry-run impact and current reference checks; destructive collection and
-history compaction remain unimplemented.
+policy, dry-run impact and current reference checks. Bounded offline orphan
+collection is available; history compaction remains unimplemented.
 
 The [synchronization automation design](docs/rewrite-plan.md#automatic-synchronization-proposals)
 automatically prepares proposals after relevant accepted imports/integration events
@@ -144,8 +144,47 @@ not time since last use, and no default expiry is configured.
 Every item reports `eligible_for_deletion: false`; `execution_supported` and
 `operational_references_complete` remain false. Journal-unreachable bytes may be
 staged inputs or SQL-backed job checkpoints. The observation digest is not a
-permission to delete. Physical cleanup needs a maintenance/staging coordination
-contract and complete operational reference discovery before it can be enabled.
+permission to delete. Physical cleanup is a separate offline command with runtime exclusion and SQL
+reference discovery; the read-only audit alone never authorizes deletion.
+
+### Offline orphan cleanup
+
+Physical cleanup uses an explicit maintenance window. Stop all API/worker replicas
+and independent local writers first. API construction/lifetimes, workers and local
+mutating CLI commands hold shared runtime leases; cleanup holds an exclusive lease
+on the persistent `.knowledge-maintenance.lock` beside the journal. All processes
+must use the same artifact directory on a local filesystem with POSIX flock support.
+Do not remove the lock file. These guards do not fence arbitrary external scripts
+or direct storage edits; those must also remain stopped.
+
+Set `DTVP_DATABASE_URL` to this installation's operational database, then prepare
+and inspect a bounded plan (at most 200 objects):
+
+```bash
+uv run python -m dtvp.knowledge.offline_cleanup --journal data/artifacts/knowledge plan --min-age-days 30 --output /tmp/dtvp-cleanup-plan.json
+uv run python -m dtvp.knowledge.offline_cleanup --journal data/artifacts/knowledge apply --plan /tmp/dtvp-cleanup-plan.json --recovery-dir /path/to/new-cleanup-recovery
+```
+
+The plan/output and recovery paths must be fresh. Recovery must be outside the
+installation artifact directory; its existing parent must be writable. Planning
+and application require stopped managed runtimes and the exact current SQL schema
+and projection. PostgreSQL table locks (or isolated SQLite exclusive transactions)
+prevent operational DML during inspection/application. All SQL rows are hashed
+without exposing their contents; existing object references from every table and
+all job statuses are retained. Missing/corrupt known native checkpoints fail closed.
+All retained journal history, tags, outputs and supporting artifacts remain protected.
+
+Apply rechecks the complete SQL/storage observation and explicit age policy.
+Stale or modified plans require a fresh preview. Before the first unlink it writes,
+fsyncs and verifies exact recovery copies of every selected object, plus plan and
+recovery manifests. Deletion receipts are stored in that operator-only recovery
+directory. Interruption can leave partial deletion, but every selected original
+has a verified recovery copy before deletion starts. Do not blindly replay a
+partially applied plan; inspect its removal records and prepare a new plan, or
+restore missing copies by verified digest with `Artifacts.put` while stopped.
+Backups/recovery-directory retention is separate: copies consume space until an
+operator's backup policy releases them. No journal ancestry or draft history is
+compacted, and no cleanup runs automatically during imports or startup.
 
 ### Rewrite completion and acceptance boundary
 

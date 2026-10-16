@@ -56,6 +56,13 @@ def main():
         uvicorn.run("dtvp.main:create_app", factory=True, host=args.host, port=args.port)
         return
     settings = Settings()
+    from dtvp.knowledge.maintenance_lock import RuntimeLease
+
+    with RuntimeLease(settings.artifact_dir / "knowledge"):
+        _local_command(args, settings)
+
+
+def _local_command(args, settings):
     engine = engine_for(settings.database_url)
     migration_engine = engine_for(settings.migration_database_url or settings.database_url)
     migrate(migration_engine, settings.artifact_dir.parent / "migration-backups")

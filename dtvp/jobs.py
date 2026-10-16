@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, select
 
 from dtvp.auth import Actor, aware, capabilities
 from dtvp.domain import import_evidence, import_sbom, inventory, lock_release
+from dtvp.knowledge.maintenance_lock import RuntimeLease
 from dtvp.models import Credential, Finding, Job, Membership, Project, Release, User, now, uid
 from dtvp.providers import ADVISORY_PROVIDERS, MATCHERS, client, import_dt
 from dtvp.storage import canonical, digest
@@ -263,6 +264,11 @@ def execute(factory, artifacts, settings, job_id, token):
 
 
 def work_once(factory, artifacts, settings):
+    with RuntimeLease(artifacts.root / "knowledge"):
+        return _work_once(factory, artifacts, settings)
+
+
+def _work_once(factory, artifacts, settings):
     claimed = claim(factory)
     if not claimed:
         return False
@@ -289,6 +295,7 @@ def work_once(factory, artifacts, settings):
 
 
 def run(factory, artifacts, settings):
-    while True:
-        if not work_once(factory, artifacts, settings):
-            time.sleep(1)
+    with RuntimeLease(artifacts.root / "knowledge"):
+        while True:
+            if not work_once(factory, artifacts, settings):
+                time.sleep(1)

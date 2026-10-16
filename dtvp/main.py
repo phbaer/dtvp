@@ -1,4 +1,5 @@
 import re
+import weakref
 from contextlib import asynccontextmanager
 
 from authlib.integrations.starlette_client import OAuth
@@ -53,6 +54,7 @@ from dtvp.auth import authenticate, issue
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready, sessions
 from dtvp.knowledge.journal import Journal
+from dtvp.knowledge.maintenance_lock import RuntimeLease
 from dtvp.knowledge.projection import catch_up, is_current
 from dtvp.models import User
 from dtvp.playground import router as playground_router
@@ -63,6 +65,17 @@ from dtvp.storage import Artifacts
 
 def create_app(settings=None):
     settings = settings or Settings()
+    lease = RuntimeLease(settings.artifact_dir / "knowledge")
+    try:
+        app = _create_app(settings, lease)
+    except BaseException:
+        lease.close()
+        raise
+    weakref.finalize(app, lease.close)
+    return app
+
+
+def _create_app(settings, lease):
     engine = engine_for(settings.database_url)
     factory = sessions(engine)
     artifacts = Artifacts(settings.artifact_dir)
@@ -70,20 +83,32 @@ def create_app(settings=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        migration_engine = (
-            engine_for(settings.migration_database_url)
-            if settings.migration_database_url
-            else engine
-        )
-        migrate(migration_engine, settings.artifact_dir.parent / "migration-backups")
-        if migration_engine is not engine:
-            migration_engine.dispose()
-        catch_up(engine, knowledge)
-        if settings.playground:
-            with factory.begin() as db:
-                seed(db, artifacts)
-        yield
-        engine.dispose()
+        # Re-entry (for example repeated test-client lifespans) must reacquire
+        # exclusion after the previous lifespan released the construction lease.
+        lifespan_lease = RuntimeLease(settings.artifact_dir / "knowledge")
+        migration_engine = None
+        try:
+            migration_engine = (
+                engine_for(settings.migration_database_url)
+                if settings.migration_database_url
+                else engine
+            )
+            migrate(migration_engine, settings.artifact_dir.parent / "migration-backups")
+            catch_up(engine, knowledge)
+            if settings.playground:
+                with factory.begin() as db:
+                    seed(db, artifacts)
+            yield
+        finally:
+            try:
+                if migration_engine is not None and migration_engine is not engine:
+                    migration_engine.dispose()
+            finally:
+                try:
+                    engine.dispose()
+                finally:
+                    lease.close()
+                    lifespan_lease.close()
 
     app = FastAPI(title="DTVP", version="2.0.0", lifespan=lifespan)
     app.state.settings, app.state.sessions, app.state.artifacts = settings, factory, artifacts
