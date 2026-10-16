@@ -63,6 +63,13 @@ Its [pipeline examples](docs/devsecops-evidence-concept.md#exemplary-pipeline-in
 map PR/nightly builds, legacy C/C++, containers, supplier inputs and parallel
 versions to intake, review, release gates, documentation and monitoring.
 
+The [component identity design](docs/rewrite-plan.md#component-identity-markers-and-continuity)
+now specifies stable DTVP IDs, ecosystem-aware package markers, exact variants and
+artifact bindings. Unambiguous continuity should be automatic; ambiguity requires
+confirmation. This design extends the existing explicit correspondence workflow;
+automatic reconciliation remains implementation work, and identity alone never
+extends human approval into a new context or version.
+
 ### Rewrite completion and acceptance boundary
 
 The bounded implementation batches are committed on `rewrite/knowledge-journal`.

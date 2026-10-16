@@ -254,6 +254,65 @@ occurrence. Prefer strong coordinates and preserve external reference mappings;
 names or import-local BOM refs alone cannot establish stable identity. Ambiguous
 matches remain unresolved rather than copying assessments speculatively.
 
+#### Component identity markers and continuity
+
+Design decision: establish continuity automatically for unambiguous matches;
+require explicit confirmation for ambiguity. This is a target contract, not a
+claim that automatic cross-import reconciliation is already implemented.
+
+Assign an immutable DTVP component/lineage ID; mutable imported metadata is not its
+primary key. Keep source assertions and their provenance alongside normalized
+identity markers. A lineage can have several package versions and build variants.
+
+| Marker | Purpose and limits |
+| --- | --- |
+| Ecosystem/package type | Distinguishes Maven, npm, PyPI, distro packages, containers, etc.; normalize using the ecosystem's rules |
+| Namespace/group + package name | Package coordinates; group is not a vendor identity; missing namespace is not known-empty |
+| Full canonical PURL | Preferred exact package coordinate, including supplied version, qualifiers and subpath; not proof of identical bytes |
+| Version | Exact package release; retain original spelling and ecosystem-specific semantics, never generic SemVer assumptions |
+| Distro, architecture, packaging, repository authority, subpath | Preserve variant/authority distinctions; unknown qualifiers remain significant until an explicit policy classifies them |
+| Vendor/manufacturer and supplier | Separate attributed organization fields; display names alone do not establish identity |
+| Algorithm-qualified artifact digest | Identifies exact bytes at the declared scope (file/package/image); use strong digests and never compare unlike scopes |
+| Repository + module path + commit | Supports source/module/build binding; a repository alone cannot identify every component it contains |
+| Producer component ID | Useful only within a configured issuer/source scope with an explicit stability contract |
+| CPE, SWID and reviewed aliases | Additional identity assertions; CPE is a product/vulnerability coordinate, not sufficient proof of exact package/build equality |
+| BOM ref / SPDX local ID / imported DT UUID | Original source references; not portable identity across independently generated documents or sources |
+
+Derive separate keys for package family, exact package/variant and artifact; retain
+all coordinates. Family grouping excludes version but does not establish variant
+or assessment equivalence. Versionless PURL is a grouping/candidate key, not a
+universal uniqueness guarantee, particularly for generic/private packages.
+Internal/legacy components without reliable package coordinates can use an
+explicit organization-scoped component ID, optionally emitted by the producer.
+Do not fabricate a public ecosystem identity from free-text vendor/name fields.
+
+Automatic continuity requires a unique compatible match within the product/part
+and context scope, an unchanged exact package/variant or scoped artifact binding,
+and no conflicting strong assertions. Names/vendor/group tuples alone produce
+candidates unless a reviewed identity policy makes those coordinates authoritative
+for that source. Explicit producer IDs can preserve lineage across upgrades but do
+not preserve exact package identity or approval automatically. Missing identity
+information is unknown, never a wildcard. Duplicate occurrences stay distinct.
+
+Store the matched markers, evidence, identity-policy revision and explanation.
+Changing or enriching an identity creates a new journal state; preserve previous
+assertions and confirmed aliases. Corrections/splits never rewrite tagged history.
+Assessment continuity additionally checks the consuming context, relevant evidence
+and recorded applicability conditions. An identity match alone cannot transfer an
+approval into another context or newly covered version.
+
+Reference comparison: Dependency-Track's documented policy identity includes
+coordinates, PURL, CPE, SWID and hashes. Its inspected development-branch
+`ComponentQueryManager.buildComponentIdentityQuery` matches alternatives with OR:
+full PURL, PURL coordinates without qualifiers/subpath, CPE, SWID or the exact
+nullable group/name/version tuple, optionally within one project. That helper is
+not a specification of every ingestion path or a uniqueness guarantee. DTVP uses
+these markers with explicit conflict checks and separate context/variant identity.
+Sources: [DT identity](https://docs.dependencytrack.org/analysis-types/component-identity/),
+[DT matching implementation](https://github.com/DependencyTrack/dependency-track/blob/master/src/main/java/org/dependencytrack/persistence/ComponentQueryManager.java),
+[PURL specification](https://github.com/package-url/purl-spec),
+[CycloneDX BOM identifiers](https://cyclonedx.org/guides/sbom/bom).
+
 A usage context is a consuming component's dependency tree in a version branch.
 The same dependency in two consuming trees needs separate assessment coverage,
 even if owned by the same team. Several paths within one tree do not by themselves
