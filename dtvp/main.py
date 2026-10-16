@@ -1,3 +1,4 @@
+import re
 from contextlib import asynccontextmanager
 
 from authlib.integrations.starlette_client import OAuth
@@ -29,6 +30,7 @@ from dtvp.api_intelligence_comparison import router as intelligence_comparison_r
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_issued_exports import router as issued_exports_router
 from dtvp.api_knowledge import router as knowledge_router
+from dtvp.api_legacy_archive import router as legacy_archive_router
 from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_metadata_editor import router as metadata_editor_router
@@ -127,6 +129,7 @@ def create_app(settings=None):
     app.include_router(synchronization_router)
     app.include_router(source_jobs_router)
     app.include_router(licenses_router)
+    app.include_router(legacy_archive_router)
     if settings.playground:
         from dtvp.api_playground_knowledge import router as knowledge_playground_router
 
@@ -135,7 +138,14 @@ def create_app(settings=None):
 
     @app.middleware("http")
     async def protect(request, call_next):
-        if request.method in {"POST", "PUT", "PATCH"}:
+        archive_stream = (
+            request.method == "POST"
+            and re.fullmatch(
+                r"/api/v3/projects/[^/]+/migration/v1-archive/preview", request.url.path
+            )
+            is not None
+        )
+        if request.method in {"POST", "PUT", "PATCH"} and not archive_stream:
             chunks, size = [], 0
             async for chunk in request.stream():
                 size += len(chunk)

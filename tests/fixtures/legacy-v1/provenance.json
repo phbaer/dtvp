@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "source_commit": "bdc7ba41a40697b0a3f5aa1b619518216e5087f8",
+  "exporter_source_sha256": "cc63b8301fa7e81c574276e2d599f286520bdf472c9cacd96ca07a549e49907f",
+  "source_test": "tests/test_project_archive_services.py",
+  "fixture_generation": "Actual frozen exporter with its synthetic FakeCacheManager/FakeExportClient; no Dependency-Track, network, operational data or Git traversal during ingestion. Valid fixture explicitly adds CycloneDX1.6 fields; diffable fixture uses original expanded-tree writer.",
+  "fixtures": {
+    "diffable-synthetic.zip": "2472973d01b6003344c365efd2b8622daa4d5c61977d417b7bbba72316057589",
+    "old-writer.zip": "6ed3c56ececec269f8a71c81256d82580f64ac599366c973f0ca7b2fc42eb8f0",
+    "valid-synthetic.zip": "4499e2f0c5e2257bd93203db3613bfc0036061f311442e53823506413fefbdce"
+  }
+}

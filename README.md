@@ -749,6 +749,58 @@ opted-in jobs gain private proof. The isolated sibling implementation is commit
 `a10b5d4` on `fix/immutable-source-binding` in `/tmp/agentyzer-source-binding`;
 it has not been merged, pushed or deployed.
 
+### External v1 project archive dry run
+
+Managers can inspect an exported `dtvp.project-archive/v1` ZIP without restoring it:
+
+```bash
+curl --fail-with-body --header "Authorization: Bearer $DTVP_TOKEN" \
+  --header 'Content-Type: application/zip' --data-binary @project.dtvp-project-archive.zip \
+  "$DTVP_URL/api/v3/projects/$PROJECT_ID/migration/v1-archive/preview"
+```
+
+The endpoint requires current target management permission before consuming the
+body. This exact POST route bypasses the general eager upload buffer and enforces
+its own streamed bound; all other routes and methods retain existing buffering,
+authentication, CSRF and response headers. Parsing runs outside the event loop.
+Use `offset`/`limit` (maximum 100) for bounded source-version pages. Resubmit exact
+bytes to reproduce the same full-report `preview_digest`; pages never invent
+source history or select target version mappings.
+
+The pure reader validates actual ZIP end/central-directory metadata before
+constructing the library member table, then checks original member hashes/sizes
+and the v1 manifest's five per-version JSON files. It rejects unsafe/ambiguous
+paths, duplicate aliases, encrypted/symlink/overlapping entries, ZIP64 and alternate
+Unicode paths, undeclared/missing files, mismatched checksums/counts, duplicate JSON
+keys, nonfinite JSON and unsupported archive schemas. Limits: configured upload
+maximum or 64 MiB compressed (whichever is smaller), 128 MiB expanded, 16 MiB per
+member, 4 MiB central directory, 2,000 entries, 100 source versions, JSON depth 64
+and one million nodes per member. Actual decoded reads are bounded as well as
+advertised sizes; archives are never extracted and no Git commands run.
+
+Reports expose hashes, counts, native SBOM normalization support, exact source
+UUID-to-exported-ref mapping coverage and explicit losses. They summarize tagged,
+plain/missing documentation and unverified source-state claims without returning
+raw source URLs, names, personal documentation or credentials. Missing/ambiguous
+component mappings never fall back to package names or PURLs. Unsupported legacy
+SBOMs are reported without silently adding a CycloneDX version or upgrading them.
+Git-friendly expanded exports can be rezipped with their manifest at the root;
+missing capture/author/build fields stay unknown, not reconstructed from Git.
+
+No ZIP, member, metadata, assessment or permission is persisted. There is no apply
+endpoint, DT writeback, membership creation or native approval. V1 captures are
+partial snapshots: assessment comments may have been stripped, histories and
+operational databases are incomplete, and exported BOM JSON need not be the
+original pipeline bytes. Retain the caller's original archive. Complete migration
+and controlled cutover still require representative sanitized archives and an
+explicit publication contract.
+
+Three committed synthetic fixtures were produced by the frozen v1 exporter and
+its fake clients: its original incomplete BOM/plain documentation, an explicitly
+valid CycloneDX/tagged variant, and the original diffable-tree writer. Fixture
+provenance/hash pins are in `tests/fixtures/legacy-v1/provenance.json`; tests and
+production inspection require no old runtime, Git, DT or customer data.
+
 ### Explicit local v2 snapshot migration rehearsal
 
 `POST /api/v3/projects/{target}/versions/{version}/migration/v2/preview`
