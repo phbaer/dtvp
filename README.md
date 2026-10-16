@@ -868,9 +868,20 @@ Authored annotations apply to the selected component occurrence/version and can
 change material evidence for all its consuming contexts. They do not establish
 applicability, approvals, legal clearance, architecture approval or published scores.
 
-Topology presentation is bounded to the first 50 imported direct consumers and
-50 dependencies, with full counts and explicit unresolved references/unknown graph
-coverage. It does not infer runtime reachability or completeness, add cross-part
+Topology presentation initially shows 50 imported direct consumers and 50
+dependencies, with full counts and explicit unresolved references/unknown graph
+coverage. Each direction supports separate search and paging through all declared
+neighbors; an unsubmitted search never changes the active paging scope. Failed
+reads retain the displayed results and exact state/component pins.
+
+`GET /api/v3/projects/{id}/states/{sha}/component-neighbors` requires current
+project-read authorization and an existing component occurrence. It accepts
+`component_ref`, `direction=incoming|outgoing`, `q`, `offset` and `limit` (1–200).
+Full filtered and declared counts precede paging; duplicate direct edges are
+deduplicated, unresolved references and cycles retained. Historical queries stay
+pinned after nightly imports. CLI consumers can use `knowledge request GET`
+with this same endpoint. Search covers source-local reference, name and version.
+ It does not infer runtime reachability or completeness, add cross-part
 assembly edges, edit dependency topology, provide a full interactive graph, or
 prove generated architecture correspondence. Imported source facts remain intact;
 prior metadata revisions and human decisions remain recoverable in journal history.

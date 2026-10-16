@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 const state = 'a'.repeat(64), revision = 'b'.repeat(64), newer = 'c'.repeat(64), context = 'd'.repeat(64)
 const annotations = { cybersecurity: { criticality: 'moderate', exposure: 'internal', mitigations: ['Firewall\nseparate note'], testing_evidence: ['TEST-42'] }, deployment: { environment: 'Production', usage: 'Report generation', configuration: 'Default' }, support: { status: 'supported', supplier: 'Supplier', support_until: null, end_of_life: null, references: ['SUPPORT-42'] }, notes: 'Keep this note', properties: { preserved: 'yes' } }
-async function fixture(page: Page, options: { manage?: boolean; stale?: boolean; conflict?: boolean; delayedRead?: boolean } = {}) {
-  const writes: any[] = []; let attempts = 0, current = state, reads = 0
+async function fixture(page: Page, options: { manage?: boolean; stale?: boolean; conflict?: boolean; delayedRead?: boolean; manyNeighbors?: boolean } = {}) {
+  const writes: any[] = []; const neighborReads: string[] = []; let neighborAttempts = 0; let attempts = 0, current = state, reads = 0
   let releaseRead!: () => void
   const readGate = new Promise<void>(resolve => { releaseRead = resolve })
   const metadata = { revision, status: options.stale ? 'stale' : 'current', applicable: !options.stale, payload: { annotations, provenance: { source: 'Component owner', reference: 'DESIGN-42', observed_at: '2026-10-15T12:00:00Z' }, rationale: 'Previous evidence', actor_id: 'manager', created_at: '2026-10-15T12:00:00Z' } }
@@ -17,14 +17,20 @@ async function fixture(page: Page, options: { manage?: boolean; stale?: boolean;
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1', state: current }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: current, project_id: 'product', version: '7.1', items: options.delayedRead ? [finding, second] : [finding], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.includes('/workspace/')) result = { ...(path.includes(second.context_id) ? second : finding), state: current }
-    else if (path.endsWith('/component-context')) { reads++; if (options.delayedRead && reads === 1) await readGate; result = { state: current, head: current, version: '7.1', component_ref: 'library', component: { name: 'Runtime library', 'bom-ref': 'library' }, metadata, defaults: annotations, capabilities: options.manage ? ['curate'] : [], blocked_reasons: options.manage ? [] : ['component_metadata_requires_management_permission'], limitations: [], topology: { dependency_graph: 'reported', consuming_root: url.searchParams.get('context_id') === second.context_id ? 'second-root' : 'application', incoming: [{ ref: 'application', name: 'Application', version: '7.1', resolved: true }], outgoing: [], incoming_total: 1, outgoing_total: 0, neighbor_limit: 50, limitations: ['Edges do not establish runtime reachability or complete discovery.'] } } }
+    else if (path.endsWith('/component-neighbors')) {
+      neighborReads.push(request.url()); neighborAttempts++
+      const query = url.searchParams.get('q') || '', offset = Number(url.searchParams.get('offset') || 0)
+      if (neighborAttempts === 1) { status = 503; result = { detail: 'Read temporarily unavailable' } }
+      else { const all = Array.from({ length: 75 }, (_, index) => ({ ref: `consumer-${String(index).padStart(3, '0')}`, name: `Consumer ${index}`, version: '1', resolved: index !== 74 })), items = all.filter(row => !query || row.name.toLowerCase().includes(query.toLowerCase())); result = { state, component_ref: 'library', direction: url.searchParams.get('direction'), items: items.slice(offset, offset + 50), total: items.length, declared_total: all.length, next_offset: offset + 50 < items.length ? offset + 50 : null } }
+    }
+    else if (path.endsWith('/component-context')) { reads++; if (options.delayedRead && reads === 1) await readGate; result = { state: current, head: current, version: '7.1', component_ref: 'library', component: { name: 'Runtime library', 'bom-ref': 'library' }, metadata, defaults: annotations, capabilities: options.manage ? ['curate'] : [], blocked_reasons: options.manage ? [] : ['component_metadata_requires_management_permission'], limitations: [], topology: { dependency_graph: 'reported', consuming_root: url.searchParams.get('context_id') === second.context_id ? 'second-root' : 'application', incoming: options.manyNeighbors ? Array.from({ length: 50 }, (_, index) => ({ ref: `consumer-${String(index).padStart(3, '0')}`, name: `Consumer ${index}`, version: '1', resolved: true })) : [{ ref: 'application', name: 'Application', version: '7.1', resolved: true }], outgoing: [], incoming_total: options.manyNeighbors ? 75 : 1, outgoing_total: 0, neighbor_limit: 50, limitations: ['Edges do not establish runtime reachability or complete discovery.'] } } }
     await route.fulfill({ status, json: result })
   })
   await page.goto('/?page=Knowledge')
   await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Metadata product', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2026-1234', exact: true }).click()
   await page.locator('.component-context > summary').click()
-  return { writes, releaseRead, panel: page.locator('.component-context') }
+  return { writes, neighborReads, releaseRead, panel: page.locator('.component-context') }
 }
 async function prepare(page: Page) {
   await page.getByRole('button', { name: 'Edit component annotations', exact: true }).click()
@@ -77,4 +83,29 @@ test('changing consuming context during a pending read reloads without stale dat
   releaseRead()
   await expect(panel).toContainText('Consuming root: second-root')
   await expect(panel).not.toContainText('Loading pinned component context')
+})
+
+
+test('large dependency neighborhoods retain pinned paging after errors and search only on explicit submit', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { panel, neighborReads, writes } = await fixture(page, { manyNeighbors: true })
+  await panel.getByText('Declared dependency neighborhood', { exact: false }).click()
+  const consumers = panel.getByRole('region', { name: 'Direct consumers', exact: true })
+  await expect(consumers).toContainText('75 matching / 75 declared neighbors')
+  await consumers.getByRole('button', { name: 'Next neighbors', exact: true }).click()
+  await expect(consumers.getByRole('alert')).toContainText('results and paging scope are retained')
+  await expect(consumers).toContainText('Consumer 0 @ 1')
+  await consumers.getByRole('searchbox', { name: 'Find neighbor', exact: true }).fill('Consumer 74')
+  await consumers.getByRole('button', { name: 'Next neighbors', exact: true }).click()
+  await expect(consumers).toContainText('Consumer 74 @ 1')
+  await expect(consumers).toContainText('unresolved reference')
+  expect(new URL(neighborReads[1]!).searchParams.get('q')).toBe('')
+  expect(new URL(neighborReads[1]!).searchParams.get('offset')).toBe('50')
+  await consumers.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(consumers).toContainText('1 matching / 75 declared neighbors')
+  await expect(consumers.getByRole('button', { name: 'Previous neighbors', exact: true })).toBeDisabled()
+  expect(new URL(neighborReads[2]!).searchParams.get('q')).toBe('Consumer 74')
+  expect(neighborReads.every(value => new URL(value).pathname.includes(`/states/${state}/`))).toBe(true)
+  expect(writes).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })

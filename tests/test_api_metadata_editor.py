@@ -106,3 +106,41 @@ def test_neighbor_lists_are_bounded_and_missing_graph_is_explicitly_unknown(anal
     assert value["topology"]["dependency_graph"] == "not_reported"
     assert value["topology"]["incoming_total"] == value["topology"]["outgoing_total"] == 0
     assert "unknown or absent edges" in value["topology"]["limitations"][0]
+
+
+def test_complete_neighbor_paging_search_and_historical_pins(analyst, app, bom):
+    from copy import deepcopy
+
+    from tests.test_knowledge_api import body, imported
+
+    project, _ = setup(analyst, bom)
+    original, _, params = selection(analyst, project)
+    source = deepcopy(bom)
+    target = params["component_ref"]
+    for index in range(76):
+        ref = f"consumer-{index:03}"
+        source["components"].append({"bom-ref": ref, "type": "library", "name": ref})
+        source["dependencies"].append({"ref": ref, "dependsOn": [target]})
+    state = imported(analyst, project, "large", body(source, request_id="paged-neighbors"))
+    path = url(project, f"/states/{state}/component-neighbors")
+    before = app.state.knowledge.head()
+    query = {"component_ref": target, "direction": "incoming", "limit": 50}
+    first = analyst.get(path, params=query)
+    assert first.status_code == 200, first.text
+    value = first.json()
+    assert value["total"] >= 76 and len(value["items"]) == 50
+    second = analyst.get(path, params={**query, "offset": value["next_offset"]}).json()
+    combined = value["items"] + second["items"]
+    assert len(combined) == value["total"]
+    assert len({row["ref"] for row in combined}) == value["total"]
+    filtered = analyst.get(path, params={**query, "q": "CONSUMER-075"}).json()
+    assert filtered["total"] == 1 and filtered["declared_total"] == value["total"]
+    assert filtered["items"][0]["ref"] == "consumer-075"
+    old = analyst.get(url(project, f"/states/{original}/component-neighbors"), params=query).json()
+    assert old["state"] == original and old["total"] < value["total"]
+    assert app.state.knowledge.head() == before
+    assert analyst.get(path, params={**query, "limit": 201}).status_code == 422
+    assert analyst.get(path, params={**query, "direction": "transitive"}).status_code == 422
+    assert analyst.get(path, params={**query, "component_ref": "absent"}).status_code == 404
+    login(analyst, "operations")
+    assert analyst.get(path, params=query).status_code == 404
