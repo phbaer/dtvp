@@ -106,6 +106,14 @@ def configure(parser):
     intelligence.add_argument("--offset", type=int, default=0)
     intelligence.add_argument("--limit", type=int, default=50)
     intelligence.add_argument("--json", action="store_true")
+    archive = commands.add_parser(
+        "legacy-archive-preview", help="Inspect an exported v1 ZIP without restoring it"
+    )
+    archive.add_argument("--project", required=True)
+    archive.add_argument("--archive", required=True)
+    archive.add_argument("--offset", type=int, default=0)
+    archive.add_argument("--limit", type=int, default=25)
+    archive.add_argument("--json", action="store_true")
     quality = commands.add_parser(
         "input-quality", help="Inspect pinned producer input observations"
     )
@@ -247,6 +255,53 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "legacy-archive-preview":
+            from stat import S_ISREG
+            from urllib.parse import quote
+
+            from dtvp.knowledge.legacy_archive import MAX_COMPRESSED
+
+            path = Path(args.archive)
+            metadata = path.stat()
+            if not S_ISREG(metadata.st_mode) or metadata.st_size > MAX_COMPRESSED:
+                raise ValueError("Legacy archive requires a regular file no larger than 64 MiB")
+            with path.open("rb") as source:
+                opened = os.fstat(source.fileno())
+                if not S_ISREG(opened.st_mode) or opened.st_size > MAX_COMPRESSED:
+                    raise ValueError("Opened legacy archive exceeds the regular-file upload bound")
+
+                def chunks():
+                    total = 0
+                    while chunk := source.read(64 * 1024):
+                        total += len(chunk)
+                        if total > MAX_COMPRESSED:
+                            raise ValueError("Legacy archive grew beyond the 64 MiB upload bound")
+                        yield chunk
+
+                result = read_response(
+                    client.post(
+                        f"/api/v3/projects/{quote(args.project, safe='')}/migration/v1-archive/preview",
+                        params={"offset": args.offset, "limit": args.limit},
+                        headers={"Content-Type": "application/zip"},
+                        content=chunks(),
+                    )
+                )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(f"Preview: {result['preview_digest']} · Source versions: {result['total']}")
+                print("Statistics: " + json.dumps(result["statistics"], sort_keys=True))
+                for row in result["items"]:
+                    print(
+                        f"Entry {row['entry_index']} {row['source_entry_id']} · Normalization: {row['normalization']['status']}"
+                    )
+                    for loss in row["losses"]:
+                        print("  Loss: " + loss)
+                for limitation in result["limitations"]:
+                    print("Limit: " + limitation)
+                if result.get("next_offset") is not None:
+                    print(f"Next offset: {result['next_offset']} (resubmit the identical archive)")
+            return
         if args.knowledge_command == "evidence-summary":
             from urllib.parse import quote
 

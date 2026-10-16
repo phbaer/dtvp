@@ -798,6 +798,20 @@ curl --fail-with-body --header "Authorization: Bearer $DTVP_TOKEN" \
   "$DTVP_URL/api/v3/projects/$PROJECT_ID/migration/v1-archive/preview"
 ```
 
+The HTTP CLI can stream the same dry run without preparing JSON or multipart data:
+
+```bash
+uv run dtvp knowledge --url http://127.0.0.1:8900 legacy-archive-preview \
+  --project PROJECT_ID --archive project.dtvp-project-archive.zip --json
+```
+
+Use `--offset`/`--limit` for source-version pages and resubmit the identical file
+for the same report digest. The CLI admits a regular file no larger than 64 MiB
+before opening it, rechecks the opened file and streams exact bytes in 64 KiB
+chunks with an actual-growth bound. A smaller server upload limit still applies.
+Only the backend parses the ZIP, checks permissions and interprets source claims;
+HTTP rejection remains an error. This command does not apply or persist an archive.
+
 The endpoint requires current target management permission before consuming the
 body. This exact POST route bypasses the general eager upload buffer and enforces
 its own streamed bound; all other routes and methods retain existing buffering,
