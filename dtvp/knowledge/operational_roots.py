@@ -24,6 +24,7 @@ NATIVE_KINDS = {
     "import-dt-native",
     "refresh-advisories-native",
     "match-osv-native",
+    "propose-sync-native",
 }
 
 
@@ -77,6 +78,19 @@ def _job_roots(journal, row, roots):
             for value in values:
                 _required(journal, value, roots)
     payload = row["payload"]
+    if row["kind"] == "propose-sync-native":
+        inputs = payload.get("inputs")
+        if not isinstance(inputs, dict):
+            raise CorruptJournal("Invalid retained synchronization inputs")
+        for key in ("policy", "source", "target"):
+            _required(journal, inputs.get(key), roots)
+        relationship = inputs.get("relationship")
+        if not isinstance(relationship, dict):
+            raise CorruptJournal("Invalid retained synchronization relationship")
+        if relationship.get("basis") is not None:
+            _required(journal, relationship["basis"], roots)
+        if "artifact_sha" in row["result"]:
+            _required(journal, row["result"]["artifact_sha"], roots)
     correlations = [payload.get("correlation")]
     follow_up = payload.get("follow_up")
     if isinstance(follow_up, dict):

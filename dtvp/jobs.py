@@ -88,12 +88,15 @@ def execute(factory, artifacts, settings, job_id, token):
         "import-dt-native",
         "refresh-advisories-native",
         "match-osv-native",
+        "propose-sync-native",
     }:
         from dtvp.knowledge.journal import Journal
         from dtvp.knowledge.projection import catch_up
 
         journal = Journal(artifacts.root / "knowledge")
-        if kind == "analyse-native":
+        if kind == "propose-sync-native":
+            from dtvp.knowledge.sync_jobs import execute as execute_native
+        elif kind == "analyse-native":
             from dtvp.knowledge.analysis_jobs import execute_analysis as execute_native
         elif kind == "match-osv-native":
             from dtvp.knowledge.osv_jobs import execute_matching as execute_native
@@ -269,6 +272,18 @@ def work_once(factory, artifacts, settings):
 
 
 def _work_once(factory, artifacts, settings):
+    # Recover journal/SQL enqueue gaps without delaying knowledge publication.
+    # Repeated failures are logged; unrelated queued jobs must remain executable.
+    from dtvp.knowledge.journal import Journal
+    from dtvp.knowledge.sync_jobs import reconcile
+
+    last_scan = getattr(_work_once, "last_sync_scan", 0)
+    if time.monotonic() - last_scan >= 5:
+        _work_once.last_sync_scan = time.monotonic()
+        try:
+            reconcile(factory, Journal(artifacts.root / "knowledge"))
+        except Exception:
+            logger.exception("Automatic synchronization scheduling awaits reconciliation")
     claimed = claim(factory)
     if not claimed:
         return False

@@ -29,8 +29,8 @@ discarded. Persona changes remain available and invalidate prior-actor responses
 Shared authentication, catalog and job services remain required; removing the v2
 router requires explicit consumer/project cutover, not just changing the landing page.
 VDR/VEX JSON semantic subsets, explicit occurrence correspondence and pinned
-assessment synchronization previews/drafts are available. Advanced scope handling
-and automatic cascading synchronization remain planned. Local v2 snapshot migration
+assessment synchronization previews/drafts are available. Advanced scope handling is explicit; configured relationships now schedule
+read-only synchronization proposals through the existing worker. Local v2 snapshot migration
 is explicit; existing v2 data never becomes journal-authoritative implicitly.
 Reuse decisions compare original v1 on local
 `main` (`bdc7ba4`), committed refactoring and uncommitted work separately; see the
@@ -106,8 +106,8 @@ collection is available; history compaction remains unimplemented.
 The [synchronization automation design](docs/rewrite-plan.md#automatic-synchronization-proposals)
 automatically prepares proposals after relevant accepted imports/integration events
 on configured version relationships. Acceptance and review of new coverage remain
-explicit; unchanged target approvals stay valid. Automatic scheduling/lifecycle
-remain implementation work on top of the existing pinned previews and drafts.
+explicit; unchanged target approvals stay valid. Automatic scheduling and durable proposal lifecycle now ship alongside existing
+pinned previews and explicit target draft adoption.
 
 ### Automatic identity comparison (first implementation slice)
 
@@ -2735,3 +2735,67 @@ require renewed review. Full original files remain retrievable. Preview samples
 are limited to 20 entries/list; full reports remain retained artifacts. Selection
 is bounded to 200 sources, 2,000 adoptions/source, 100,000 candidate records and
 64 MiB normalized candidate/report limits, failing without partial publication.
+
+### Automatic synchronization proposal scheduling
+
+Managers configure explicit source→target version relationships through
+`GET/PUT /api/v3/projects/{id}/synchronization-policy`. Configuration is a
+journal-backed CAS policy with ≤20 relationships, optional explicit common basis
+and ≤1,000 one-to-one context mappings per relationship. Empty relationships
+stop future scheduling; already captured jobs remain inspectable. Relationships
+can reference not-yet-created versions and wait until both branch heads exist.
+
+The existing SQL worker rescans committed policy/branch references every five
+seconds, rotating across at most 100 configured products per pass. Deterministic
+job IDs deduplicate exact policy/source/target pins. This repairs journal/SQL
+enqueue gaps after process failure without blocking knowledge publication.
+Imports, assessment/review/evidence changes and recorded integration events change
+the relevant branch pins and therefore trigger fresh proposals. After downtime,
+intermediate heads are coalesced into the latest observed state; this is not a
+promise to produce an individual proposal for every historical publication.
+Cyclic relationships cannot trigger feedback because proposals never mutate
+knowledge, target inventory, assessments, approvals or scores.
+
+`GET /projects/{id}/synchronization-jobs` lists durable jobs; detail and paginated
+`/{job}/proposal` return exact frozen inputs, preview digest, retained artifact
+hash and current stale classification. Computation reuses pinned synchronization
+previews and is bounded to 2,000 rows/16 MiB with leased execution. Historical
+proposals remain readable under current project authorization after heads/policy
+change. Existing explicit draft adoption/review remains the only application path.
+
+Execution rechecks the policy author's current credential and project manage
+permission. Use a suitably scoped machine credential for unattended operation;
+a revoked/expired credential fails closed. Reauthorize the policy explicitly or
+retry a failed job as its original author with a current authorized credential.
+`POST /synchronization-jobs/{job}/retry` preserves all knowledge pins; `/cancel`
+stops queued/running collection. Failed/cancelled jobs never implicitly restart.
+SQL jobs and proposal artifacts remain operational backup/retention roots; the
+journal alone does not reconstruct operational job state.
+
+Knowledge exposes lazy advanced **Pipeline source roles and threat-model mappings**
+and **Automatic synchronization relationships** editors. Current server capabilities
+govern editing; explicit review captures a complete JSON replacement and exact policy/
+version pins. Uncertain PUT requests and job actions retain their original request
+until resolved/discarded; actor changes invalidate prior responses. Proposal browsing
+is read-only and paginated, with frozen source/target/digest and visible stale status.
+
+The HTTP-only CLI offers:
+
+```bash
+uv run dtvp knowledge pipeline-config --project PROJECT
+uv run dtvp knowledge pipeline-config --project PROJECT --input exact-request.json
+uv run dtvp knowledge pipeline-context --project PROJECT --state STATE --configuration POLICY
+uv run dtvp knowledge synchronization-policy --project PROJECT --input exact-policy-request.json
+uv run dtvp knowledge synchronization-jobs --project PROJECT
+uv run dtvp knowledge synchronization-jobs --project PROJECT --job JOB --action proposal
+uv run dtvp knowledge synchronization-jobs --project PROJECT --job JOB --action retry
+uv run dtvp knowledge observation-import --project PROJECT --version VERSION --input metadata.json --file original.cdx.json
+uv run dtvp knowledge observation-sources --project PROJECT --version VERSION
+uv run dtvp knowledge observation-selection --project PROJECT --version VERSION --input selection.json
+uv run dtvp knowledge observation-selection --project PROJECT --version VERSION --input selection.json --apply
+```
+
+Configuration commands GET by default and PUT only with `--input`; observation
+selection previews by default and publishes only with `--apply`. Files retain exact
+SBOM bytes (CLI transport bound 32 MiB); all matching, validation, policy and workflow
+decisions remain server-side. Commands print JSON; no local domain calculations.

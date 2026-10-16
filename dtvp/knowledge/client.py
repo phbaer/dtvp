@@ -64,6 +64,44 @@ def configure(parser):
     command.add_argument("--token-env", default="DTVP_API_TOKEN")
     command.add_argument("--persona", help="Synthetic playground login only")
     commands = command.add_subparsers(dest="knowledge_command", required=True)
+    for name in ("observation-import", "observation-selection", "observation-sources"):
+        resource = commands.add_parser(
+            name, help="Use pinned observation intake and explicit selection"
+        )
+        resource.add_argument("--project", required=True)
+        resource.add_argument("--version", required=True)
+        if name != "observation-sources":
+            resource.add_argument("--input", required=True, help="Exact request metadata JSON")
+        if name == "observation-import":
+            resource.add_argument(
+                "--file", required=True, help="Original SBOM bytes (up to 32 MiB)"
+            )
+        elif name == "observation-selection":
+            resource.add_argument(
+                "--apply",
+                action="store_true",
+                help="Publish the explicit selection; default is preview",
+            )
+        else:
+            resource.add_argument("--offset", type=int, default=0)
+            resource.add_argument("--limit", type=int, default=50)
+    for name in ("pipeline-config", "synchronization-policy"):
+        resource = commands.add_parser(name, help="Read or explicitly replace pinned configuration")
+        resource.add_argument("--project", required=True)
+        resource.add_argument("--input", help="Exact PUT request JSON; omitted for read-only GET")
+    context = commands.add_parser("pipeline-context", help="Read pinned resolved model mappings")
+    for name in ("project", "state", "configuration"):
+        context.add_argument("--" + name, required=True)
+    context.add_argument("--offset", type=int, default=0)
+    context.add_argument("--limit", type=int, default=200)
+    automatic = commands.add_parser(
+        "synchronization-jobs", help="Read or explicitly retry/cancel automatic proposals"
+    )
+    automatic.add_argument("--project", required=True)
+    automatic.add_argument("--job")
+    automatic.add_argument("--action", choices=("proposal", "retry", "cancel"))
+    automatic.add_argument("--offset", type=int, default=0)
+    automatic.add_argument("--limit", type=int, default=50)
     identity = commands.add_parser(
         "identity-matches", help="Compare pinned component identity candidates"
     )
@@ -306,6 +344,83 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command in {
+            "observation-import",
+            "observation-selection",
+            "observation-sources",
+        }:
+            from stat import S_ISREG
+            from urllib.parse import quote
+
+            path = f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}"
+            if args.knowledge_command == "observation-sources":
+                response = client.get(
+                    path + "/observation-sources",
+                    params={"offset": args.offset, "limit": args.limit},
+                )
+            else:
+                metadata = json.loads(Path(args.input).read_text())
+                if not isinstance(metadata, dict):
+                    raise ValueError("Observation metadata must be a JSON object")
+                if args.knowledge_command == "observation-selection":
+                    response = client.post(
+                        path + "/observation-selection" + ("" if args.apply else "/preview"),
+                        json=metadata,
+                    )
+                else:
+                    with Path(args.file).open("rb") as source:
+                        if not S_ISREG(os.fstat(source.fileno()).st_mode):
+                            raise ValueError("Observation requires a regular SBOM file")
+                        raw = source.read(32 * 1024 * 1024 + 1)
+                    if len(raw) > 32 * 1024 * 1024:
+                        raise ValueError("Observation exceeds the CLI 32 MiB transport bound")
+                    response = client.post(
+                        path + "/observation-files",
+                        data={"metadata": json.dumps(metadata)},
+                        files={"file": (Path(args.file).name, raw, "application/octet-stream")},
+                    )
+            print(json.dumps(read_response(response), indent=2))
+            return
+        if args.knowledge_command in {
+            "pipeline-config",
+            "synchronization-policy",
+            "pipeline-context",
+            "synchronization-jobs",
+        }:
+            from urllib.parse import quote
+
+            path = f"/api/v3/projects/{quote(args.project, safe='')}"
+            if args.knowledge_command in {"pipeline-config", "synchronization-policy"}:
+                path += "/" + args.knowledge_command
+                response = (
+                    client.put(path, json=json.loads(Path(args.input).read_text()))
+                    if args.input
+                    else client.get(path)
+                )
+            elif args.knowledge_command == "pipeline-context":
+                response = client.get(
+                    path + f"/states/{quote(args.state, safe='')}/pipeline-context",
+                    params={
+                        "configuration": args.configuration,
+                        "offset": args.offset,
+                        "limit": args.limit,
+                    },
+                )
+            else:
+                if args.action and not args.job:
+                    raise ValueError("A synchronization action requires --job")
+                path += "/synchronization-jobs"
+                if args.job:
+                    path += "/" + quote(args.job, safe="")
+                if args.action:
+                    path += "/" + args.action
+                response = (
+                    client.post(path)
+                    if args.action in {"retry", "cancel"}
+                    else client.get(path, params={"offset": args.offset, "limit": args.limit})
+                )
+            print(json.dumps(read_response(response), indent=2))
+            return
         if args.knowledge_command == "identity-matches":
             from urllib.parse import quote
 

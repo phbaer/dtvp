@@ -211,3 +211,35 @@ def test_row_and_byte_bounds(database, journal, monkeypatch):
     monkeypatch.setattr(module, "MAX_BYTES", 1)
     with pytest.raises(ValueError, match="byte bound"):
         module.snapshot_operational_roots(database, journal)
+
+
+@pytest.mark.parametrize("missing", [None, "policy", "source", "target", "basis", "artifact_sha"])
+def test_synchronization_inputs_and_frozen_proposals_are_strict_roots(database, journal, missing):
+    objects = {
+        key: journal.store({"object": key})
+        for key in ("policy", "source", "target", "basis", "artifact_sha")
+    }
+    values = dict(objects)
+    if missing:
+        values[missing] = "e" * 64
+    job(
+        database,
+        kind="propose-sync-native",
+        status="cancelled",
+        payload={
+            "inputs": {
+                "policy": values["policy"],
+                "source": values["source"],
+                "target": values["target"],
+                "relationship": {"basis": values["basis"]},
+            }
+        },
+        result={"artifact_sha": values["artifact_sha"]},
+    )
+    if missing:
+        with pytest.raises(CorruptJournal, match="missing or corrupt"):
+            module.snapshot_operational_roots(database, journal)
+    else:
+        assert module.snapshot_operational_roots(database, journal)["roots"] == sorted(
+            objects.values()
+        )

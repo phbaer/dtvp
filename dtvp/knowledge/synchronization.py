@@ -163,6 +163,7 @@ def synchronization_preview(
     limit=50,
     *,
     row_id=None,
+    paginate=True,
 ):
     """Propose content only; knowledge ancestry never proves a software merge."""
     page([], offset, limit)
@@ -308,4 +309,11 @@ def synchronization_preview(
     preview["preview_digest"] = digest(canonical([preview, rows]))
     if row_id is not None:
         preview["selected_row"] = next((row for row in rows if row["id"] == row_id), None)
-    return {**preview, **page(rows, offset, limit)}
+    return {
+        **preview,
+        **(
+            page(rows, offset, limit)
+            if paginate
+            else {"items": rows, "total": len(rows), "next_offset": None}
+        ),
+    }

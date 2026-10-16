@@ -50,6 +50,7 @@ from dtvp.api_reconciliation import router as reconciliation_router
 from dtvp.api_reconciliation_catalog import router as reconciliation_catalog_router
 from dtvp.api_rescoring import router as rescoring_router
 from dtvp.api_source_jobs import router as source_jobs_router
+from dtvp.api_sync_jobs import router as sync_jobs_router
 from dtvp.api_synchronization import router as synchronization_router
 from dtvp.api_workflow import router as workflow_router
 from dtvp.auth import authenticate, issue
@@ -156,6 +157,7 @@ def _create_app(settings, lease):
     app.include_router(portfolio_router)
     app.include_router(pipeline_summary_router)
     app.include_router(pipeline_config_router)
+    app.include_router(sync_jobs_router)
     app.include_router(osv_matching_router)
     app.include_router(observations_router)
     app.include_router(ownership_editor_router)
