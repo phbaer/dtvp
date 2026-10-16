@@ -597,6 +597,12 @@ complete preview digest across pages. Shared draft/submission targets are explic
 reviews and publication never inherit across versions. Continuous applicability
 ranges and semantic cross-import identity reconciliation remain planned.
 
+Native guided file intake now bootstraps empty product versions and isolated
+source parts through exact-byte multipart imports. Read-only target inspection
+exposes authority, scope and permissions; retries freeze the complete input and
+concurrency pins. Existing scope boundaries are retained without silently copying
+old build provenance or coverage. Source parts still require explicit assembly.
+
 Explicit cross-import occurrence correspondence now has a server preview,
 attributed versioned confirmation/retraction and bounded UI selectors over committed
 states. PURL/component versions and normalized checksum evidence are checked

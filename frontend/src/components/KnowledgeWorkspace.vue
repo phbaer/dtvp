@@ -11,12 +11,14 @@ import KnowledgeLicenses from './KnowledgeLicenses.vue'
 import KnowledgeAnalysisEvidence from './KnowledgeAnalysisEvidence.vue'
 import KnowledgeSpecialists from './KnowledgeSpecialists.vue'
 import KnowledgeSources from './KnowledgeSources.vue'
-import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
+import KnowledgeIntake from './KnowledgeIntake.vue'
 import KnowledgeCoverage from './KnowledgeCoverage.vue'
 import KnowledgeDocuments from './KnowledgeDocuments.vue'
 import KnowledgePortfolio from './KnowledgePortfolio.vue'
+import KnowledgeAdvisories from './KnowledgeAdvisories.vue'
 import KnowledgeReconciliation from './KnowledgeReconciliation.vue'
 const props = defineProps<{ me: Me }>()
+const intakeLocked = ref(false)
 const project = ref(''), projectName = ref(''), version = ref(''), team = ref(''), lifecycle = ref(''), query = ref('')
 const filterLabels: Record<string, string> = { source_severity: 'Source severity', contextual_severity: 'Published severity', applicability: 'Applicability', scoring_status: 'Scoring status', team_review: 'Team assessment', provider: 'Evidence provider', cvss_version: 'Source CVSS version', dependency: 'Dependency relationship', source_conflict: 'Source discrepancies', component: 'Component' }
 const emptyFilters = () => Object.fromEntries(Object.keys(filterLabels).map(key => [key, '']))
@@ -86,6 +88,7 @@ async function load(reset = true, keep = false) {
   finally { if (current === sequence) busy.value = false }
 }
 async function chooseProject(option: { id: string; name?: string }, preferredVersion = '') {
+  if (intakeLocked.value) return
   if (teamLabelProject !== option.id) { knownTeamLabels.value = {}; teamLabelProject = option.id; if (!restoring) team.value = explicitAllTeams.value ? '' : defaultTeam() }
   const current = ++sequence; ++versionSequence; projectName.value = option.name || option.id; versions.value = []; version.value = ''; versionQuery.value = ''; versionMenu.value = false; workspace.value = null; close()
   busy.value = true; error.value = ''; notice.value = ''
@@ -96,7 +99,12 @@ async function chooseProject(option: { id: string; name?: string }, preferredVer
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
 }
+async function onCompositionImported(value: { version: string; part_id: string | null }) {
+  if (value.part_id) { notice.value = 'Source part imported; the assembled product remains unchanged.'; return }
+  await chooseProject({ id: project.value, name: projectName.value }, value.version)
+}
 async function seedDemo(scenario: 'workflow' | 'specialists' = 'workflow') {
+  if (intakeLocked.value) return
   busy.value = true; error.value = ''; notice.value = ''
   try {
     const result = await knowledgeApi<{ project_id: string; project_name: string; version: string }>('/playground/knowledge/seed', send({ scenario }))
@@ -117,7 +125,7 @@ async function loadVersions(append = false) {
   finally { if (current === versionSequence) versionBusy.value = false }
 }
 function searchVersions() { clearTimeout(versionTimer); versionTimer = setTimeout(() => { void loadVersions() }, 200) }
-function chooseVersion(value: string) { version.value = value; versionMenu.value = false; void load() }
+function chooseVersion(value: string) { if (intakeLocked.value) return; version.value = value; versionMenu.value = false; void load() }
 async function open(row: KnowledgeFinding) {
   const current = ++sequence; busy.value = true; error.value = ''; notice.value = ''
   try {
@@ -213,6 +221,7 @@ function saveView() {
 }
 function removeView(name: string) { savedViews.value = savedViews.value.filter(item => item.name !== name); try { persistViews() } catch { error.value = 'Browser storage is unavailable.' } }
 async function restoreView(value: string) {
+  if (intakeLocked.value) return
   if (busy.value) return
   const params = new URLSearchParams(value), id = params.get('k_project') || ''
   restoring = true; busy.value = true; error.value = ''
@@ -240,10 +249,10 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
 </script>
 <template>
   <section class="knowledge-workspace" aria-label="Knowledge workspace">
-    <header class="knowledge-heading"><div><h1>Contextual review</h1><p class="hint">Product version · consuming context · responsible team</p></div><div class="knowledge-actions"><button v-if="me.playground" :disabled="busy" @click="seedDemo()">Load workflow demo</button><button v-if="me.playground" :disabled="busy" @click="seedDemo('specialists')">Load specialist demo</button><button :disabled="busy || !version" @click="load()">Refresh workspace</button></div></header>
+    <header class="knowledge-heading"><div><h1>Contextual review</h1><p class="hint">Product version · consuming context · responsible team</p></div><div class="knowledge-actions"><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo()">Load workflow demo</button><button v-if="me.playground" :disabled="busy || intakeLocked" @click="seedDemo('specialists')">Load specialist demo</button><button :disabled="busy || !version" @click="load()">Refresh workspace</button></div></header>
     <form class="knowledge-filters" @submit.prevent="load()">
-      <SearchSelect v-model="project" label="Knowledge product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy" @select="chooseProject" />
-      <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>
+      <SearchSelect v-model="project" label="Knowledge product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy || intakeLocked" @select="chooseProject" />
+      <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || intakeLocked || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>
       <label>Responsible team<select v-model="team" :disabled="busy" @change="explicitAllTeams = !team"><option value="">All accessible teams</option><option v-for="item in teamOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
       <label>Review status<select v-model="lifecycle" :disabled="busy"><option value="">All statuses</option><option v-for="status in ['unassessed', 'draft', 'submitted', 'approved', 'reassessment_needed', 'historically_absent']" :key="status" :value="status">{{ label(status) }}</option></select></label>
       <label class="knowledge-search">Search<input v-model="query" :disabled="busy" type="search" placeholder="Vulnerability, component or description"></label>
@@ -263,7 +272,8 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       </div><div class="knowledge-actions"><button type="button" @click="resetFilters">Reset advanced filters</button><button class="primary">Apply filters</button></div></fieldset></form>
       <p class="hint">Filters and counts use the full server result. Unknown evidence stays unknown; outdated scores are excluded from published severity.</p>
     </details>
-    <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
+    <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy || intakeLocked" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
+    <KnowledgeIntake :project="project" :version="version" @locked="intakeLocked = $event" @imported="onCompositionImported" />
     <KnowledgeComparison :project="project" />
     <p v-if="error" role="alert" class="message">{{ error }}</p><p v-if="notice" role="status" class="message">{{ notice }}</p><p v-if="busy" role="status">Loading…</p>
     <p v-if="project && !busy && !version && !versions.length" class="empty">No journal-backed versions. Import a baseline to start.</p><p v-else-if="!project" class="empty">Select a product to review its versioned knowledge.</p>
@@ -274,9 +284,9 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
       <KnowledgeLicenses :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
       <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
-      <KnowledgeReconciliation :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
       <KnowledgeAdvisories :project="project" :state="workspace.state" />
+      <KnowledgeReconciliation :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
       <div class="knowledge-columns" :class="{ 'has-detail': selected }">
         <section class="knowledge-queue" aria-label="Context finding queue"><div class="table-wrap"><table><thead><tr><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small></td><td>{{ sourceScore(row) }}</td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
         <section v-if="selected" class="knowledge-detail" aria-label="Context finding detail">

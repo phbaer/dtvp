@@ -162,6 +162,23 @@ Explore a repeatable two-part nightly update against the running playground:
 uv run python scripts/assembly_demo.py
 ```
 
+### Interactive composition intake
+
+**Import composition** in Knowledge works before the first baseline exists.
+Inspect an existing or new product version, choose a complete product baseline or
+isolated source part, and upload the original file with an explicit source sequence
+and observation time. Source-part imports leave assembled products unchanged.
+Connector-owned and assembled baselines cannot be silently replaced by manual files.
+Existing boundary fields are prefilled, while build commits, digests, pipeline runs
+and coverage claims must be declared for the new input; old provenance is not copied.
+
+`GET /api/v3/projects/{id}/intake-target?version=VERSION[&part_id=PART]` returns the
+exact target head, source authority, boundary template and current capabilities.
+`.../intake-parts` supplies bounded searchable source-part choices. The form freezes
+file bytes, metadata, expected head and request ID before publication; ambiguous
+responses retry unchanged. Switching target requires an explicit new request.
+Imports retain historical assessments; their current validity remains server-owned.
+
 ### Versioned ownership and consuming contexts
 
 The journal-backed assessment engine supports immutable draft/submitted revisions
