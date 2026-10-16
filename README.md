@@ -686,8 +686,9 @@ age is explicit and does not establish disappearance date or obsolescence. Full
 counts accompany bounded revision/logical-assessment pages; `expected=PLAN_HASH`
 rejects changed references during pagination. The HTTP CLI can use `knowledge
 request GET /api/v3/projects/ID/maintenance/retention-preview`. This dry run writes
-nothing and makes no physical storage estimate. Archival/application, retention
-policy and journal garbage collection remain planned; history is not deleted.
+nothing and makes no physical storage estimate. Explicit logical archival uses
+the separate complete-history plan described below. Retention policy and physical
+journal garbage collection remain planned; history is not deleted.
 
 Advanced queue and portfolio filters include authored cybersecurity `criticality`,
 `exposure`, `support_status` and `metadata_status`. UI saved views and the HTTP CLI
@@ -713,6 +714,32 @@ retry identity. Historical annotations remain read only. Direct imported depende
 neighbors and raw source facts use the existing context disclosure; this is not
 an editable dependency graph, runtime topology, complete discovery or clearance.
 No-finding components do not receive implicit security/license approval.
+
+### Explicit logical assessment archival
+
+Project managers can inspect `POST /api/v3/projects/{id}/maintenance/assessment-archive/preview`
+and explicitly select up to 100 logical assessment IDs for `.../apply`. Apply also
+requires current write permission, the exact full project-reference map and plan
+hash, a stable request ID and a reason. The complete historical scan has finite
+state, pointer and 64 MiB decoded-input budgets; exceeding a cap or encountering
+unreadable/corrupt history fails closed. Unknown scope, any active covered target,
+exact tag protection or a current scoring reference blocks retirement. Preview is
+read-only and reports full counts alongside bounded pages.
+
+Publication atomically records a retirement manifest and removes selected current
+assessment/review pointers across affected branches. A concurrent new branch, tag,
+source or policy reference invalidates the plan. Original assessment payloads,
+review records, authorship, reasons, source artifacts and historical state exports
+remain immutable. No files or historical approvals are deleted; this does not
+reclaim disk space or implement retention policy or physical garbage collection.
+
+Current project readers can list `GET .../maintenance/assessment-archive` and inspect
+`GET .../maintenance/assessment-archive/{assessment_id}`; retained records explicitly
+confer no current approval. Reappearing findings require a new logical assessment ID.
+Retired IDs cannot be edited or reused, while exact earlier request receipts and
+historical coverage remain unchanged. Explicit forks may retain historical pointers
+without granting cross-version approval. Retries recheck current authorization
+before returning a prior receipt and never repin inputs or publish a second change.
 
 ### Curated component metadata
 

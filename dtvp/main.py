@@ -12,6 +12,7 @@ from dtvp.api_agentyzer_results import router as agentyzer_results_router
 from dtvp.api_analysis import router as analysis_router
 from dtvp.api_analysis_jobs import router as analysis_jobs_router
 from dtvp.api_assembly_editor import router as assembly_editor_router
+from dtvp.api_assessment_archive import router as assessment_archive_router
 from dtvp.api_bulk_reviews import router as bulk_reviews_router
 from dtvp.api_component_inventory import router as component_inventory_router
 from dtvp.api_coverage import router as coverage_router
@@ -97,6 +98,7 @@ def create_app(settings=None):
     app.include_router(analysis_router)
     app.include_router(analysis_jobs_router)
     app.include_router(assembly_editor_router)
+    app.include_router(assessment_archive_router)
     app.include_router(bulk_reviews_router)
     app.include_router(coverage_router)
     app.include_router(cpe_editor_router)

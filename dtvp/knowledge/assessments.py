@@ -240,7 +240,16 @@ def save_assessment(
     )
     if receipt:
         return receipt
+    from dtvp.knowledge.assessment_archive import archive_ref, is_retired
+
     refs = journal.references()
+    retirement_ref = archive_ref(project_id)
+    retirement_state = refs.get(retirement_ref.key)
+    if is_retired(journal, retirement_state, assessment_id):
+        raise Conflict(
+            "Assessment identifier is retired; use a new identifier or an explicit future restore"
+        )
+    publication_checks = (*publication_checks, (retirement_ref, retirement_state))
     project_heads = {
         ref.name: state
         for ref_key, state in refs.items()

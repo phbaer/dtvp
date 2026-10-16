@@ -271,7 +271,9 @@ class Journal:
             raise Conflict("Request ID already belongs to different input")
         return receipt
 
-    def publish(self, *, request_id, fingerprint, updates, checks=(), branch_heads=None):
+    def publish(
+        self, *, request_id, fingerprint, updates, checks=(), branch_heads=None, project_refs=None
+    ):
         if not updates or len({u.ref.key for u in updates}) != len(updates):
             raise ValueError("Publish at least one distinct reference")
         with self.writer():
@@ -292,6 +294,14 @@ class Journal:
                 }
                 if actual != expected:
                     raise Conflict("Product versions changed; reload ownership configuration")
+            for project_id, expected in (project_refs or {}).items():
+                actual = {
+                    key: sha
+                    for key, sha in refs.items()
+                    if Ref.model_validate_json(key).project_id == project_id
+                }
+                if actual != expected:
+                    raise Conflict("Product references changed; preview maintenance again")
             for update in updates:
                 existing = refs.get(update.ref.key)
                 if existing != update.expected:
