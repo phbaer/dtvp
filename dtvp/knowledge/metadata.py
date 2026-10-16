@@ -137,7 +137,7 @@ def get_metadata(journal, sections, version, component_ref):
     }
 
 
-def list_metadata(journal, sections, version, offset=0, limit=50):
+def list_metadata(journal, sections, version, offset=0, limit=50, *, paginate=True):
     if offset < 0 or not 1 <= limit <= 200:
         raise ValueError("Invalid component metadata page bounds")
     records = [
@@ -146,10 +146,10 @@ def list_metadata(journal, sections, version, offset=0, limit=50):
         if key.startswith("metadata:")
     ]
     return {
-        "items": records[offset : offset + limit],
+        "items": records[offset : offset + limit] if paginate else records,
         "total": len(records),
         "by_status": dict(Counter(item["status"] for item in records)),
-        "next_offset": offset + limit if offset + limit < len(records) else None,
+        "next_offset": offset + limit if paginate and offset + limit < len(records) else None,
     }
 
 

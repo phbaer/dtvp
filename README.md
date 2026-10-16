@@ -829,6 +829,18 @@ explain unknown producer coverage, historical-only scope and documentary limits.
 Detailed pinned input-quality, license, document and consumer-bundle reports are
 linked separately; original component/source/report payloads are not duplicated.
 
+Native bundles with authored annotations also include an optional
+`component_metadata` register (`dtvp.component-metadata-register/1`). It contains
+every recorded occurrence, including components without findings, with exact
+revision/authorship/provenance and server-derived current, stale, absent or
+out-of-scope status. Consumers can present current support/context facts without
+interpreting raw historical records as current annotations. No approval is implied.
+
+New knowledge-bundle issuances containing this register identify serializer `/2`;
+bundles without annotations keep their prior representation and serializer `/1`.
+Previously issued selectors always replay their archived original bytes, including
+older bundles without the register. They are never enriched through later lookups.
+
 ### License evidence worklist
 
 `GET /api/v3/projects/{id}/states/{state}/license-worklist` returns pinned,

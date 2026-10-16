@@ -326,7 +326,11 @@ def issue_export(journal, *, project_id, actor_id, state, kind, payload=None, se
         "files": artifacts,
         "selector": selector,
         "selector_sha256": selector_sha,
-        "serializer_id": SERIALIZERS[kind],
+        "serializer_id": (
+            "dtvp.knowledge-bundle-serializer/2"
+            if kind == "knowledge-bundle" and "component_metadata" in payload
+            else SERIALIZERS[kind]
+        ),
         "material_fingerprint_id": MATERIAL_FORMAT,
         "material_fingerprint": material_fingerprint(journal, state),
         "issued_by": actor_id,

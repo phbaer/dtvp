@@ -109,6 +109,15 @@ def build_bundle(journal, state):
             "format": "dtvp.license-disposition-register/1",
             **list_license_reviews(journal, sections, revision.version, paginate=False),
         }
+    if any(key.startswith("metadata:") for key in sections["history"]):
+        from dtvp.knowledge.metadata import list_metadata
+
+        # Consumers present server-derived applicability instead of treating raw
+        # historical annotations as current facts. No metadata keeps old bytes.
+        bundle["component_metadata"] = {
+            "format": "dtvp.component-metadata-register/1",
+            **list_metadata(journal, sections, revision.version, paginate=False),
+        }
     return bundle
 
 
