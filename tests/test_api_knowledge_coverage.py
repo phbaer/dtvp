@@ -157,3 +157,39 @@ def test_absent_contexts_missing_states_and_request_validation_are_explicit(anal
     assert preview(analyst, project_id, payload, offset=-1).status_code == 422
     assert preview(analyst, "not-this-project", payload).status_code == 404
     assert app.state.knowledge.head() == before
+
+
+def test_closed_range_pages_bind_unselected_new_branches_and_validate(analyst, app, bom):
+    project_id, _ = setup(analyst, bom, VERSIONS)
+    payload = {
+        **selected(analyst, project_id),
+        "version_selection": {"lower": "7.1.1", "upper": "7.2.0", "exclude": ["7.1.2"]},
+    }
+    result = preview(analyst, project_id, payload, limit=1)
+    assert result.status_code == 200, result.text
+    first = result.json()
+    assert first["total"] == first["statistics"]["versions"] == 2
+    assert first["version_selection"]["selected_versions"] == ["7.1.1", "7.2.0"]
+    assert len(first["heads"]) == 4
+    assert (
+        preview(
+            analyst, project_id, {**payload, "expected_preview": first["preview_digest"]}, offset=1
+        ).status_code
+        == 200
+    )
+    imported(analyst, project_id, "8.0.0", body(bom, request_id="outside-range-new-branch"))
+    assert (
+        preview(
+            analyst, project_id, {**payload, "expected_preview": first["preview_digest"]}, offset=1
+        ).status_code
+        == 409
+    )
+    for selector in (
+        {"lower": "7.2.0", "upper": "7.1.1"},
+        {"include": ["main"], "exclude": ["main"]},
+        {"include": ["absent-label"]},
+    ):
+        assert (
+            preview(analyst, project_id, {**payload, "version_selection": selector}).status_code
+            == 422
+        )

@@ -471,6 +471,47 @@ claims. A changed candidate head or selected exclusion blocks the entire batch.
 
 ### Cross-version assessment scope
 
+Cross-version candidates optionally accept a closed numeric release selection:
+
+```json
+{
+  "source": "SOURCE_STATE_SHA", "context_id": "CONTEXT_SHA", "vulnerability_id": "CVE-ID",
+  "version_selection": {"lower": "7.1.1", "upper": "7.2.0", "include": ["main"], "exclude": ["7.1.2"]}
+}
+```
+
+Bounds include their endpoints and order only strict numeric `major.minor.patch`
+labels. No `v` prefixes, leading zeros, prereleases, build suffixes or other label
+schemes are silently normalized. Unorderable branch names stay explicitly unknown
+unless included by exact name; includes/excludes must name current branches and
+cannot overlap. Exclusions remove exact named versions. Missing bounds are open;
+an explicit empty selector selects numeric release labels only. Omitting the
+selector preserves the existing unfiltered response and preview digest contract.
+
+Selection inspects at most 1,000 current heads and 1,000 selected context rows,
+otherwise fails without truncation. The report names selected, excluded, outside
+range and unknown branches; counts precede paging. The digest binds the selector,
+all captured heads (including excluded branches), classifications and explicit
+candidate rows. Any new or advanced branch invalidates an existing preview page.
+Selection performs no writes and never establishes applicability or approval.
+
+The assessment panel's collapsed **Limit additional versions** controls require
+explicit refresh; edits do not change the selector used by subsequent pages.
+Additional target checkboxes remain unselected. The current assessment context
+always remains in scope, even when outside the filter. Conditions and independent
+reviews remain required. The CLI uses the same endpoint with `knowledge coverage
+--version-from 7.1.1 --version-through 7.2.0 --exclude-version 7.1.2`; repeat
+`--include-version`/`--exclude-version` for exact names, and retain
+`--expected-preview` across pages.
+
+A range materializes only the finite captured candidate set. Later branches and
+nightlies do not inherit approved coverage. Assessment writes retain their
+existing explicit-target/head checks and immutable payloads; there is no dynamic
+range approval, persisted intent, assessment fingerprint change or new write
+receipt. A branch appearing before a later ordinary explicit-target save is not
+implicitly selected; this feature does not add a full-preview CAS to that write.
+
+
 The Knowledge assessment panel can load a pinned coverage matrix across current
 product versions. Candidates distinguish matching material, changed material,
 different consuming contexts, identity conflicts and absence. Extra targets are

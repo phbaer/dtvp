@@ -81,6 +81,10 @@ def configure(parser):
     for name in ("project", "state", "context", "vulnerability"):
         coverage.add_argument("--" + name, required=True)
     coverage.add_argument("--expected-preview")
+    coverage.add_argument("--version-from")
+    coverage.add_argument("--version-through")
+    coverage.add_argument("--include-version", action="append", default=[])
+    coverage.add_argument("--exclude-version", action="append", default=[])
     coverage.add_argument("--offset", type=int, default=0)
     coverage.add_argument("--limit", type=int, default=50)
     coverage.add_argument("--json", action="store_true")
@@ -378,6 +382,21 @@ def run(args):
                         "context_id": args.context,
                         "vulnerability_id": args.vulnerability,
                         "expected_preview": args.expected_preview,
+                        **(
+                            {
+                                "version_selection": {
+                                    "lower": args.version_from,
+                                    "upper": args.version_through,
+                                    "include": args.include_version,
+                                    "exclude": args.exclude_version,
+                                }
+                            }
+                            if args.version_from
+                            or args.version_through
+                            or args.include_version
+                            or args.exclude_version
+                            else {}
+                        ),
                     },
                 )
             )
@@ -387,6 +406,10 @@ def run(args):
                 print(
                     f"Preview: {result['preview_digest']} · Versions: {result['statistics']['versions']} · Targets: {result['total']}"
                 )
+                if result.get("version_selection"):
+                    for version in result["version_selection"]["versions"]:
+                        print(f"Version {version['version']}: {version['status']}")
+                    print(result["version_selection"]["semantics"])
                 for row in result["items"]:
                     print(
                         f"{row['version']}  context={row['context_id']}  team={row.get('team_id') or 'unresolved'}  "

@@ -6,6 +6,7 @@ from dtvp.api import DB, Auth, project_for
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.coverage_candidates import coverage_candidates
 from dtvp.knowledge.journal import Name, Sha
+from dtvp.knowledge.version_selection import VersionSelection
 from dtvp.schemas import RequestModel
 
 router = APIRouter(prefix="/api/v3")
@@ -16,6 +17,7 @@ class CoverageCandidatesInput(RequestModel):
     context_id: Sha
     vulnerability_id: Name
     expected_preview: Sha | None = None
+    version_selection: VersionSelection | None = None
 
 
 def capabilities(db, actor, project, context):
@@ -43,7 +45,14 @@ def candidates(
     journal = request.app.state.knowledge
     require_state(journal, data.source, project_id)
     result = coverage_candidates(
-        journal, project_id, data.source, data.context_id, data.vulnerability_id, offset, limit
+        journal,
+        project_id,
+        data.source,
+        data.context_id,
+        data.vulnerability_id,
+        offset,
+        limit,
+        version_selection=data.version_selection,
     )
     if data.expected_preview is not None and data.expected_preview != result["preview_digest"]:
         raise HTTPException(409, "Coverage candidate heads changed; refresh the complete preview")

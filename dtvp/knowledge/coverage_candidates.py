@@ -6,6 +6,7 @@ from dtvp.knowledge.assessments import component_lineage, coverage_status
 from dtvp.knowledge.comparison import components, page, product_state, reachable_states
 from dtvp.knowledge.metadata import identity_fingerprint
 from dtvp.knowledge.ownership import product_heads
+from dtvp.knowledge.version_selection import MAX_SELECTION_ROWS, select_versions
 from dtvp.knowledge.workspace import load_sections
 from dtvp.storage import canonical, digest
 
@@ -169,7 +170,15 @@ def _row(source, sections, version, state, context, component, coverage, compone
 
 
 def coverage_candidates(
-    journal, project_id, source, context_id, vulnerability_id, offset=0, limit=50
+    journal,
+    project_id,
+    source,
+    context_id,
+    vulnerability_id,
+    offset=0,
+    limit=50,
+    *,
+    version_selection=None,
 ):
     """Read all current version heads from one reference snapshot, then paginate."""
     page([], offset, limit)
@@ -177,6 +186,8 @@ def coverage_candidates(
     revision = journal.verify_state(source)
     product_state(journal, source, project_id)
     heads = dict(sorted(product_heads(references, project_id).items()))
+    selection = select_versions(heads, version_selection) if version_selection is not None else None
+    selected_versions = set(selection["selected_versions"]) if selection else set(heads)
     if source not in heads.values() and source not in reachable_states(
         journal, project_id, references=references
     ):
@@ -218,6 +229,8 @@ def coverage_candidates(
     }
     rows = []
     for version, state in heads.items():
+        if version not in selected_versions:
+            continue
         current_revision = journal.verify_state(state)
         if current_revision.project_id != project_id or current_revision.version != version:
             raise ValueError("Current product branch head has incompatible identity")
@@ -236,6 +249,8 @@ def coverage_candidates(
         if not any(item["id"] == context_id for item in contexts):
             contexts.append(None)
         for candidate in contexts:
+            if selection and len(rows) >= MAX_SELECTION_ROWS:
+                raise ValueError("Version selection exceeds the complete 1000-context budget")
             candidate_id = candidate["id"] if candidate else context_id
             rows.append(
                 _row(
@@ -256,7 +271,7 @@ def coverage_candidates(
         "source": selected,
         "heads": heads,
         "statistics": {
-            "versions": len(heads),
+            "versions": len(selected_versions),
             "rows": len(rows),
             "assessment_candidates": sum(row["assessment_candidate"] for row in rows),
             "by_classification": dict(Counter(row["classification"] for row in rows)),
@@ -265,5 +280,10 @@ def coverage_candidates(
         },
         "limitations": LIMITATIONS,
     }
+    if selection is not None:
+        result["version_selection"] = selection
+        result["limitations"] = [
+            item for item in LIMITATIONS if not item.startswith("Version names")
+        ] + [selection["semantics"]]
     result["preview_digest"] = digest(canonical([result, rows]))
     return {**result, **page(rows, offset, limit)}

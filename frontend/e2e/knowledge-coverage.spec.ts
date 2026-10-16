@@ -15,6 +15,7 @@ async function fixture(page: Page, readonly = false, author = 'person') {
         if (failPage) return route.fulfill({ status: 409, json: { detail: 'Coverage candidate heads changed; refresh the complete preview' } })
         return route.fulfill({ json: { preview_digest: 'preview-one', source: { coverage: finding.coverage }, heads: {}, items: [row('9.0.0')], total: 7, next_offset: null } })
       }
+      if (body.version_selection) return route.fulfill({ json: { preview_digest: 'range-one', source: { coverage: finding.coverage }, heads: {}, items: rows.slice(0, 2), total: 2, next_offset: 20, version_selection: { captured_versions: 6, selected_versions: ['7.1.1', '7.1.2'], versions: [{ version: '7.1.1', status: 'selected_numeric_range' }, { version: '7.1.2', status: 'selected_numeric_range' }, { version: '7.2.0', status: 'excluded_explicitly' }, { version: 'main', status: 'unknown_ordering' }], semantics: 'Closed exact current heads only; no future approval.' } } })
       return route.fulfill({ json: { preview_digest: 'preview-one', source: { coverage: finding.coverage }, heads: {}, items: rows, total: 7, next_offset: 20 } })
     }
     if (route.request().method() === 'POST') {
@@ -72,7 +73,7 @@ test('shared assessment requires conditions and retains full scope plus UUID on 
   await expect(page.getByRole('status').filter({ hasText: 'Assessment submitted' })).toContainText('Assessment submitted')
   expect(writes[2]!.body).toEqual(writes[0]!.body)
   await detail.getByRole('button', { name: 'assessment', exact: true }).click()
-  await expect(detail.getByLabel('Cross-version assessment scope')).not.toContainText('additional')
+  await expect(detail.getByLabel('Cross-version assessment scope').locator(':scope > summary')).not.toContainText('additional')
 })
 
 test('review scope remains current context after choosing assessment targets', async ({ page }) => {
@@ -139,4 +140,28 @@ test('a replacement author starts a separate decision and retains evidence on un
   expect(writes[1]).toEqual(writes[0])
   expect(writes[0]!.path).not.toContain('/logical-one/')
   expect(writes[0]!.body).toMatchObject({ expected_revision: null, rationale: 'Existing recorded reasoning', evidence: [] })
+})
+
+
+test('range narrows finite candidate preview without selecting targets and pages retain the applied selector', async ({ page }) => {
+  const { matrix, previews, writes, stalePage } = await fixture(page)
+  await matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true }).check()
+  await matrix.getByText('Limit additional versions', { exact: true }).click()
+  await matrix.getByRole('checkbox', { name: 'Use numeric release range and explicit version names' }).check()
+  await matrix.getByLabel('From version (inclusive)').fill('7.1.1')
+  await matrix.getByLabel('Through version (inclusive)').fill('7.2.0')
+  await matrix.getByLabel('Exclude versions (one per line)').fill('7.2.0')
+  await matrix.getByRole('button', { name: 'Refresh coverage candidates', exact: true }).click()
+  await expect(matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true })).not.toBeChecked()
+  expect(previews.at(-1)).toMatchObject({ version_selection: { lower: '7.1.1', upper: '7.2.0', include: [], exclude: ['7.2.0'] } })
+  await matrix.getByText('Captured version selection · 2 of 6 branches', { exact: true }).click()
+  await expect(matrix).toContainText('main · unknown ordering')
+  await expect(matrix).toContainText('7.2.0 · excluded explicitly')
+  await matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true }).check()
+  await matrix.getByLabel('Through version (inclusive)').fill('8.0.0')
+  stalePage(); await matrix.getByRole('button', { name: 'Next candidate page' }).click()
+  await expect(matrix.getByRole('alert')).toContainText('heads changed')
+  expect(previews.at(-1)).toMatchObject({ expected_preview: 'range-one', version_selection: { upper: '7.2.0' } })
+  await expect(matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true })).toBeChecked()
+  expect(writes).toHaveLength(0)
 })
