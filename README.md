@@ -393,6 +393,13 @@ existing committed journal without SQL: publication/reference chain, all histori
 states/parents and retained objects. It reports the pinned head and checked counts,
 fails on corruption and performs no repair. Uncommitted orphan files are excluded.
 Operational SQL data still requires its own backup; see [recovery](docs/deployment.md#native-journal-recovery).
+`uv run pytest -q tests/test_installation_recovery.py` rehearses a stopped local
+SQLite installation restore: operational accounts/credentials/permissions and
+uncertain jobs, the complete artifact journal, tags, independent reviews and
+issued consumer bytes. It rebuilds only native projections and checks denied
+cross-team access. This is a repeatable local workflow check; PostgreSQL
+backup/restore and deployment-specific identity/remote-job qualification remain
+release gates.
 
 ### Retention maintenance preview
 

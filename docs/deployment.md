@@ -94,6 +94,15 @@ consumer hashes, tags and active branch coverage before reopening writes. Keep t
 original backup unchanged. Cross-version serializer compatibility and operational
 restore qualification remain release acceptance work.
 
+The repeatable local rehearsal is `uv run pytest -q tests/test_installation_recovery.py`.
+It stops writers, backs up the SQLite playground database and copies the full
+artifact directory into a separate candidate. It verifies the complete journal,
+rebuilds only native projections and checks preserved credentials, memberships,
+uncertain remote-job outcomes, tags, exact reviews and issued artifact bytes,
+including denied cross-team reads. The source artifact copy remains unchanged.
+This qualifies the local recovery sequence, not PostgreSQL dump/restore,
+production identity-provider access or remote service reconciliation.
+
 ## Legacy migration
 
 Legacy local data and the old Git revision remain intact. Import original SBOMs
