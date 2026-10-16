@@ -76,8 +76,11 @@ silently discards or transfers existing assessments.
 The [overlapping-input design](docs/rewrite-plan.md#reconciled-graph-from-overlapping-observations)
 classifies delivery parts separately from observations of the same part. Compatible
 observations should form one provenance-preserving graph without collapsing usage
-contexts or accumulating obsolete nightly inventory. Reconciliation remains planned;
-source-authority and conflict policy are the next design decision.
+contexts or accumulating obsolete nightly inventory. The pipeline explicitly
+designates inventory authority per delivery part/scope; other sources enrich
+attributed evidence and propose inventory changes for explicit reconciliation.
+Source roles are provider-independent. This reconciliation/authority design remains
+implementation work.
 
 ### Rewrite completion and acceptance boundary
 

@@ -265,7 +265,35 @@ contribution and retains historical inputs and assessments.
 Preview node/edge consolidations, conflicts, additions/removals, unresolved identity
 and assessment impact before atomic publication. Version the reconciliation policy
 and explicit mappings; UI, CLI and exports use the same backend-derived graph.
-The next design decision is source authority per subject/scope and conflict handling.
+
+#### Inventory authority and enrichment
+
+Design decision: one explicitly pipeline-designated inventory source governs each
+delivery part and declared subject/scope. This is a configured role, not a privilege
+inherent in a file format or provider: a DT/CyBeats export or supplied file can
+serve as the designated source. Legacy/manual pipelines can configure that role
+explicitly. Authority never follows upload arrival time or a source's own claim.
+
+The latest accepted complete build from that binding determines inventory
+membership and baseline dependency topology for its scope. Validate subject and
+build ordering; a delayed older build must not silently replace a newer baseline.
+Different parts can designate different sources. Selection/authority policy changes
+are explicit, versioned and preview their graph/coverage impact before publication.
+
+Other selected SBOMs, scanners and providers enrich attributed metadata and
+vulnerability/license/architecture evidence. Unambiguous matches attach to existing
+occurrences; missing or contradictory inventory and additional/contradictory topology
+become explicit reconciliation proposals. They cannot silently insert/remove nodes,
+change dependency contexts or resurrect components omitted by the current baseline.
+Accepting a proposal creates a recorded model change; it neither rewrites the
+original source document nor grants approval. Its scope and continued applicability
+must be checked against later authoritative imports, never reapplied blindly.
+
+Retain conflicting source assertions instead of overwriting them. Inventory
+authority does not imply authority over vulnerability applicability, licenses,
+CPE identity, authored annotations or human decisions. If no authority is configured,
+retain inputs/proposals and show unresolved inventory authority; do not silently
+select a winner or describe the assembly as a complete accepted baseline.
 
 ### Inventory layers and source acceptance
 
