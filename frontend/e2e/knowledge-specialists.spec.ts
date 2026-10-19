@@ -40,6 +40,7 @@ async function fixture(page: Page, options: { denied?: boolean; wrongHash?: bool
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Specialist product', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Finding details' }).getByRole('button', { name: 'Analysis tools', exact: true }).click()
   return { calls, advance: () => { state = nextState }, panel: page.locator('.knowledge-specialists') }
 }
 
@@ -47,6 +48,7 @@ async function fixture(page: Page, options: { denied?: boolean; wrongHash?: bool
 test('CPE lookup is explicit, attributed and pinned without changing identity or findings', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const { calls } = await fixture(page)
+  await page.getByRole('button', { name: 'Component & CPE details', exact: true }).click()
   const panel = page.getByLabel('CPE identification', { exact: true })
   expect(calls).toHaveLength(0)
   await panel.locator(':scope > summary').click()
@@ -123,6 +125,7 @@ test('missing source qualification stays explicit and a changed state clears der
   state.advance()
   await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  await page.getByRole('button', { name: 'Analysis tools', exact: true }).click()
   await state.panel.getByText('Agentyzer repository input', { exact: true }).click()
   await expect(state.panel.getByRole('button', { name: 'Download Agentyzer input JSON', exact: true })).toHaveCount(0)
   await state.panel.getByRole('button', { name: 'Prepare Agentyzer input', exact: true }).click()

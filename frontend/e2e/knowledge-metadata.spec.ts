@@ -30,6 +30,7 @@ async function fixture(page: Page, options: { manage?: boolean; stale?: boolean;
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Metadata product', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2026-1234', exact: true }).click()
+  await page.getByRole('button', { name: 'Component & CPE details', exact: true }).click()
   await page.locator('.component-context > summary').click()
   return { writes, neighborReads, releaseRead, panel: page.locator('.component-context') }
 }
@@ -79,6 +80,7 @@ test('changing consuming context during a pending read reloads without stale dat
   const { panel, releaseRead } = await fixture(page, { delayedRead: true })
   await expect(panel).toContainText('Loading pinned component context')
   await page.getByRole('button', { name: 'CVE-2026-2345', exact: true }).click()
+  await page.getByRole('button', { name: 'Component & CPE details', exact: true }).click()
   await panel.getByText('Declared dependency neighborhood', { exact: false }).click()
   await expect(panel).toContainText('Consuming root: second-root')
   releaseRead()

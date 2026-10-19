@@ -60,6 +60,7 @@ test('knowledge queue shows full-scope statistics and keeps assessment evidence 
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
   const detail = page.getByLabel('Context finding detail')
   await expect(detail.locator('.knowledge-description')).toContainText('A long vulnerability description.')
+  await detail.getByRole('button', { name: 'Technical provenance', exact: true }).click()
   await detail.getByText('Additional evidence', { exact: true }).click()
   await expect(detail).toContainText('Deployment report')
   await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
@@ -222,7 +223,7 @@ test('external proposal comparison requires explicit coordinator preview', async
 test('curated context remains attributed and available during assessment', async ({ page }) => {
   await fixture(page)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByText('Curated component context · current', { exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Usage context current' })).toBeVisible()
   const detail = page.getByLabel('Context finding detail')
   await expect(detail).toContainText('Report generation')
   await expect(detail).toContainText('Component owner · DESIGN-42')
@@ -236,6 +237,7 @@ test('curated context remains attributed and available during assessment', async
 test('DT legacy documentation stays readable without manufacturing current approval', async ({ page }) => {
   const { writes } = await fixture(page)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  await page.getByRole('button', { name: 'Technical provenance', exact: true }).click()
   await page.getByText('Imported DT assessment history', { exact: true }).click()
   const detail = page.getByLabel('Context finding detail')
   await expect(detail).toContainText('Legacy deployment excludes the path.')
@@ -363,23 +365,31 @@ test('revising recorded SSVC sends authored selection only and preserves evidenc
   expect(selection.rationale).toBe('Previous prioritization evidence.')
 })
 
-test('assessment focus shows evidence beside the form at every width and returns to its queue', async ({ page }) => {
+test('finding width stays stable across workflow tabs and responsive results return restores focus', async ({ page }) => {
   await fixture(page)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
   const detail = page.getByLabel('Context finding detail', { exact: true })
   await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
   for (const width of [1440, 1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 })
-    await expect(page.getByRole('region', { name: 'Context finding queue', includeHidden: true, exact: true })).toBeHidden()
+    const queue = page.getByRole('region', { name: 'Context finding queue', includeHidden: true, exact: true })
+    if (width > 1100) await expect(queue).toBeVisible()
+    else await expect(queue).toBeHidden()
     await expect(detail.getByRole('region', { name: 'Evidence alongside assessment', exact: true })).toBeVisible()
     await expect(detail.getByRole('form', { name: 'Team assessment', exact: true })).toBeVisible()
     await expect(detail.getByRole('region', { name: 'CVSS vector comparison', exact: true })).toBeVisible()
     const available = (await page.locator('.knowledge-columns').boundingBox())!.width
-    expect((await detail.boundingBox())!.width / available).toBeGreaterThan(.98)
+    const expectedWidth = (await detail.boundingBox())!.width
+    expect(expectedWidth / available).toBeGreaterThan(width > 1100 ? .7 : .98)
+    for (const name of ['Overview', 'Independent review', 'Assessment']) {
+      await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name, exact: true }).click()
+      expect((await detail.boundingBox())!.width).toBeCloseTo(expectedWidth, 0)
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
   }
   await detail.getByRole('button', { name: 'Back to results', exact: false }).click()
   await expect(page.getByRole('region', { name: 'Context finding queue', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'CVE-2099-1234', exact: true })).toBeFocused()
 })
 
 test('unsaved assessment and citations survive returning to the queue without requiring any scoring', async ({ page }) => {
@@ -452,5 +462,30 @@ test('a changed assessment revision keeps the old local draft inspectable withou
   await expect(drafts).toContainText('baseline-sha')
   await drafts.getByRole('button',{name:'Discard this unsaved draft',exact:true}).click()
   await expect(drafts).toHaveCount(0)
+  expect(f.writes).toHaveLength(0)
+})
+
+
+for (const published of [false, true]) test(`CVSS supplied metrics remain visible with ${published ? 'identical' : 'a single'} vector`, async ({ page }) => {
+  const f = await fixture(page)
+  if (!published) f.row.published_score = null as any
+  await page.route('**/api/v1/cvss/metrics/3.1', route => route.fulfill({ json: { metrics: [] } }))
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  const widget = page.getByRole('region', { name: 'CVSS vector comparison', exact: true })
+  await expect(widget.getByRole('checkbox', { name: 'All metrics', exact: true })).not.toBeChecked()
+  await expect(widget.locator('tbody > tr')).toHaveCount(published ? 2 : 1)
+  for (const key of ['AV', 'AC', 'PR', 'UI', 'S', 'C', 'I', 'A']) await expect(widget.getByRole('columnheader', { name: key, exact: true })).toBeVisible()
+  expect(f.writes).toHaveLength(0)
+})
+
+test('an outdated publication requests coordinator review without inventing a team reassessment requirement', async ({ page }) => {
+  const f = await fixture(page)
+  Object.assign(f.row.published_score!, { score: 0, current: false })
+  f.row.coverage.status = 'approved'
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  const status = page.getByLabel('Finding status', { exact: true })
+  await expect(status).toContainText('0.0')
+  await expect(status).toContainText('Outdated · coordinator review required')
+  await expect(status).not.toContainText('reassessment required')
   expect(f.writes).toHaveLength(0)
 })

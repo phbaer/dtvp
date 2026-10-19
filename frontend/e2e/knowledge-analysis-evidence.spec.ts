@@ -93,7 +93,7 @@ test('untrusted report text stays escaped and detailed provenance fits a narrow 
   for (const header of await page.locator('.review-queue-table th').all()) expect(await header.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
   expect(writes).toHaveLength(0)
 })
-test('desktop review detail has sixty percent of space and predictable source/published columns', async ({ page }) => {
+test('desktop review has a wider detail and compact queue with labelled source and published scores', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { detail } = await fixture(page, [analysis()])
   const queue = page.getByRole('region', { name: 'Context finding queue', exact: true })
@@ -101,14 +101,16 @@ test('desktop review detail has sixty percent of space and predictable source/pu
   expect(detailWidth / (detailWidth + queueWidth)).toBeGreaterThan(.58)
   const tabs = detail.getByRole('navigation', { name: 'Assessment workflow' }), sources = detail.getByRole('region', { name: 'Vulnerability sources', exact: true })
   expect((await tabs.boundingBox())!.y).toBeLessThan((await sources.boundingBox())!.y)
-  const headers = queue.locator('th'), source = (await headers.nth((await headers.count()) - 2).boundingBox())!, published = (await headers.nth((await headers.count()) - 1).boundingBox())!
-  expect(source.width).toBeCloseTo(published.width, 0); expect(source.width).toBeLessThan(85)
-  for (const header of await headers.all()) expect(await header.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  await expect(queue.getByRole('list', { name: 'Finding results' })).toBeVisible()
+  await expect(queue.locator('.queue-ratings')).toContainText('Source')
+  await expect(queue.locator('.queue-ratings')).toContainText('Published')
+  await expect(queue.getByRole('table')).not.toBeVisible()
   expect(await queue.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
 })
 
 test('CPE declarations, configured mappings and candidates remain separate from accepted identities', async ({ page }) => {
   const { detail, writes } = await fixture(page)
+  await detail.getByRole('button', { name: 'Component & CPE details', exact: true }).click()
   const cpe = detail.getByLabel('CPE identification', { exact: true })
   await expect(cpe.locator(':scope > summary')).toContainText('1 declared · 0 accepted · 1 candidates')
   await cpe.locator(':scope > summary').click()
@@ -138,10 +140,12 @@ test('finding evidence includes only its consuming dependency path', async ({ pa
   expect(writes).toHaveLength(0)
 })
 
-test('default evidence shows review information and exposes tool sections without a parent accordion', async ({ page }) => {
+test('default overview separates evidence from explicit analysis preparation without queuing work', async ({ page }) => {
   const { detail, writes } = await fixture(page)
   await expect(detail.getByRole('region', { name: 'Vulnerability overview', exact: true })).toContainText('Imported source advisory description.')
   for (const name of ['Vulnerability sources', 'Vulnerability analyses']) await expect(detail.getByRole('region', { name, exact: true })).toBeVisible()
+  await expect(detail.getByText('VScorer input files', { exact: true })).not.toBeVisible()
+  await detail.getByRole('button', { name: 'Analysis tools', exact: true }).click()
   for (const name of ['VScorer input files', 'Agentyzer repository input', 'Agentyzer analysis jobs']) {
     const summary = detail.getByText(name, { exact: true })
     await expect(summary).toBeVisible()

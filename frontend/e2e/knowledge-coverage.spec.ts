@@ -65,6 +65,7 @@ test('shared assessment requires conditions and retains full scope plus UUID on 
   await detail.getByRole('button', { name: 'Submit assessment', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Publication uncertain')
   await expect(matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true })).toBeChecked()
+  await detail.getByRole('button', { name: 'Analysis tools', exact: true }).click()
   await page.getByRole('button', { name: 'Retry exact assessment workflow request', exact: true }).click()
   expect(writes).toHaveLength(2)
   expect(writes[1]!.body).toEqual(writes[0]!.body)
@@ -165,4 +166,17 @@ test('range narrows finite candidate preview without selecting targets and pages
   expect(previews.at(-1)).toMatchObject({ expected_preview: 'range-one', version_selection: { upper: '7.2.0' } })
   await expect(matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true })).toBeChecked()
   expect(writes).toHaveLength(0)
+})
+
+
+test('utility tasks clear additional scope alongside the unmounted selector but retain authored reasoning', async ({ page }) => {
+  const { detail, matrix, writes } = await fixture(page)
+  await matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true }).check()
+  await detail.getByLabel('Reason and evidence', { exact: true }).fill('Explicit reasoning retained across evidence tasks.')
+  await detail.getByRole('button', { name: 'Technical provenance', exact: true }).click()
+  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Assessment', exact: true }).click()
+  await expect(detail.getByLabel('Reason and evidence', { exact: true })).toHaveValue('Explicit reasoning retained across evidence tasks.')
+  await expect(detail).not.toContainText('2 explicit targets selected')
+  await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect(writes[0]!.body).toMatchObject({ expected_versions: { '7.1.1': 'source-head' }, targets: [{ version: '7.1.1', context_id: 'context', vulnerability_id: 'CVE-2099-1234' }] })
 })

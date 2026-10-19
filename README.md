@@ -18,13 +18,12 @@ comparison. The assessment workspace and vector comparison are integrated into
 Review; the broader navigation and automatic My teams scope remain proposals.
 Prototype record links also work when the prototype is already open.
 The [screenshot-based usability review](docs/ui-review.md#screenshot-review-hierarchy-before-additional-panels)
-and [revised vulnerability mockup](docs/vulnerability-proposal.html) propose a clearer
-hierarchy, compact CVSS display and semantic accent colours. This mockup keeps the
-same record width across tabs; the runtime layout correction remains pending.
+and [revised vulnerability mockup](docs/vulnerability-proposal.html) explain the
+implemented hierarchy: a stable, wider record pane, compact CVSS display and semantic
+accent colours.
 The [next UI refactoring plan](docs/ui-review.md#next-refactoring-stable-vulnerability-workspace)
-replaces tab-dependent expansion with a consistently wider vulnerability pane and a
-less crowded Overview; that layout change is planned, not yet implemented. The
-plan also makes one shared assessment across applicable product versions the
+describes the stable vulnerability pane and clearer Overview now implemented. It
+also proposes one shared assessment across applicable product versions as the
 default, with explicit ranges and version-specific exceptions; durable scope intent
 and its UI/CLI support remain planned. Current runtime scope behavior is below.
 The design document retains historical decisions; implemented behavior and
@@ -68,20 +67,26 @@ System, light and dark themes are available. Dark mode uses warm charcoal surfac
 cream text and Catppuccin-inspired mauve accents; System follows the same palette
 when the operating system prefers dark mode.
 
-Overview retains the searchable queue and a wider detail pane on desktop. Narrow
-screens show the selected finding directly, with **Back to results** restoring the
-queue. Rows distinguish the consuming root as well as the affected component.
-**Assessment**, **Independent review** and **Coordinator scoring** open a focused,
-full-width workspace. Evidence and decisions sit side by side on wide screens and
-stack on narrow screens. Assessment actions stay in form flow so they do not
-cover fields. Team/version/context and source/published scores remain
-visible; unrelated filters and configuration leave the focused view.
+All finding tabs retain the same wider pane and compact results rail on desktop.
+The rail distinguishes component, consuming root, team/status and labelled
+source/published scores and scrolls independently; closing the finding restores
+the full table. Narrow screens
+show the selected finding directly, with **Back to results** restoring the queue
+and keyboard focus. Tab changes never change pane width or filter visibility.
+The shared header separates source severity/provider, contextual publication/currentness
+and team assessment, with a role-appropriate action. Overview starts with description
+and usage beside advisory/analysis evidence when pane width permits. **Assessment**,
+**Independent review** and **Coordinator scoring** retain evidence beside decisions
+on sufficiently wide panes and stack on narrower panes. Assessment actions stay in
+form flow. Teal identifies sources, peach analyses, rose critical source severity,
+amber revalidation and green actual approval; labels carry the same meaning.
 
 The v1-style **CVSS vectors** comparison aligns source ratings, external proposals,
 publication and the coordinator's server preview. Added and changed metrics are
 explicitly labelled. All metrics, exact vectors and comparison baseline are
-selectable; CVSS methods stay separate. Metric descriptions come from the backend;
-comparison never calculates or adopts a score. Analysts compare read-only.
+selectable; single or identical vectors show their supplied metrics rather than an
+empty difference table. CVSS methods stay separate. Metric descriptions come from
+the backend; comparison never calculates or adopts a score. Analysts compare read-only.
 
 Analysts record applicability, not-affected justification, reasoning and explicitly
 selected evidence citations. Existing unrecognized citations remain retained.
@@ -91,9 +96,10 @@ within the same workspace session, bound to the input state and assessment revis
 Drafts from earlier input states or other contexts remain inspectable in the
 unsaved-drafts disclosure; they are never silently applied to a changed baseline.
 They are not browser-persistent: use **Save draft** before leaving. Reload warns
-about unsaved drafts. Additional version coverage requires an explicit preview;
-leaving the Assessment tab clears that additional selection. Captured pending
-submissions retain their exact scope, payload and retry identity across navigation.
+about unsaved drafts. Additional version coverage requires an explicit preview.
+Leaving Assessment for another workflow tab or utility task clears that additional
+selection. Captured pending submissions retain their exact scope, payload and retry
+identity across navigation.
 Final rescoring remains a separate coordinator task, gated per vulnerability on
 current independent approvals of all required contexts.
 
@@ -106,13 +112,14 @@ prove that an analysis was used in a published decision.
 CPE details distinguish source declarations, configured mappings and candidates;
 none becomes an approved identity implicitly.
 The Overview tab opens with description/consuming context, vulnerability sources
-and analysis results visible. Paths, CPE details, VScorer input files, Agentyzer
-repository input and Agentyzer analysis jobs have their own directly visible,
-collapsed sections. Input preparation and jobs are siblings of the evidence;
-there is no enclosing “Analysis tools and input files” accordion. Detailed
-provenance, vectors, raw records and editing controls remain collapsed. Opening
-sections does not prepare inputs or submit jobs; captured operations remain mounted
-across workflow tabs.
+and analysis results visible, followed by the compact vector comparison. Dependency
+paths remain directly accessible in context. **Analysis tools** opens VScorer input
+files, Agentyzer repository input and jobs; **Component & CPE details** opens identity
+evidence, candidate discovery and annotation editing; **Technical provenance** holds
+raw records, supplementary evidence and imported DT assessment history. These named
+task views share the record frame and remain mounted across workflow tabs. Opening
+them does not prepare inputs or submit jobs. Pending follow-ups and annotation edits
+keep navigation locked with their exact captured inputs reachable.
 
 1. A pipeline imports complete source snapshots or separately identified delivery
    parts, with explicit source/build ordering, scope and collection limitations.

@@ -10,8 +10,9 @@ team ownership, version history and explicit human decisions.
 
 ## Implementation status
 
-Review now includes the focused assessment/review/scoring layout, responsive return
-to the queue, consuming-root labels and v1-style attributed vector comparisons.
+Review now uses a stable, wider record pane across Overview, Assessment, Review
+and Scoring. Desktop results use a compact rail; narrow screens provide responsive
+return to the full queue. Consuming-root labels and attributed vector comparisons remain.
 Evidence remains visible beside the assessment and review controls. Explicit
 assessment citations and in-session draft retention use the existing pinned backend
 contracts. Submitted assessments require a new decision before editing. Independent
@@ -26,13 +27,14 @@ assessment changes; the README describes current runtime behavior.
 The supplied dark-mode screenshot confirms an information hierarchy problem that
 palette changes alone did not resolve. This is a visual/heuristic assessment of
 the supplied image and current components, not measured user-task performance.
-The running application still changes width by workflow tab; the stable layout
-below remains planned.
+The stable layout and hierarchy described below are now implemented. The screenshot
+records the earlier layout, before this correction.
 
 A [revised vulnerability mockup](vulnerability-proposal.html) shows a compact
 Overview and Assessment in the same frame, using the sparse scale example and a
-richer example with source disagreements. It is a standalone design proposal,
-not a production screen or a change to backend coverage/approval semantics.
+richer example with source disagreements. It remains a standalone design reference
+for the implemented visual changes. It does not change backend
+coverage or approval semantics.
 
 | Visible problem | Proposed correction |
 | :--- | :--- |
@@ -87,8 +89,9 @@ colour; reflow must avoid page-wide horizontal scrolling.
 
 ## Next refactoring: stable vulnerability workspace
 
-This is the revised implementation plan after reviewing the integrated assessment
-screen. It supersedes the earlier recommendation to expand only Assessment,
+This plan now describes the implemented visual layout; durable all-version
+assessment scope remains separate, pending backend work. It followed review of the
+integrated assessment screen. It supersedes the earlier recommendation to expand only Assessment,
 Independent review and Coordinator scoring. The standalone wireframe still shows
 that earlier behavior and is not the specification for pane sizing.
 
