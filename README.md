@@ -127,6 +127,7 @@ only. Load an editable dataset explicitly:
 ```sh
 uv run dtvp knowledge --url http://127.0.0.1:8900 --persona administrator demo load --file playground/scenarios/workflow.json
 uv run dtvp knowledge --url http://127.0.0.1:8900 --persona administrator demo load --file playground/scenarios/specialists.json
+uv run dtvp knowledge --url http://127.0.0.1:8900 --persona administrator --timeout 300 demo load --file playground/scenarios/scale-5000.json
 ```
 
 The workflow file includes parallel versions, dependency ownership, contrasting
@@ -134,6 +135,14 @@ assessment states, independent synthetic reviewers, imports and a historical tag
 The specialist file adds license review and mock VScorer/Agentyzer evidence.
 These simulated fixture decisions are marked synthetic; they are not actual
 human approvals or evidence of external-service execution.
+
+**Scale 5000 Vulnerabilities**, version `7.2.0`, contains 5,000 distinct synthetic
+vulnerability IDs, 402 components plus the product root, branching/shared
+dependencies and delegated team ownership. Shared usage creates 6,000 contextual
+review targets, all unassessed. The first load can take over a minute; `--timeout`
+sets the CLI's HTTP wait. Repeating the exact file preserves existing work.
+Regenerate its editable JSON offline with
+`uv run python scripts/generate_scale_scenario.py`.
 
 Edit complete SBOMs and phase data in `playground/scenarios/*.json`.
 Reloading an unchanged file preserves interactive changes. To load a changed copy,

@@ -1,6 +1,7 @@
 """HTTP-only CLI presentation; workflow decisions live in the application."""
 
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -67,6 +68,7 @@ def configure(parser):
     command.add_argument("--url", default=os.getenv("DTVP_URL", "http://127.0.0.1:8900"))
     command.add_argument("--token-env", default="DTVP_API_TOKEN")
     command.add_argument("--persona", help="Synthetic playground login only")
+    command.add_argument("--timeout", type=float, default=60, help="HTTP timeout in seconds (default: 60)")
     commands = command.add_subparsers(dest="knowledge_command", required=True)
     demo = commands.add_parser("demo", help="Load explicit synthetic playground scenario data")
     demo_commands = demo.add_subparsers(dest="demo_command", required=True)
@@ -373,12 +375,14 @@ def display_workspace(result):
 
 
 def run(args):
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        raise ValueError("HTTP timeout must be a positive finite number of seconds")
     headers = {}
     token = os.getenv(args.token_env)
     if token:
         headers["Authorization"] = "Bearer " + token
     with httpx.Client(
-        base_url=args.url, headers=headers, timeout=60, follow_redirects=False
+        base_url=args.url, headers=headers, timeout=args.timeout, follow_redirects=False
     ) as client:
         if args.persona:
             if token:
