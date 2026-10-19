@@ -21,6 +21,110 @@ The wider application navigation and automatic multi-team work scope described
 below remain proposals. The findings record the original inspection, before these
 assessment changes; the README describes current runtime behavior.
 
+## Next refactoring: stable vulnerability workspace
+
+This is the revised implementation plan after reviewing the integrated assessment
+screen. It supersedes the earlier recommendation to expand only Assessment,
+Independent review and Coordinator scoring. The standalone wireframe still shows
+that earlier behavior and is not the specification for pane sizing.
+
+### One frame across workflow tabs
+
+Opening a finding establishes the layout; changing tabs never changes pane width,
+queue visibility, product/filter visibility or the outer scroll container.
+
+On wide screens retain a compact queue of approximately 320–380 CSS pixels and
+allocate the remaining width to the vulnerability pane, targeting roughly 70–75%
+for the detail at ordinary desktop sizes. These are starting dimensions to validate,
+not a reason to squeeze the detail below its useful minimum. The queue uses compact
+case rows: CVE/component, consuming root, team/workflow status and explicitly labelled
+source/published scores. Do not compress the existing five-column table into a narrow
+rail. The list-only view retains its full table and filters.
+
+Below the width needed for both panes, opening any finding shows the detail with
+Back to results. This applies equally to Overview, Assessment, Independent review
+and Coordinator scoring. Returning restores query, filters, page, selected row,
+scroll and keyboard focus. Workflow tab changes never trigger a full-screen mode.
+
+Keep one compact product/version/filter bar and one stable record header. The
+header identifies CVE, component/version, consuming root and responsible team,
+with original source severity/method, published contextual severity/freshness and
+assessment/review state. Remove repeated product/team/status paragraphs and the
+large three-step strip; show the next permitted action or blocking reason once.
+
+### A readable Overview
+
+The Overview must answer four questions: what is the issue, where/how is this
+component used, what evidence do we have, and what needs attention next?
+
+| Area | Default content | Further detail |
+| :--- | :--- | :--- |
+| Description and usage | Readable description; consuming context; exposure, cybersecurity criticality, deployment and support with attribution/currentness | Full long description in the same pane; dependency paths and component record through named actions |
+| Vulnerability sources | Provider, source severity/method, scope/currentness and material disagreements | Read advisory opens the complete claim and provenance without losing the case |
+| Analysis proposals | Provider, proposed applicability/score, qualification limits, currentness and recorded citations | Read report/rationale opens beside the decision when assessing or reviewing |
+| CVSS comparison | Compact aligned vector/metric rows, attributed source/proposal/published status, labelled additions/changes | Full vectors, all metrics and metric explanations remain directly accessible |
+| Next action | Assess, review, coordinate scoring, or a concrete waiting reason | Exact workflow/input identifiers remain secondary |
+
+Use two internal columns only when the actual detail pane is wide enough: description
+and usage on one side, source/analysis summaries on the other; the comparison spans
+the available width below. Stack in the same reading order when space is tighter.
+Use a pane/container breakpoint rather than assuming a wide browser implies a wide
+card. Keep ordinary text readable; achieve compactness by removing duplication and
+empty structure, not by shrinking labels or clamping essential evidence.
+
+Replace the large CVSS instruction block and empty comparison framing with a compact
+presentation. A single vector still shows its original metrics; multiple vectors
+make additions and differences visible. Missing vectors/scores stay explicit.
+Preserve source Base and modifier provenance, method separation and read-only access
+for analysts/reviewers. Scores continue to come from the backend.
+
+Input-file preparation, analysis-job submission, CPE mapping edits and component
+annotation editing move to explicitly opened task views within the same record
+frame. Configuration stays outside the review task. A compact CPE/identity summary,
+source limitations and relevant mitigation/testing evidence remain available to the
+analyst; moving editing controls must not remove decision evidence. Avoid replacing
+the current long stack with another long stack of collapsed sections.
+
+### Assessment and review within the same frame
+
+Use the same record width and header as Overview. Evidence remains alongside the
+assessment or review form where space permits; narrower detail panes stack them.
+Retain the selected report, draft and citations when switching between relevant
+views. Preserve the existing explicit cross-version preview/reset semantics and
+captured-request protections; layout work must not silently change coverage.
+
+Assessments require applicability, rationale/evidence and a not-affected reason
+where applicable. They never require rescoring. Independent reviewers approve an
+exact assessment revision; a coordinator performs final scoring only after all
+required contexts for that vulnerability have current independent approval.
+
+### Implementation batches and acceptance
+
+1. **Stable layout:** replace tab-dependent `focused` sizing/visibility with layout
+   driven by selected finding and available width. Consolidate the conflicting CSS
+   rules in `KnowledgeWorkspace.vue`; add a compact selected-case queue presentation.
+   Preserve the full list-only table, filters, source/published values and navigation.
+2. **Overview composition:** extract a shared record header, usage/context summary
+   and source/analysis summary components. Reduce duplicate notices/metadata, compact
+   `CvssVectorComparison.vue`, and separate evidence viewing from input/editing tasks.
+   Keep analysis requests and unresolved operations mounted across view changes.
+3. **Workflow alignment and verification:** reuse the shared evidence presentation
+   in assessment/review/scoring without duplicating competing summaries. Verify exact
+   retries, evidence citations, draft recovery, version coverage and coordinator gates.
+   Update the wireframe and README to match; rebuild the playground without resetting it.
+
+Browser checks must assert identical record bounding width and queue/filter visibility
+before and after every tab change at a fixed viewport. Cover at least 1920, 1440,
+1280, 1024, 768, 390 and 320 CSS pixels; also check a narrow container in a wide window.
+Use long descriptions, names and vectors, multiple consuming contexts, source conflicts,
+stale/withheld reports, absent scores and the 5,000-vulnerability dataset. Check keyboard
+navigation, labelled severity/status, theme contrast, readable report text, unobscured
+controls and absence of page-level horizontal overflow. Test both desktop and narrow
+return-to-results behavior. Validate with screenshots as well as geometry assertions.
+
+This is a presentation refactoring. Backend authorization, assessment/review/scoring
+contracts and CLI behavior remain the authority and do not change as part of it.
+
 ## Findings from the current application
 
 The review covers the current screen structure and component inventory, with live
