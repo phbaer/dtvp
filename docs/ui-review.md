@@ -184,6 +184,33 @@ conflicting records. Assessment citations identify what was considered; a matchi
 score does not establish adoption. Full rationales and reports remain readable
 while assessing and reviewing; ordinary evidence should not require nested opens.
 
+### Focused assessment workspace
+
+The [assessment wireframe](ui-proposal.html#assessment) replaces the queue with a
+wide task workspace. A stable header retains vulnerability, component, consuming
+application, team, version, original severity and published score. A short workflow
+indicator locates the analyst before independent review and coordinator scoring.
+
+Evidence and the decision form sit side by side on wide screens. The evidence
+column shows description, dependency path, exposure, criticality, source claims
+and analysis proposals. Full advisory/report text opens in that column without
+replacing the form. Long descriptions scroll within their own labelled region.
+On narrow screens evidence and form stack in reading order.
+
+The form asks for applicability, rationale, evidence considered and supporting
+verification notes. Not affected reveals a required justification. Selecting a
+citation does not adopt an analysis conclusion or score. Current version coverage
+is explicit; applying an assessment to additional versions requires a backend
+applicability preview, not a blanket copy. Analysts never publish contextual scores.
+
+The prototype retains separate drafts per consuming context in page memory only.
+Reloading discards them; no production save or submission is simulated as success.
+The second example shows an already submitted assessment read-only to its analyst.
+An independent reviewer needs a separate, permission-controlled review action on
+the exact revision and coverage; the prototype does not implement that action.
+Draft saving is separate from a submission preview, which checks for rationale,
+not-affected justification and a citation or supporting verification notes.
+
 ### Actions and handoffs
 
 Use a visible "Next action" with an explanation: assess, submit for independent
