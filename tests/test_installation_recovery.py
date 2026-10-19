@@ -154,6 +154,16 @@ def test_offline_installation_restore_preserves_permissions_jobs_history_and_iss
         engine.dispose()
     original = create_app(configured(source, source_url))
     with TestClient(original) as client:
+        login(client, "administrator")
+        team = next(
+            item for item in client.get("/api/v1/workspaces").json()
+            if item["name"] == "Platform"
+        )
+        created = client.post(
+            "/api/v1/projects",
+            json={"workspace_id": team["id"], "name": "Synthetic recovery rehearsal"},
+        )
+        assert created.status_code == 201, created.text
         project_id, _ = setup(client, bom, versions=("7.1.1", "7.1.2"))
         reviewed(client, project_id)
         current = workspace(client, project_id)
