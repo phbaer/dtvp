@@ -4,35 +4,23 @@ import { send } from '../api'
 import { knowledgeApi, type KnowledgeFinding } from '../knowledgeApi'
 import KnowledgeAnalysisJobs from './KnowledgeAnalysisJobs.vue'
 
-type Candidate = { cpe: string; identification_basis: string; basis_verification: string; provenance: Record<string, unknown> }
-type CpeResult = { inventory_state: string; policy_state: string | null; proposal: { algorithm_version: string; content_digest: string; catalog_content_digest: string; rules_content_digest: string; requested_purl: string | null; resolved_purl: string | null; candidates: Candidate[]; rejected_candidates: unknown[]; reviewed_rules: unknown[]; limitations: string[] } }
 type VScorerResult = { eligible: boolean; sbom: unknown; cves: unknown; dtvp_source: { state: string; artifacts: { sbom_sha256: string; cves_sha256: string; pipeline_context_sha256?: string } } | null; coverage: { included: string[]; excluded: { vulnerability_id: string; reason: string }[]; verification: string; remote_authenticity: string }; files?: Record<string, string> }
 type AgentyzerResult = { ready_to_submit: boolean; request: unknown; receipt: { state: string; request_sha256: string | null }; coverage: { reasons: string[]; limitations: string[]; source_verification: string; repository_authorization: string } }
 const props = defineProps<{ project: string; state: string; version: string; finding: KnowledgeFinding }>()
 const emit = defineEmits<{ locked: [boolean] }>()
-const cpe = ref<CpeResult | null>(null), vscorer = ref<VScorerResult | null>(null), agentyzer = ref<AgentyzerResult | null>(null)
-const cpeBusy = ref(false), vscorerBusy = ref(false), agentyzerBusy = ref(false)
-const cpeError = ref(''), vscorerError = ref(''), agentyzerError = ref(''), sourceBase = ref(''), exactFiles = ref(false)
+const vscorer = ref<VScorerResult | null>(null), agentyzer = ref<AgentyzerResult | null>(null)
+const vscorerBusy = ref(false), agentyzerBusy = ref(false)
+const vscorerError = ref(''), agentyzerError = ref(''), sourceBase = ref(''), exactFiles = ref(false)
 let sequence = 0, vectorSequence = 0
 const label = (value: string) => value.replaceAll('_', ' ')
 const componentRef = computed(() => typeof props.finding.context.component_ref === 'string' ? props.finding.context.component_ref : (props.finding.component as { 'bom-ref'?: string })['bom-ref'] || '')
 const endpoint = () => `/projects/${encodeURIComponent(props.project)}/states/${encodeURIComponent(props.state)}`
-const vectors = computed(() => [...new Set(props.finding.source_ratings.map(item => item.vector).filter((value): value is string => Boolean(value)))])
+const vectors = computed(() => [...new Set((props.finding.original_base_vectors || props.finding.source_ratings).map(item => item.vector).filter((value): value is string => Boolean(value)))])
 function ratingLabels(vector: string) {
-  return props.finding.source_ratings.filter(item => item.vector === vector).map(item => `${typeof item.source === 'string' ? item.source : item.source?.name || item.observed_source || 'Unattributed source'} · ${item.score ?? 'Unknown score'}`).join('; ')
+  return props.finding.source_ratings.filter(item => item.vector === vector).map(item => `${typeof item.source === 'string' ? item.source : item.source?.name || item.observed_source || 'Unattributed source'} · ${item.score ?? 'Unknown score'}`).join('; ') || 'Imported source Base'
 }
-function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Specialist input request failed' }
-function reset() { ++sequence; ++vectorSequence; cpe.value = null; vscorer.value = null; agentyzer.value = null; sourceBase.value = ''; exactFiles.value = false; cpeError.value = ''; vscorerError.value = ''; agentyzerError.value = ''; cpeBusy.value = false; vscorerBusy.value = false; agentyzerBusy.value = false }
-async function loadCpe() {
-  if (!componentRef.value || cpeBusy.value) return
-  const current = sequence
-  cpeBusy.value = true; cpeError.value = ''
-  try {
-    const result = await knowledgeApi<CpeResult>(`${endpoint()}/cpe?${new URLSearchParams({ component_ref: componentRef.value })}`)
-    if (current === sequence) cpe.value = result
-  } catch (error) { if (current === sequence) cpeError.value = errorMessage(error) }
-  finally { if (current === sequence) cpeBusy.value = false }
-}
+function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Analysis input request failed' }
+function reset() { ++sequence; ++vectorSequence; vscorer.value = null; agentyzer.value = null; sourceBase.value = ''; exactFiles.value = false; vscorerError.value = ''; agentyzerError.value = ''; vscorerBusy.value = false; agentyzerBusy.value = false }
 async function sha256(text: string) {
   if (!globalThis.crypto?.subtle) throw new Error('Artifact downloads require browser SHA-256 support in a secure context.')
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map(value => value.toString(16).padStart(2, '0')).join('')
@@ -80,22 +68,9 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence; emit('locked', false) })
 
 <template>
   <details class="knowledge-specialists">
-    <summary>Specialist inputs and CPE candidates</summary>
+    <summary>Analysis tools and input files</summary>
     <p class="hint">Preparing or downloading specialist inputs does not submit work or adopt an assessment, identity or score. External analysis needs a separate explicit job request.</p>
-    <p v-if="!componentRef" class="hint">The source component reference is unavailable; CPE and VScorer inputs cannot be prepared.</p>
-    <details>
-      <summary>CPE candidate discovery</summary>
-      <p class="hint">Offline discovery uses the selected inventory and the current discovery policy. Refresh explicitly to use an updated policy.</p>
-      <button :disabled="cpeBusy || !componentRef" @click="loadCpe">{{ cpeBusy ? 'Loading candidates…' : cpe ? 'Refresh CPE candidates' : 'Load CPE candidates' }}</button>
-      <p v-if="cpeError" role="alert">{{ cpeError }}</p>
-      <template v-if="cpe">
-        <p v-if="!cpe.proposal.candidates.length">No CPE candidates from these inputs. This does not establish that no matching identity exists.</p>
-        <article v-for="(candidate, index) in cpe.proposal.candidates" :key="index"><code>{{ candidate.cpe }}</code><p>{{ label(candidate.identification_basis) }} · {{ label(candidate.basis_verification) }}</p><details><summary>Candidate attribution</summary><pre>{{ JSON.stringify(candidate.provenance, null, 2) }}</pre></details></article>
-        <ul><li v-for="limit in cpe.proposal.limitations" :key="limit">{{ limit }}</li></ul>
-        <details><summary>CPE input and policy pins</summary><dl><dt>Inventory state</dt><dd><code>{{ cpe.inventory_state }}</code></dd><dt>Policy state</dt><dd><code>{{ cpe.policy_state || 'No configured policy' }}</code></dd><dt>Algorithm</dt><dd>{{ cpe.proposal.algorithm_version }}</dd><dt>Candidate digest</dt><dd><code>{{ cpe.proposal.content_digest }}</code></dd></dl><pre>{{ JSON.stringify({ requested_purl: cpe.proposal.requested_purl, resolved_purl: cpe.proposal.resolved_purl, catalog_digest: cpe.proposal.catalog_content_digest, rules_digest: cpe.proposal.rules_content_digest, reviewed_rules: cpe.proposal.reviewed_rules, rejected_candidates: cpe.proposal.rejected_candidates }, null, 2) }}</pre></details>
-        <button @click="downloadJson(cpe, 'dtvp-cpe-candidates.json')">Download CPE candidate JSON</button>
-      </template>
-    </details>
+    <p v-if="!componentRef" class="hint">The source component reference is unavailable; VScorer inputs cannot be prepared.</p>
     <details>
       <summary>VScorer input files</summary>
       <p class="hint">Select an original source Base explicitly for {{ finding.vulnerability_id }}. The backend validates it; other context vulnerabilities remain explicit exclusions. No published or contextual score is substituted.</p>
@@ -128,7 +103,7 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence; emit('locked', false) })
 </template>
 
 <style scoped>
-.knowledge-specialists { padding: 1rem; border-block: 1px solid var(--border, #64748b33); min-width: 0; }
+.knowledge-specialists { padding: 6px 0; margin-top:6px; border-block: 1px solid var(--border, #64748b33); min-width: 0; }
 summary { cursor: pointer; overflow-wrap: anywhere; }
 .knowledge-specialists > details { margin-top: .75rem; }
 label { display: grid; gap: .3rem; margin-block: .6rem; min-width: 0; }

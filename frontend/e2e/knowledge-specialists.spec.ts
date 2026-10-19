@@ -43,13 +43,14 @@ async function fixture(page: Page, options: { denied?: boolean; wrongHash?: bool
   return { calls, advance: () => { state = nextState }, panel: page.locator('.knowledge-specialists') }
 }
 
-async function openPanel(page: Page) { await page.getByText('Specialist inputs and CPE candidates', { exact: true }).click() }
+async function openPanel(page: Page) { await page.getByText('Analysis tools and input files', { exact: true }).click() }
 
 test('CPE lookup is explicit, attributed and pinned without changing identity or findings', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const { calls, panel } = await fixture(page)
+  const { calls } = await fixture(page)
+  const panel = page.getByLabel('CPE identification', { exact: true })
   expect(calls).toHaveLength(0)
-  await openPanel(page)
+  await panel.locator(':scope > summary').click()
   await panel.getByText('CPE candidate discovery', { exact: true }).click()
   expect(calls).toHaveLength(0)
   await panel.getByRole('button', { name: 'Load CPE candidates', exact: true }).click()

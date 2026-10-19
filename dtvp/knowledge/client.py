@@ -425,9 +425,12 @@ def display_vulnerability(result):
             if item.get("adoption", {}).get("status") == "referenced":
                 summary += " · Cited in an assessment (not proof of adoption)."
             if item.get("diagnostics"):
+                diagnostics = item["diagnostics"]
                 summary += " · " + "; ".join(
-                    plain(value).replace("_", " ") for value in item["diagnostics"]
+                    plain(value).replace("_", " ") for value in diagnostics[:2]
                 )
+                if len(diagnostics) > 2:
+                    summary += f" (+{len(diagnostics) - 2} more; --json)"
             prefix = f"  {label:24} {status:20} "
             print(
                 textwrap.fill(

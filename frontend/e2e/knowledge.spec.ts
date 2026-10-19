@@ -15,6 +15,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
     scoring_proposals: coordinator ? [{ id: 'proposal-one', provider: 'vscorer', source_label: 'Threat model', current: true, eligible: true, ineligibility_reasons: [], report_sha256: 'report-sha', proposal: { base_score: 9.8, score: 0, base_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L' }, score_input: { base_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L' } }] : [],
     published_score: { score: 4.2, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }, capabilities: coordinator ? ['rescore'] : reviewer ? ['approve'] : ['assess'], evidence: [{ source: 'build', claim: 'Deployment report' }],
   }
+  ;(row as Record<string, unknown>).contributions = { format: 'dtvp.evidence-contributions/1', scope: {}, vulnerability_sources: [], vulnerability_analyses: row.scoring_proposals.map(item => ({ id: item.id, kind: 'scoring_proposal', provider: item.provider, label: item.source_label, status: 'eligible', current: true, summary: 'Contextual scoring proposal available for coordinator preview.', ratings: [], proposal: item.proposal, claims: { proposal_id: item.id, eligible: item.eligible }, adoption: { status: 'not_recorded', assessment_revisions: [], published_score: false }, provenance: {}, diagnostics: [] })), cpe: { declared: [], curated: [], accepted: [], candidates: [], diagnostics: [] }, limitations: [] }
   let conflict = false, uncertain = false, scoreReady = false
   const writes: { path: string; body: Record<string, unknown> }[] = []
   const workspaceQueries: URLSearchParams[] = []
@@ -205,8 +206,7 @@ test('advanced filters reset pagination and forward the full scope to server sta
 test('external proposal comparison requires explicit coordinator preview', async ({ page }) => {
   const { writes } = await fixture(page, false, true)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByText('External scoring proposals (1)', { exact: true }).click()
-  await expect(page.getByRole('table', { name: 'External scoring comparison' })).toContainText('Threat model')
+  await expect(page.getByRole('region', { name: 'Vulnerability analyses', exact: true })).toContainText('Threat model')
   await page.getByRole('button', { name: 'Use proposal', exact: true }).click()
   expect(writes).toHaveLength(0)
   await expect(page.getByRole('form', { name: 'Coordinator rescoring' })).toBeVisible()

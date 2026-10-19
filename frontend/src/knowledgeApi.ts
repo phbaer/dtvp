@@ -1,7 +1,7 @@
 import { API_PREFIX } from './apiContract'
 import { ApiError } from './api'
 
-/** Presentation transport only; workflow rules and authorization live in v3. */
+/** Presentation transport only; workflow rules and authorization live in the backend. */
 export async function knowledgeApi<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers)
   const csrf = document.cookie.split('; ').find(item => item.startsWith('dtvp_csrf='))?.split('=')[1]
@@ -34,8 +34,11 @@ export type KnowledgeCodeAnalysis = {
   source_receipt?: { state?: string; context_id?: string; assessment_fingerprint?: string }
   source_proof: { target_claim_consistent: boolean; source_commit_consistent: boolean; consistency_only: boolean; source_binding: { status?: string; expected_commit?: string; requested_commit?: string; resolved_commit?: string; reason?: string } }
 }
+export type EvidenceContribution = { id: string; kind: string; provider: string; label: string; status: string; current: boolean | null; summary: string; ratings: { score?: number | null; method?: string; vector?: string; severity?: string }[]; proposal: { base_score?: number; score?: number; base_vector?: string; vector?: string; version?: string } | null; claims: Record<string, unknown>; adoption: { status: string; assessment_revisions: string[]; published_score: boolean }; provenance: Record<string, unknown>; diagnostics: string[] }
+export type EvidenceContributions = { format: string; scope: Record<string, string>; vulnerability_sources: EvidenceContribution[]; vulnerability_analyses: EvidenceContribution[]; cpe: { declared: EvidenceContribution[]; curated: EvidenceContribution[]; accepted: EvidenceContribution[]; candidates: EvidenceContribution[]; diagnostics: string[] }; limitations: string[] }
 export type KnowledgeFinding = {
   id: string; context_id: string; vulnerability_id: string; state?: string
+  contributions?: EvidenceContributions
   component: { name: string; version?: string; purl?: string }
   context: { root_ref?: string; team_id?: string; status?: string; [key: string]: unknown }
   description: string

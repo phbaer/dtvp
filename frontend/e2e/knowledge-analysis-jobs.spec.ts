@@ -41,7 +41,7 @@ async function fixture(page: Page, options: { readonly?: boolean; createResponse
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Job product', exact: true }).click()
   await page.getByRole('button', { name: vulnerability, exact: true }).click()
-  await page.getByText('Specialist inputs and CPE candidates', { exact: true }).click()
+  await page.getByText('Analysis tools and input files', { exact: true }).click()
   await page.getByText('Agentyzer repository input', { exact: true }).click()
   const jobs = page.locator('.analysis-jobs')
   return { reads, writes, jobs, advance: () => { state = nextState } }
@@ -129,7 +129,7 @@ test('a changed input state clears request guidance and requires fresh source pr
   state.advance()
   await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click()
   await page.getByRole('button', { name: vulnerability, exact: true }).click()
-  await page.getByText('Specialist inputs and CPE candidates', { exact: true }).click()
+  await page.getByText('Analysis tools and input files', { exact: true }).click()
   await page.getByText('Agentyzer repository input', { exact: true }).click()
   await load(page)
   await expect(state.jobs.getByLabel('Analysis guidance (optional)', { exact: true })).toBeEmpty()

@@ -49,6 +49,12 @@ published severity remain visible together. Expandable evidence and advanced too
 support detailed analysis without filling the ordinary review view.
 System, light and dark themes are available.
 
+Selecting a finding gives its detail pane about 60% of desktop review space.
+Fixed team and score columns keep source/published values aligned while long
+component names wrap. Narrow screens stack the queue and detail. Workflow tabs
+stay above the evidence, and captured analysis operations remain available across
+steps until resolved or explicitly discarded.
+
 The vulnerability pane compares **Vulnerability sources** (imported SBOM/DT facts,
 NVD and other advisory/VEX inputs) with **Vulnerability analyses** (VScorer,
 Agentyzer and historical analysis claims). Each entry identifies received content,
@@ -224,7 +230,7 @@ uv run dtvp knowledge --persona analyst vulnerability --project PROJECT_ID --ver
 
 The first command exposes context IDs; the second prints compact source, analysis
 and CPE contributions. Add `--expected STATE_HASH` to reject a changed version head,
-or `--json` for complete retained facts and hashes. Classification is computed by
+or `--json` for full returned fields and hashes. Classification is computed by
 the backend for the selected vulnerability detail, not duplicated in either client
 or added to every row of the large review queue.
 
