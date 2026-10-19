@@ -122,6 +122,15 @@ navigation, labelled severity/status, theme contrast, readable report text, unob
 controls and absence of page-level horizontal overflow. Test both desktop and narrow
 return-to-results behavior. Validate with screenshots as well as geometry assertions.
 
+Use `playground/scenarios/review-rich.json` as the functional UI acceptance dataset,
+alongside `scale-5000.json` for list volume. The rich dataset supplies contradictory
+source vectors, multiple analysis proposals, mixed CVSS versions, missing identity
+and severity, multiple dependency paths, authored component context, varied team
+assessment states, removed-component history, license review and actual synthetic
+coordinator publications. The README maps example CVEs to the intended workflows.
+Keep payloads editable and idempotently loadable; do not replace existing projects
+or manufacture extra findings only in frontend mocks.
+
 This is a presentation refactoring. Backend authorization, assessment/review/scoring
 contracts and CLI behavior remain the authority and do not change as part of it.
 

@@ -183,6 +183,7 @@ only. Load an editable dataset explicitly:
 ```sh
 uv run dtvp knowledge --url http://127.0.0.1:8900 --persona administrator demo load --file playground/scenarios/workflow.json
 uv run dtvp knowledge --url http://127.0.0.1:8900 --persona administrator demo load --file playground/scenarios/specialists.json
+uv run dtvp knowledge --url http://127.0.0.1:8900 --persona administrator --timeout 300 demo load --file playground/scenarios/review-rich.json
 uv run dtvp knowledge --url http://127.0.0.1:8900 --persona administrator --timeout 300 demo load --file playground/scenarios/scale-5000.json
 ```
 
@@ -191,6 +192,28 @@ assessment states, independent synthetic reviewers, imports and a historical tag
 The specialist file adds license review and mock VScorer/Agentyzer evidence.
 These simulated fixture decisions are marked synthetic; they are not actual
 human approvals or evidence of external-service execution.
+
+**Rich Review Playground** (`review-rich.json`) exercises feature variety rather
+than volume. Open version `7.1.2`; compare it with `7.1.1` or the parallel `7.2.0`.
+
+| Example | What to exercise |
+| :--- | :--- |
+| `CVE-2099-31001` | Separate team contexts, approved/submitted assessments, two VScorer vectors (0 and 6.5), unqualified Agentyzer evidence, blocked coordinator gate |
+| `CVE-2099-31002` | Changed source evidence requiring reassessment |
+| `CVE-2099-32001` | Long description/name, two dependency paths, conflicting 9.8/8.1 source vectors, investigation draft, authored exposure/criticality/support/mitigation context and analysis limitations |
+| `CVE-2099-32002` | Binary inventory with declared CPE and mixed CVSS 2/4 ratings; these methods are not direct vector conflicts |
+| `CVE-2099-32003` | Missing PURL/CPE, unknown package version and absent severity; no invented zero score |
+| `CVE-2099-32004` | Removed component and retained historical assessment, visible in earlier states/tag |
+| `CVE-2099-32005` | Both team contexts independently approved; explicitly published contextual score 0 beside original 9.8 |
+| `CVE-2099-32006` | New component/vulnerability in the parallel `7.2.0` composition |
+
+The file also contains submitted license review, mixed/unknown license claims and
+a pre-update release tag. Optional `metadata` and `scores` phases use ordinary
+permission, exact-input and review-gate checks. Assessments marked `after_updates`
+run after import changes and annotations, so final scoring uses fresh approvals.
+Publications are synthetic fixture
+operations, not real security approvals. Empty optional phases preserve earlier
+scenario hashes; the existing files and loaded projects remain compatible.
 
 **Scale 5000 Vulnerabilities**, version `7.2.0`, contains 5,000 distinct synthetic
 vulnerability IDs, 402 components plus the product root, branching/shared

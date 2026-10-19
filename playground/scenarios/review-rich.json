@@ -1,0 +1,2028 @@
+{
+  "format": "dtvp.demo-scenario/1",
+  "synthetic": true,
+  "fixture_id": "review-rich/1",
+  "project_name": "Rich Review Playground",
+  "selected_version": "7.1.2",
+  "baselines": [
+    {
+      "id": "import-7.1.1-1",
+      "version": "7.1.1",
+      "source": "playground:native-scenario",
+      "build_number": 1,
+      "occurred_at": "2026-01-01T00:00:00+00:00",
+      "sbom": {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+          "component": {
+            "type": "application",
+            "bom-ref": "product",
+            "name": "Synthetic rich review product",
+            "version": "7.1.1"
+          }
+        },
+        "components": [
+          {
+            "type": "application",
+            "bom-ref": "platform-app",
+            "name": "platform-app",
+            "version": "1.0",
+            "purl": "pkg:generic/platform-app@1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "operations-app",
+            "name": "operations-app",
+            "version": "1.0",
+            "purl": "pkg:generic/operations-app@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-tls",
+            "name": "shared-tls",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-tls@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "MIT"
+                }
+              }
+            ],
+            "properties": [
+              {
+                "name": "vscorer:threat-model-element-ids",
+                "value": "synthetic-tls-boundary"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-parser",
+            "name": "shared-parser",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-parser@1.0",
+            "licenses": [
+              {
+                "expression": "Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "long-name",
+            "name": "protocol-gateway-for-device-connectivity-and-enterprise-authentication",
+            "group": "Example.Technology.Security",
+            "version": "3.2.1",
+            "purl": "pkg:generic/example/protocol-gateway@3.2.1",
+            "licenses": [
+              {
+                "expression": "MIT OR Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "legacy-binary",
+            "name": "Legacy vendor binary (inventory only)",
+            "version": "8.0",
+            "cpe": "cpe:2.3:a:example:legacy_binary:8.0:*:*:*:*:*:*:*",
+            "licenses": [
+              {
+                "license": {
+                  "name": "Synthetic commercial terms"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "unknown-package",
+            "name": "Unidentified statically linked module",
+            "version": "unknown"
+          },
+          {
+            "type": "library",
+            "bom-ref": "removed-module",
+            "name": "Retired helper library",
+            "version": "1.0",
+            "purl": "pkg:generic/removed-module@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "GPL-3.0-only"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "fixed-adapter",
+            "name": "Patched protocol adapter",
+            "version": "2.0",
+            "purl": "pkg:generic/fixed-adapter@2.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "Apache-2.0"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-a",
+            "name": "Service wrapper A",
+            "version": "1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-b",
+            "name": "Service wrapper B",
+            "version": "1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "retired-app",
+            "name": "retired-app",
+            "version": "1.0"
+          }
+        ],
+        "dependencies": [
+          {
+            "ref": "product",
+            "dependsOn": [
+              "platform-app",
+              "operations-app",
+              "retired-app"
+            ]
+          },
+          {
+            "ref": "platform-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "wrapper-a",
+              "wrapper-b",
+              "legacy-binary",
+              "unknown-package",
+              "fixed-adapter"
+            ]
+          },
+          {
+            "ref": "operations-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "legacy-binary",
+              "fixed-adapter"
+            ]
+          },
+          {
+            "ref": "shared-tls",
+            "dependsOn": []
+          },
+          {
+            "ref": "shared-parser",
+            "dependsOn": []
+          },
+          {
+            "ref": "long-name",
+            "dependsOn": []
+          },
+          {
+            "ref": "legacy-binary",
+            "dependsOn": []
+          },
+          {
+            "ref": "unknown-package",
+            "dependsOn": []
+          },
+          {
+            "ref": "removed-module",
+            "dependsOn": []
+          },
+          {
+            "ref": "fixed-adapter",
+            "dependsOn": []
+          },
+          {
+            "ref": "wrapper-a",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "wrapper-b",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "retired-app",
+            "dependsOn": [
+              "removed-module"
+            ]
+          }
+        ],
+        "vulnerabilities": [
+          {
+            "id": "CVE-2099-31001",
+            "description": "Synthetic TLS defect. Determine whether the vulnerable protocol is enabled in each consuming application.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-tls"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-31002",
+            "description": "Synthetic parser defect. Review whether untrusted input reaches this parser and retain deployment evidence.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-parser"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32001",
+            "description": "SYNTHETIC advisory: this is invented test evidence, not an actual CVE.\n\n1. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n2. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n3. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n4. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n5. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n6. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n7. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n8. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic NVD"
+                },
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              },
+              {
+                "source": {
+                  "name": "Synthetic supplier"
+                },
+                "method": "CVSSv31",
+                "score": 8.1,
+                "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "long-name"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32002",
+            "description": "SYNTHETIC mixed-method advisory for a binary-only component. Source CVSS versions describe different scales, not a direct vector disagreement.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic legacy advisory"
+                },
+                "method": "CVSSv2",
+                "score": 7.5,
+                "vector": "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+              },
+              {
+                "source": {
+                  "name": "Synthetic modern advisory"
+                },
+                "method": "CVSSv4",
+                "score": 9.3,
+                "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "legacy-binary"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32003",
+            "description": "SYNTHETIC incomplete identity: no PURL, CPE, source severity or verified reachability. Missing information is not a zero score.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [],
+            "affects": [
+              {
+                "ref": "unknown-package"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32004",
+            "description": "SYNTHETIC component disappears in a later source import. Its assessment remains historical evidence.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "removed-module"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32005",
+            "description": "SYNTHETIC fixed-context example: independent approvals for both consuming roots permit a coordinator to publish contextual scores.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "fixed-adapter"
+              }
+            ]
+          }
+        ]
+      },
+      "context": {
+        "subject_kind": "build",
+        "configuration": "synthetic",
+        "pipeline_run": "fixture-1",
+        "collector": "DTVP playground",
+        "method": "build",
+        "limitations": [
+          "Synthetic composition and decisions; not a real assessment or release."
+        ],
+        "analysis_source": {
+          "repository_name": "synthetic-workflow",
+          "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    {
+      "id": "import-7.1.2-1",
+      "version": "7.1.2",
+      "source": "playground:native-scenario",
+      "build_number": 1,
+      "occurred_at": "2026-01-01T00:00:00+00:00",
+      "sbom": {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+          "component": {
+            "type": "application",
+            "bom-ref": "product",
+            "name": "Synthetic rich review product",
+            "version": "7.1.2"
+          }
+        },
+        "components": [
+          {
+            "type": "application",
+            "bom-ref": "platform-app",
+            "name": "platform-app",
+            "version": "1.0",
+            "purl": "pkg:generic/platform-app@1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "operations-app",
+            "name": "operations-app",
+            "version": "1.0",
+            "purl": "pkg:generic/operations-app@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-tls",
+            "name": "shared-tls",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-tls@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "MIT"
+                }
+              }
+            ],
+            "properties": [
+              {
+                "name": "vscorer:threat-model-element-ids",
+                "value": "synthetic-tls-boundary"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-parser",
+            "name": "shared-parser",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-parser@1.0",
+            "licenses": [
+              {
+                "expression": "Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "long-name",
+            "name": "protocol-gateway-for-device-connectivity-and-enterprise-authentication",
+            "group": "Example.Technology.Security",
+            "version": "3.2.1",
+            "purl": "pkg:generic/example/protocol-gateway@3.2.1",
+            "licenses": [
+              {
+                "expression": "MIT OR Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "legacy-binary",
+            "name": "Legacy vendor binary (inventory only)",
+            "version": "8.0",
+            "cpe": "cpe:2.3:a:example:legacy_binary:8.0:*:*:*:*:*:*:*",
+            "licenses": [
+              {
+                "license": {
+                  "name": "Synthetic commercial terms"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "unknown-package",
+            "name": "Unidentified statically linked module",
+            "version": "unknown"
+          },
+          {
+            "type": "library",
+            "bom-ref": "removed-module",
+            "name": "Retired helper library",
+            "version": "1.0",
+            "purl": "pkg:generic/removed-module@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "GPL-3.0-only"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "fixed-adapter",
+            "name": "Patched protocol adapter",
+            "version": "2.0",
+            "purl": "pkg:generic/fixed-adapter@2.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "Apache-2.0"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-a",
+            "name": "Service wrapper A",
+            "version": "1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-b",
+            "name": "Service wrapper B",
+            "version": "1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "retired-app",
+            "name": "retired-app",
+            "version": "1.0"
+          }
+        ],
+        "dependencies": [
+          {
+            "ref": "product",
+            "dependsOn": [
+              "platform-app",
+              "operations-app",
+              "retired-app"
+            ]
+          },
+          {
+            "ref": "platform-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "wrapper-a",
+              "wrapper-b",
+              "legacy-binary",
+              "unknown-package",
+              "fixed-adapter"
+            ]
+          },
+          {
+            "ref": "operations-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "legacy-binary",
+              "fixed-adapter"
+            ]
+          },
+          {
+            "ref": "shared-tls",
+            "dependsOn": []
+          },
+          {
+            "ref": "shared-parser",
+            "dependsOn": []
+          },
+          {
+            "ref": "long-name",
+            "dependsOn": []
+          },
+          {
+            "ref": "legacy-binary",
+            "dependsOn": []
+          },
+          {
+            "ref": "unknown-package",
+            "dependsOn": []
+          },
+          {
+            "ref": "removed-module",
+            "dependsOn": []
+          },
+          {
+            "ref": "fixed-adapter",
+            "dependsOn": []
+          },
+          {
+            "ref": "wrapper-a",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "wrapper-b",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "retired-app",
+            "dependsOn": [
+              "removed-module"
+            ]
+          }
+        ],
+        "vulnerabilities": [
+          {
+            "id": "CVE-2099-31001",
+            "description": "Synthetic TLS defect. Determine whether the vulnerable protocol is enabled in each consuming application.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-tls"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-31002",
+            "description": "Synthetic parser defect. Review whether untrusted input reaches this parser and retain deployment evidence.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-parser"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32001",
+            "description": "SYNTHETIC advisory: this is invented test evidence, not an actual CVE.\n\n1. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n2. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n3. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n4. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n5. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n6. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n7. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n8. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic NVD"
+                },
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              },
+              {
+                "source": {
+                  "name": "Synthetic supplier"
+                },
+                "method": "CVSSv31",
+                "score": 8.1,
+                "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "long-name"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32002",
+            "description": "SYNTHETIC mixed-method advisory for a binary-only component. Source CVSS versions describe different scales, not a direct vector disagreement.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic legacy advisory"
+                },
+                "method": "CVSSv2",
+                "score": 7.5,
+                "vector": "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+              },
+              {
+                "source": {
+                  "name": "Synthetic modern advisory"
+                },
+                "method": "CVSSv4",
+                "score": 9.3,
+                "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "legacy-binary"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32003",
+            "description": "SYNTHETIC incomplete identity: no PURL, CPE, source severity or verified reachability. Missing information is not a zero score.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [],
+            "affects": [
+              {
+                "ref": "unknown-package"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32004",
+            "description": "SYNTHETIC component disappears in a later source import. Its assessment remains historical evidence.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "removed-module"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32005",
+            "description": "SYNTHETIC fixed-context example: independent approvals for both consuming roots permit a coordinator to publish contextual scores.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "fixed-adapter"
+              }
+            ]
+          }
+        ]
+      },
+      "context": {
+        "subject_kind": "build",
+        "configuration": "synthetic",
+        "pipeline_run": "fixture-1",
+        "collector": "DTVP playground",
+        "method": "build",
+        "limitations": [
+          "Synthetic composition and decisions; not a real assessment or release."
+        ],
+        "analysis_source": {
+          "repository_name": "synthetic-workflow",
+          "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    {
+      "id": "import-7.2.0-1",
+      "version": "7.2.0",
+      "source": "playground:native-scenario",
+      "build_number": 1,
+      "occurred_at": "2026-01-01T00:00:00+00:00",
+      "sbom": {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+          "component": {
+            "type": "application",
+            "bom-ref": "product",
+            "name": "Synthetic rich review product",
+            "version": "7.2.0"
+          }
+        },
+        "components": [
+          {
+            "type": "application",
+            "bom-ref": "platform-app",
+            "name": "platform-app",
+            "version": "1.0",
+            "purl": "pkg:generic/platform-app@1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "operations-app",
+            "name": "operations-app",
+            "version": "1.0",
+            "purl": "pkg:generic/operations-app@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-tls",
+            "name": "shared-tls",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-tls@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "MIT"
+                }
+              }
+            ],
+            "properties": [
+              {
+                "name": "vscorer:threat-model-element-ids",
+                "value": "synthetic-tls-boundary"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-parser",
+            "name": "shared-parser",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-parser@1.0",
+            "licenses": [
+              {
+                "expression": "Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "long-name",
+            "name": "protocol-gateway-for-device-connectivity-and-enterprise-authentication",
+            "group": "Example.Technology.Security",
+            "version": "3.2.1",
+            "purl": "pkg:generic/example/protocol-gateway@3.2.1",
+            "licenses": [
+              {
+                "expression": "MIT OR Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "legacy-binary",
+            "name": "Legacy vendor binary (inventory only)",
+            "version": "8.0",
+            "cpe": "cpe:2.3:a:example:legacy_binary:8.0:*:*:*:*:*:*:*",
+            "licenses": [
+              {
+                "license": {
+                  "name": "Synthetic commercial terms"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "unknown-package",
+            "name": "Unidentified statically linked module",
+            "version": "unknown"
+          },
+          {
+            "type": "library",
+            "bom-ref": "removed-module",
+            "name": "Retired helper library",
+            "version": "1.0",
+            "purl": "pkg:generic/removed-module@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "GPL-3.0-only"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "fixed-adapter",
+            "name": "Patched protocol adapter",
+            "version": "2.0",
+            "purl": "pkg:generic/fixed-adapter@2.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "Apache-2.0"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-a",
+            "name": "Service wrapper A",
+            "version": "1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-b",
+            "name": "Service wrapper B",
+            "version": "1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "new-runtime",
+            "name": "New runtime service",
+            "version": "1.0",
+            "purl": "pkg:generic/new-runtime@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "BSD-3-Clause"
+                }
+              }
+            ]
+          },
+          {
+            "type": "application",
+            "bom-ref": "retired-app",
+            "name": "retired-app",
+            "version": "1.0"
+          }
+        ],
+        "dependencies": [
+          {
+            "ref": "product",
+            "dependsOn": [
+              "platform-app",
+              "operations-app",
+              "retired-app"
+            ]
+          },
+          {
+            "ref": "platform-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "wrapper-a",
+              "wrapper-b",
+              "legacy-binary",
+              "unknown-package",
+              "fixed-adapter",
+              "new-runtime"
+            ]
+          },
+          {
+            "ref": "operations-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "legacy-binary",
+              "fixed-adapter"
+            ]
+          },
+          {
+            "ref": "shared-tls",
+            "dependsOn": []
+          },
+          {
+            "ref": "shared-parser",
+            "dependsOn": []
+          },
+          {
+            "ref": "long-name",
+            "dependsOn": []
+          },
+          {
+            "ref": "legacy-binary",
+            "dependsOn": []
+          },
+          {
+            "ref": "unknown-package",
+            "dependsOn": []
+          },
+          {
+            "ref": "removed-module",
+            "dependsOn": []
+          },
+          {
+            "ref": "fixed-adapter",
+            "dependsOn": []
+          },
+          {
+            "ref": "wrapper-a",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "wrapper-b",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "new-runtime",
+            "dependsOn": []
+          },
+          {
+            "ref": "retired-app",
+            "dependsOn": [
+              "removed-module"
+            ]
+          }
+        ],
+        "vulnerabilities": [
+          {
+            "id": "CVE-2099-31001",
+            "description": "Synthetic TLS defect. Determine whether the vulnerable protocol is enabled in each consuming application.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-tls"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-31002",
+            "description": "Synthetic parser defect. Review whether untrusted input reaches this parser and retain deployment evidence.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-parser"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32001",
+            "description": "SYNTHETIC advisory: this is invented test evidence, not an actual CVE.\n\n1. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n2. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n3. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n4. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n5. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n6. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n7. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n8. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic NVD"
+                },
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              },
+              {
+                "source": {
+                  "name": "Synthetic supplier"
+                },
+                "method": "CVSSv31",
+                "score": 8.1,
+                "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "long-name"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32002",
+            "description": "SYNTHETIC mixed-method advisory for a binary-only component. Source CVSS versions describe different scales, not a direct vector disagreement.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic legacy advisory"
+                },
+                "method": "CVSSv2",
+                "score": 7.5,
+                "vector": "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+              },
+              {
+                "source": {
+                  "name": "Synthetic modern advisory"
+                },
+                "method": "CVSSv4",
+                "score": 9.3,
+                "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "legacy-binary"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32003",
+            "description": "SYNTHETIC incomplete identity: no PURL, CPE, source severity or verified reachability. Missing information is not a zero score.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [],
+            "affects": [
+              {
+                "ref": "unknown-package"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32004",
+            "description": "SYNTHETIC component disappears in a later source import. Its assessment remains historical evidence.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "removed-module"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32005",
+            "description": "SYNTHETIC fixed-context example: independent approvals for both consuming roots permit a coordinator to publish contextual scores.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "fixed-adapter"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32006",
+            "description": "SYNTHETIC new vulnerability present only in the parallel 7.2.0 version.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "new-runtime"
+              }
+            ]
+          }
+        ]
+      },
+      "context": {
+        "subject_kind": "build",
+        "configuration": "synthetic",
+        "pipeline_run": "fixture-1",
+        "collector": "DTVP playground",
+        "method": "build",
+        "limitations": [
+          "Synthetic composition and decisions; not a real assessment or release."
+        ],
+        "analysis_source": {
+          "repository_name": "synthetic-workflow",
+          "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ],
+  "ownership": {
+    "rules": [
+      {
+        "selector": "platform-app",
+        "team": "Platform"
+      },
+      {
+        "selector": "operations-app",
+        "team": "Operations"
+      },
+      {
+        "selector": "retired-app",
+        "team": "Platform"
+      }
+    ],
+    "context_roots": {
+      "7.1.1": [
+        "platform-app",
+        "operations-app",
+        "retired-app"
+      ],
+      "7.1.2": [
+        "platform-app",
+        "operations-app",
+        "retired-app"
+      ],
+      "7.2.0": [
+        "platform-app",
+        "operations-app",
+        "retired-app"
+      ]
+    }
+  },
+  "assessments": [
+    {
+      "id": "fixture-earlier-draft",
+      "version": "7.1.1",
+      "root_ref": "platform-app",
+      "component_ref": "shared-parser",
+      "vulnerability_id": "CVE-2099-31002",
+      "persona": "analyst",
+      "stage": "draft",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      }
+    },
+    {
+      "id": "fixture-approved-tls",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "shared-tls",
+      "vulnerability_id": "CVE-2099-31001",
+      "persona": "analyst",
+      "stage": "approved",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      },
+      "review": {
+        "persona": "reviewer",
+        "rationale": "Synthetic independent review confirms the example scope and deployment evidence."
+      }
+    },
+    {
+      "id": "fixture-submitted-tls",
+      "version": "7.1.2",
+      "root_ref": "operations-app",
+      "component_ref": "shared-tls",
+      "vulnerability_id": "CVE-2099-31001",
+      "persona": "operations",
+      "stage": "submitted",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      }
+    },
+    {
+      "id": "fixture-stale-parser",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "shared-parser",
+      "vulnerability_id": "CVE-2099-31002",
+      "persona": "analyst",
+      "stage": "approved",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      },
+      "review": {
+        "persona": "reviewer",
+        "rationale": "Synthetic independent review confirms the example scope and deployment evidence."
+      }
+    },
+    {
+      "id": "rich-investigation-draft",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "long-name",
+      "vulnerability_id": "CVE-2099-32001",
+      "persona": "analyst",
+      "stage": "draft",
+      "assessment": {
+        "state": "under_investigation",
+        "rationale": "SYNTHETIC fixture decision for this consuming context only. Deployment verification and source limitations are invented for local interaction testing.",
+        "evidence": [
+          {
+            "reference": "synthetic:deployment-check",
+            "description": "Invented configuration and regression-test evidence, not a real approval."
+          }
+        ]
+      },
+      "after_updates": true
+    },
+    {
+      "id": "rich-binary-submitted",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "legacy-binary",
+      "vulnerability_id": "CVE-2099-32002",
+      "persona": "analyst",
+      "stage": "submitted",
+      "assessment": {
+        "state": "affected",
+        "rationale": "SYNTHETIC fixture decision for this consuming context only. Deployment verification and source limitations are invented for local interaction testing.",
+        "evidence": [
+          {
+            "reference": "synthetic:deployment-check",
+            "description": "Invented configuration and regression-test evidence, not a real approval."
+          }
+        ]
+      },
+      "after_updates": true
+    },
+    {
+      "id": "rich-removed-assessment",
+      "version": "7.1.2",
+      "root_ref": "retired-app",
+      "component_ref": "removed-module",
+      "vulnerability_id": "CVE-2099-32004",
+      "persona": "analyst",
+      "stage": "approved",
+      "assessment": {
+        "state": "not_affected",
+        "rationale": "SYNTHETIC fixture decision for this consuming context only. Deployment verification and source limitations are invented for local interaction testing.",
+        "evidence": [
+          {
+            "reference": "synthetic:deployment-check",
+            "description": "Invented configuration and regression-test evidence, not a real approval."
+          }
+        ],
+        "justification": "code_not_reachable"
+      },
+      "review": {
+        "persona": "reviewer",
+        "rationale": "SYNTHETIC independent review for this exact fixture context. No real human approval assurance."
+      }
+    },
+    {
+      "id": "rich-fixed-platform",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "fixed-adapter",
+      "vulnerability_id": "CVE-2099-32005",
+      "persona": "analyst",
+      "stage": "approved",
+      "assessment": {
+        "state": "fixed",
+        "rationale": "SYNTHETIC fixture decision for this consuming context only. Deployment verification and source limitations are invented for local interaction testing.",
+        "evidence": [
+          {
+            "reference": "synthetic:deployment-check",
+            "description": "Invented configuration and regression-test evidence, not a real approval."
+          }
+        ]
+      },
+      "review": {
+        "persona": "reviewer",
+        "rationale": "SYNTHETIC independent review for this exact fixture context. No real human approval assurance."
+      },
+      "after_updates": true
+    },
+    {
+      "id": "rich-fixed-operations",
+      "version": "7.1.2",
+      "root_ref": "operations-app",
+      "component_ref": "fixed-adapter",
+      "vulnerability_id": "CVE-2099-32005",
+      "persona": "operations",
+      "stage": "approved",
+      "assessment": {
+        "state": "fixed",
+        "rationale": "SYNTHETIC fixture decision for this consuming context only. Deployment verification and source limitations are invented for local interaction testing.",
+        "evidence": [
+          {
+            "reference": "synthetic:deployment-check",
+            "description": "Invented configuration and regression-test evidence, not a real approval."
+          }
+        ]
+      },
+      "review": {
+        "persona": "operations-reviewer",
+        "rationale": "SYNTHETIC independent review for this exact fixture context. No real human approval assurance."
+      },
+      "after_updates": true
+    }
+  ],
+  "tags": [
+    {
+      "name": "workflow-demo-reviewed-baseline",
+      "version": "7.1.2"
+    }
+  ],
+  "updates": [
+    {
+      "id": "import-7.1.2-2",
+      "version": "7.1.2",
+      "source": "playground:native-scenario",
+      "build_number": 2,
+      "occurred_at": "2026-01-02T00:00:00+00:00",
+      "sbom": {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+          "component": {
+            "type": "application",
+            "bom-ref": "product",
+            "name": "Synthetic rich review product",
+            "version": "7.1.2"
+          }
+        },
+        "components": [
+          {
+            "type": "application",
+            "bom-ref": "platform-app",
+            "name": "platform-app",
+            "version": "1.0",
+            "purl": "pkg:generic/platform-app@1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "operations-app",
+            "name": "operations-app",
+            "version": "1.0",
+            "purl": "pkg:generic/operations-app@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-tls",
+            "name": "shared-tls",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-tls@1.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "MIT"
+                }
+              }
+            ],
+            "properties": [
+              {
+                "name": "vscorer:threat-model-element-ids",
+                "value": "synthetic-tls-boundary"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-parser",
+            "name": "shared-parser",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-parser@1.0",
+            "licenses": [
+              {
+                "expression": "Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "long-name",
+            "name": "protocol-gateway-for-device-connectivity-and-enterprise-authentication",
+            "group": "Example.Technology.Security",
+            "version": "3.2.1",
+            "purl": "pkg:generic/example/protocol-gateway@3.2.1",
+            "licenses": [
+              {
+                "expression": "MIT OR Apache-2.0"
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "legacy-binary",
+            "name": "Legacy vendor binary (inventory only)",
+            "version": "8.0",
+            "cpe": "cpe:2.3:a:example:legacy_binary:8.0:*:*:*:*:*:*:*",
+            "licenses": [
+              {
+                "license": {
+                  "name": "Synthetic commercial terms"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "unknown-package",
+            "name": "Unidentified statically linked module",
+            "version": "unknown"
+          },
+          {
+            "type": "library",
+            "bom-ref": "fixed-adapter",
+            "name": "Patched protocol adapter",
+            "version": "2.0",
+            "purl": "pkg:generic/fixed-adapter@2.0",
+            "licenses": [
+              {
+                "license": {
+                  "id": "Apache-2.0"
+                }
+              }
+            ]
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-a",
+            "name": "Service wrapper A",
+            "version": "1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "wrapper-b",
+            "name": "Service wrapper B",
+            "version": "1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "retired-app",
+            "name": "retired-app",
+            "version": "1.0"
+          }
+        ],
+        "dependencies": [
+          {
+            "ref": "product",
+            "dependsOn": [
+              "platform-app",
+              "operations-app",
+              "retired-app"
+            ]
+          },
+          {
+            "ref": "platform-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "wrapper-a",
+              "wrapper-b",
+              "legacy-binary",
+              "unknown-package",
+              "fixed-adapter"
+            ]
+          },
+          {
+            "ref": "operations-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser",
+              "legacy-binary",
+              "fixed-adapter"
+            ]
+          },
+          {
+            "ref": "shared-tls",
+            "dependsOn": []
+          },
+          {
+            "ref": "shared-parser",
+            "dependsOn": []
+          },
+          {
+            "ref": "long-name",
+            "dependsOn": []
+          },
+          {
+            "ref": "legacy-binary",
+            "dependsOn": []
+          },
+          {
+            "ref": "unknown-package",
+            "dependsOn": []
+          },
+          {
+            "ref": "fixed-adapter",
+            "dependsOn": []
+          },
+          {
+            "ref": "wrapper-a",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "wrapper-b",
+            "dependsOn": [
+              "long-name"
+            ]
+          },
+          {
+            "ref": "retired-app",
+            "dependsOn": []
+          }
+        ],
+        "vulnerabilities": [
+          {
+            "id": "CVE-2099-31001",
+            "description": "Synthetic TLS defect. Determine whether the vulnerable protocol is enabled in each consuming application.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-tls"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-31002",
+            "description": "Synthetic parser defect. Review whether untrusted input reaches this parser and retain deployment evidence. Updated supplier evidence identifies another potentially reachable entry point; reassessment is required.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-parser"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32001",
+            "description": "SYNTHETIC advisory: this is invented test evidence, not an actual CVE.\n\n1. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n2. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n3. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n4. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n5. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n6. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n7. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.\n\n8. Deployment consideration: evaluate the consuming application, trust boundary, authentication, enabled protocols and build coverage. A matching package does not prove that a vulnerable execution path is reachable. Confirm runtime configuration, generated code and linked binary limitations before drawing a conclusion.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic NVD"
+                },
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              },
+              {
+                "source": {
+                  "name": "Synthetic supplier"
+                },
+                "method": "CVSSv31",
+                "score": 8.1,
+                "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "long-name"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32002",
+            "description": "SYNTHETIC mixed-method advisory for a binary-only component. Source CVSS versions describe different scales, not a direct vector disagreement.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "source": {
+                  "name": "Synthetic legacy advisory"
+                },
+                "method": "CVSSv2",
+                "score": 7.5,
+                "vector": "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+              },
+              {
+                "source": {
+                  "name": "Synthetic modern advisory"
+                },
+                "method": "CVSSv4",
+                "score": 9.3,
+                "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "legacy-binary"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32003",
+            "description": "SYNTHETIC incomplete identity: no PURL, CPE, source severity or verified reachability. Missing information is not a zero score.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [],
+            "affects": [
+              {
+                "ref": "unknown-package"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-32005",
+            "description": "SYNTHETIC fixed-context example: independent approvals for both consuming roots permit a coordinator to publish contextual scores.",
+            "source": {
+              "name": "Synthetic review advisory"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "fixed-adapter"
+              }
+            ]
+          }
+        ]
+      },
+      "context": {
+        "subject_kind": "build",
+        "configuration": "synthetic",
+        "pipeline_run": "fixture-2",
+        "collector": "DTVP playground",
+        "method": "build",
+        "limitations": [
+          "Synthetic composition and decisions; not a real assessment or release."
+        ],
+        "analysis_source": {
+          "repository_name": "synthetic-workflow",
+          "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "subject_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ],
+  "licenses": [
+    {
+      "id": "synthetic-license-disposition",
+      "version": "7.1.2",
+      "component_ref": "shared-tls",
+      "persona": "license-analyst",
+      "submit": true,
+      "disposition": {
+        "concluded_expression": "MIT",
+        "disposition": "allowed",
+        "obligations": [
+          "Synthetic example: retain the copyright and license notice."
+        ],
+        "distribution": "Synthetic example distribution only",
+        "modification": "Unmodified example",
+        "linking": "Synthetic dynamic linking assumption",
+        "rationale": "Demonstration judgment only; no real legal clearance or compliance conclusion.",
+        "provenance": {
+          "source": "synthetic-playground"
+        },
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Invented MIT evidence for interaction testing."
+          }
+        ]
+      }
+    }
+  ],
+  "vscorer_proposals": [
+    {
+      "id": "synthetic-vscorer-proposal",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "shared-tls",
+      "vulnerability_id": "CVE-2099-31001",
+      "persona": "analyst",
+      "source_label": "Synthetic VScorer playground",
+      "base_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "binding_reason": "Synthetic file scenario supplies mock minimal VScorer output; no external service or verified provider.",
+      "finding": {
+        "id": "synthetic-vscorer-finding",
+        "assessment_id": "synthetic-vscorer-assessment",
+        "cve_id": "CVE-2099-31001",
+        "version": 1,
+        "state": "pending",
+        "source_facts": {
+          "cve_id": "CVE-2099-31001",
+          "base_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "base_score": 9.8,
+          "base_conflict": false,
+          "component_scope_conflict": false,
+          "unresolved_scope": false,
+          "components": [
+            {
+              "bom_ref": "shared-tls",
+              "name": "shared-tls",
+              "version": "1.0",
+              "purl": "pkg:generic/shared-tls@1.0"
+            }
+          ]
+        },
+        "preview": {
+          "environmental_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L/MAV:P/MAC:H/MPR:H/MUI:R/MS:U/MC:N/MI:N/MA:N",
+          "environmental_score": 0.0,
+          "environmental_approval_allowed": true,
+          "approval_blockers": [],
+          "scope_complete": true,
+          "finding_id": "synthetic-vscorer-finding",
+          "finding_version": 1
+        }
+      }
+    },
+    {
+      "id": "rich-vscorer-alternative",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "shared-tls",
+      "vulnerability_id": "CVE-2099-31001",
+      "persona": "analyst",
+      "source_label": "Synthetic VScorer alternative contextual assumptions",
+      "base_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "binding_reason": "Synthetic file scenario supplies mock minimal VScorer output; no external service or verified provider.",
+      "finding": {
+        "id": "rich-vscorer-finding",
+        "assessment_id": "rich-vscorer-assessment",
+        "cve_id": "CVE-2099-31001",
+        "version": 1,
+        "state": "pending",
+        "source_facts": {
+          "cve_id": "CVE-2099-31001",
+          "base_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "base_score": 9.8,
+          "base_conflict": false,
+          "component_scope_conflict": false,
+          "unresolved_scope": false,
+          "components": [
+            {
+              "bom_ref": "shared-tls",
+              "name": "shared-tls",
+              "version": "1.0",
+              "purl": "pkg:generic/shared-tls@1.0"
+            }
+          ]
+        },
+        "preview": {
+          "environmental_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:A/MI:L/MA:L/CR:L",
+          "environmental_score": 6.5,
+          "environmental_approval_allowed": true,
+          "approval_blockers": [],
+          "scope_complete": true,
+          "finding_id": "rich-vscorer-finding",
+          "finding_version": 1
+        }
+      }
+    }
+  ],
+  "code_analysis": [
+    {
+      "id": "synthetic-agentyzer-evidence",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "shared-tls",
+      "vulnerability_id": "CVE-2099-31001",
+      "persona": "analyst",
+      "source_label": "Synthetic Agentyzer playground",
+      "report": {
+        "assessment": {
+          "affected": null,
+          "confidence": "Low",
+          "summary": "Synthetic source-analysis example, not an actual repository analysis.",
+          "reasoning": "No external call, code scan, provider verification or binary/build verification occurred.",
+          "application_eligible": false,
+          "rescoring_eligible": false
+        }
+      }
+    },
+    {
+      "id": "rich-agentyzer-limitations",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "long-name",
+      "vulnerability_id": "CVE-2099-32001",
+      "persona": "analyst",
+      "source_label": "Synthetic Agentyzer configuration limitations",
+      "report": {
+        "assessment": {
+          "affected": null,
+          "confidence": "Low",
+          "summary": "SYNTHETIC code scan: generated configuration and linked binaries were not inspected.",
+          "reasoning": "SYNTHETIC report rationale: runtime protocol configuration remains unknown. Compare the supplier precondition and both source ratings. No provider authenticity or source-commit proof is asserted.",
+          "application_eligible": false,
+          "rescoring_eligible": false
+        }
+      }
+    }
+  ],
+  "metadata": [
+    {
+      "id": "rich-context",
+      "version": "7.1.2",
+      "component_ref": "long-name",
+      "persona": "administrator",
+      "annotations": {
+        "cybersecurity": {
+          "criticality": "high",
+          "exposure": "external",
+          "mitigations": [
+            "SYNTHETIC: restrict legacy protocol at the gateway."
+          ],
+          "testing_evidence": [
+            "synthetic:integration-test-42"
+          ]
+        },
+        "deployment": {
+          "environment": "Synthetic externally reachable gateway",
+          "usage": "Device connectivity and authentication",
+          "configuration": "Legacy protocol disabled in the invented production profile."
+        },
+        "support": {
+          "status": "supported",
+          "supplier": "Synthetic supplier",
+          "support_until": "2028-12-31"
+        },
+        "notes": "SYNTHETIC authored context; not imported supplier facts or a real cybersecurity conclusion."
+      },
+      "provenance": {
+        "source": "synthetic-playground",
+        "reference": "synthetic:deployment-design-42"
+      },
+      "rationale": "SYNTHETIC owner-authored context to exercise criticality, exposure, support and mitigation views."
+    }
+  ],
+  "scores": [
+    {
+      "id": "rich-score-platform-app",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "fixed-adapter",
+      "vulnerability_id": "CVE-2099-32005",
+      "persona": "coordinator",
+      "base_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N",
+      "rationale": "SYNTHETIC coordinator publication after both independent context approvals. Zero is an explicit contextual score, never missing source evidence."
+    },
+    {
+      "id": "rich-score-operations-app",
+      "version": "7.1.2",
+      "root_ref": "operations-app",
+      "component_ref": "fixed-adapter",
+      "vulnerability_id": "CVE-2099-32005",
+      "persona": "coordinator",
+      "base_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N",
+      "rationale": "SYNTHETIC coordinator publication after both independent context approvals. Zero is an explicit contextual score, never missing source evidence."
+    }
+  ]
+}

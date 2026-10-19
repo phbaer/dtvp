@@ -262,7 +262,9 @@ def test_demo_release_tag_retains_file_and_synthetic_review_provenance(analyst, 
     assert marker["synthetic"] is True
     assert marker["human_approval_assurance"] == "simulated fixture decisions only"
     assert marker["scenario_sha256"] in journal.state(state).artifacts
-    assert json.loads(journal.objects.read(marker["scenario_sha256"])) == DemoScenario.model_validate(scenario()).model_dump(mode="json")
+    assert json.loads(
+        journal.objects.read(marker["scenario_sha256"])
+    ) == DemoScenario.model_validate(scenario()).model_dump(mode="json")
 
 
 def test_invalid_synthetic_persona_review_is_forbidden_without_publication(analyst, app):
@@ -275,3 +277,80 @@ def test_invalid_synthetic_persona_review_is_forbidden_without_publication(analy
     assert app.state.knowledge.references() == before
     with app.state.sessions() as db:
         assert db.scalar(select(Project).where(Project.name == value["project_name"])) is None
+
+
+def test_rich_file_exercises_review_evidence_scoring_and_version_deltas(analyst, app):
+    from dtvp.knowledge.filters import source_conflict
+    from dtvp.knowledge.licenses import license_worklist
+
+    demo = load(analyst, scenario("review-rich"))
+    current = workspace(app, demo)
+    rows = current["items"]
+    assert {"approved", "draft", "submitted", "reassessment_needed", "unassessed"} <= {
+        row["coverage"]["status"] for row in rows
+    }
+    conflict = next(row for row in rows if row["vulnerability_id"] == "CVE-2099-32001")
+    assert source_conflict(conflict) == "yes" and len(conflict["description"]) > 2000
+    assert conflict["curated_metadata"]["applicable"]
+    assert conflict["curated_metadata"]["payload"]["annotations"]["cybersecurity"] == {
+        "criticality": "high",
+        "exposure": "external",
+        "mitigations": ["SYNTHETIC: restrict legacy protocol at the gateway."],
+        "testing_evidence": ["synthetic:integration-test-42"],
+    }
+    unknown = next(row for row in rows if row["vulnerability_id"] == "CVE-2099-32003")
+    assert not unknown["component"].get("purl")
+    assert unknown["source_ratings"] == [] and unknown["published_score"] is None
+    mixed = next(row for row in rows if row["vulnerability_id"] == "CVE-2099-32002")
+    assert {r["method"] for r in mixed["source_ratings"]} == {"CVSSv2", "CVSSv4"}
+    assert source_conflict(mixed) == "no"
+    published = [row for row in rows if row["vulnerability_id"] == "CVE-2099-32005"]
+    assert len(published) == 2
+    assert all(row["published_score"]["score"] == 0 for row in published)
+    assert all(row["coverage"]["status"] == "approved" for row in published)
+    tls = next(
+        row
+        for row in rows
+        if row["vulnerability_id"] == "CVE-2099-31001"
+        and row["context"]["root_ref"] == "platform-app"
+    )
+    assert len(tls["scoring_proposals"]) == 2
+    assert {proposal["proposal"]["score"] for proposal in tls["scoring_proposals"]} == {0, 6.5}
+    assert tls["published_score"] is None  # Another context still awaits independent approval.
+    assert tls["code_analysis"] and not tls["code_analysis"][0]["application_eligible"]
+    sections = load_sections(app.state.knowledge, current["state"])
+    assert "assessment:rich-removed-assessment" in sections["assessments"]
+    assert not any(
+        c.get("bom-ref") == "removed-module"
+        for c in sections["inventory"].values()
+        if isinstance(c, dict)
+    )
+    assert license_worklist(app.state.knowledge, current["state"])["items"]
+    parallel = workspace(app, demo, "7.2.0")
+    assert "CVE-2099-32006" in {row["vulnerability_id"] for row in parallel["items"]}
+    assert "CVE-2099-32006" not in {row["vulnerability_id"] for row in rows}
+    again = load(analyst, scenario("review-rich"))
+    assert again["preserved_existing"] and workspace(app, again)["state"] == current["state"]
+
+
+def test_optional_demo_phases_preserve_existing_scenario_serialization():
+    value = DemoScenario.model_validate(scenario()).model_dump(mode="json")
+    assert "metadata" not in value and "scores" not in value
+    assert all("after_updates" not in item for item in value["assessments"])
+
+
+@pytest.mark.parametrize("change", ["missing_review", "wrong_scorer", "wrong_metadata_author"])
+def test_rich_file_keeps_publication_and_metadata_authorization_atomic(analyst, app, change):
+    value = scenario("review-rich")
+    if change == "missing_review":
+        decision = next(a for a in value["assessments"] if a["id"] == "rich-fixed-operations")
+        decision["stage"] = "submitted"
+        decision.pop("review")
+    elif change == "wrong_scorer":
+        value["scores"][0]["persona"] = "analyst"
+    else:
+        value["metadata"][0]["persona"] = "analyst"
+    before = app.state.knowledge.references()
+    response = analyst.post(PATH, json=value)
+    assert response.status_code == (422 if change == "missing_review" else 403), response.text
+    assert app.state.knowledge.references() == before

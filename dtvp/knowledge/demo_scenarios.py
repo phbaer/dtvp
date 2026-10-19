@@ -22,7 +22,13 @@ from dtvp.storage import canonical, digest
 
 MAX_SCENARIO_BYTES = 32 * 1024 * 1024
 Persona = Literal[
-    "administrator", "analyst", "reviewer", "operations", "operations-reviewer", "license-analyst"
+    "administrator",
+    "analyst",
+    "reviewer",
+    "operations",
+    "operations-reviewer",
+    "license-analyst",
+    "coordinator",
 ]
 
 
@@ -63,6 +69,7 @@ class ScenarioTarget(RequestModel):
 class ScenarioAssessment(ScenarioTarget):
     stage: Literal["draft", "submitted", "approved"]
     assessment: dict
+    after_updates: bool = Field(default=False, strict=True, exclude_if=lambda value: not value)
     review: ScenarioReview | None = None
 
     @model_validator(mode="after")
@@ -118,6 +125,22 @@ class ScenarioAnalysis(ScenarioTarget):
     report: dict
 
 
+class ScenarioMetadata(RequestModel):
+    id: Name
+    version: Name
+    component_ref: Name
+    persona: Persona
+    annotations: dict
+    provenance: dict
+    rationale: str = Field(min_length=1, max_length=6000)
+
+
+class ScenarioScore(ScenarioTarget):
+    base_vector: str = Field(max_length=2000)
+    vector: str = Field(max_length=2000)
+    rationale: str = Field(min_length=1, max_length=6000)
+
+
 class DemoScenario(RequestModel):
     format: Literal["dtvp.demo-scenario/1"]
     synthetic: Literal[True]
@@ -132,6 +155,14 @@ class DemoScenario(RequestModel):
     licenses: list[ScenarioLicense] = Field(default_factory=list, max_length=100)
     vscorer_proposals: list[ScenarioVScorer] = Field(default_factory=list, max_length=100)
     code_analysis: list[ScenarioAnalysis] = Field(default_factory=list, max_length=100)
+
+    # Omit empty optional phases to preserve existing scenario hashes and receipts.
+    metadata: list[ScenarioMetadata] = Field(
+        default_factory=list, max_length=100, exclude_if=lambda value: not value
+    )
+    scores: list[ScenarioScore] = Field(
+        default_factory=list, max_length=100, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def coherent(self):
@@ -151,6 +182,8 @@ class DemoScenario(RequestModel):
             *self.licenses,
             *self.vscorer_proposals,
             *self.code_analysis,
+            *self.metadata,
+            *self.scores,
         ]
         identifiers = [item.id for item in items]
         if (
@@ -255,7 +288,8 @@ def build_scenario(journal, db, project, users, teams, data, authorize):
             context_roots=data.ownership.context_roots,
         ),
     )
-    for item in data.assessments:
+
+    def assessed(item):
         target = Target(
             version=item.version,
             context_id=context(item)["id"],
@@ -297,6 +331,10 @@ def build_scenario(journal, db, project, users, teams, data, authorize):
                 ),
                 authorize=authorize(db, project, reviewer),
             )
+
+    for item in data.assessments:
+        if not item.after_updates:
+            assessed(item)
     for index, tag in enumerate(data.tags):
         create_tag(
             journal,
@@ -308,6 +346,60 @@ def build_scenario(journal, db, project, users, teams, data, authorize):
         )
     for item in data.updates:
         imported(item)
+    for item in data.metadata:
+        from dtvp.knowledge.metadata import MetadataInput, save_metadata
+
+        user = users[item.persona]
+        authorize(db, project, user)(project.workspace_id, "manage")
+        save_metadata(
+            journal,
+            project_id=project.id,
+            version=item.version,
+            actor_id=user.id,
+            data=MetadataInput(
+                request_id=item.id,
+                expected=head(item.version),
+                expected_revision=None,
+                component_ref=item.component_ref,
+                annotations=item.annotations,
+                provenance=item.provenance,
+                rationale=item.rationale,
+            ),
+        )
+    for item in data.assessments:
+        if item.after_updates:
+            assessed(item)
+    for item in data.scores:
+        from dtvp.knowledge.scoring import (
+            ScoreInput,
+            ScorePublication,
+            prepare_score,
+            publish_score,
+        )
+
+        user = users[item.persona]
+        authorize(db, project, user)(project.workspace_id, "rescore")
+        data_input = ScoreInput(
+            request_id=item.id,
+            expected_versions={item.version: head(item.version)},
+            targets=[
+                Target(
+                    version=item.version,
+                    context_id=context(item)["id"],
+                    vulnerability_id=item.vulnerability_id,
+                )
+            ],
+            base_vector=item.base_vector,
+            vector=item.vector,
+            rationale=item.rationale,
+        )
+        preview, _, _ = prepare_score(journal, project_id=project.id, data=data_input)
+        publish_score(
+            journal,
+            project_id=project.id,
+            actor_id=user.id,
+            data=ScorePublication(**data_input.model_dump(), preview=preview["preview"]),
+        )
     for item in data.licenses:
         from dtvp.knowledge.license_reviews import LicenseInput, save_license
 

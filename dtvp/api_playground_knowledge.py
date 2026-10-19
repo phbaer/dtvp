@@ -28,6 +28,7 @@ def fixture_users(db):
         "operations",
         "operations-reviewer",
         "license-analyst",
+        "coordinator",
     }
     users = {
         user.subject: user
