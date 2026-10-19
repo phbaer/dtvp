@@ -1,0 +1,8 @@
+# Optional host trust bundle, available only during dependency installation.
+services:
+  api:
+    build:
+      secrets: [build_ca]
+secrets:
+  build_ca:
+    file: ${DTVP_BUILD_CA:?Select a readable PEM CA bundle}

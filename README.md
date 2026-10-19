@@ -2426,12 +2426,28 @@ it removes both the isolated journal and its database.
 volumes and a separate local port. Browser fixture resets preserve the interactive
 playground and its large inventory.
 
-If your build network requires a private CA, keep TLS verification enabled:
+Playground builds automatically forward the host's PEM trust bundle as a BuildKit
+secret to both npm and uv. Selection order: `--ca-cert`, `DTVP_BUILD_CA`,
+`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, then
+Python's default host CA file. Invalid selected bundles fail before Docker runs.
+An explicit override is available for corporate/proxy roots:
 
 ```bash
-docker build --secret id=build_ca,src=/path/to/trusted-ca.pem -t dtvp:rewrite .
-uv run python scripts/playground.py up --skip-build
+uv run python scripts/playground.py up --ca-cert /path/to/trusted-ca.pem
+# Or: DTVP_BUILD_CA=/path/to/trusted-ca.pem uv run python scripts/playground.py up
 ```
+
+The same selection applies to `reset` and `test`; host-side npm/Playwright downloads
+also receive `NODE_EXTRA_CA_CERTS`. The certificate extends the build's existing
+roots, stays outside the image/build context, and is not installed into running
+containers. TLS verification remains enabled. In WSL, the bundle must include the
+corporate root inside WSL; Windows-only trust is not automatically available.
+If no host CA file exists, builds use their standard public trust stores.
+Direct Docker builds can still use
+`docker build --secret id=build_ca,src=/path/to/trusted-ca.pem -t dtvp:rewrite .`.
+Verified with 13 focused CA-selection/command-propagation checks and a real image
+build (npm, uv and frontend). A runtime-image check confirmed that neither the
+secret mount nor the temporary combined bundle is retained.
 
 ## Review and ownership
 

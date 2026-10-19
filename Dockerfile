@@ -11,7 +11,11 @@ FROM python:3.15-slim-trixie
 COPY --from=uv /uv /uvx /usr/local/bin/
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --locked --no-dev
+RUN --mount=type=secret,id=build_ca,target=/run/secrets/build_ca \
+    if [ -f /run/secrets/build_ca ]; then \
+      cat /etc/ssl/certs/ca-certificates.crt /run/secrets/build_ca > /tmp/dtvp-build-ca.pem && \
+      SSL_CERT_FILE=/tmp/dtvp-build-ca.pem uv sync --locked --no-dev && rm /tmp/dtvp-build-ca.pem; \
+    else uv sync --locked --no-dev; fi
 COPY dtvp ./dtvp
 COPY alembic.ini ./
 COPY playground/fixtures ./playground/fixtures
