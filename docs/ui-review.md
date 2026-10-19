@@ -89,14 +89,74 @@ the current long stack with another long stack of collapsed sections.
 
 Use the same record width and header as Overview. Evidence remains alongside the
 assessment or review form where space permits; narrower detail panes stack them.
-Retain the selected report, draft and citations when switching between relevant
-views. Preserve the existing explicit cross-version preview/reset semantics and
-captured-request protections; layout work must not silently change coverage.
+Retain the selected report, draft, citations and declared version scope when
+switching between relevant views. Preserve exact captured-request protections;
+revised default coverage is specified below and requires backend support.
 
 Assessments require applicability, rationale/evidence and a not-affected reason
 where applicable. They never require rescoring. Independent reviewers approve an
 exact assessment revision; a coordinator performs final scoring only after all
 required contexts for that vulnerability have current independent approval.
+
+### Assessment scope: shared across versions by default
+
+Revised requirement: one shared assessment per vulnerability, component lineage
+and consuming usage context normally covers all applicable product versions. A
+selected version is the analyst's viewing context, not a single-version default
+for the decision. Long-lived product lines can narrow this default through an
+explicit product-version range, including exclusions and named exceptions.
+
+Show a visible scope control at the start of the assessment:
+
+- **All applicable product versions** (default).
+- **Product-version range** with inclusive bounds and optional exclusions.
+- **Selected versions**, including the single-version exception.
+
+Use product release versions, not package versions, as the range labels. An
+eight-year product lifetime is context for this workflow; it must not silently
+become a hard-coded date cutoff or inferred release range. Non-numeric version
+labels need explicit support/selection and must not disappear from All versions.
+
+Maintain one logical assessment and rationale for the shared scope. Permit explicit
+version-specific or narrower-range decisions where usage, component material,
+configuration or conclusions differ. Show these as exceptions to the shared scope.
+Do not overwrite independent decisions while editing the general assessment;
+overlapping contradictory ranges require an explicit conflict resolution. Different
+consuming roots and team responsibilities remain separate assessment contexts.
+
+The backend resolves declared scope against all authorized product-version states
+and returns a complete, pinned preview: included versions, existing exceptions,
+changed/ambiguous material, absent findings/components and permission exclusions.
+Selection must not depend on the currently displayed candidate page. Never label a
+partial or budget-truncated result All versions. The UI and CLI consume this same
+read model and submit the same captured scope; avoid client-side expansion loops.
+
+Submitting one shared assessment must not require creating separate copies for
+each patch release. Independent review can approve its exact evaluated coverage
+in one operation. Store declared range/all-version intent separately from concrete
+verified coverage, assessment revision and reviewed input states. New imports and
+future versions are evaluated against that intent; material changes or uncertain
+identity require revalidation of the affected coverage. A broad scope does not by
+itself supply an approval for previously unreviewed evidence. Released tags retain
+the decisions and approval state captured at release.
+
+Keep the scope visible across workflow tabs; tab navigation must not silently
+reduce an all-version or range assessment to the selected version. Show a compact
+summary such as “All applicable versions · 18 covered · 2 version-specific
+exceptions · 1 requires revalidation”, with the actual version list available.
+Specific scope choices/conditions belong to the shared record, not a transient
+checkbox list. Rescoring stays separate and gated on all required approved
+contexts for the vulnerability in each evaluated product version.
+
+Extend the rich fixture with a shared multi-version assessment, a bounded range,
+a version-specific exception and a later import requiring partial revalidation.
+Acceptance must cover preserved historical approvals/tags, future-version discovery,
+unauthorized versions, non-numeric labels, conflicting decisions, more than one
+candidate page and budgets. Verify CLI/API parity and exact retry payloads.
+
+This is a planned domain/API and presentation change. The current runtime still
+uses explicit finite targets with single-version defaults; changing labels alone
+would not implement the agreed behavior.
 
 ### Implementation batches and acceptance
 
@@ -108,7 +168,10 @@ required contexts for that vulnerability have current independent approval.
    and source/analysis summary components. Reduce duplicate notices/metadata, compact
    `CvssVectorComparison.vue`, and separate evidence viewing from input/editing tasks.
    Keep analysis requests and unresolved operations mounted across view changes.
-3. **Workflow alignment and verification:** reuse the shared evidence presentation
+3. **Shared version coverage:** implement durable all-version/range intent, complete
+   backend scope preview and explicit version-specific exceptions; use the same
+   contracts in UI and CLI. Preserve exact reviewed state pins and released tags.
+4. **Workflow alignment and verification:** reuse the shared evidence presentation
    in assessment/review/scoring without duplicating competing summaries. Verify exact
    retries, evidence citations, draft recovery, version coverage and coordinator gates.
    Update the wireframe and README to match; rebuild the playground without resetting it.

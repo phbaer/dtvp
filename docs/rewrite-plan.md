@@ -513,9 +513,15 @@ separate action. Actual context/evidence changes can still require reassessment.
 ### Shared assessments and verified coverage
 
 Distinguish source-reported affected ranges, declared assessment scope and verified
-coverage. A shared assessment records vulnerability, component/context lineage,
-selected versions or ranges/exclusions, conclusion, reason, evidence and supporting
-conditions. Reviews bind exact assessment revisions and evaluated version states.
+coverage. The default is one shared assessment across all applicable product
+versions for one vulnerability and component/usage context. Product-version ranges,
+exclusions and single-version decisions are explicit scope choices or exceptions;
+independent exceptions must not be overwritten by a general assessment. A shared
+assessment records vulnerability, component/context lineage, declared scope,
+conclusion, reason, evidence and supporting conditions. Reviews bind exact
+assessment revisions and evaluated version states. UI tab changes preserve scope.
+This default and durable scope intent are planned; the current runtime still
+requires explicit finite targets, as described in the implementation notes.
 
 A range is not proof that every version satisfies the conditions. New versions
 are coverage candidates requiring explicit confirmation/review. Nightly imports

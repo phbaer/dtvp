@@ -19,7 +19,10 @@ Review; the broader navigation and automatic My teams scope remain proposals.
 Prototype record links also work when the prototype is already open.
 The [next UI refactoring plan](docs/ui-review.md#next-refactoring-stable-vulnerability-workspace)
 replaces tab-dependent expansion with a consistently wider vulnerability pane and a
-less crowded Overview; that layout change is planned, not yet implemented.
+less crowded Overview; that layout change is planned, not yet implemented. The
+plan also makes one shared assessment across applicable product versions the
+default, with explicit ranges and version-specific exceptions; durable scope intent
+and its UI/CLI support remain planned. Current runtime scope behavior is below.
 The design document retains historical decisions; implemented behavior and
 `/openapi.json` take precedence over older planning notes.
 
