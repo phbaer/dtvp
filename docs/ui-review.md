@@ -21,6 +21,70 @@ The wider application navigation and automatic multi-team work scope described
 below remain proposals. The findings record the original inspection, before these
 assessment changes; the README describes current runtime behavior.
 
+## Screenshot review: hierarchy before additional panels
+
+The supplied dark-mode screenshot confirms an information hierarchy problem that
+palette changes alone did not resolve. This is a visual/heuristic assessment of
+the supplied image and current components, not measured user-task performance.
+The running application still changes width by workflow tab; the stable layout
+below remains planned.
+
+A [revised vulnerability mockup](vulnerability-proposal.html) shows a compact
+Overview and Assessment in the same frame, using the sparse scale example and a
+richer example with source disagreements. It is a standalone design proposal,
+not a production screen or a change to backend coverage/approval semantics.
+
+| Visible problem | Proposed correction |
+| :--- | :--- |
+| A large vector panel precedes the description, but shows almost no metrics for the one-source case | Put description/usage first; show a compact real metric row below the main evidence area; retain full vectors and comparisons |
+| Repeated team/status paragraphs and three similarly weighted score/state labels | One identity header, then three distinct summaries: original severity, published score and assessment state |
+| The primary assessment action is below a long disclosure stack | Put the role-appropriate next action at the upper right of the record header |
+| Many sections have the same border, type weight and purple treatment | Use surface levels, spacing, meaningful section headings and restrained semantic accents |
+| Empty analyses/CPE sections and input tools occupy ordinary reading space | One concise empty-analysis state; secondary component/task views for CPE details and analysis execution |
+| Raw records, policy explanations, source evidence and configuration share one column | Keep decision evidence visible; move technical provenance and input/editing controls into named task views |
+| Long lines and controls spread towards the far right impede scanning | Bound prose to roughly 60–70 characters per line; group controls with their section; reflow by actual pane width |
+
+Keep the default reading order: **identity and next action → severity/decision
+state → description and usage → advisory/analysis evidence → compact vectors**.
+On a sufficiently wide detail pane, place description/usage beside the evidence
+summaries. On narrow panes stack them in that order. Overview, Assessment, Review
+and Scoring retain the same outer width and queue/filter visibility. Do not fix
+crowding by shrinking text, increasing full-width prose or adding more accordions.
+
+Purposeful accents on warm charcoal surfaces:
+
+| Treatment | Meaning |
+| :--- | :--- |
+| Mauve | Primary actions, keyboard focus and active navigation |
+| Teal section accent | Advisory evidence, with provider and received-via provenance |
+| Peach section accent | Analysis proposals, including withheld/outdated qualification |
+| Rose/red plus severity label | Critical source severity, never a claim of confirmed applicability |
+| Amber plus status label | A required next step, disagreement or revalidation |
+| Muted neutral | Missing/unknown information, no published score, unavailable results |
+| Green plus approval label | Only an actual approved/completed state when present |
+
+Do not fill every card with colour or use colour as the only status cue. Use
+subtle section accents, compact badges and text. Avoid bright outlines around
+all content; reserve strong boundaries for controls/focus and actionable states.
+Provider ratings received in the same SBOM are separate attributed claims, not
+independent retrievals. Source count, provider-claim count and input-file count
+must not be conflated. A proposal citation is not adoption or publication.
+
+Implementation priorities: (1) stable pane geometry and shared header/action,
+(2) compact Overview composition and useful single-vector display, (3) shared
+source/analysis summaries with dedicated task views, (4) responsive and role-based
+acceptance. Keep the all-version/range assessment requirement in the next section;
+its backend scope work is separate from these visual changes.
+
+The recommendations apply established principles to DTVP rather than prescribe a
+particular design system: essential information should not depend on accordions;
+use a concise, purposeful empty state; status must remain understandable without
+colour; reflow must avoid page-wide horizontal scrolling.
+[GOV.UK accordion guidance](https://design-system.service.gov.uk/components/accordion/),
+[Carbon empty states](https://www.carbondesignsystem.com/building-blocks/core/patterns/empty-states),
+[W3C use of colour](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html),
+[W3C reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html).
+
 ## Next refactoring: stable vulnerability workspace
 
 This is the revised implementation plan after reviewing the integrated assessment

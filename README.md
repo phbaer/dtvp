@@ -17,6 +17,10 @@ workflow redesign, including automatic My teams work scope and a focused
 comparison. The assessment workspace and vector comparison are integrated into
 Review; the broader navigation and automatic My teams scope remain proposals.
 Prototype record links also work when the prototype is already open.
+The [screenshot-based usability review](docs/ui-review.md#screenshot-review-hierarchy-before-additional-panels)
+and [revised vulnerability mockup](docs/vulnerability-proposal.html) propose a clearer
+hierarchy, compact CVSS display and semantic accent colours. This mockup keeps the
+same record width across tabs; the runtime layout correction remains pending.
 The [next UI refactoring plan](docs/ui-review.md#next-refactoring-stable-vulnerability-workspace)
 replaces tab-dependent expansion with a consistently wider vulnerability pane and a
 less crowded Overview; that layout change is planned, not yet implemented. The
