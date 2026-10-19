@@ -18,7 +18,7 @@ def main():
     serve.add_argument("--port", type=int, default=8000)
     sub.add_parser("worker")
     sub.add_parser("migrate")
-    sub.add_parser("rebuild-knowledge", help="Rebuild only v3 projections from the local journal")
+    sub.add_parser("rebuild-knowledge", help="Rebuild knowledge projections from the local journal")
     verify = sub.add_parser("verify-knowledge", help="Verify committed journal history without SQL")
     verify.add_argument("--directory", required=True, help="Existing knowledge journal directory")
     from dtvp.knowledge.client import configure

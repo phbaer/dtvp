@@ -186,7 +186,29 @@ Vite proxies backend requests to port 8000.
 
 ## CLI and API
 
-`uv run dtvp knowledge --help` lists native presentation commands.
+`uv run dtvp knowledge --help` lists everyday commands: discovery, findings,
+assessment/review, scoring, imports, dependency trees and comparisons.
+`uv run dtvp knowledge advanced --help` lists integration, configuration,
+synchronization, migration and diagnostic tools, including raw `request` access.
+Previous direct spellings of advanced commands remain supported for existing scripts.
+Connection/authentication options go before the command (including `advanced`).
+
+Discover IDs and versions without constructing API requests:
+
+```sh
+uv run dtvp knowledge --persona administrator projects
+uv run dtvp knowledge --persona administrator projects --q Product --limit 25
+uv run dtvp knowledge --persona administrator versions --project PROJECT_ID
+uv run dtvp knowledge --persona administrator teams
+uv run dtvp knowledge --persona administrator advanced request GET /api/v1/me
+```
+
+Projects support server-side name search, workspace filtering and cursor pagination.
+Versions list current branches and immutable release tags with their exact state IDs;
+use `--offset`/`--limit` to page them. Discovery commands support `--json` for scripts.
+Teams list accessible workspaces/team IDs; component ownership remains separately
+configured. Results follow the authenticated user's permissions.
+
 Use an explicit playground `--persona` for local demo sessions, or
 `DTVP_API_TOKEN` for scoped machine access. Request files retain exact IDs,
 version/policy pins, targets and rationale; the CLI does not infer approval.

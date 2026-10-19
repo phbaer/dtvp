@@ -72,14 +72,61 @@ def configure(parser):
     command.add_argument(
         "--timeout", type=float, default=60, help="HTTP timeout in seconds (default: 60)"
     )
-    commands = command.add_subparsers(dest="knowledge_command", required=True)
-    demo = commands.add_parser("demo", help="Load explicit synthetic playground scenario data")
+    commands = command.add_subparsers(
+        dest="knowledge_command", required=True, metavar="COMMAND", title="main commands"
+    )
+    advanced = commands.add_parser(
+        "advanced", help="Integration, configuration and diagnostic tools"
+    )
+    specialist = advanced.add_subparsers(
+        dest="knowledge_command", required=True, metavar="COMMAND", title="advanced commands"
+    )
+    primary = {
+        "projects",
+        "versions",
+        "teams",
+        "workspace",
+        "vulnerability",
+        "tree",
+        "portfolio",
+        "assessment",
+        "review",
+        "score",
+        "import-file",
+        "history",
+        "compare",
+        "licenses",
+        "demo",
+    }
+
+    def add_command(name, **kwargs):
+        target = commands if name in primary else specialist
+        result = target.add_parser(name, **kwargs)
+        if target is specialist:
+            # Keep existing scripts working without listing legacy spellings in help.
+            commands.choices[name] = result
+        return result
+
+    projects = add_command("projects", help="List accessible projects and their IDs")
+    projects.add_argument("--q", default="", help="Search project names")
+    projects.add_argument("--workspace", default="", help="Filter by workspace/team ID")
+    projects.add_argument("--cursor", default="", help="Continue from the displayed cursor")
+    projects.add_argument("--limit", type=int, default=25)
+    projects.add_argument("--json", action="store_true")
+    versions = add_command("versions", help="List version branches and release tags")
+    versions.add_argument("--project", required=True)
+    versions.add_argument("--offset", type=int, default=0)
+    versions.add_argument("--limit", type=int, default=50)
+    versions.add_argument("--json", action="store_true")
+    teams = add_command("teams", help="List accessible workspaces/teams and their IDs")
+    teams.add_argument("--json", action="store_true")
+    demo = add_command("demo", help="Load explicit synthetic playground scenario data")
     demo_commands = demo.add_subparsers(dest="demo_command", required=True)
     loader = demo_commands.add_parser(
         "load", help="Load a versioned JSON fixture without resetting work"
     )
     loader.add_argument("--file", required=True, help="Editable dtvp.demo-scenario/1 JSON file")
-    assess = commands.add_parser("assessment", help="Save or submit an exact scoped assessment")
+    assess = add_command("assessment", help="Save or submit an exact scoped assessment")
     assess_commands = assess.add_subparsers(dest="assessment_command", required=True)
     for name in ("draft", "submit"):
         action = assess_commands.add_parser(name)
@@ -88,12 +135,12 @@ def configure(parser):
         action.add_argument(
             "--file", required=True, help="Exact AssessmentInput JSON, including pins"
         )
-    review = commands.add_parser("review", help="Submit exact independent approval/change request")
+    review = add_command("review", help="Submit exact independent approval/change request")
     review.add_argument("--project", required=True)
     review.add_argument(
         "--file", required=True, help="Exact ReviewInput JSON, including revision and pins"
     )
-    score = commands.add_parser("score", help="Read policies or explicitly preview/publish scoring")
+    score = add_command("score", help="Read policies or explicitly preview/publish scoring")
     score_commands = score.add_subparsers(dest="score_command", required=True)
     for name in ("policy", "preview", "publish"):
         action = score_commands.add_parser(name)
@@ -106,9 +153,7 @@ def configure(parser):
         if name != "policy":
             action.add_argument("--rules", action="store_true", help="Use configured rule scoring")
     for name in ("observation-import", "observation-selection", "observation-sources"):
-        resource = commands.add_parser(
-            name, help="Use pinned observation intake and explicit selection"
-        )
+        resource = add_command(name, help="Use pinned observation intake and explicit selection")
         resource.add_argument("--project", required=True)
         resource.add_argument("--version", required=True)
         if name != "observation-sources":
@@ -127,15 +172,15 @@ def configure(parser):
             resource.add_argument("--offset", type=int, default=0)
             resource.add_argument("--limit", type=int, default=50)
     for name in ("pipeline-config", "synchronization-policy"):
-        resource = commands.add_parser(name, help="Read or explicitly replace pinned configuration")
+        resource = add_command(name, help="Read or explicitly replace pinned configuration")
         resource.add_argument("--project", required=True)
         resource.add_argument("--input", help="Exact PUT request JSON; omitted for read-only GET")
-    context = commands.add_parser("pipeline-context", help="Read pinned resolved model mappings")
+    context = add_command("pipeline-context", help="Read pinned resolved model mappings")
     for name in ("project", "state", "configuration"):
         context.add_argument("--" + name, required=True)
     context.add_argument("--offset", type=int, default=0)
     context.add_argument("--limit", type=int, default=200)
-    automatic = commands.add_parser(
+    automatic = add_command(
         "synchronization-jobs", help="Read or explicitly retry/cancel automatic proposals"
     )
     automatic.add_argument("--project", required=True)
@@ -143,16 +188,14 @@ def configure(parser):
     automatic.add_argument("--action", choices=("proposal", "retry", "cancel"))
     automatic.add_argument("--offset", type=int, default=0)
     automatic.add_argument("--limit", type=int, default=50)
-    identity = commands.add_parser(
-        "identity-matches", help="Compare pinned component identity candidates"
-    )
+    identity = add_command("identity-matches", help="Compare pinned component identity candidates")
     identity.add_argument("--project", required=True)
     identity.add_argument("--source", required=True)
     identity.add_argument("--target", required=True)
     identity.add_argument("--offset", type=int, default=0)
     identity.add_argument("--limit", type=int, default=50)
     identity.add_argument("--json", action="store_true")
-    workspace = commands.add_parser("workspace", help="Show contextual findings and review status")
+    workspace = add_command("workspace", help="Show contextual findings and review status")
     workspace.add_argument("--project", required=True)
     workspace.add_argument("--version", required=True)
     for option in ("team", "q", "lifecycle", "expected"):
@@ -167,7 +210,7 @@ def configure(parser):
         action="store_true",
         help="Print full context IDs for detailed vulnerability inspection",
     )
-    finding = commands.add_parser(
+    finding = add_command(
         "vulnerability", help="Show source, analysis and CPE contributions for one context"
     )
     finding.add_argument("--project", required=True)
@@ -176,7 +219,7 @@ def configure(parser):
     finding.add_argument("--id", required=True, help="Exact vulnerability identifier")
     finding.add_argument("--expected", help="Pin the expected version head")
     finding.add_argument("--json", action="store_true")
-    tree = commands.add_parser("tree", help="Print a pinned, bounded dependency tree")
+    tree = add_command("tree", help="Print a pinned, bounded dependency tree")
     tree.add_argument("--project", required=True)
     selection = tree.add_mutually_exclusive_group(required=True)
     selection.add_argument(
@@ -188,9 +231,7 @@ def configure(parser):
     tree.add_argument("--offset", type=int, default=0)
     tree.add_argument("--limit", type=int, default=100)
     tree.add_argument("--json", action="store_true")
-    portfolio = commands.add_parser(
-        "portfolio", help="Show project statistics across current versions"
-    )
+    portfolio = add_command("portfolio", help="Show project statistics across current versions")
     portfolio.add_argument("--project", required=True)
     portfolio.add_argument(
         "--version", action="append", help="Select version; repeat for multiple versions"
@@ -202,7 +243,7 @@ def configure(parser):
         portfolio.add_argument("--" + option.replace("_", "-"), default="")
     portfolio.add_argument("--json", action="store_true")
     for name in ("refs", "history", "compare"):
-        resource = commands.add_parser(name, help="Read pinned product " + name)
+        resource = add_command(name, help="Read pinned product " + name)
         resource.add_argument("--project", required=True)
         resource.add_argument("--offset", type=int, default=0)
         resource.add_argument("--limit", type=int, default=50)
@@ -212,9 +253,7 @@ def configure(parser):
         if name == "compare":
             resource.add_argument("--before", required=True)
             resource.add_argument("--after", required=True)
-    sync = commands.add_parser(
-        "synchronization", help="Preview assessment reuse without applying changes"
-    )
+    sync = add_command("synchronization", help="Preview assessment reuse without applying changes")
     for name in ("project", "source", "target"):
         sync.add_argument("--" + name, required=True)
     sync.add_argument("--basis")
@@ -222,13 +261,13 @@ def configure(parser):
     sync.add_argument("--offset", type=int, default=0)
     sync.add_argument("--limit", type=int, default=50)
     sync.add_argument("--json", action="store_true")
-    adopted = commands.add_parser(
+    adopted = add_command(
         "correspondence-draft", help="Preview or explicitly create a linked target draft"
     )
     adopted.add_argument("--project", required=True)
     adopted.add_argument("--input", required=True, help="Exact JSON preview or apply request")
     adopted.add_argument("--apply", action="store_true", help="Publish one new unsubmitted draft")
-    coverage = commands.add_parser(
+    coverage = add_command(
         "coverage", help="Compare explicit assessment targets across current versions"
     )
     for name in ("project", "state", "context", "vulnerability"):
@@ -241,7 +280,7 @@ def configure(parser):
     coverage.add_argument("--offset", type=int, default=0)
     coverage.add_argument("--limit", type=int, default=50)
     coverage.add_argument("--json", action="store_true")
-    intelligence = commands.add_parser(
+    intelligence = add_command(
         "compare-intelligence", help="Compare pinned composition with selected advisory evidence"
     )
     for name in ("project", "state"):
@@ -253,7 +292,7 @@ def configure(parser):
     intelligence.add_argument("--offset", type=int, default=0)
     intelligence.add_argument("--limit", type=int, default=50)
     intelligence.add_argument("--json", action="store_true")
-    archive = commands.add_parser(
+    archive = add_command(
         "legacy-archive-preview", help="Inspect an exported v1 ZIP without restoring it"
     )
     archive.add_argument("--project", required=True)
@@ -261,7 +300,7 @@ def configure(parser):
     archive.add_argument("--offset", type=int, default=0)
     archive.add_argument("--limit", type=int, default=25)
     archive.add_argument("--json", action="store_true")
-    publication = commands.add_parser(
+    publication = add_command(
         "legacy-archive-publication",
         help="Preview or explicitly publish one reviewed sanitized v1 version",
     )
@@ -270,9 +309,7 @@ def configure(parser):
     publication.add_argument(
         "--apply", action="store_true", help="Publish the exact reviewed preview explicitly"
     )
-    quality = commands.add_parser(
-        "input-quality", help="Inspect pinned producer input observations"
-    )
+    quality = add_command("input-quality", help="Inspect pinned producer input observations")
     for name in ("project", "state"):
         quality.add_argument("--" + name, required=True)
     for name in ("q", "code"):
@@ -280,7 +317,7 @@ def configure(parser):
     quality.add_argument("--offset", type=int, default=0)
     quality.add_argument("--limit", type=int, default=50)
     quality.add_argument("--json", action="store_true")
-    licenses = commands.add_parser("licenses", help="Browse pinned license evidence and approvals")
+    licenses = add_command("licenses", help="Browse pinned license evidence and approvals")
     for name in ("project", "state"):
         licenses.add_argument("--" + name, required=True)
     for name in ("q", "evidence-status", "review-status", "approved-disposition"):
@@ -288,31 +325,29 @@ def configure(parser):
     licenses.add_argument("--offset", type=int, default=0)
     licenses.add_argument("--limit", type=int, default=50)
     licenses.add_argument("--json", action="store_true")
-    summary = commands.add_parser(
+    summary = add_command(
         "evidence-summary", help="Read pinned pipeline evidence counts without a release verdict"
     )
     for name in ("project", "state"):
         summary.add_argument("--" + name, required=True)
     summary.add_argument("--json", action="store_true")
-    document = commands.add_parser(
+    document = add_command(
         "document-register", help="Register exact generated bytes against issued inputs"
     )
     for name in ("project", "version", "file", "metadata"):
         document.add_argument("--" + name, required=True)
     document.add_argument("--submit", action="store_true", help="Submit for independent review")
-    evidence = commands.add_parser(
+    evidence = add_command(
         "evidence-import", help="Preview or import exact VDR/VEX/advisory JSON file bytes"
     )
     for name in ("project", "file", "metadata"):
         evidence.add_argument("--" + name, required=True)
     evidence.add_argument("--preview", action="store_true", help="Read-only semantic scope preview")
-    request = commands.add_parser("request", help="Read or mutate API resources using JSON")
+    request = add_command("request", help="Read or mutate API resources using JSON")
     request.add_argument("method", choices=["GET", "POST", "PUT"])
     request.add_argument("path", help=f"Absolute {API_PREFIX}/ path; query parameters supported")
     request.add_argument("--body", help="JSON filename, or - for standard input")
-    upload = commands.add_parser(
-        "import-file", help="Import original SBOM bytes with explicit metadata"
-    )
+    upload = add_command("import-file", help="Import original SBOM bytes with explicit metadata")
     upload.add_argument("--project", required=True)
     upload.add_argument("--version", required=True)
     upload.add_argument(
@@ -525,6 +560,56 @@ def run(args):
                 client.post(API_PREFIX + "/playground/login", json={"persona": args.persona})
             )
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command in {"projects", "versions", "teams"}:
+            from urllib.parse import quote
+
+            if args.knowledge_command == "projects":
+                result = read_response(
+                    client.get(
+                        API_PREFIX + "/catalog/projects",
+                        params={
+                            "q": args.q,
+                            "workspace_id": args.workspace,
+                            "cursor": args.cursor,
+                            "limit": args.limit,
+                        },
+                    )
+                )
+            elif args.knowledge_command == "versions":
+                result = read_response(
+                    client.get(
+                        f"{API_PREFIX}/projects/{quote(args.project, safe='')}/refs",
+                        params={"offset": args.offset, "limit": args.limit},
+                    )
+                )
+            else:
+                result = read_response(client.get(API_PREFIX + "/workspaces"))
+            if args.json:
+                print(json.dumps(result, indent=2))
+                return
+            items = result if isinstance(result, list) else result["items"]
+            if not items:
+                print("No results.")
+            for item in items:
+                if args.knowledge_command == "versions":
+                    print(
+                        f"{item['name']}  {item['kind']}  version={item['version']}  state={item['state']}"
+                    )
+                else:
+                    print(
+                        f"{item['id']}  {item['name']}"
+                        + (
+                            f"  team={item['workspace']}  versions={item['version_count']}"
+                            if args.knowledge_command == "projects"
+                            else ""
+                        )
+                    )
+            if isinstance(result, dict):
+                if result.get("next_cursor") is not None:
+                    print(f"Next cursor: {result['next_cursor']} (continue with --cursor)")
+                if result.get("next_offset") is not None:
+                    print(f"Next offset: {result['next_offset']} (continue with --offset)")
+            return
         if args.knowledge_command == "vulnerability":
             from urllib.parse import quote
 
