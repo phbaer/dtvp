@@ -13,7 +13,8 @@ This README is the canonical project overview. See the
 The [UI review and proposed structure](docs/ui-review.md) and
 [interactive wireframe](docs/ui-proposal.html) describe a proposed navigation and
 workflow redesign, including automatic My teams work scope and a focused
-[assessment preview](docs/ui-proposal.html#assessment); they do not describe
+[assessment preview](docs/ui-proposal.html#assessment) with v1-style CVSS vector
+comparison; they do not describe
 shipped screens.
 The design document retains historical decisions; implemented behavior and
 `/openapi.json` take precedence over older planning notes.

@@ -211,6 +211,33 @@ the exact revision and coverage; the prototype does not implement that action.
 Draft saving is separate from a submission preview, which checks for rationale,
 not-affected justification and a citation or supporting verification notes.
 
+### Preserve the v1 CVSS vector comparison
+
+Retain the approach of v1 `CvssVectorDisplay.vue` (available on `main`): labelled
+vector rows, aligned metric cells, logical metric groups and readable metric
+explanations. Make differences explicit with **Added**, **Changed** and **Removed**
+labels alongside colour. Preserve exact original vectors; environmental modifiers
+must remain distinguishable from their effective values and original Base metrics.
+
+The assessment preview adds a read-only comparison above evidence and the form.
+It initially shows differing metrics, with controls for all metrics, exact vectors
+and comparison source. Source disagreements are separate from contextual additions.
+The synthetic VScorer vector extends the NVD Base; selecting a different comparison
+baseline does not change that derivation. Agentyzer has no numeric/vector proposal
+in this example. Missing vectors and unpublished scores remain explicit, never zero.
+The local CVSS library verifies the sample scores (source 9.8, supplier 8.1,
+environmental proposal 6.5).
+
+Use the same comparison in coordinator scoring: source, external proposals, policy
+output, current published vector and proposed revision. Show the provenance and
+reason for each addition/change; distinguish proposal from adoption/publication.
+Analysts and reviewers compare read-only; coordinators edit contextual metrics only
+after the required independent approvals. Support each CVSS method with its own
+metric definitions; do not interpret different versions as a direct metric diff.
+CLI output must expose the same attributed vectors and metric additions/changes in
+a compact textual comparison. The standalone preview illustrates CVSS 3.1 only;
+production wiring, other versions and the CLI comparison remain implementation work.
+
 ### Actions and handoffs
 
 Use a visible "Next action" with an explanation: assess, submit for independent
