@@ -10,7 +10,7 @@ from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.comparison import reachable_states
 from dtvp.knowledge.component_inventory import inventory_page
-from dtvp.knowledge.dependency_tree import dependency_paths, dependency_tree
+from dtvp.knowledge.dependency_tree import dependency_children, dependency_paths, dependency_tree
 from dtvp.knowledge.journal import Name, Ref, Sha
 from dtvp.knowledge.metadata import component_at
 from dtvp.knowledge.workspace import load_sections
@@ -19,18 +19,19 @@ from dtvp.models import Workspace
 router = APIRouter(prefix=API_PREFIX)
 
 
-def pinned(request, project_id, state, *, inventory_only=False):
+def pinned(request, project_id, state, *, sections=None):
     journal = request.app.state.knowledge
     if state not in reachable_states(journal, project_id):
         raise HTTPException(404, "Committed state unavailable in this product line")
     revision = require_state(journal, state, project_id)
     sections = (
         {
-            "inventory": {
-                key: journal.load(sha) for key, sha in journal.records(state, "inventory").items()
+            section: {
+                key: journal.load(sha) for key, sha in journal.records(state, section).items()
             }
+            for section in sections
         }
-        if inventory_only
+        if sections is not None
         else load_sections(journal, state)
     )
     return journal, revision, sections
@@ -61,6 +62,43 @@ def tree(
     return {**result, "state": state, "version": revision.version}
 
 
+@router.get("/projects/{project_id}/states/{state}/dependency-children")
+def children(
+    project_id: str,
+    state: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    parent_ref: str | None = Query(
+        None, min_length=1, max_length=4096, pattern=r"^[^\x00-\x1f\x7f]+$"
+    ),
+    root_ref: str | None = Query(
+        None, min_length=1, max_length=4096, pattern=r"^[^\x00-\x1f\x7f]+$"
+    ),
+    path: list[str] = Query(default=[], max_length=100),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+):
+    project_for(db, actor, project_id)
+    _, revision, sections = pinned(
+        request, project_id, state, sections=("inventory", "vulnerabilities")
+    )
+    try:
+        result = dependency_children(
+            sections,
+            parent_ref=parent_ref,
+            root_ref=root_ref,
+            path=path,
+            offset=offset,
+            limit=limit,
+        )
+    except KeyError:
+        raise HTTPException(404, "Dependency parent or root absent from selected state") from None
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return {**result, "state": state, "version": revision.version}
+
+
 @router.get("/projects/{project_id}/states/{state}/dependency-paths")
 def paths(
     project_id: str,
@@ -75,7 +113,7 @@ def paths(
     limit: int = Query(20, ge=1, le=50),
 ):
     project_for(db, actor, project_id)
-    _, revision, sections = pinned(request, project_id, state, inventory_only=True)
+    _, revision, sections = pinned(request, project_id, state, sections=("inventory",))
     try:
         result = dependency_paths(
             sections, component_ref=component_ref, root_ref=root_ref, limit=limit

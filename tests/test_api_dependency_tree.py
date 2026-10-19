@@ -54,6 +54,7 @@ def test_tree_does_not_accept_another_products_state(analyst, bom):
         "/api/v1/projects", json={"workspace_id": teams["Platform"], "name": "Other product"}
     ).json()["id"]
     assert analyst.get(url(other, f"/states/{state}/dependency-tree")).status_code == 404
+    assert analyst.get(url(other, f"/states/{state}/dependency-children")).status_code == 404
     assert (
         analyst.get(
             url(other, f"/states/{state}/dependency-paths"), params={"component_ref": "root"}
@@ -79,3 +80,35 @@ def test_dependency_paths_are_pinned_read_only_and_authorized(analyst, app, bom)
     assert app.state.knowledge.head() == before
     login(analyst, "operations")
     assert analyst.get(endpoint, params={"component_ref": ref}).status_code == 404
+
+
+def test_branch_children_are_scoped_pinned_and_authorized(analyst, app, bom):
+    project, _ = setup(analyst, bom)
+    state = workspace(analyst, project)["state"]
+    endpoint = url(project, f"/states/{state}/dependency-children")
+    before = app.state.knowledge.head()
+    response = analyst.get(endpoint)
+    assert response.status_code == 200, response.text
+    roots = response.json()
+    root = next(row for row in roots["items"] if row["child_count"])
+    params = [("parent_ref", root["component_ref"]), ("path", root["component_ref"]), ("limit", 1)]
+    response = analyst.get(endpoint, params=params)
+    assert response.status_code == 200, response.text
+    page = response.json()
+    assert page["ancestor_path"] == root["path"]
+    assert all(row["depth"] == 1 and row["path"][:-1] == root["path"] for row in page["items"])
+    if page["next_offset"] is not None:
+        next_page = analyst.get(endpoint, params=[*params, ("offset", page["next_offset"])]).json()
+        assert next_page["items"][0]["component_ref"] != page["items"][0]["component_ref"]
+    assert analyst.get(endpoint, params={"parent_ref": "absent"}).status_code == 404
+    assert analyst.get(endpoint, params={"limit": 201}).status_code == 422
+    assert (
+        analyst.get(
+            endpoint, params=[("parent_ref", root["component_ref"]), ("path", "absent")]
+        ).status_code
+        == 422
+    )
+    assert analyst.get(endpoint, params=[("path", "root")] * 101).status_code == 422
+    assert app.state.knowledge.head() == before
+    login(analyst, "operations")
+    assert analyst.get(endpoint).status_code == 404

@@ -134,3 +134,44 @@ def test_path_search_handles_depth_beyond_tree_pages_but_reports_its_own_cap():
     result = dependency_paths(sections, component_ref="n102", root_ref="n0")
     assert result["paths"] == [] and result["truncated"]
     assert result["visited_count"] == 101 and result["depth_limit"] == 100
+
+
+def test_children_page_only_siblings_and_keep_context_paths():
+    from dtvp.knowledge.dependency_tree import dependency_children
+
+    roots = dependency_children(graph())
+    assert [row["component_ref"] for row in roots["items"]] == ["root", "island"]
+    first = dependency_children(graph(), parent_ref="root", path=["root"], limit=1)
+    assert first["total"] == 3 and first["next_offset"] == 1
+    assert first["items"][0]["path"] == ["root", "a"]
+    second = dependency_children(graph(), parent_ref="root", path=["root"], offset=1, limit=2)
+    assert [row["component_ref"] for row in second["items"]] == ["b", "missing"]
+    assert second["next_offset"] is None
+    for parent in ("a", "b"):
+        result = dependency_children(graph(), parent_ref=parent, path=["root", parent])
+        assert result["items"][0]["path"] == ["root", parent, "shared"]
+        assert result["items"][0]["shared"]
+        assert result["items"][0]["vulnerability_count"] == 2
+    cycle = dependency_children(graph(), parent_ref="shared", path=["root", "a", "shared"])
+    assert cycle["items"][0]["cycle"] and cycle["items"][0]["component_ref"] == "a"
+
+
+def test_children_validate_declared_paths_and_support_subtree_roots():
+    import pytest
+
+    from dtvp.knowledge.dependency_tree import dependency_children
+
+    assert dependency_children(graph(), root_ref="b")["items"][0]["path"] == ["b"]
+    with pytest.raises(KeyError):
+        dependency_children(graph(), parent_ref="absent")
+    for invalid in (["root", "b", "a"], ["a", "shared", "a"], ["root", "missing"]):
+        with pytest.raises(ValueError):
+            dependency_children(graph(), parent_ref="a", path=invalid)
+    with pytest.raises(ValueError):
+        dependency_children(graph(), parent_ref="a", root_ref="b", path=["root", "a"])
+    with pytest.raises(ValueError):
+        dependency_children(graph(), path=["root"])
+    with pytest.raises(ValueError):
+        dependency_children(graph(), parent_ref="a", path=["x"] * 101)
+    with pytest.raises(ValueError):
+        dependency_children(graph(), parent_ref="a", path=["bad\x00", "a"])

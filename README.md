@@ -230,10 +230,20 @@ Opening the tree shows collapsed roots. Expand individual branches; **Collapse a
 returns to roots. Compact rows show component/version, direct dependency counts and
 vulnerability counts. Select a component to reveal **Show paths**, subtree navigation
 and identifiers, without repeating those controls on every row. **Back** restores the
-previous subtree; depth/refresh controls and coverage notes stay under disclosures.
+previous subtree. Expanding a node fetches only its immediate children. **Load more
+children** appends siblings within that branch; **Load more roots** appends roots.
+There is no whole-tree next/previous pagination or global display-depth control.
+Expanded descendants, selection and cached branches survive sibling loading and
+collapse/re-expansion. **Refresh tree** releases the loaded branches. The UI retains
+at most 10,000 loaded occurrences and 100 dependency levels; focus a subtree to
+continue. Shared components expand independently per usage path; cycles terminate.
+The pinned `GET /api/v1/projects/{project}/states/{state}/dependency-children` endpoint
+accepts optional `root_ref`, `parent_ref`, repeated `path` ancestors, and sibling
+`offset`/`limit` (default 100, maximum 200). The backend validates declared ancestor
+edges and returns context-specific paths, counts and cycle/shared markers.
 The UI's expandable dependency hierarchy includes **Show paths** for the selected component.
 This switches to a compact path-only view; **Back to dependency tree** restores the
-hierarchy without losing its page or expansion. Finding evidence also shows the
+hierarchy without losing its loaded branches or expansion. Finding evidence also shows the
 path from that finding's consuming root to the affected component. Named components
 and versions replace raw reference chains; alternative shortest paths are selectable.
 The authorized, pinned `GET /api/v1/projects/{project}/states/{state}/dependency-paths`
@@ -258,7 +268,7 @@ each component, not descendant totals or approvals.
 
 In **Review**, expand **Dependency tree** above the queue. It loads lazily for the
 selected immutable state, independently of queue filters; collapse branches,
-change depth, browse subtrees or page through entries. Shared dependencies, cycles,
+expand nodes, browse subtrees or load additional siblings in place. Shared dependencies, cycles,
 missing component metadata and unavailable graph declarations remain explicit.
 API: `GET /api/v1/projects/{id}/states/{state}/dependency-tree`.
 

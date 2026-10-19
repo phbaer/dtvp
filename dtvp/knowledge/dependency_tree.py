@@ -10,9 +10,7 @@ LIMITATIONS = [
 ]
 
 
-def dependency_tree(sections, *, root_ref=None, max_depth=3, offset=0, limit=100):
-    if not 0 <= max_depth <= 20 or offset < 0 or not 1 <= limit <= 200:
-        raise ValueError("Tree requires depth 0..20, nonnegative offset and limit 1..200")
+def _tree_index(sections):
     inventory = sections["inventory"]
     components = {
         value["bom-ref"]: value
@@ -34,32 +32,45 @@ def dependency_tree(sections, *, root_ref=None, max_depth=3, offset=0, limit=100
         component = components.get(ref, {})
         return (component.get("name", ref).casefold(), component.get("version", ""), ref)
 
+    return components, children, refs, incoming, order
+
+
+def _tree_roots(inventory, children, refs, incoming, order):
+    primary = inventory.get("root", {}).get("bom-ref")
+    roots = ([primary] if primary in refs else []) + sorted(
+        (ref for ref in refs if not incoming[ref] and ref != primary), key=order
+    )
+    # Discover disconnected cyclic groups independently of display depth.
+    covered = set()
+
+    def cover(ref):
+        pending = [ref]
+        while pending:
+            current = pending.pop()
+            if current not in covered:
+                covered.add(current)
+                pending.extend(children[current] - covered)
+
+    selected = []
+    for ref in [*roots, *sorted(refs, key=order)]:
+        if ref not in covered:
+            selected.append(ref)
+            cover(ref)
+    return selected
+
+
+def dependency_tree(sections, *, root_ref=None, max_depth=3, offset=0, limit=100):
+    if not 0 <= max_depth <= 20 or offset < 0 or not 1 <= limit <= 200:
+        raise ValueError("Tree requires depth 0..20, nonnegative offset and limit 1..200")
+    inventory = sections["inventory"]
+    components, children, refs, incoming, order = _tree_index(sections)
     if root_ref is not None and root_ref not in refs:
         raise KeyError(root_ref)
-    if root_ref is not None:
-        roots = [root_ref]
-    else:
-        primary = inventory.get("root", {}).get("bom-ref")
-        roots = ([primary] if primary in refs else []) + sorted(
-            (ref for ref in refs if not incoming[ref] and ref != primary), key=order
-        )
-        # Discover disconnected cyclic groups independently of display depth.
-        covered = set()
-
-        def cover(ref):
-            pending = [ref]
-            while pending:
-                current = pending.pop()
-                if current not in covered:
-                    covered.add(current)
-                    pending.extend(children[current] - covered)
-
-        selected = []
-        for ref in [*roots, *sorted(refs, key=order)]:
-            if ref not in covered:
-                selected.append(ref)
-                cover(ref)
-        roots = selected
+    roots = (
+        [root_ref]
+        if root_ref is not None
+        else _tree_roots(inventory, children, refs, incoming, order)
+    )
 
     vulnerabilities = defaultdict(set)
     for record in sections["vulnerabilities"].values():
@@ -208,4 +219,78 @@ def dependency_paths(sections, *, component_ref, root_ref=None, limit=20):
             "Declared dependencies do not establish runtime reachability or complete discovery.",
             "Disconnected cycles without a declared root have no product-root path.",
         ],
+    }
+
+
+def dependency_children(sections, *, parent_ref=None, root_ref=None, path=(), offset=0, limit=100):
+    """Page only immediate siblings; expanded branches never compete for page slots."""
+    if offset < 0 or not 1 <= limit <= 200 or len(path) > 100:
+        raise ValueError("Children require nonnegative offset, limit 1..200 and path depth <=100")
+    if any(
+        not isinstance(ref, str)
+        or not ref
+        or len(ref) > 4096
+        or any(ord(char) < 32 or ord(char) == 127 for char in ref)
+        for ref in path
+    ):
+        raise ValueError("Invalid ancestor path reference")
+    inventory = sections["inventory"]
+    components, children, refs, incoming, order = _tree_index(sections)
+    if any(ref not in refs for ref in (parent_ref, root_ref) if ref is not None):
+        raise KeyError(parent_ref or root_ref)
+    ancestors = list(path)
+    if parent_ref is None:
+        if ancestors:
+            raise ValueError("Root listings cannot have an ancestor path")
+        siblings = (
+            [root_ref]
+            if root_ref is not None
+            else _tree_roots(inventory, children, refs, incoming, order)
+        )
+    else:
+        ancestors = ancestors or [parent_ref]
+        if (
+            ancestors[-1] != parent_ref
+            or len(set(ancestors)) != len(ancestors)
+            or (root_ref is not None and ancestors[0] != root_ref)
+            or any(child not in children[parent] for parent, child in zip(ancestors, ancestors[1:]))
+        ):
+            raise ValueError("Ancestor path must follow declared dependencies to the parent")
+        siblings = sorted(children[parent_ref], key=order)
+    vulnerabilities = defaultdict(set)
+    for record in sections.get("vulnerabilities", {}).values():
+        if record.get("ref") and record.get("identifier"):
+            vulnerabilities[record["ref"]].add(record["identifier"])
+    items = []
+    for ref in siblings[offset : offset + limit]:
+        component = components.get(ref, {})
+        items.append(
+            {
+                "component_ref": ref,
+                "parent_ref": parent_ref,
+                "path": [*ancestors, ref],
+                "depth": len(ancestors),
+                "component": {
+                    key: component[key]
+                    for key in ("name", "group", "version", "purl", "type")
+                    if key in component
+                },
+                "child_count": len(children[ref]),
+                "vulnerability_count": len(vulnerabilities[ref]),
+                "cycle": ref in ancestors,
+                "shared": incoming[ref] > 1,
+                "missing": ref not in components,
+            }
+        )
+    return {
+        "root_ref": root_ref,
+        "parent_ref": parent_ref,
+        "ancestor_path": ancestors,
+        "items": items,
+        "offset": offset,
+        "total": len(siblings),
+        "next_offset": offset + limit if offset + limit < len(siblings) else None,
+        "component_count": len(components),
+        "dependency_graph": inventory.get("baseline", {}).get("dependency_graph", "unknown"),
+        "limitations": list(LIMITATIONS),
     }
