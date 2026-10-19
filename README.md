@@ -12,7 +12,8 @@ This README is the canonical project overview. See the
 [DevSecOps concept and critical review](docs/devsecops-evidence-concept.md).
 The [UI review and proposed structure](docs/ui-review.md) and
 [interactive wireframe](docs/ui-proposal.html) describe a proposed navigation and
-workflow redesign; they do not describe shipped screens.
+workflow redesign, including automatic My teams work scope; they do not describe
+shipped screens.
 The design document retains historical decisions; implemented behavior and
 `/openapi.json` take precedence over older planning notes.
 

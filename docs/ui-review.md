@@ -41,10 +41,45 @@ analysis proposals, immutable request handling, themes and lazy branch loading.
 ## Structure and responsibility
 
 Use one shared application shell. Keep product/version and responsible team visible
-across product pages. A team filter scopes responsibility; it does not change access.
+across product pages. Team memberships determine the default work scope; product
+access remains a separate authorization rule.
 A consuming application defines assessment context separately from team ownership.
 Multiple responsibilities can belong to the same person without introducing more
 persona-specific applications.
+
+### Automatic team scope
+
+Assign users to one or more teams, with roles per team. Default work queues to
+**My teams**, resolved by the backend from current membership and product access.
+"Their findings" means responsibility for the component/consuming context, including
+under-investigation, not-affected and fixed decisions where the selected state view
+includes them; it does not require confirmed affectedness.
+
+| Membership or responsibility | Default UI |
+| :--- | :--- |
+| One team | Show that team's cases; a passive team label replaces the team filter |
+| Multiple teams | Show the union of their teams' cases; offer optional narrowing in the shared work-scope control |
+| Explicit cross-team oversight | Offer All teams within authorized products, plus My teams; do not grant assessment/approval rights for every team |
+| No applicable team membership | Explain that no team work is assigned; do not silently show every team's queue |
+
+Use a single work-scope control in the application shell when scope choice is
+useful, not a repeated team filter on every screen. All teams is an explicit
+oversight scope rather than automatic membership in every team or an administrator
+approval privilege. New teams follow the configured oversight scope; ordinary
+memberships remain explicit.
+
+Scope filtering must apply consistently to worklists, totals, searches and scoped
+exports in UI and CLI. Resolve it server-side; a UI default is not an access
+boundary. Preserve API-credential team/project restrictions. Explicit broader scope
+must not reveal unauthorized products. Existing project read access can still allow
+related dependency/source context from other teams; strict row-level isolation
+would be a separate access-policy change.
+
+Union results by context identity. Keep the same CVE/component under different
+consuming roots as separate cases. Route unassigned/conflicting ownership to an
+explicit coordinator/manager queue instead of dropping it. Final scoring retains
+the complete required-context gate even when the coordinator's current view is
+narrower. Membership never bypasses independent-review or coordinator permissions.
 
 ```mermaid
 flowchart TD
@@ -108,7 +143,8 @@ contextual severity. Put uncommon columns behind a column chooser. Long componen
 names can wrap; a selected record must expose its full identity. Row actions and
 keyboard access should be predictable.
 
-Offer common filters for product/version, responsible team, workflow and severity.
+Offer common filters for product/version, workflow and severity. Team scope comes
+from My teams or the shared optional scope control.
 Group other filters into applicability, evidence/freshness, component/dependency
 and business context. Always show active filters and clear actions outside the
 filter panel. Keep source and contextual severity filters distinct. Preserve v1's
@@ -263,7 +299,8 @@ shared API/CLI semantics; avoid redesigning backend decisions to suit a screen.
 Acceptance scenarios: identify one CVE in two same-team consuming applications;
 review a long description plus conflicting sources; explain an unusable analysis;
 continue a captured submission after a head update; discover and preview a team
-mapping; compare parallel versions; inspect license and document approval; return
+mapping; compare parallel versions; inspect license and document approval; verify single-team defaults, multi-team unions, explicit oversight and empty
+membership without changing project access; return
 from mobile detail to the original 5000-vulnerability queue; distinguish missing
 collection coverage from zero findings. Use keyboard and screen-reader checks in
 addition to browser assertions, at 320/390/768/1024/1440px and 200%/400% zoom.
