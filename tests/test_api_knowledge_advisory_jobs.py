@@ -111,7 +111,7 @@ def test_native_advisory_roundtrip_keeps_baseline_and_never_approves(analyst, ap
     assert any("Source-attributed enrichment" in str(item) for item in current["items"])
     assert all(not item["coverage"].get("approved") for item in current["items"])
     assert analyst.get(path, params={"limit": 1}).json()["items"][0]["id"] == job["id"]
-    assert analyst.post(f"/api/v2/jobs/{job['id']}/retry").status_code == 409
+    assert analyst.post(f"/api/v1/jobs/{job['id']}/retry").status_code == 404
 
 
 def test_refresh_permissions_disabled_unknown_ids_cancellation_and_scope_conflicts(

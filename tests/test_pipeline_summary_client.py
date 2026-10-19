@@ -43,7 +43,7 @@ def test_cli_reads_exact_state_without_computing_a_gate(monkeypatch, capsys, as_
         ],
     }
     route = respx.get(
-        "http://dtvp.test/api/v3/projects/product%2Fname/states/" + "a" * 64 + "/evidence-summary"
+        "http://dtvp.test/api/v1/projects/product%2Fname/states/" + "a" * 64 + "/evidence-summary"
     ).mock(return_value=httpx.Response(200, json=result))
     main()
     assert route.call_count == 1 and not route.calls[0].request.url.query

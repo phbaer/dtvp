@@ -3,10 +3,11 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.intelligence_comparison import IntelligenceInput, compare_intelligence
 from dtvp.knowledge.journal import Conflict
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.post("/projects/{project_id}/compare/intelligence")

@@ -1,39 +1,51 @@
-"""Interactive workflow fixture is explicit, synthetic and never resets user work."""
+"""Editable file scenarios exercise real domain workflows without resetting work."""
 
-from conftest import login
+import copy
+import json
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from dtvp.api_playground_knowledge import PROJECT_NAME, VERSIONS, document
+from dtvp.api_playground_knowledge import authorize_fixture
 from dtvp.config import Settings
+from dtvp.knowledge.assessments import AssessmentInput, Target, save_assessment
+from dtvp.knowledge.demo_scenarios import DemoScenario
 from dtvp.knowledge.journal import Ref
+from dtvp.knowledge.service import import_inventory
+from dtvp.knowledge.workspace import load_sections, load_workspace
 from dtvp.main import create_app
+from dtvp.models import Project, User, Workspace
+from tests.conftest import login
 from tests.test_knowledge_api import app as knowledge_app
 
 app = knowledge_app
-
-PATH = "/api/v3/playground/knowledge/seed"
-
-
-def seed(client):
-    result = client.post(PATH, json={})
-    assert result.status_code == 200, result.text
-    return result.json()
+PATH = "/api/v1/playground/knowledge/load"
+SCENARIOS = Path(__file__).parent.parent / "playground/scenarios"
 
 
-def workspace(client, demo, version=None):
-    result = client.get(
-        f"/api/v3/projects/{demo['project_id']}/versions/{version or demo['version']}/workspace"
-    )
-    assert result.status_code == 200, result.text
-    return result.json()
+def scenario(name="workflow"):
+    return json.loads((SCENARIOS / (name + ".json")).read_bytes())
 
 
-def test_demo_has_real_contextual_workflow_states_and_historical_tag(analyst, app):
-    before = analyst.get("/api/v2/projects").json()
-    demo = seed(analyst)
-    assert demo["project_name"] == PROJECT_NAME
+def load(client, value=None):
+    response = client.post(PATH, json=value or scenario())
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def workspace(app, demo, version=None):
+    journal = app.state.knowledge
+    state = journal.resolve(Ref(project_id=demo["project_id"], name=version or demo["version"]))
+    return load_workspace(journal, state, paginate=False)
+
+
+def test_file_demo_has_contextual_states_and_historical_tag(analyst, app):
+    demo = load(analyst)
+    assert demo["project_name"] == scenario()["project_name"]
     assert demo["synthetic"] and not demo["preserved_existing"]
-    current = workspace(analyst, demo)
+    current = workspace(app, demo)
     assert len(current["items"]) == 4
     assert {item["coverage"]["status"] for item in current["items"]} == {
         "approved",
@@ -47,7 +59,7 @@ def test_demo_has_real_contextual_workflow_states_and_historical_tag(analyst, ap
     }
     assert len({item["context"]["team_id"] for item in current["items"]}) == 2
     assert "draft" in {
-        item["coverage"]["status"] for item in workspace(analyst, demo, VERSIONS[0])["items"]
+        item["coverage"]["status"] for item in workspace(app, demo, "7.1.1")["items"]
     }
     approved = next(item for item in current["items"] if item["coverage"]["status"] == "approved")
     assert (
@@ -59,100 +71,129 @@ def test_demo_has_real_contextual_workflow_states_and_historical_tag(analyst, ap
         Ref(kind="tag", project_id=demo["project_id"], name="workflow-demo-reviewed-baseline")
     )
     assert historical and historical != current["state"]
-    assert journal.state(historical).version == VERSIONS[1]
-    assert len(analyst.get("/api/v2/projects").json()) == len(before) + 1
+    assert journal.state(historical).version == "7.1.2"
+    assert demo["scenario_sha256"] and "synthetic" in demo["actors"]
 
 
-def test_repeat_preserves_interactive_assessment_and_existing_heads(analyst, app):
-    demo = seed(analyst)
-    login(analyst, "operations")
-    current = workspace(analyst, demo)
+def test_repeat_preserves_interactive_native_assessment_and_heads(analyst, app):
+    demo = load(analyst)
+    current = workspace(app, demo)
     row = next(item for item in current["items"] if item["coverage"]["status"] == "unassessed")
-    changed = analyst.post(
-        f"/api/v3/projects/{demo['project_id']}/assessments/interactive-draft/draft",
-        json={
-            "request_id": "interactive-draft",
-            "expected_versions": {demo["version"]: current["state"]},
-            "expected_revision": None,
-            "targets": [
-                {
-                    "version": demo["version"],
-                    "context_id": row["context_id"],
-                    "vulnerability_id": row["vulnerability_id"],
-                }
-            ],
-            "state": "under_investigation",
-            "rationale": "Interactive work must survive loading the demo again.",
-        },
-    )
-    assert changed.status_code == 201, changed.text
-    refs = app.state.knowledge.references()
-    projects = analyst.get("/api/v2/projects").json()
-    again = seed(analyst)
+    with app.state.sessions.begin() as db:
+        user = db.scalar(
+            select(User).where(User.issuer == "playground", User.subject == "operations")
+        )
+        project = db.get(Project, demo["project_id"])
+        save_assessment(
+            app.state.knowledge,
+            project_id=project.id,
+            actor_id=user.id,
+            assessment_id="interactive-draft",
+            data=AssessmentInput(
+                request_id="interactive-draft",
+                expected_versions={demo["version"]: current["state"]},
+                expected_revision=None,
+                targets=[
+                    Target(
+                        version=demo["version"],
+                        context_id=row["context_id"],
+                        vulnerability_id=row["vulnerability_id"],
+                    )
+                ],
+                state="under_investigation",
+                rationale="Interactive work must survive reloading this exact scenario.",
+            ),
+            submit=False,
+            authorize=authorize_fixture(db, project, user),
+        )
+    before = app.state.knowledge.references()
+    again = load(analyst)
     assert again["project_id"] == demo["project_id"] and again["preserved_existing"]
-    assert app.state.knowledge.references() == refs
-    assert analyst.get("/api/v2/projects").json() == projects
-    item = next(item for item in workspace(analyst, demo)["items"] if item["id"] == row["id"])
-    assert item["coverage"]["assessment"]["payload"]["rationale"].startswith("Interactive work")
+    assert app.state.knowledge.references() == before
+    assert any(
+        item["coverage"]
+        .get("assessment", {})
+        .get("payload", {})
+        .get("rationale", "")
+        .startswith("Interactive work")
+        for item in workspace(app, demo)["items"]
+    )
 
 
-def test_seed_keeps_unrelated_project_inventory_and_policy(client, app):
-    login(client, "administrator")
-    project = next(
-        item for item in client.get("/api/v2/projects").json() if item["name"] == "Demo Gateway"
+def test_file_load_preserves_unrelated_native_project(analyst, app):
+    value = scenario()
+    with app.state.sessions.begin() as db:
+        team = db.scalar(select(Workspace).where(Workspace.name == "Platform"))
+        project = Project(workspace_id=team.id, name="Independent interactive project")
+        db.add(project)
+        db.flush()
+        project_id = project.id
+    baseline = value["baselines"][0]
+    import_inventory(
+        app.state.knowledge,
+        project_id=project_id,
+        version="unrelated",
+        actor_id="pipeline",
+        request_id="independent",
+        expected=None,
+        source="test",
+        build_number=1,
+        occurred_at=baseline["occurred_at"],
+        sbom=baseline["sbom"],
     )
-    team = next(
-        item for item in client.get("/api/v2/me").json()["workspaces"] if item["name"] == "Platform"
-    )
-    base = f"/api/v3/projects/{project['id']}"
-    imported = client.post(
-        f"{base}/versions/unrelated/imports",
-        json={
-            "request_id": "unrelated-import",
-            "expected": None,
-            "source": "test",
-            "build_number": 1,
-            "occurred_at": "2026-01-01T00:00:00+00:00",
-            "completeness": "complete",
-            "sbom": document("unrelated"),
-        },
-    )
-    assert imported.status_code == 201, imported.text
-    initial = client.get(f"{base}/ownership").json()
-    policy = client.put(
-        f"{base}/ownership",
-        json={
-            "request_id": "unrelated-policy",
-            "expected_policy": initial["policy_state"],
-            "expected_versions": initial["versions"],
-            "rules": [{"selector": "*", "team_id": team["id"]}],
-        },
-    )
-    assert policy.status_code == 201, policy.text
     before = {
-        key: value
-        for key, value in app.state.knowledge.references().items()
-        if Ref.model_validate_json(key).project_id == project["id"]
+        key: state
+        for key, state in app.state.knowledge.references().items()
+        if Ref.model_validate_json(key).project_id == project_id
     }
-    seed(client)
+    load(analyst)
     after = {
-        key: value
-        for key, value in app.state.knowledge.references().items()
-        if Ref.model_validate_json(key).project_id == project["id"]
+        key: state
+        for key, state in app.state.knowledge.references().items()
+        if Ref.model_validate_json(key).project_id == project_id
     }
-    assert after == before
+    assert before == after
 
 
-def test_seed_requires_session_csrf_and_rejects_arbitrary_data(client):
-    assert client.post(PATH, json={}).status_code == 401
+def test_changed_scenario_same_identity_rejects_overwrite_and_new_identity_is_editable(
+    analyst, app
+):
+    original = load(analyst)
+    changed = scenario()
+    changed["baselines"][0]["sbom"]["components"].append(
+        {
+            "bom-ref": "custom-library",
+            "name": "Locally edited library",
+            "type": "library",
+            "version": "2",
+        }
+    )
+    before = app.state.knowledge.references()
+    response = analyst.post(PATH, json=changed)
+    assert response.status_code == 409
+    assert app.state.knowledge.references() == before
+    changed.update(fixture_id="custom-workflow/1", project_name="My edited native scenario")
+    custom = load(analyst, changed)
+    assert custom["project_id"] != original["project_id"]
+    state = app.state.knowledge.resolve(Ref(project_id=custom["project_id"], name="7.1.1"))
+    assert (
+        load_sections(app.state.knowledge, state)["inventory"]["component:ref:custom-library"][
+            "name"
+        ]
+        == "Locally edited library"
+    )
+
+
+def test_scenario_requires_csrf_and_explicit_versioned_payload(client):
+    assert client.post(PATH, json=scenario()).status_code == 401
     login(client, "viewer")
-    assert client.post(PATH, json={"reset": True}).status_code == 422
+    assert client.post(PATH, json={"scenario": "workflow"}).status_code == 422
     client.headers.pop("X-CSRF-Token")
-    assert client.post(PATH, json={}).status_code == 403
+    assert client.post(PATH, json=scenario()).status_code == 403
 
 
-def test_production_has_no_demo_seed_route(tmp_path):
-    app = create_app(
+def test_production_exposes_no_scenario_or_seed_endpoint(tmp_path):
+    value = create_app(
         Settings(
             _env_file=None,
             playground=False,
@@ -162,88 +203,75 @@ def test_production_has_no_demo_seed_route(tmp_path):
             frontend_dir=tmp_path / "absent",
         )
     )
-    # Route registration needs no production database or lifespan execution.
-    client = TestClient(app)
+    paths = set(value.openapi()["paths"])
+    assert PATH not in paths and "/api/v1/playground/knowledge/seed" not in paths
+    client = TestClient(value)
     try:
-        assert client.post(PATH, json={}).status_code == 404
+        assert client.post(PATH, json=scenario()).status_code == 404
     finally:
         client.close()
 
 
-def test_specialist_scenario_has_native_inputs_proposals_and_license_example(analyst, app):
-    from dtvp.api_playground_knowledge import SPECIALIST_PROJECT_NAME
-    from dtvp.knowledge.agentyzer import derive_analysis_input
-    from dtvp.knowledge.licenses import license_worklist
-    from dtvp.knowledge.vscorer import derive_context_inputs
-
-    ordinary = seed(analyst)
-    original_refs = app.state.knowledge.references()
-    response = analyst.post(PATH, json={"scenario": "specialists"})
-    assert response.status_code == 200, response.text
-    demo = response.json()
-    assert demo["project_name"] == SPECIALIST_PROJECT_NAME
-    assert demo["project_id"] != ordinary["project_id"]
-    current = workspace(analyst, demo)
+def test_specialist_file_contains_explicit_native_proposals_without_publishing_scores(analyst, app):
+    regular = load(analyst)
+    before = app.state.knowledge.references()
+    demo = load(analyst, scenario("specialists"))
+    assert demo["project_id"] != regular["project_id"]
+    current = workspace(app, demo)
     row = next(
         item
         for item in current["items"]
         if item["context"]["root_ref"] == "platform-app"
         and item["component"]["name"] == "shared-tls"
     )
-    analysis = derive_analysis_input(
-        app.state.knowledge, current["state"], row["context_id"], row["vulnerability_id"]
-    )
-    assert analysis["ready_to_submit"]
-    assert analysis["receipt"]["analysis_source"]["repository_name"] == "synthetic-workflow"
-    assert analysis["receipt"]["build_binding_verified"] is False
-    scoring = derive_context_inputs(
-        app.state.knowledge,
-        current["state"],
-        row["context_id"],
-        "shared-tls",
-        {row["vulnerability_id"]: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
-    )
-    assert scoring["eligible"]
-    assert row["coverage"]["status"] == "approved"
-    proposal = row["scoring_proposals"][0]
-    assert proposal["current"] and proposal["eligible"]
-    assert proposal["provider_authenticity"] == "caller_asserted_not_verified"
+    assert row["scoring_proposals"][0]["eligible"]
+    assert row["scoring_proposals"][0]["verification"] == "operator_bound_minimal_rest_exchange"
     assert row["published_score"] is None
-    evidence = row["code_analysis"][0]
-    assert evidence["current"] and not evidence["application_eligible"]
-    assert not evidence["rescoring_eligible"]
-    assert evidence["build_binding_verified"] is False
-    assert "Synthetic" in evidence["source_label"]
+    assert row["code_analysis"] and not row["code_analysis"][0]["application_eligible"]
+    assert all(app.state.knowledge.references()[key] == state for key, state in before.items())
+    from dtvp.knowledge.licenses import license_worklist
+
     licenses = license_worklist(app.state.knowledge, current["state"])
     tls = next(item for item in licenses["items"] if item["component_ref"] == "shared-tls")
-    assert tls["evidence"]["status"] == "reported"
-    assert tls["license_review"]["status"] == "submitted"
-    assert not tls["license_review"]["approved"]
-    for key, value in original_refs.items():
-        assert app.state.knowledge.references()[key] == value
-    login(analyst, "operations")
-    unassessed = next(
-        item for item in current["items"] if item["coverage"]["status"] == "unassessed"
-    )
-    saved = analyst.post(
-        f"/api/v3/projects/{demo['project_id']}/assessments/specialist-interactive/draft",
-        json={
-            "request_id": "specialist-interactive",
-            "expected_versions": {demo["version"]: current["state"]},
-            "expected_revision": None,
-            "targets": [
-                {
-                    "version": demo["version"],
-                    "context_id": unassessed["context_id"],
-                    "vulnerability_id": unassessed["vulnerability_id"],
-                }
-            ],
-            "state": "under_investigation",
-            "rationale": "Preserve this interactive specialist workspace edit.",
-        },
-    )
-    assert saved.status_code == 201, saved.text
-    refs = app.state.knowledge.references()
-    again = analyst.post(PATH, json={"scenario": "specialists"})
-    assert again.status_code == 200 and again.json()["preserved_existing"]
-    assert app.state.knowledge.references() == refs
+    assert tls["license_review"]["status"] == "submitted" and not tls["license_review"]["approved"]
+
+
+@pytest.mark.parametrize(
+    "change", ["unknown_step", "real_flag", "duplicate_version", "pin_override"]
+)
+def test_scenario_schema_rejects_scripts_and_unsafe_overrides(change):
+    value = copy.deepcopy(scenario())
+    if change == "unknown_step":
+        value["steps"] = [{"execute": "rm -rf"}]
+    elif change == "real_flag":
+        value["synthetic"] = False
+    elif change == "duplicate_version":
+        value["baselines"].append(copy.deepcopy(value["baselines"][0]))
+    else:
+        value["assessments"][0]["assessment"]["expected_versions"] = {}
+    with pytest.raises(ValueError):
+        DemoScenario.model_validate(value)
+
+
+def test_demo_release_tag_retains_file_and_synthetic_review_provenance(analyst, app):
+    demo = load(analyst)
+    journal = app.state.knowledge
+    tag = scenario()["tags"][0]
+    state = journal.resolve(Ref(kind="tag", project_id=demo["project_id"], name=tag["name"]))
+    marker = load_sections(journal, state)["history"]["synthetic-scenario"]
+    assert marker["synthetic"] is True
+    assert marker["human_approval_assurance"] == "simulated fixture decisions only"
+    assert marker["scenario_sha256"] in journal.state(state).artifacts
+    assert json.loads(journal.objects.read(marker["scenario_sha256"])) == DemoScenario.model_validate(scenario()).model_dump(mode="json")
+
+
+def test_invalid_synthetic_persona_review_is_forbidden_without_publication(analyst, app):
+    value = scenario()
+    approved = next(item for item in value["assessments"] if item.get("review"))
+    approved["review"]["persona"] = "analyst"
+    before = app.state.knowledge.references()
+    response = analyst.post(PATH, json=value)
+    assert response.status_code == 403
+    assert app.state.knowledge.references() == before
+    with app.state.sessions() as db:
+        assert db.scalar(select(Project).where(Project.name == value["project_name"])) is None

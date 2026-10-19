@@ -181,7 +181,7 @@ def test_current_responsible_team_authority_is_required_even_with_project_approv
 
     project, data = prepared(analyst, bom)
     login(analyst, "administrator")
-    teams = {row["name"]: row["id"] for row in analyst.get("/api/v2/workspaces").json()}
+    teams = {row["name"]: row["id"] for row in analyst.get("/api/v1/workspaces").json()}
     apply_policy(
         analyst,
         project,

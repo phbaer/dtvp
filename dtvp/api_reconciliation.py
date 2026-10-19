@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import Field
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.comparison import reachable_states
 from dtvp.knowledge.identity_matches import identity_matches
@@ -19,7 +20,7 @@ from dtvp.knowledge.reconciliation import (
 )
 from dtvp.schemas import RequestModel
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 class PreviewInput(RequestModel):

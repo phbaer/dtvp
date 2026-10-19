@@ -17,7 +17,7 @@ app = knowledge_app
 
 
 def path(project_id, suffix=""):
-    return f"/api/v3/projects/{project_id}/evidence{suffix}"
+    return f"/api/v1/projects/{project_id}/evidence{suffix}"
 
 
 def state(client, project_id):
@@ -155,9 +155,9 @@ def test_evidence_capability_and_current_download_authorization(analyst, bom):
     assert denied.status_code == 404
     assert analyst.get(path(project_id, f"/{sha}/source")).status_code == 200
     login(analyst, "administrator")
-    teams = {team["name"]: team["id"] for team in analyst.get("/api/v2/workspaces").json()}
+    teams = {team["name"]: team["id"] for team in analyst.get("/api/v1/workspaces").json()}
     shared = analyst.put(
-        f"/api/v2/projects/{project_id}/sharing",
+        f"/api/v1/projects/{project_id}/sharing",
         json={"workspace_id": teams["Operations"], "capabilities": ["read"]},
     )
     assert shared.status_code == 200
@@ -169,7 +169,7 @@ def test_evidence_capability_and_current_download_authorization(analyst, bom):
     login(analyst, "administrator")
     assert (
         analyst.put(
-            f"/api/v2/projects/{project_id}/sharing",
+            f"/api/v1/projects/{project_id}/sharing",
             json={"workspace_id": teams["Operations"], "capabilities": []},
         ).status_code
         == 200

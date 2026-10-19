@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import Field
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.api_workflow import authorize_team
 from dtvp.knowledge.assessments import load_sections
@@ -19,7 +20,7 @@ from dtvp.knowledge.synchronization import synchronization_preview
 from dtvp.knowledge.synchronization_apply import SynchronizationApplyInput, apply_synchronization
 from dtvp.schemas import RequestModel
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 class SynchronizationInput(RequestModel):

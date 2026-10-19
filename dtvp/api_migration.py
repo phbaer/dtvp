@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 
 from dtvp.api import DB, Auth, project_for, snapshot_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name
 from dtvp.knowledge.migration import (
@@ -16,10 +17,11 @@ from dtvp.knowledge.migration import (
     migration_receipt,
     preview_migration,
 )
-from dtvp.models import Project, Release, Revision
+from dtvp.migration_models import Release, Revision
+from dtvp.models import Project
 from dtvp.storage import canonical, digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def source_snapshot(project_id, data, db, actor):

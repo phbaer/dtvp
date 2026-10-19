@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const a = 'a'.repeat(64), b = 'b'.repeat(64), head = 'c'.repeat(64)
 const declarations = [{ relationship_id: 'application-container', kind: 'DEPENDS_ON', from: { part_id: 'application', state: a, ref: 'root-a' }, to: { part_id: 'container', state: b, ref: 'root-b' }, rationale: 'Explicit integration relationship' }]
@@ -16,16 +17,16 @@ async function fixture(page: Page, hold?: 'preview' | 'apply') {
       return route.fulfill(applications < 3 ? { status: applications === 1 ? 503 : 409, json: { detail: 'Exact input retained' } } : { status: 201, json: { committed: true } })
     }
     let value: unknown = { items: [], next_cursor: null, next_offset: null }
-    if (path === '/api/v2/me') value = { id: actor, name: actor, org_admin: false, playground: true, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') value = { id: actor, name: actor, org_admin: false, playground: true, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) value = [{ id: 'analyst', name: 'Analyst' }, { id: 'other', name: 'Other' }]
-    else if (path === '/api/v2/catalog/projects') value = { items: [{ id: 'product', name: 'Assembly product' }], next_cursor: null }
+    else if (path === '/api/v1/catalog/projects') value = { items: [{ id: 'product', name: 'Assembly product' }], next_cursor: null }
     else if (path.endsWith('/versions')) value = { items: [{ version: '7.2', state: head }], next_offset: null }
     else if (path.endsWith('/workspace')) value = { state: head, project_id: 'product', version: '7.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/assembly-target')) value = { state: head, predecessor: null, previous_kind: 'assembly', parts: [{ part_id: 'application', state: a, required: true, role: 'delivery' }, { part_id: 'container', state: b, required: true, role: 'delivery' }], cross_part_relationships: declarations, capabilities: ['assemble'], limitations: [] }
     return route.fulfill({ json: value })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Assembly product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Assembly product', exact: true }).click()
   await page.locator('.knowledge-assembly > summary').click()
   const panel = page.getByRole('region', { name: 'Product assembly editor' })
   await panel.getByRole('button', { name: 'Inspect assembly target', exact: true }).click()
@@ -56,7 +57,7 @@ test('invalid mapping JSON releases the workspace lock and explicit removal capt
   await f.panel.getByRole('button', { name: 'Preview exact assembly', exact: true }).click()
   await expect(f.panel.getByRole('alert')).toContainText('Correct the input')
   expect(f.writes).toHaveLength(0)
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
   await json.fill('[]'); await f.panel.getByLabel('Relationship change reason', { exact: true }).fill('Explicit relationship retirement')
   await f.panel.getByRole('button', { name: 'Preview exact assembly', exact: true }).click()
   expect(f.writes[0]!.body.relationship_change_reason).toBe('Explicit relationship retirement')

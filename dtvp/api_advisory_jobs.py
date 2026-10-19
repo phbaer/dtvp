@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.advisory_jobs import (
     KIND,
     AdvisoryRefreshInput,
@@ -20,7 +21,7 @@ from dtvp.knowledge.ownership import product_heads
 from dtvp.models import Job
 from dtvp.non_us_advisories import IDENTIFIER_FORMATS, supports_identifier
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def selected(db, actor, project_id, job_id, capability="read", *, lock=False):

@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 const sha = (value: string) => value.repeat(64)
@@ -31,14 +32,14 @@ async function fixture(page: Page, readonly = false) {
       return route.fulfill({ json: { policy_state: state, source: { source: 'Historical source', revision: 'rev-previous' }, items: [{ trust: 'historical_unverified' }], total: 26, next_offset: new URL(route.request().url()).searchParams.get('offset') === '0' ? 25 : null, limitations: [] } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'CPE product', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'CPE product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [] }
     else if (path.endsWith('/cpe/editor')) result = { policy_state: pin, configuration: { algorithm_version: 'dtvp.cpe-discovery/1', catalog: [], rules: {}, offline_sources: {} }, capabilities: readonly ? [] : ['configure'], limitations: [] }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'CPE product', exact: true }).click()
   await page.getByText('CPE discovery policy and reviewed mappings', { exact: true }).click()
   const parent = page.getByLabel('CPE discovery policy', { exact: true })
@@ -57,7 +58,7 @@ test('exact source capture and CAS pins survive503; confirmation precedes write'
   const { parent, panel, writes, previews, fail } = await fixture(page)
   await prepare(panel)
   await expect(panel.getByRole('button', { name: 'Publish previewed offline source' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await expect(parent.getByRole('button', { name: 'Prepare complete policy replacement', exact: true })).toBeDisabled()
   expect(writes).toHaveLength(0)
   await panel.getByRole('checkbox').check(); fail(503)
@@ -68,7 +69,7 @@ test('exact source capture and CAS pins survive503; confirmation precedes write'
   expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1])
   expect(Buffer.from(String(writes[0]!.content_base64), 'base64').toString()).toBe(bytes)
   expect(writes[0]).toMatchObject({ expected: sha('a'), request_id: previews[0]!.request_id, preview_digest: sha('d') })
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })
 test('first preview503 keeps original upload and explicit discard releases context', async ({ page }) => {
   const { panel, previews, previewFail, writes } = await fixture(page)
@@ -78,7 +79,7 @@ test('first preview503 keeps original upload and explicit discard releases conte
   previewFail(0); await panel.getByRole('button', { name: 'Retry identical source preview' }).click()
   expect(previews).toHaveLength(2); expect(previews[0]).toEqual(previews[1]); expect(writes).toHaveLength(0)
   await panel.getByRole('button', { name: 'Discard offline source draft' }).click()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
   expect(await panel.getByLabel('Exact source file').evaluate(element => (element as HTMLInputElement).files?.length)).toBe(0)
   await prepare(panel)
   expect(previews).toHaveLength(3)
@@ -90,7 +91,7 @@ test('committed pending retains exact receipt request without pretending failure
   await prepare(panel); await panel.getByRole('checkbox').check(); pending()
   await panel.getByRole('button', { name: 'Publish previewed offline source' }).click()
   await expect(panel.getByRole('status')).toContainText('Source committed; projection is pending')
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
   current(); await panel.getByRole('button', { name: 'Refresh committed source receipt' }).click()
   expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1])
 })
@@ -137,12 +138,12 @@ test('failed remote capture retains original query and policy; explicit retry ma
   captureFail(502); await prepareRemote(panel)
   await expect(panel.getByRole('alert')).toContainText('NVD provider unavailable')
   await expect(panel.getByLabel('NVD query keyword')).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   captureFail(0); await panel.getByRole('button', { name: 'Retry scoped NVD capture' }).click()
   await expect(panel.getByRole('button', { name: 'Publish previewed offline source' })).toBeVisible()
   expect(captures).toHaveLength(2); expect(captures[0]).toEqual(captures[1]); expect(writes).toHaveLength(0)
   await panel.getByRole('button', { name: 'Discard offline source draft' }).click()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })
 test('changed captured bytes fail closed before any publication', async ({ page }) => {
   const { panel, writes, corrupt } = await fixture(page)

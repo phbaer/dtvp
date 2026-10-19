@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 async function fixture(page: Page, readonly = false) {
@@ -12,8 +13,8 @@ async function fixture(page: Page, readonly = false) {
       return route.fulfill({ status: 202, json: { ...job, id: path.endsWith('/advisory-jobs') ? 'new-job' : 'existing', status: path.endsWith('/cancel') ? 'cancelled' : 'queued', capabilities: readonly ? [] : ['cancel'] } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: 'old-head' }] }
     else if (path.endsWith('/workspace')) result = { state: 'old-head', project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/advisory-refresh')) result = { expected_versions: { '7.1.1': changed ? 'new-head' : 'old-head', '7.1.2': 'parallel-head' }, expected_evidence: changed ? 'new-evidence' : 'old-evidence', providers: [{ id: 'circl', publisher: 'CVE Project mirror', enabled: true, next_revision: changed ? 4 : 3 }, { id: 'nvd', publisher: 'NVD', enabled: false, next_revision: 0 }, { id: 'jvn', publisher: 'MyJVN API', enabled: true, next_revision: 0, identifier_formats: ['JVNDB'] }], unsupported_total: url.searchParams.get('provider') === 'jvn' ? 21 : 0, identifiers: url.searchParams.get('provider') === 'jvn' ? ['JVNDB-2099-000001'] : url.searchParams.get('offset') === '20' ? ['CVE-2099-0021'] : Array.from({ length: 20 }, (_, i) => `CVE-2099-${String(i + 1).padStart(4, '0')}`), total: 21, next_offset: url.searchParams.get('offset') === '20' ? null : 20, capabilities: readonly ? [] : ['refresh'], limitations: ['Publisher identity is unverified; no automatic approval.'] }
@@ -21,8 +22,8 @@ async function fixture(page: Page, readonly = false) {
     else if (path.includes('/advisory-jobs/')) result = { ...job, status: 'succeeded', capabilities: [] }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   expect(queries.some(url => url.pathname.endsWith('/advisory-refresh'))).toBeFalsy()
   await page.getByText('Advisory intelligence refresh', { exact: true }).click()
@@ -90,7 +91,7 @@ test('job actions follow server capabilities and only explicit GET refreshes sta
   await expect(job.getByRole('button', { name: 'Cancel DTVP advisory job', exact: true })).toBeVisible()
   await job.getByRole('button', { name: 'Cancel DTVP advisory job', exact: true }).click()
   await expect.poll(() => writes.length).toBe(2)
-  expect(writes.map(item => item.path)).toEqual(['/api/v3/projects/product/advisory-jobs/existing/retry', '/api/v3/projects/product/advisory-jobs/existing/cancel'])
+  expect(writes.map(item => item.path)).toEqual(['/api/v1/projects/product/advisory-jobs/existing/retry', '/api/v1/projects/product/advisory-jobs/existing/cancel'])
   await job.getByRole('button', { name: 'Refresh advisory status', exact: true }).click()
   await expect(job).toContainText('succeeded')
   await job.getByText('Advisory job pins and capture result', { exact: true }).click()

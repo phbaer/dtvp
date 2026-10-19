@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.assessments import AssessmentInput, ReviewInput, create_review, save_assessment
 from dtvp.knowledge.exports import build_vscorer_worklist, export_bytes
@@ -21,7 +22,14 @@ from dtvp.knowledge.scoring import (
 from dtvp.knowledge.workspace import load_sections, load_workspace
 from dtvp.models import Workspace
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
+
+
+@router.get("/ssvc/models")
+def ssvc_models(actor: Auth):
+    from dtvp.knowledge.ssvc import models
+
+    return {"models": list(models())}
 
 
 @router.get("/projects/{project_id}/states/{state}/bundle")
@@ -186,11 +194,15 @@ def workspace(
     metadata_status: str = "",
     agentyzer_evidence: EvidenceFilter = "",
     vscorer_evidence: EvidenceFilter = "",
+    ssvc_status: str = "",
+    ssvc_action: str = "",
 ):
     project = project_for(db, actor, project_id)
     state = state_for(request, project_id, version, expected)
     try:
         filters = KnowledgeFilters(
+            ssvc_status=ssvc_status,
+            ssvc_action=ssvc_action,
             source_severity=source_severity,
             contextual_severity=contextual_severity,
             applicability=applicability,

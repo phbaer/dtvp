@@ -104,7 +104,7 @@ def test_stopped_application_major_upgrade_preserves_native_and_operational_stat
                 name: client.get(item["url"]).content for name, item in exported["files"].items()
             }
             cookies = httpx.Cookies(client.cookies)
-            actor = client.get("/api/v2/me").json()["id"]
+            actor = client.get("/api/v1/me").json()["id"]
             with original.state.sessions.begin() as db:
                 db.add(
                     Job(
@@ -158,7 +158,7 @@ def test_stopped_application_major_upgrade_preserves_native_and_operational_stat
         )
         with TestClient(restored) as client:
             client.cookies.update(cookies)
-            assert client.get("/api/v2/me").json()["id"] == actor
+            assert client.get("/api/v1/me").json()["id"] == actor
             login(client, "analyst")
             assert workspace(client, project) == before_workspace
             login(client, "administrator")

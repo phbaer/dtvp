@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 const sha = (value: string) => value.repeat(64)
@@ -25,15 +26,15 @@ async function fixture(page: Page, readonly = false, empty = false) {
       return route.fulfill({ status: 201, json: {} })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: empty ? [] : [{ version: '7.1.1', state: head }] }
     else if (path.endsWith('/workspace')) result = { state: head, project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/evidence')) result = { evidence_state: evidence, versions: pins().expected_versions, total: 22, documents: [{ artifact_sha: artifact, active, source: 'supplier', source_revision: 1, representation: 'original_bytes', identity_basis: 'publisher_source_document_id', document: { format: 'openvex', document_id: 'SUPPLIER-1', publisher: 'Supplier', revision: 1, losses: ['unsupported_signature_not_verified'] } }, { artifact_sha: sha('0'), active: false, source: 'legacy', source_revision: 0, representation: 'canonical_json', identity_basis: 'content_digest', superseded_by: artifact, document: { format: 'cyclonedx-vex', document_id: null, publisher: null, revision: null, losses: [] } }], next_offset: url.searchParams.get('offset') === '20' ? null : 20, capabilities: readonly ? [] : ['import', 'withdraw'] }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('VDR, VEX and advisory evidence files', { exact: true }).click()
   const panel = page.getByLabel('Evidence source files', { exact: true })
@@ -111,7 +112,7 @@ test('readonly inspection preserves active/history distinction, losses and exact
   await expect(document).toContainText('unsupported_signature_not_verified')
   const link = document.getByRole('link', { name: 'Download exact source bytes', exact: true })
   const href = await link.getAttribute('href')
-  expect(href).toBe(`/api/v3/projects/product/evidence/artifacts/${artifact}?expected_evidence=${sha('b')}`)
+  expect(href).toBe(`/api/v1/projects/product/evidence/artifacts/${artifact}?expected_evidence=${sha('b')}`)
   const bytes = await page.evaluate(async path => Array.from(new Uint8Array(await (await fetch(path!)).arrayBuffer())), href)
   expect(Buffer.from(bytes)).toEqual(raw)
   await expect(page.locator('body')).toHaveJSProperty('scrollWidth', 390)
@@ -171,6 +172,7 @@ test('optional subset profile stays frozen across503 and reports signatures as u
 test('default subset omits the new field from preview and import metadata', async ({ page }) => {
   const f = await fixture(page)
   await previewFile(f.panel)
+  await expect.poll(() => f.previews.length).toBe(1)
   expect(f.previews[0]).not.toHaveProperty('validation_profile')
   await expect(f.panel.getByLabel('Evidence conformance report', { exact: true })).toHaveCount(0)
   await f.panel.getByRole('button', { name: 'Import exact previewed evidence', exact: true }).click()

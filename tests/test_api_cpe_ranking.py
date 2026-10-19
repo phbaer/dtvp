@@ -17,7 +17,7 @@ def setup(analyst, bom):
     sbom = copy.deepcopy(bom)
     sbom["components"][0].update({"purl": "pkg:npm/foo@1", "version": "1"})
     state = imported(analyst, project, "ranking", body(sbom))
-    path = f"/api/v3/projects/{project}/states/{state}/cpe/rank"
+    path = f"/api/v1/projects/{project}/states/{state}/cpe/rank"
     data = {
         "component_ref": sbom["components"][0]["bom-ref"],
         "records": [
@@ -93,7 +93,7 @@ def test_exact_component_committed_scope_policy_scope_and_input_validation(analy
         ],
         "rules": {},
     }
-    result = analyst.put(f"/api/v3/projects/{project}/cpe", json=policy_body)
+    result = analyst.put(f"/api/v1/projects/{project}/cpe", json=policy_body)
     assert result.status_code == 201, result.text
     policy = result.json()["updates"][0]["target"]
     result = analyst.post(path, json={**data, "policy": policy})
@@ -136,7 +136,7 @@ def test_assembled_part_root_and_retained_policy_are_explicitly_available(analys
     part = source_import(analyst, project, "package", sbom)
     state = publish(analyst, project, assembly([selection("package", part)]))
     root_ref = namespaced_ref("package", sbom["metadata"]["component"]["bom-ref"])
-    path = f"/api/v3/projects/{project}/states/{state}/cpe/rank"
+    path = f"/api/v1/projects/{project}/states/{state}/cpe/rank"
     data = {
         "component_ref": root_ref,
         "records": [
@@ -153,10 +153,10 @@ def test_assembled_part_root_and_retained_policy_are_explicitly_available(analys
     assert result.json()["policy_selection"] == "current_configuration"
     login(analyst, "administrator")
     policy = {"request_id": "old", "expected": None, "catalog": [], "rules": {}}
-    old = analyst.put(f"/api/v3/projects/{project}/cpe", json=policy).json()["updates"][0]["target"]
+    old = analyst.put(f"/api/v1/projects/{project}/cpe", json=policy).json()["updates"][0]["target"]
     assert (
         analyst.put(
-            f"/api/v3/projects/{project}/cpe", json={**policy, "request_id": "new", "expected": old}
+            f"/api/v1/projects/{project}/cpe", json={**policy, "request_id": "new", "expected": old}
         ).status_code
         == 201
     )
@@ -174,7 +174,7 @@ def test_alias_cycle_is_a_validation_error_and_nested_malformed_json_is_bounded(
     }
     assert (
         analyst.put(
-            f"/api/v3/projects/{project}/cpe",
+            f"/api/v1/projects/{project}/cpe",
             json={"request_id": "cyclic", "expected": None, "catalog": [], "rules": rules},
         ).status_code
         == 201

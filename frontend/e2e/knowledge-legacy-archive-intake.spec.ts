@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), raw = Buffer.from([80,75,3,4,0,255,10,13,42]), archive = sha('a'), entry = sha('b'), digest = sha('c'), policy = sha('d'), evidence = sha('e')
 async function fixture(page: Page, options: { statuses?: number[]; previewStatuses?: number[]; total?: number; pending?: boolean; personas?: boolean; hold?: boolean } = {}) {
@@ -22,18 +23,18 @@ async function fixture(page: Page, options: { statuses?: number[]; previewStatus
       return route.fulfill({ json: { archive_sha256: archive, preview_digest: sha('f'), items: [{ source_entry_id: entry, entry_index: 1, counts: { findings: 2, assessments: 1 }, normalization: { status: 'supported' }, losses: ['assessment_comments_may_have_been_stripped'], member_pins: { bom: { sha256: sha('9'), bytes: 100 } } }], total: options.total || 1, next_offset: null, limitations: [] } })
     }
     let data: unknown = { items: [], next_cursor: null, next_offset: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: !!options.personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: !!options.personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = options.personas ? [{ id: 'author', name: 'author' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product' }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: applied ? 'migrated' : 'old', state: sha('8') }], next_offset: null }
     else if (path.endsWith('/ownership')) data = { policy_state: policy }
     else if (path.endsWith('/evidence')) data = { evidence_state: evidence, items: [] }
     else if (path.endsWith('/workspace')) data = { state: sha('8'), project_id: 'product', version: 'old', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.locator('.knowledge-intake > summary').click(); await page.getByText('Reviewed v1 archive', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Reviewed v1 archive intake' })
   await panel.getByLabel('Sanitized v1 ZIP', { exact: true }).setInputFiles({ name: 'reviewed.zip', mimeType: 'application/zip', buffer: raw })
@@ -55,7 +56,7 @@ async function prepare(page: Page) {
 test('reviewed preview and explicit publication retain byte-exact ZIP, ASCII header and pins across503/409', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const f = await fixture(page, { statuses: [503, 409, 201], pending: true }); await prepare(page)
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Inspect target', exact: true })).toBeDisabled()
   await f.panel.getByRole('button', { name: 'Preview reviewed publication', exact: true }).click()
   const preview = f.panel.getByRole('region', { name: 'Archive publication preview' })
@@ -72,7 +73,7 @@ test('reviewed preview and explicit publication retain byte-exact ZIP, ASCII hea
   expect(preflight.header).toMatch(/\\u00e4/); expect(preflight.header).toMatch(/^[\x00-\x7f]+$/)
   expect(fields).toMatchObject({ expected: null, expected_policy: policy, expected_evidence: evidence, source_entry_id: entry, archive_sha256: archive, acknowledge_sanitized_export: true, acknowledge_operator_review: true, acknowledge_project_reader_disclosure: true })
   expect(JSON.parse(writes[0]!.header!)).toEqual({ ...fields, preview_digest: digest })
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
   expect(await page.locator('body').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
 })
 test('multi-version archive is inspectable but cannot be prepared for publication', async ({ page }) => {
@@ -81,7 +82,7 @@ test('multi-version archive is inspectable but cannot be prepared for publicatio
   await expect(f.panel.getByRole('button', { name: 'Preview reviewed publication', exact: true })).toBeDisabled()
   expect(f.posts).toHaveLength(1)
   await f.panel.getByRole('button', { name: 'Discard archive capture', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })
 test('actor roundtrip invalidates a late archive publication response and clears retained capture', async ({ page }) => {
   const f = await fixture(page, { personas: true, hold: true }); await prepare(page)
@@ -107,5 +108,5 @@ test('failed first publication preview freezes its exact declaration until retry
   const requests = f.posts.filter(row => row.header); expect(requests).toHaveLength(2); expect(requests[0]).toEqual(requests[1])
   expect(f.posts.some(row => row.path.endsWith('/apply'))).toBe(false)
   await f.panel.getByRole('button', { name: 'Discard archive capture', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })

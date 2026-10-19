@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 async function fixture(page: Page, teams: string[], query = '') {
@@ -5,9 +6,9 @@ async function fixture(page: Page, teams: string[], query = '') {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
     let value: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') value = { id: 'analyst', name: 'Analyst', playground: false, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: teams.map(id => ({ id, name: id, capabilities: ['read', 'assess'] })) }
-    else if (path === '/api/v2/catalog/projects') value = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') value = { id: 'product', name: 'Product' }
+    if (path === '/api/v1/me') value = { id: 'analyst', name: 'Analyst', playground: false, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: teams.map(id => ({ id, name: id, capabilities: ['read', 'assess'] })) }
+    else if (path === '/api/v1/catalog/projects') value = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') value = { id: 'product', name: 'Product' }
     else if (path.endsWith('/versions')) value = { items: [{ version: '1', state: 'state' }] }
     else if (path.endsWith('/workspace')) {
       queries.push(url.searchParams)
@@ -15,9 +16,9 @@ async function fixture(page: Page, teams: string[], query = '') {
     }
     await route.fulfill({ json: value })
   })
-  await page.goto('/?page=Knowledge' + query)
+  await page.goto('/?page=Review' + query); await openNativeTools(page)
   if (!query.includes('k_project')) {
-    await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+    await page.getByRole('button', { name: 'Product scope', exact: false }).click()
     await page.getByRole('option', { name: 'Product', exact: true }).click()
   }
   await expect(page.getByLabel('Filtered workspace statistics')).toBeVisible()

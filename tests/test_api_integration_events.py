@@ -60,7 +60,7 @@ def prepared(client, bom):
         "rationale": "Exact qualified target pipeline declares integration",
         "git_commit_objects": objects,
     }
-    return project, f"/api/v3/projects/{project}/integration-events", payload
+    return project, f"/api/v1/projects/{project}/integration-events", payload
 
 
 def test_record_list_exact_replay_and_read_only_event_bound_preview(analyst, app, bom):
@@ -71,13 +71,13 @@ def test_record_list_exact_replay_and_read_only_event_bound_preview(analyst, app
     assert analyst.post(path, json=payload).json() == result
     state = result["updates"][0]["target"]
     selected = analyst.get(
-        f"/api/v3/projects/{project}/states/{state}/integration-events/{result['event_id']}"
+        f"/api/v1/projects/{project}/states/{state}/integration-events/{result['event_id']}"
     )
     assert selected.status_code == 200, selected.text
     assert selected.json()["git_ancestry"]["status"] == "verified_commit_object_ancestry"
     assert not selected.json()["software_integration_verified"]
     page = analyst.get(
-        f"/api/v3/projects/{project}/states/{state}/integration-events", params={"limit": 1}
+        f"/api/v1/projects/{project}/states/{state}/integration-events", params={"limit": 1}
     ).json()
     assert page["items"] == [selected.json()] and page["total"] == 1 and page["next_offset"] is None
     before = app.state.knowledge.head()

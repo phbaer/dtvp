@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 PROJECT_NAME = "Ownership Playground"
 VERSIONS = ("7.1.1", "7.1.2")
 
@@ -148,12 +150,12 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:8900")
     args = parser.parse_args()
     with httpx.Client(base_url=args.url, timeout=30) as client:
-        checked(client.post("/api/v2/playground/login", json={"persona": "administrator"}))
+        checked(client.post(f"{API_PREFIX}/playground/login", json={"persona": "administrator"}))
         client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
-        teams = {item["name"]: item["id"] for item in checked(client.get("/api/v2/workspaces"))}
+        teams = {item["name"]: item["id"] for item in checked(client.get(f"{API_PREFIX}/workspaces"))}
         if not {"Platform", "Operations"} <= teams.keys():
             raise RuntimeError("Start the isolated seeded playground with Platform/Operations teams")
-        projects = checked(client.get("/api/v2/projects"))
+        projects = checked(client.get(f"{API_PREFIX}/projects"))
         candidates = [
             item for item in projects
             if item["name"] == PROJECT_NAME and item["workspace_id"] == teams["Platform"]
@@ -162,10 +164,10 @@ def main():
             raise RuntimeError("Multiple Ownership Playground projects; select a clean playground")
         project = candidates[0] if candidates else checked(
             client.post(
-                "/api/v2/projects", json={"workspace_id": teams["Platform"], "name": PROJECT_NAME}
+                f"{API_PREFIX}/projects", json={"workspace_id": teams["Platform"], "name": PROJECT_NAME}
             )
         )
-        project_path = f"/api/v3/projects/{project['id']}"
+        project_path = f"{API_PREFIX}/projects/{project['id']}"
         print(f"Synthetic ownership demo; only dedicated project {project['id']} is updated.")
         for version in VERSIONS:
             import_version(client, project_path, version)

@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const base = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
 const contextual = `${base}/CR:L/IR:L/AR:L`
@@ -8,7 +9,7 @@ async function fixture(page: Page, personas = false) {
   function finding(index: number) { return { id: `finding-${index}`, context_id: `context-${index}`, vulnerability_id: `CVE-2099-${index}`, component: { name: `TLS ${index}`, version: '2' }, context: { component_ref: `tls-${index}`, root_ref: `application-${index}`, team_id: 'team', status: 'resolved' }, description: `Source evidence ${index}`, source_ratings: [{ vector: base, score: 9.8, method: 'CVSSv31' }], published_score: null, coverage: { status: 'approved', assessment: null }, capabilities: ['rescore'] } }
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
-    if (path === '/api/v2/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
+    if (path === '/api/v1/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (path.endsWith('/scoring/preview')) {
       const body = route.request().postDataJSON(); previews.push(body)
       if (holdPreview) { holdPreview = false; await new Promise<void>(resolve => { releasePreview = resolve }) }
@@ -24,17 +25,17 @@ async function fixture(page: Page, personas = false) {
     }
     reads.push(path)
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/playground/personas') data = personas ? [{ id: 'coordinator', name: 'coordinator' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Score product', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/playground/personas') data = personas ? [{ id: 'coordinator', name: 'coordinator' }, { id: 'other', name: 'other' }] : []
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Score product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.1', state }], next_offset: null }
     else if (path.endsWith('/workspace')) data = { state, project_id: 'product', version: '7.1.1', items: [finding(0), finding(1)], next_offset: null, statistics: { totals: { context_findings: 2, unique_vulnerabilities: 2 }, by_status: { approved: 2 }, by_team: { team: 2 }, severity: {}, recorded: 2, submitted: 2, approved: 2 } }
     else if (path.includes('/workspace/')) data = { ...finding(Number(path.split('/').at(-1)!.replace('CVE-2099-', ''))), state }
     await route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
+  await page.goto('/?page=Review'); await openNativeTools(page)
   async function select() {
-    await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+    await page.getByRole('button', { name: 'Product scope', exact: false }).click()
     await page.getByRole('option', { name: 'Score product', exact: true }).click()
     await page.getByRole('button', { name: 'CVE-2099-0', exact: true }).click()
     await page.getByRole('button', { name: 'scoring', exact: true }).click()
@@ -42,7 +43,7 @@ async function fixture(page: Page, personas = false) {
   await select()
   const detail = page.getByRole('region', { name: 'Context finding detail', exact: true }), editor = page.getByRole('form', { name: 'Coordinator rescoring' })
   async function prepare() {
-    await editor.getByText('Contextual vector', { exact: true }).click()
+    await editor.getByText('Advanced vector input', { exact: true }).click()
     await editor.getByLabel('Proposed contextual vector', { exact: true }).fill(contextual)
     await editor.getByLabel('Scoring rationale', { exact: true }).fill('Coordinator reviewed explicit deployment evidence')
     await editor.getByRole('button', { name: 'Preview contextual score', exact: true }).click()

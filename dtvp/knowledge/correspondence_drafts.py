@@ -261,7 +261,9 @@ def apply_correspondence_draft(journal, *, project_id, actor_id, data, authorize
     )
     checks = ((policy_ref(project_id), data.expected_policy),)
     operation = {
-        **assessment.model_dump(mode="json"),
+        **assessment.model_dump(
+            mode="json", exclude={"ssvc"} if assessment.ssvc is None else set()
+        ),
         "assessment_id": data.assessment_id,
         "submit": False,
         "publication_checks": [

@@ -20,12 +20,12 @@ def seed(client, bom):
 def test_bootstrap_pure_preview_and_exact_receipt_replay(analyst, app, bom):
     project_id, state = seed(analyst, bom)
     target = analyst.get(
-        f"/api/v3/projects/{project_id}/assembly-target", params={"version": "empty"}
+        f"/api/v1/projects/{project_id}/assembly-target", params={"version": "empty"}
     )
     assert target.status_code == 200, target.text
     assert target.json()["previous_kind"] == "none"
     choices = analyst.get(
-        f"/api/v3/projects/{project_id}/assembly-parts",
+        f"/api/v1/projects/{project_id}/assembly-parts",
         params={"version": "empty", "q": "app", "limit": 1},
     ).json()
     assert choices["items"][0]["state"] == state
@@ -83,7 +83,7 @@ def test_bad_admission_digest_and_changed_product_head_do_not_publish(analyst, a
     assert response.status_code == 409
     assert (
         analyst.get(
-            f"/api/v3/projects/{project_id}/assembly-target", params={"version": "empty"}
+            f"/api/v1/projects/{project_id}/assembly-target", params={"version": "empty"}
         ).json()["state"]
         is None
     )
@@ -125,20 +125,20 @@ def test_read_only_target_does_not_grant_assembly_and_foreign_parts_are_hidden(a
     payload = assembly([selection("application", state)])
     login(analyst, "coordinator")
     target = analyst.get(
-        f"/api/v3/projects/{project_id}/assembly-target", params={"version": "empty"}
+        f"/api/v1/projects/{project_id}/assembly-target", params={"version": "empty"}
     )
     assert target.status_code == 200 and target.json()["capabilities"] == []
     assert analyst.post(endpoint(project_id, "preview"), json=payload).status_code == 404
     login(analyst, "operations")
     assert (
         analyst.get(
-            f"/api/v3/projects/{project_id}/assembly-parts", params={"version": "empty"}
+            f"/api/v1/projects/{project_id}/assembly-parts", params={"version": "empty"}
         ).status_code
         == 404
     )
     assert (
         analyst.get(
-            f"/api/v3/projects/{project_id}/assembly-target", params={"version": "empty"}
+            f"/api/v1/projects/{project_id}/assembly-target", params={"version": "empty"}
         ).status_code
         == 404
     )
@@ -151,7 +151,7 @@ def test_unknown_or_nonstate_predecessors_are_not_dereferenced(analyst, app, bom
     before = journal.head()
     for predecessor in ("f" * 64, baseline["artifact_sha"]):
         response = analyst.get(
-            f"/api/v3/projects/{project_id}/assembly-target",
+            f"/api/v1/projects/{project_id}/assembly-target",
             params={"version": "empty", "predecessor": predecessor},
         )
         assert response.status_code == 404, response.text

@@ -31,7 +31,7 @@ def test_renamed_refs_missing_identity_and_pagination_are_read_only(analyst, app
     )
     journal = app.state.knowledge
     before = journal.head()
-    path = f"/api/v3/projects/{project}/states/{target}/identity-matches"
+    path = f"/api/v1/projects/{project}/states/{target}/identity-matches"
     response = analyst.get(path, params={"source": source, "limit": 1})
     assert response.status_code == 200, response.text
     result = response.json()
@@ -63,6 +63,6 @@ def test_uncommitted_state_is_not_an_identity_destination(analyst, app, bom):
         sections=sections,
     )
     result = analyst.get(
-        f"/api/v3/projects/{project}/states/{staged}/identity-matches", params={"source": source}
+        f"/api/v1/projects/{project}/states/{staged}/identity-matches", params={"source": source}
     )
     assert result.status_code == 422

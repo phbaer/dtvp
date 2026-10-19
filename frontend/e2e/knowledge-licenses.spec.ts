@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const initial = 'a'.repeat(64), advanced = 'b'.repeat(64), revision = 'c'.repeat(64)
@@ -15,8 +16,8 @@ async function fixture(page: Page, capabilities: string[], alreadySubmitted = fa
       return route.fulfill({ status: 201, json: { state, committed: true, projection } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Team', capabilities: ['read'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'License product', capabilities: ['read', ...capabilities] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Team', capabilities: ['read'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'License product', capabilities: ['read', ...capabilities] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state, project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/license-worklist')) {
@@ -26,8 +27,8 @@ async function fixture(page: Page, capabilities: string[], alreadySubmitted = fa
     }
     return route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'License product' }).click()
   await page.getByText('License evidence and review', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'License evidence and review' })
@@ -107,7 +108,7 @@ test('draft and review buffers block row paging and filters until explicit disca
   await fill(page)
   await expect(panel.getByRole('button', { name: 'Next license components', exact: true })).toBeDisabled()
   await expect(panel.getByRole('button', { name: 'Apply license filters', exact: true })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await panel.getByRole('button', { name: 'Discard license input', exact: true }).click()
   await panel.getByLabel('Search license evidence', { exact: true }).fill('Apache')
   await panel.getByRole('combobox', { name: 'Authoritative license evidence status', exact: true }).selectOption('reported')
@@ -264,7 +265,7 @@ test('adopted SPDX occurrence has no authority license claim and retains its own
   await claim.getByText('Source pins and original claim', { exact: true }).click()
   await expect(claim).toContainText('spdx-2.3-json')
   await expect(claim).toContainText('SPDXRef-library')
-  await expect(claim.getByRole('link', { name: 'Open original SBOM', exact: true })).toHaveAttribute('href', `/api/v3/projects/product/states/${initial}/artifacts/${'1'.repeat(64)}`)
+  await expect(claim.getByRole('link', { name: 'Open original SBOM', exact: true })).toHaveAttribute('href', `/api/v1/projects/product/states/${initial}/artifacts/${'1'.repeat(64)}`)
   expect(posts).toHaveLength(0)
 })
 
@@ -277,13 +278,13 @@ test('original SBOM links stay bound to the retained product state and reject in
   const claims = panel.locator('.supplemental-license-claim')
   await claims.nth(0).locator(':scope > summary').click(); await claims.nth(1).locator(':scope > summary').click()
   const link = claims.nth(0).getByRole('link', { name: 'Open original SBOM', exact: true })
-  await expect(link).toHaveAttribute('href', `/api/v3/projects/product/states/${initial}/artifacts/${'f'.repeat(64)}`)
+  await expect(link).toHaveAttribute('href', `/api/v1/projects/product/states/${initial}/artifacts/${'f'.repeat(64)}`)
   await expect(link).toHaveAttribute('target', '_blank')
   await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   await expect(claims.nth(1).getByRole('link')).toHaveCount(0)
   await fill(page); advance()
   await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click()
   await expect(panel).toContainText('retained input stays bound to its original source')
-  await expect(link).toHaveAttribute('href', `/api/v3/projects/product/states/${initial}/artifacts/${'f'.repeat(64)}`)
+  await expect(link).toHaveAttribute('href', `/api/v1/projects/product/states/${initial}/artifacts/${'f'.repeat(64)}`)
   expect(posts).toHaveLength(0)
 })

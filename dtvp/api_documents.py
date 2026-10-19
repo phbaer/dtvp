@@ -3,6 +3,7 @@
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.documents import (
     MAX_BYTES,
@@ -14,7 +15,7 @@ from dtvp.knowledge.documents import (
 )
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def authorize(db, actor, project_id):

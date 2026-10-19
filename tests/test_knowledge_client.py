@@ -34,7 +34,7 @@ def test_coverage_cli_forwards_frozen_selection_and_reports_complete_counts(monk
             "1",
         ],
     )
-    route = respx.post("http://dtvp.test/api/v3/projects/project/coverage/candidates").mock(
+    route = respx.post("http://dtvp.test/api/v1/projects/project/coverage/candidates").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -101,7 +101,7 @@ def test_pipeline_cli_uploads_original_bytes_and_explicit_retry_metadata(
         argv.extend(["--part", part])
     monkeypatch.setattr(sys, "argv", argv)
     monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
-    path = "http://dtvp.test/api/v3/projects/project/versions/7.1.1"
+    path = "http://dtvp.test/api/v1/projects/project/versions/7.1.1"
     if part:
         path += "/parts/supplier%20part"
     route = respx.post(path + "/files").mock(
@@ -146,7 +146,7 @@ def test_machine_workspace_cli_uses_http_without_opening_database(monkeypatch, c
             "7.1.1",
         ],
     )
-    route = respx.get("http://dtvp.test/api/v3/projects/project/versions/7.1.1/workspace").mock(
+    route = respx.get("http://dtvp.test/api/v1/projects/project/versions/7.1.1/workspace").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -195,12 +195,12 @@ def test_playground_cli_forwards_json_and_csrf_without_domain_logic(monkeypatch,
     payload = {"request_id": "explicit-request", "expected_versions": {"7.1.1": "b" * 64}}
     body = tmp_path / "review.json"
     body.write_text(json.dumps(payload))
-    respx.post("http://dtvp.test/api/v2/playground/login").mock(
+    respx.post("http://dtvp.test/api/v1/playground/login").mock(
         return_value=httpx.Response(
             200, json={}, headers={"Set-Cookie": "dtvp_csrf=csrf-test; Path=/"}
         )
     )
-    route = respx.post("http://dtvp.test/api/v3/projects/project/reviews").mock(
+    route = respx.post("http://dtvp.test/api/v1/projects/project/reviews").mock(
         return_value=httpx.Response(201, json={"committed": True})
     )
     monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
@@ -216,7 +216,7 @@ def test_playground_cli_forwards_json_and_csrf_without_domain_logic(monkeypatch,
             "reviewer",
             "request",
             "POST",
-            "/api/v3/projects/project/reviews",
+            "/api/v1/projects/project/reviews",
             "--body",
             str(body),
         ],
@@ -265,7 +265,7 @@ def test_workspace_cli_forwards_advanced_filters_and_keeps_server_totals(monkeyp
             "current",
         ],
     )
-    route = respx.get("http://dtvp.test/api/v3/projects/p/versions/7.1.2/workspace").mock(
+    route = respx.get("http://dtvp.test/api/v1/projects/p/versions/7.1.2/workspace").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -311,7 +311,7 @@ def test_compare_cli_uses_pinned_server_diff_and_full_count(monkeypatch, capsys)
             "1",
         ],
     )
-    route = respx.get("http://dtvp.test/api/v3/projects/p/compare/details").mock(
+    route = respx.get("http://dtvp.test/api/v1/projects/p/compare/details").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -350,7 +350,7 @@ def test_synchronization_cli_displays_server_preview_without_applying(monkeypatc
             "b" * 64,
         ],
     )
-    route = respx.post("http://dtvp.test/api/v3/projects/p/synchronization/preview").mock(
+    route = respx.post("http://dtvp.test/api/v1/projects/p/synchronization/preview").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -455,7 +455,7 @@ def test_portfolio_cli_forwards_selected_heads_filters_and_displays_server_count
         },
         "limitations": ["Counts do not verify complete software coverage."],
     }
-    route = respx.get("http://dtvp.test/api/v3/projects/p/portfolio").mock(
+    route = respx.get("http://dtvp.test/api/v1/projects/p/portfolio").mock(
         return_value=httpx.Response(200, json=result)
     )
     main()
@@ -522,7 +522,7 @@ def test_document_cli_preserves_bytes_and_explicit_review_pins(tmp_path, monkeyp
         argv.append("--submit")
     monkeypatch.setattr(sys, "argv", argv)
     route = respx.post(
-        "http://dtvp.test/api/v3/projects/product/versions/7.1.2/documents/"
+        "http://dtvp.test/api/v1/projects/product/versions/7.1.2/documents/"
         + ("submit" if submit else "draft")
     ).mock(return_value=httpx.Response(201, json={"committed": True}))
     main()
@@ -578,7 +578,7 @@ def test_evidence_cli_preserves_original_bytes_and_explicit_collection_pins(
     if preview:
         argv.append("--preview")
     monkeypatch.setattr(sys, "argv", argv)
-    path = "http://dtvp.test/api/v3/projects/product/evidence/files" + (
+    path = "http://dtvp.test/api/v1/projects/product/evidence/files" + (
         "/preview" if preview else ""
     )
     route = respx.post(path).mock(

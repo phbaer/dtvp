@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const state = 'a'.repeat(64), advanced = 'b'.repeat(64), context = 'c'.repeat(64), report = 'd'.repeat(64), vuln = 'CVE-2099-42'
 async function fixture(page: Page, allowed = true, personas = false) {
@@ -8,7 +9,7 @@ async function fixture(page: Page, allowed = true, personas = false) {
   const job = (id = 'parent') => ({ id, status: 'succeeded', version: '7.1.2', context_id: context, vulnerability_id: vuln, state: '9'.repeat(64), attempts: 1, error: '', result: { report_sha256: report }, created_at: '2026-10-16', requires_explicit_reconciliation: false, capabilities: allowed ? ['follow_up'] : [] })
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
-    if (path === '/api/v2/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
+    if (path === '/api/v1/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (route.request().method() === 'POST' && path.endsWith('/follow-up')) {
       posts.push({ path, body: route.request().postDataJSON() })
       if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve }) }
@@ -16,18 +17,18 @@ async function fixture(page: Page, allowed = true, personas = false) {
       return route.fulfill({ status: 202, json: { ...job('child'), status: 'queued', result: {}, parent_job_id: 'parent', follow_up_question: posts.at(-1)!.body.question, capabilities: ['cancel'] } })
     }
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Follow-up product', capabilities: ['read'] }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Follow-up product' }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Follow-up product', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Follow-up product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.2', state: head }], next_offset: null }
     else if (path.endsWith('/workspace')) data = { state: head, project_id: 'product', version: '7.1.2', items: [finding], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.includes('/workspace/')) data = { ...finding, state: head }
     else if (path.endsWith('/analysis-jobs')) data = { items: [job()], next_offset: null, capabilities: [] }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Follow-up product', exact: true }).click()
   await page.getByRole('button', { name: vuln, exact: true }).click()
   await page.getByText('Specialist inputs and CPE candidates', { exact: true }).click()
@@ -45,12 +46,12 @@ test('a completed parent and explicit question create only a separate source-bou
   const f = await fixture(page)
   expect(f.posts).toHaveLength(0)
   await prepare(page, f.panel)
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Close context finding', exact: true })).toBeDisabled()
   await f.panel.getByRole('button', { name: 'Queue bound follow-up', exact: true }).click()
   await expect(f.panel).toContainText('Follow-up job child recorded')
   expect(f.posts).toHaveLength(1)
-  expect(f.posts[0]!.path).toBe('/api/v3/projects/product/versions/7.1.2/analysis-jobs/parent/follow-up')
+  expect(f.posts[0]!.path).toBe('/api/v1/projects/product/versions/7.1.2/analysis-jobs/parent/follow-up')
   expect(f.posts[0]!.body).toMatchObject({ expected: state, parent_report_sha256: report, question: 'Does the configured entry point reach the vulnerable parser?', user_guidance: '' })
   expect(Object.keys(f.posts[0]!.body).sort()).toEqual(['expected', 'parent_report_sha256', 'question', 'request_id', 'user_guidance'])
   await expect(f.jobs.getByRole('article', { name: 'Analysis job child', exact: true })).toBeVisible()
@@ -81,7 +82,7 @@ test('a dirty first question retains its original head and requires explicit dis
   expect((await f.panel.boundingBox())!.width).toBeLessThanOrEqual(390)
   await f.panel.getByRole('button', { name: 'Discard follow-up input', exact: true }).click()
   await expect(f.panel).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })
 test('read-only job capabilities expose no follow-up action', async ({ page }) => {
   const f = await fixture(page, false)

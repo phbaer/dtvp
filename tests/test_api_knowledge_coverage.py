@@ -144,7 +144,7 @@ def test_absent_contexts_missing_states_and_request_validation_are_explicit(anal
     assert absent["availability"] == "component_absent" and not absent["assessment_candidate"]
     login(analyst, "administrator")
     foreign_project = next(
-        item["id"] for item in analyst.get("/api/v2/projects").json() if item["id"] != project_id
+        item["id"] for item in analyst.get("/api/v1/projects").json() if item["id"] != project_id
     )
     foreign_state = imported(analyst, foreign_project, "7.1.1", body(bom))
     login(analyst)

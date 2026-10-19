@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const stateSha = 'a'.repeat(64), nextState = 'b'.repeat(64), contextId = 'c'.repeat(64)
@@ -29,15 +30,15 @@ async function fixture(page: Page, options: { readonly?: boolean; createResponse
       const later = url.searchParams.get('offset') === '20'
       result = { items: [options.knownFailed ? job('known-job', 'failed', options.readonly ? [] : ['retry']) : job(later ? 'older-job' : 'unknown-job', 'submission_unknown', options.reconcile ? ['reconcile', 'cancel'] : [])], next_offset: later ? null : 20, capabilities: options.readonly ? [] : ['submit'] }
     } else if (path.includes('/analysis-jobs/')) { reads.push({ path, query: new URLSearchParams(url.search) }); result = job(path.split('/').at(-1)!) }
-    else if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Job product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Job product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state, project_id: 'product', version: '7.1.2', items: [row], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: {}, by_team: { team: 1 }, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.includes('/workspace/')) result = { ...row, state }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Job product', exact: true }).click()
   await page.getByRole('button', { name: vulnerability, exact: true }).click()
   await page.getByText('Specialist inputs and CPE candidates', { exact: true }).click()
@@ -66,7 +67,7 @@ test('readers see bounded contextual jobs and unknown submissions never expose a
   await expect(state.jobs.getByRole('article', { name: 'Analysis job older-job', exact: true })).toBeVisible()
   expect(state.reads.at(-1)?.query.get('offset')).toBe('20')
   await state.jobs.getByRole('button', { name: 'Refresh job status', exact: true }).click()
-  expect(state.reads.at(-1)?.path).toBe('/api/v3/projects/product/analysis-jobs/older-job')
+  expect(state.reads.at(-1)?.path).toBe('/api/v1/projects/product/analysis-jobs/older-job')
   expect(state.writes).toHaveLength(0)
   expect(await state.jobs.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
 })
@@ -85,7 +86,7 @@ test('analysis is queued only after explicit qualified input preparation and rem
   await expect(state.jobs.getByRole('article', { name: 'Analysis job older-job', exact: true })).toBeVisible()
   const create = state.writes.find(write => write.path.endsWith('/analysis-jobs'))!
   expect(create.body).toEqual({ expected: stateSha, context_id: contextId, vulnerability_id: vulnerability, user_guidance: 'Check the parser entry points.', request_id: expect.stringMatching(/^[0-9a-f-]{36}$/) })
-  expect(state.writes.map(write => write.path)).toEqual([`/api/v3/projects/product/states/${stateSha}/agentyzer-input`, '/api/v3/projects/product/versions/7.1.2/analysis-jobs'])
+  expect(state.writes.map(write => write.path)).toEqual([`/api/v1/projects/product/states/${stateSha}/agentyzer-input`, '/api/v1/projects/product/versions/7.1.2/analysis-jobs'])
   await expect(form.getByRole('button', { name: 'New analysis request', exact: true })).toBeVisible()
 })
 
@@ -117,7 +118,7 @@ test('safe retry and local cancellation appear only through returned job capabil
   await state.jobs.getByRole('button', { name: 'Cancel DTVP job', exact: true }).click()
   await expect(state.jobs.getByRole('article')).toContainText('cancelled')
   await expect(state.jobs.getByRole('button', { name: /retry|cancel/i })).toHaveCount(0)
-  expect(state.writes.map(write => write.path)).toEqual(['/api/v3/projects/product/analysis-jobs/known-job/retry', '/api/v3/projects/product/analysis-jobs/known-job/cancel'])
+  expect(state.writes.map(write => write.path)).toEqual(['/api/v1/projects/product/analysis-jobs/known-job/retry', '/api/v1/projects/product/analysis-jobs/known-job/cancel'])
 })
 
 test('a changed input state clears request guidance and requires fresh source preparation', async ({ page }) => {

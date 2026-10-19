@@ -9,6 +9,7 @@ from pydantic import Field, field_validator
 from sqlalchemy import or_, select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.assembly import AssemblyInput, publish_assembly
 from dtvp.knowledge.composition import CollectionContext
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
@@ -19,7 +20,7 @@ from dtvp.knowledge.withdrawal import WithdrawalInput, withdraw_inventory
 from dtvp.models import Workspace
 from dtvp.schemas import RequestModel
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 logger = logging.getLogger(__name__)
 
 

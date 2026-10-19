@@ -52,7 +52,7 @@ def test_explicit_metadata_exact_bytes_unicode_and_operation(monkeypatch, tmp_pa
     invoke(monkeypatch, tmp_path, json.dumps(metadata, ensure_ascii=False).encode(), apply=apply)
     operation = "apply" if apply else "preview"
     route = respx.post(
-        f"http://dtvp.test/api/v3/projects/product%2Fname/versions/release%2Ftest/migration/v1-archive/{operation}"
+        f"http://dtvp.test/api/v1/projects/product%2Fname/versions/release%2Ftest/migration/v1-archive/{operation}"
     ).mock(return_value=httpx.Response(200, json={"result": "server-owned"}))
     main()
     request = route.calls[0].request
@@ -91,7 +91,7 @@ def test_invalid_or_expanded_oversized_metadata_never_uploaded(
 def test_backend_failure_is_not_publication_success(monkeypatch, tmp_path, capsys, status):
     invoke(monkeypatch, tmp_path, b'{"request_id":"retained"}', apply=True)
     route = respx.post(
-        "http://dtvp.test/api/v3/projects/product%2Fname/versions/release%2Ftest/migration/v1-archive/apply"
+        "http://dtvp.test/api/v1/projects/product%2Fname/versions/release%2Ftest/migration/v1-archive/apply"
     ).mock(return_value=httpx.Response(status, json={"detail": "Retry captured request"}))
     with pytest.raises(SystemExit) as error:
         main()

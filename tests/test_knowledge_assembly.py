@@ -18,7 +18,7 @@ app = knowledge_app
 
 
 def path(project_id, version="7.1.1"):
-    return f"/api/v3/projects/{project_id}/versions/{version}"
+    return f"/api/v1/projects/{project_id}/versions/{version}"
 
 
 def source_import(client, project_id, part_id, bom, *, version="7.1.1", **changes):
@@ -63,7 +63,7 @@ def inventory(client, project_id, version="7.1.1"):
 
 def tag(client, project_id, state, name):
     return client.post(
-        f"/api/v3/projects/{project_id}/tags",
+        f"/api/v1/projects/{project_id}/tags",
         json={"request_id": f"tag-{name}", "name": name, "state": state},
     )
 
@@ -95,7 +95,7 @@ def test_part_intake_is_isolated_and_assembly_preserves_source_occurrences(analy
         }
         assert {item["dtvp_origin"]["ref"] for item in occurrences} == {original["bom-ref"]}
         assert {item["dtvp_origin"]["state"] for item in occurrences} == {a, b}
-    manifest = analyst.get(f"/api/v3/projects/{project_id}/states/{state}/assembly")
+    manifest = analyst.get(f"/api/v1/projects/{project_id}/states/{state}/assembly")
     assert manifest.status_code == 200, manifest.text
     assert manifest.json()["state"] == state
     assert {item["part_id"] for item in manifest.json()["manifest"]["parts"]} == {
@@ -189,7 +189,7 @@ def test_part_update_requires_selection_and_preserves_other_knowledge(analyst, a
             origin = value["dtvp_origin"]
             assert by_origin[origin["part_id"], origin["ref"]]["bom-ref"] == value["bom-ref"]
     diff = analyst.get(
-        f"/api/v3/projects/{project_id}/compare", params={"before": first, "after": second}
+        f"/api/v1/projects/{project_id}/compare", params={"before": first, "after": second}
     )
     assert diff.status_code == 200, diff.text
     assert diff.json()["changes"]["inventory"]["changed"]
@@ -237,7 +237,7 @@ def test_part_removal_is_explicit_and_keeps_original_and_previous_state(analyst,
     first = publish(
         analyst, project_id, assembly([selection("application", a), selection("supplier", b)])
     )
-    original = analyst.get(f"/api/v3/projects/{project_id}/states/{b}/source")
+    original = analyst.get(f"/api/v1/projects/{project_id}/states/{b}/source")
     assert original.status_code == 200
     assert original.content == canonical(bom)
     payload = assembly([selection("application", a)], request_id="remove", expected=first)
@@ -263,18 +263,18 @@ def test_part_removal_is_explicit_and_keeps_original_and_previous_state(analyst,
         for i in inventory(analyst, project_id)["items"]
     )
     assert (
-        analyst.get(f"/api/v3/projects/{project_id}/states/{b}/source").content == original.content
+        analyst.get(f"/api/v1/projects/{project_id}/states/{b}/source").content == original.content
     )
     assert (
         len(
-            analyst.get(f"/api/v3/projects/{project_id}/states/{first}/assembly").json()[
+            analyst.get(f"/api/v1/projects/{project_id}/states/{first}/assembly").json()[
                 "manifest"
             ]["parts"]
         )
         == 2
     )
     diff = analyst.get(
-        f"/api/v3/projects/{project_id}/compare", params={"before": first, "after": second}
+        f"/api/v1/projects/{project_id}/compare", params={"before": first, "after": second}
     ).json()
     assert diff["changes"]["inventory"]["removed"]
 
@@ -300,7 +300,7 @@ def test_assembly_cas_retry_and_projection_rebuild(analyst, app, bom):
     catch_up(app.state.engine, app.state.knowledge, rebuild=True)
     assert inventory(analyst, project_id)["state"] == second
     assert analyst.get(f"{path(project_id)}/parts/application").json()["state"] == a
-    assert analyst.get("/api/v2/findings").json()["items"]
+    assert inventory(analyst, project_id)["items"]
 
 
 def test_assembly_rejects_foreign_version_part_and_nonpart_states(analyst, bom):
@@ -324,7 +324,7 @@ def test_assembly_rejects_foreign_version_part_and_nonpart_states(analyst, bom):
     login(analyst, "operations")
     foreign_product = product(analyst)
     foreign = source_import(analyst, foreign_product, "application", bom)
-    assert analyst.get(f"/api/v3/projects/{project_id}/states/{a}/assembly").status_code == 404
+    assert analyst.get(f"/api/v1/projects/{project_id}/states/{a}/assembly").status_code == 404
     login(analyst)
     response = analyst.post(
         f"{path(project_id)}/assembly",
@@ -371,7 +371,7 @@ def test_part_head_update_does_not_prevent_selecting_an_older_pinned_revision(an
         build_number=2,
     )
     assembled = publish(analyst, project_id, assembly([selection("application", first)]))
-    manifest = analyst.get(f"/api/v3/projects/{project_id}/states/{assembled}/assembly").json()[
+    manifest = analyst.get(f"/api/v1/projects/{project_id}/states/{assembled}/assembly").json()[
         "manifest"
     ]
     assert manifest["parts"][0]["state"] == first
@@ -404,13 +404,13 @@ def test_selected_part_withdrawal_requires_explicit_acknowledgement(analyst, bom
             "withdrawal_reason": "Supplier withdrew this input pending correction",
         },
     )
-    manifest = analyst.get(f"/api/v3/projects/{project_id}/states/{second}/assembly").json()[
+    manifest = analyst.get(f"/api/v1/projects/{project_id}/states/{second}/assembly").json()[
         "manifest"
     ]
     assert manifest["parts"][0]["part_id"] == "supplier"
     assert manifest["parts"][0]["state"] is None
     assert analyst.get(
-        f"/api/v3/projects/{project_id}/states/{source}/source"
+        f"/api/v1/projects/{project_id}/states/{source}/source"
     ).content == canonical(bom)
 
 
@@ -437,7 +437,7 @@ def test_part_file_intake_retains_exact_bytes_and_does_not_publish_product(analy
     )
     assert response.status_code == 201, response.text
     state = response.json()["updates"][0]["target"]
-    original = analyst.get(f"/api/v3/projects/{project_id}/states/{state}/source")
+    original = analyst.get(f"/api/v1/projects/{project_id}/states/{state}/source")
     assert original.content == raw
     assert original.headers["x-dtvp-representation"] == "original_bytes"
     assert analyst.get(f"{path(project_id)}/inventory").status_code == 404

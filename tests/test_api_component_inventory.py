@@ -78,9 +78,9 @@ def test_foreign_and_nonstate_objects_are_not_inventory_destinations(analyst, ap
     project, _ = setup(analyst, bom)
     state = analyst.get(url(project, "/versions/7.1.1/workspace")).json()["state"]
     login(analyst, "administrator")
-    team = analyst.get("/api/v2/projects").json()[0]["workspace_id"]
+    team = analyst.get("/api/v1/projects").json()[0]["workspace_id"]
     other = analyst.post(
-        "/api/v2/projects", json={"workspace_id": team, "name": "Other inventory"}
+        "/api/v1/projects", json={"workspace_id": team, "name": "Other inventory"}
     ).json()["id"]
     assert analyst.get(url(other, f"/states/{state}/components")).status_code == 404
     artifact = app.state.knowledge.store({"not": "a committed state"})

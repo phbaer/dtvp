@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const first = 'a'.repeat(64), second = 'b'.repeat(64), digest = 'c'.repeat(64)
 async function fixture(page: Page) {
@@ -14,15 +15,15 @@ async function fixture(page: Page) {
       return route.fulfill({ json: { format: 'dtvp.input-quality/1', state, project_id: 'product', version: state === first ? '7.1.1' : '7.1.2', baseline_status: 'assembly', report_digest: changedDigest ? 'd'.repeat(64) : digest, sources: [{ id: 'part:supplier', part_id: 'supplier', state: first, availability: 'selected', required: true, collection: { package_coverage: 'reported_complete', dependency_coverage: 'unknown', license_coverage: 'partial' }, dependency_graph: 'not_reported', coverage_verification: 'not_verified', source: { source: 'Supplier nightly', artifact_sha: second, format: 'spdx-2.3-json' } }], statistics: { occurrences: 101, by_role: { inventory_component: 100, constituent_root: 1 }, inventory_components: { components: 100 }, by_source: { 'part:supplier': { occurrences: 101, inventory_components: 100, license_evidence: { reported: 50, unknown: 50 }, by_code: { license_noassertion_reported: 40 } } }, unique_dependency_edges: 0, unresolved_dependency_refs: 2, issues: 250, by_code: { license_noassertion_reported: 40, package_identifier_not_reported: 30 } }, selection: { q, code }, items, total: q || code ? 22 : 80, next_offset: offset ? null : 20, limitations: ['Producer claims remain unverified.', 'Missing packages cannot be discovered from the imported model.'] } })
     }
     let result: unknown = { items: [], next_offset: null, next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Quality product', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Quality product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: first }, { version: '7.1.2', state: second }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: path.includes('7.1.2') ? second : first, project_id: 'product', version: path.includes('7.1.2') ? '7.1.2' : '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/connectors/dependency-track')) result = { project_id: null, configured: false, capabilities: [] }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Quality product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Quality product', exact: true }).click()
   const panel = page.getByLabel('Composition input observations', { exact: true })
   return { panel, reads, writes, change: () => { changedDigest = true }, hold: () => { hold = true }, release: () => { hold = false; release?.() } }
 }
@@ -31,7 +32,7 @@ test('lazy read shows full role/source counts while server filters and pages sta
   expect(reads).toHaveLength(0)
   await panel.locator(':scope > summary').click()
   await expect(panel).toContainText('250 observations in the full model')
-  expect((await panel.boundingBox())!.width).toBeCloseTo((await page.getByRole('group', { name: 'Pinned state tools', exact: true }).boundingBox())!.width, 0)
+  expect((await panel.boundingBox())!.width).toBeCloseTo((await page.locator('[data-tool-group=composition] > .knowledge-tools').boundingBox())!.width, 0)
   await panel.getByText('Source and constituent coverage claims', { exact: true }).click()
   await expect(panel).toContainText('Producer-declared; not verified')
   await expect(panel).toContainText('reported complete')

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 import { send } from '../api'
@@ -86,7 +87,7 @@ async function mutate(job?: Job, kind?: string) {
   finally { if (current === generation) busy.value = false }
 }
 function artifactLinks(job: Job) { return [...new Set([...(Array.isArray(job.result.raw_artifact_shas) ? job.result.raw_artifact_shas : []), job.result.progress_sha256, job.result.capture_sha256].filter((value): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)))] }
-const download = (job: Job, sha: string) => `/api/v3${root()}/osv-jobs/${encodeURIComponent(job.id)}/artifacts/${sha}`
+const download = (job: Job, sha: string) => `${API_PREFIX}${root()}/osv-jobs/${encodeURIComponent(job.id)}/artifacts/${sha}`
 watch(() => props.state, () => { ++generation; busy.value = false; error.value = '' })
 watch(() => props.project, () => { ++generation; busy.value = false; plan.value = null; pending.value = null; recorded.value = false; selected.value = []; jobs.value = []; recent.value = null; jobsLoaded.value = false; action.value = null; planPrevious.value = []; jobPrevious.value = []; planOffset.value = 0; jobOffset.value = 0; jobNext.value = null; error.value = ''; notice.value = ''; if (opened.value) void loadPlan() })
 onBeforeUnmount(() => { ++generation; emit('locked', false) })

@@ -10,12 +10,14 @@ from urllib.parse import quote
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 
 async def probe(client, *, project, version, requests=20, concurrency=2):
     if not 1 <= requests <= 200 or not 1 <= concurrency <= 10:
         raise ValueError("Probe supports 1–200 requests and 1–10 concurrent readers")
     path = (
-        f"/api/v3/projects/{quote(project, safe='')}/versions/{quote(version, safe='')}/workspace"
+        f"{API_PREFIX}/projects/{quote(project, safe='')}/versions/{quote(version, safe='')}/workspace"
     )
     initial = await client.get(path, params={"limit": 1})
     initial.raise_for_status()
@@ -111,10 +113,10 @@ def main():
         ) as client:
             if args.persona:
                 response = await client.post(
-                    "/api/v2/playground/login", json={"persona": args.persona}
+                    f"{API_PREFIX}/playground/login", json={"persona": args.persona}
                 )
                 response.raise_for_status()
-                me = await client.get("/api/v2/me")
+                me = await client.get(f"{API_PREFIX}/me")
                 me.raise_for_status()
                 if me.json().get("playground") is not True:
                     raise ValueError("Persona authentication requires an isolated playground")

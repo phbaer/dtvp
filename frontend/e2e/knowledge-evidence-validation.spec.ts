@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { createHash } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
@@ -9,8 +10,8 @@ async function fixture(page: Page, playground = false) {
   let wrong = false, delay = false, released = () => {}, actor = 'actor'
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
-    if (path === '/api/v2/playground/personas') return route.fulfill({ json: playground ? [{ id: 'analyst', name: 'Analyst' }, { id: 'reviewer', name: 'Reviewer' }] : [] })
-    if (path === '/api/v2/playground/login') { actor = 'reviewer'; return route.fulfill({ json: {} }) }
+    if (path === '/api/v1/playground/personas') return route.fulfill({ json: playground ? [{ id: 'analyst', name: 'Analyst' }, { id: 'reviewer', name: 'Reviewer' }] : [] })
+    if (path === '/api/v1/playground/login') { actor = 'reviewer'; return route.fulfill({ json: {} }) }
     if (path.endsWith('/schema-validation')) {
       checks.push({ path, body: route.request().postDataBuffer() })
       const body = route.request().postDataJSON()
@@ -26,15 +27,15 @@ async function fixture(page: Page, playground = false) {
       return route.fulfill({ json: { format: 'dtvp.artifact-signature-verification/1', committed: false, project_id: 'product', artifact_sha256: wrong ? 'f'.repeat(64) : sha(source), expected_artifact_sha256: sha(source), compact_jws_sha256: sha(signature), trust_policy_sha256: policy, verified: true, configured_signer_subject: 'Supplier A', report_digest: 'c'.repeat(64), diagnostic: 'signature_verified', limitations: ['Configured key policy only; no applicability or approval.'] } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: actor, name: actor === 'actor' ? 'Analyst' : 'Reviewer', org_admin: false, playground, agentyzer: { enabled: false }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: actor, name: actor === 'actor' ? 'Analyst' : 'Reviewer', org_admin: false, playground, agentyzer: { enabled: false }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state }] }
     else if (path.endsWith('/workspace')) result = { state, project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/evidence')) result = { evidence_state: null, versions: { '7.1.1': state }, total: 0, documents: [], next_offset: null, capabilities: ['import'] }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('VDR, VEX and advisory evidence files', { exact: true }).click()
   const tool = page.getByLabel('Read-only evidence validation', { exact: true })
@@ -114,5 +115,5 @@ test('actor change unmounts captured validation and rejects late prior-actor rep
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toHaveValue('reviewer')
   release()
   await expect(page.getByLabel('Evidence validation result')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })

@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
 from dtvp.storage import canonical, digest
 from scripts.knowledge_pipeline_rehearsal import checked, login
 
@@ -19,14 +20,14 @@ def rehearse(client, *, rounds=3, writers=2, output=None):
     if type(rounds) is not int or type(writers) is not int or not 1 <= rounds <= 20 or not 2 <= writers <= 8 or rounds * writers > 80:
         raise ValueError('Use 1–20 rounds, 2–8 writers and at most 80 competing requests')
     login(client, 'administrator')
-    me = checked(client.get('/api/v2/me'))
+    me = checked(client.get(f'{API_PREFIX}/me'))
     team = next((row['id'] for row in me['workspaces'] if 'write' in row['capabilities']), None)
     if team is None:
         raise ValueError('A writable playground team is required')
-    project = checked(client.post('/api/v2/projects', json={
+    project = checked(client.post(f'{API_PREFIX}/projects', json={
         'workspace_id': team, 'name': '[SYNTHETIC] Import contention ' + uuid4().hex[:12],
     }))['id']
-    base = f'/api/v3/projects/{project}'
+    base = f'{API_PREFIX}/projects/{project}'
     endpoint = base + '/versions/contention/imports'
     report = {
         'format': 'dtvp.import-contention-rehearsal/1', 'synthetic': True,

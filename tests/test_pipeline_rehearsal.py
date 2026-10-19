@@ -67,7 +67,7 @@ def test_pipeline_rehearsal_assembles_gates_reviews_and_archives_exact_issued_by
     second, _ = rehearse(client)
     assert second["project_id"] != report["project_id"]
     old = client.get(
-        f"/api/v3/projects/{report['project_id']}/states/{report['final_state']}/evidence-summary"
+        f"/api/v1/projects/{report['project_id']}/states/{report['final_state']}/evidence-summary"
     )
     assert old.json() == summary
 
@@ -86,7 +86,7 @@ def test_nonplayground_server_is_rejected_before_resource_writes():
     ) as client:
         with pytest.raises(ValueError, match="isolated playground"):
             rehearse(client)
-    assert calls == ["/api/v2/playground/login", "/api/v2/me"]
+    assert calls == ["/api/v1/playground/login", "/api/v1/me"]
 
 
 def test_playground_can_keep_scanner_evidence_selected_without_simulated_reviews(client):
@@ -95,7 +95,7 @@ def test_playground_can_keep_scanner_evidence_selected_without_simulated_reviews
     assert report["initial_state"] == report["final_state"]
     assert report["overlap"]["withdrawn"] is False
     assert len(report["selection_states"]) == 2
-    path = f"/api/v3/projects/{report['project_id']}/versions/7.1.1/observation-selection"
+    path = f"/api/v1/projects/{report['project_id']}/versions/7.1.1/observation-selection"
     selection = client.get(path).json()["selection"]
     assert len(selection["sources"]) == 1
     bundle = json.loads(files["issued-bundle.json"])

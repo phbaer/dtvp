@@ -18,7 +18,7 @@ def test_cli_uses_only_server_identity_report(monkeypatch, capsys, structured):
         "next_offset": None,
     }
     route = respx.get(
-        "http://dtvp.test/api/v3/projects/product%2Fname/states/" + "b" * 64 + "/identity-matches",
+        "http://dtvp.test/api/v1/projects/product%2Fname/states/" + "b" * 64 + "/identity-matches",
         params={"source": "a" * 64, "offset": "0", "limit": "50"},
     ).mock(return_value=httpx.Response(200, json=report))
     monkeypatch.delenv("DTVP_API_TOKEN", raising=False)

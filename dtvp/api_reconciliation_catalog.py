@@ -5,11 +5,12 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.journal import Sha
 from dtvp.knowledge.reconciliation_catalog import occurrence_catalog
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/states/{state}/reconciliation-candidates")

@@ -3,13 +3,14 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.coverage_candidates import coverage_candidates
 from dtvp.knowledge.journal import Name, Sha
 from dtvp.knowledge.version_selection import VersionSelection
 from dtvp.schemas import RequestModel
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 class CoverageCandidatesInput(RequestModel):

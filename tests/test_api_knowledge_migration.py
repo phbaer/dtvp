@@ -1,4 +1,4 @@
-"""Real v2 approved snapshot -> explicitly unapproved native model, with scoped raw provenance."""
+"""Retained historical snapshot imports confer no native approval or runtime dependency."""
 
 import pytest
 
@@ -9,36 +9,129 @@ from tests.test_knowledge_api import app as knowledge_app
 app = knowledge_app
 
 
+def retained_snapshot(app, project, author, sbom, *, original=None, suffix="cdx"):
+    """Build a retained-format archive directly; never revive the removed runtime."""
+    import json
+
+    from dtvp.migration_models import Release, Revision, Snapshot
+    from dtvp.models import now
+    from dtvp.storage import canonical, digest
+
+    raw_source = original if original is not None else json.dumps(sbom, indent=2).encode()
+    source_sha = app.state.artifacts.put(raw_source)
+    release, revision, identifier = (
+        f"historical-{suffix}-{kind}" for kind in ("release", "revision", "snapshot")
+    )
+    payload = {
+        "schema_version": "dtvp.snapshot/1",
+        "project": {"id": project, "metadata": {}},
+        "release": {"id": release, "version": f"historical-{suffix}"},
+        "selected_revision": revision,
+        "coverage": {"inventory": "complete"},
+        "sbom": sbom,
+        "original_sha256": source_sha,
+        "source_revisions": [
+            {"id": revision, "sha256": source_sha, "source": "historical-pipeline"}
+        ],
+        "components": [{"id": "component", "refs": ["library"], "metadata": {}}],
+        "findings": [
+            {
+                "id": "finding",
+                "identifier": "CVE-2099-1234",
+                "component_id": "component",
+                "active": True,
+                "observations": [
+                    {
+                        "id": "observation",
+                        "source": "historical-pipeline",
+                        "advisory": {
+                            "id": "CVE-2099-1234",
+                            "description": "Retained source advisory",
+                            "ratings": [
+                                {
+                                    "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                                    "score": 9.8,
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "decisions": [
+                    {
+                        "id": "decision",
+                        "state": "affected",
+                        "rationale": "Historical review",
+                        "author_id": author,
+                    }
+                ],
+                "approval": {"id": "approval", "reviewer_id": "historical-reviewer"},
+            }
+        ],
+    }
+    raw = canonical(payload)
+    sha = app.state.artifacts.put(raw)
+    with app.state.sessions.begin() as db:
+        db.add(Release(id=release, project_id=project, version=f"historical-{suffix}"))
+        db.flush()
+        db.add(
+            Revision(
+                id=revision,
+                release_id=release,
+                source="historical-pipeline",
+                event_id="retained",
+                occurred_at=now(),
+                artifact_sha=source_sha,
+                format="cyclonedx-json",
+                completeness="complete",
+                document=sbom,
+            )
+        )
+        db.add(
+            Snapshot(
+                id=identifier,
+                project_id=project,
+                release_id=release,
+                author_id=author,
+                sha=sha,
+                manifest={
+                    "sha256": sha,
+                    "selected_revision": revision,
+                    "files": {"sbom": digest(canonical(sbom))},
+                },
+            )
+        )
+    return {"id": identifier, "sha256": sha}, raw
+
+
 @pytest.fixture
-def legacy(analyst, release_id):
-    finding = analyst.get("/api/v2/findings").json()["items"][0]
-    decision = analyst.post(
-        f"/api/v2/findings/{finding['id']}/decisions",
-        json={
-            "expected_version": finding["state_version"],
-            "state": "affected",
-            "rationale": "Legacy deployment evidence reviewed",
-        },
-    )
-    assert decision.status_code == 201, decision.text
-    login(analyst, "reviewer")
-    current = analyst.get(f"/api/v2/findings/{finding['id']}").json()
-    approval = analyst.post(
-        f"/api/v2/findings/{finding['id']}/approvals",
-        json={"expected_version": current["state_version"], "decision_id": decision.json()["id"]},
-    )
-    assert approval.status_code == 200, approval.text
-    snapshot = analyst.post("/api/v2/snapshots", json={"release_id": release_id})
-    assert snapshot.status_code == 201, snapshot.text
-    snapshot = snapshot.json()
-    raw = analyst.get(f"/api/v2/snapshots/{snapshot['id']}/bundle").content
-    project = analyst.get("/api/v2/projects").json()[0]["id"]
+def legacy(analyst, app):
+    from sqlalchemy import select
+
+    from dtvp.models import Project, User, Workspace
+
+    with app.state.sessions() as db:
+        project = db.scalar(
+            select(Project)
+            .join(Workspace, Project.workspace_id == Workspace.id)
+            .where(Workspace.name == "Platform")
+        ).id
+        author = db.scalar(select(User).where(User.subject == "analyst")).id
+    bom = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "components": [
+            {"bom-ref": "library", "name": "Library", "version": "1", "type": "library"}
+        ],
+        "dependencies": [{"ref": "library", "dependsOn": []}],
+    }
+    snapshot, raw = retained_snapshot(app, project, author, bom)
     login(analyst, "administrator")
     return project, snapshot, raw
 
 
 def path(project, operation):
-    return f"/api/v3/projects/{project}/versions/migrated/migration/v2/{operation}"
+    return f"/api/v1/projects/{project}/versions/migrated/migration/v2/{operation}"
 
 
 def body(snapshot):
@@ -79,12 +172,12 @@ def test_actual_approved_snapshot_archives_exact_originals_without_native_approv
     )
     for sha in summary["source_artifacts"]:
         assert journal.objects.read(sha) == app.state.artifacts.read(sha)
-    current = analyst.get(f"/api/v3/projects/{project}/versions/migrated/workspace").json()
+    current = analyst.get(f"/api/v1/projects/{project}/versions/migrated/workspace").json()
     assert current["statistics"]["totals"]["context_findings"] > 0
     assert current["statistics"]["approved"] == 0
     assert (
         analyst.get(
-            f"/api/v3/projects/{project}/states/{state}/artifacts/{snapshot['sha256']}"
+            f"/api/v1/projects/{project}/states/{state}/artifacts/{snapshot['sha256']}"
         ).content
         == raw
     )
@@ -212,9 +305,6 @@ def test_actual_spdx_snapshot_uses_original_relationship_and_license_semantics(
     analyst, app, legacy
 ):
     project, _, _ = legacy
-    release = analyst.post(f"/api/v2/projects/{project}/releases", json={"version": "spdx-source"})
-    assert release.status_code == 201, release.text
-    release_id = release.json()["id"]
     spdx = {
         "spdxVersion": "SPDX-2.3",
         "SPDXID": "SPDXRef-DOCUMENT",
@@ -261,25 +351,42 @@ def test_actual_spdx_snapshot_uses_original_relationship_and_license_semantics(
             },
         ],
     }
-    result = analyst.post(
-        f"/api/v2/releases/{release_id}/ingestions",
-        json={
-            "source": "spdx-pipeline",
-            "event_id": "spdx-1",
-            "occurred_at": "2026-10-16T01:00:00Z",
-            "sbom": spdx,
+    import json
+
+    from sqlalchemy import select
+
+    from dtvp.models import User
+
+    # The old converter promoted DESCRIBES/CONTAINS to dependency edges.
+    old_bom = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+            "component": {
+                "bom-ref": "SPDXRef-DOCUMENT",
+                "name": "SPDX document",
+                "type": "application",
+            }
         },
-    )
-    assert result.status_code == 201, result.text
-    response = analyst.post("/api/v2/snapshots", json={"release_id": release_id})
-    assert response.status_code == 201, response.text
-    snapshot = response.json()
-    old_bom = analyst.get(f"/api/v2/snapshots/{snapshot['id']}/sbom").json()
-    assert (
-        "SPDXRef-Library"
-        in next(edge for edge in old_bom["dependencies"] if edge["ref"] == "SPDXRef-App")[
-            "dependsOn"
-        ]
+        "components": [
+            {
+                "bom-ref": p["SPDXID"],
+                "name": p["name"],
+                "version": p["versionInfo"],
+                "type": "library",
+            }
+            for p in spdx["packages"]
+        ],
+        "dependencies": [
+            {"ref": "SPDXRef-DOCUMENT", "dependsOn": ["SPDXRef-App"]},
+            {"ref": "SPDXRef-App", "dependsOn": ["SPDXRef-Library", "SPDXRef-Helper"]},
+        ],
+    }
+    with app.state.sessions() as db:
+        author = db.scalar(select(User).where(User.subject == "analyst")).id
+    snapshot, _ = retained_snapshot(
+        app, project, author, old_bom, original=json.dumps(spdx).encode(), suffix="spdx"
     )
     request = body(snapshot)
     preview = analyst.post(path(project, "preview"), json=request)
@@ -302,7 +409,7 @@ def test_actual_spdx_snapshot_uses_original_relationship_and_license_semantics(
         "CONTAINS",
         "DEPENDS_ON",
     }
-    worklist = analyst.get(f"/api/v3/projects/{project}/states/{state}/license-worklist").json()
+    worklist = analyst.get(f"/api/v1/projects/{project}/states/{state}/license-worklist").json()
     library = next(item for item in worklist["items"] if item["component_ref"] == "SPDXRef-Library")
     assert library["source"]["format"] == "spdx-2.3-json"
     assert library["evidence"]["status"] == "reported"

@@ -73,7 +73,7 @@ def test_vscorer_roundtrip_is_comparable_without_approval(analyst, bom):
     assert received["statistics"]["context_findings"] == 1
     assert received["next_offset"] is None
     assert workspace(analyst, project_id, vscorer_evidence="historical_only")["items"] == []
-    for path in (url(project_id, "/portfolio"), "/api/v3/portfolio"):
+    for path in (url(project_id, "/portfolio"), "/api/v1/portfolio"):
         result = analyst.get(path, params={"vscorer_evidence": "eligible"})
         assert result.status_code == 200, result.text
         assert result.json()["statistics"]["context_findings"] == 1

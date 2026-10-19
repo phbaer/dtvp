@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string) => value.repeat(64)
 const catalog = [{ purl: 'pkg:npm/parser', cpe: 'cpe:2.3:a:example:parser:*:*:*:*:*:*:*:*', source: 'supplied-dictionary', identification_basis: 'community_mapping', reason: 'Supplied explicit identity' }]
@@ -17,14 +18,14 @@ async function fixture(page: Page, readonly = false) {
       pin = sha('b'); return route.fulfill({ status: 201, json: { committed: true, projection: 'current' } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'CPE product', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'CPE product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [] }
     else if (path.endsWith('/cpe/editor')) result = { policy_state: pin, configuration: { algorithm_version: 'dtvp.cpe-discovery/1', catalog, rules }, capabilities: readonly ? [] : ['configure'], limitations: ['Imported source/basis claims are not independently verified; candidates are not approved mappings.'] }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'CPE product', exact: true }).click()
   await page.getByText('CPE discovery policy and reviewed mappings', { exact: true }).click()
   const panel = page.getByLabel('CPE discovery policy', { exact: true })

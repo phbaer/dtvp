@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), state = sha('a'), policy = sha('b')
 async function fixture(page: Page, writable = true) {
@@ -14,10 +15,10 @@ async function fixture(page: Page, writable = true) {
       return route.fulfill({ json: request.method() === 'PUT' ? { committed: true } : job('queued') })
     }
     let data: unknown = { items: [], next_offset: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, playground: true, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, playground: true, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }]
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product' }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.2', state }] }
     else if (path.endsWith('/workspace')) data = { state, project_id: 'product', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/pipeline-config')) data = { configuration_state: policy, expected_versions: { '7.1.2': state }, configuration: { format: 'dtvp.pipeline-configuration/1', parts: [], models: [], mappings: [] }, capabilities: writable ? ['configure'] : [] }
@@ -27,8 +28,8 @@ async function fixture(page: Page, writable = true) {
     else if (path.endsWith('/proposal')) data = { job_id: 'job-one', source: sha('c'), target: state, stale: false, preview_digest: sha('d'), total: 1, next_offset: null, items: [{ id: 'row', vulnerability_id: 'CVE-2099-10', category: 'needs_review', reasons: ['Independent review required'] }] }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
   return { writes, wrongContext: () => { wrongContext = true }, fail: (value: boolean) => { fail = value }, hold: () => { held = true }, release: () => release?.() }
 }
 async function pipeline(page: Page) { await page.getByText('Pipeline source roles and threat-model mappings', { exact: true }).click(); return page.getByRole('region', { name: 'Pipeline source roles and threat-model mappings', exact: true }) }

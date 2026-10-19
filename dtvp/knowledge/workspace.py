@@ -3,6 +3,8 @@
 from collections import Counter
 
 from dtvp.knowledge.journal import SECTIONS
+from dtvp.knowledge.ssvc import workspace_summary as ssvc_summary
+from dtvp.rescoring import original_vectors
 from dtvp.storage import canonical, digest
 
 LIFECYCLES = {
@@ -284,10 +286,12 @@ def load_workspace(
                     else {}
                 ),
                 "source_ratings": ratings,
+                "original_base_vectors": original_vectors([{"ratings": ratings}]),
                 "source_severity": source_severity(ratings),
                 "description": descriptions[0]["text"] if descriptions else "",
                 "descriptions": descriptions,
                 "coverage": coverage,
+                "ssvc": ssvc_summary(coverage),
                 "published_score": published_score(
                     journal, sections, revision.version, context["id"], identifier, gate=gate
                 ),

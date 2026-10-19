@@ -5,6 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.component_topology import LIMITATIONS as TOPOLOGY_LIMITATIONS
 from dtvp.knowledge.component_topology import neighbor_page, neighborhood
@@ -12,7 +13,7 @@ from dtvp.knowledge.journal import Ref, Sha
 from dtvp.knowledge.metadata import LIMITATIONS, Annotations, component_at, get_metadata
 from dtvp.knowledge.workspace import load_sections
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/states/{state}/component-context")

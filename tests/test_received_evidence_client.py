@@ -38,7 +38,7 @@ def test_received_evidence_filters_reach_server(monkeypatch, capsys, command, pa
             "--json",
         ],
     )
-    route = respx.get("http://dtvp.test/api/v3" + path).mock(
+    route = respx.get("http://dtvp.test/api/v1" + path).mock(
         return_value=httpx.Response(200, json={"items": []})
     )
     main()

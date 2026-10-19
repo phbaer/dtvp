@@ -5,6 +5,7 @@ from collections import Counter
 from fastapi import APIRouter, HTTPException, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.cpe import (
     ALGORITHM_VERSION,
     LIMITATIONS,
@@ -14,7 +15,7 @@ from dtvp.knowledge.cpe import (
 )
 from dtvp.storage import canonical, digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/cpe/editor")

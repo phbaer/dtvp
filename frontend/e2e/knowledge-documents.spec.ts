@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const sha = (char: string) => char.repeat(64)
@@ -21,15 +22,15 @@ async function fixture(page: Page, role: 'author' | 'reviewer' | 'viewer' = 'aut
       return route.fulfill({ status: 201, json: {} })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: role, name: role, org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: role, name: role, org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: head }] }
     else if (path.endsWith('/workspace')) result = { state: head, project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/documents')) { reads.push(url.search); result = { state: head, items: [row], total: 21, next_offset: url.searchParams.get('offset') === '20' ? null : 20, capabilities: role === 'author' ? ['documentary_assess'] : role === 'reviewer' ? ['documentary_approve'] : [] } }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('Controlled documents', { exact: true }).click()
   const panel = page.getByLabel('Controlled document registry', { exact: true })
@@ -56,7 +57,7 @@ test('registration explicitly issues input and retains exact multipart metadata 
   await form.getByRole('button', { name: 'Issue input bundle for this state', exact: true }).click()
   await expect(form.getByLabel('Issued input receipt SHA-256')).toHaveValue(sha('b'))
   expect(issued).toHaveLength(1)
-  await expect(form.getByRole('link', { name: 'Download issued bundle.json', exact: true })).toHaveAttribute('href', `/api/v3/projects/product/issued-exports/${sha('b')}/files/bundle.json`)
+  await expect(form.getByRole('link', { name: 'Download issued bundle.json', exact: true })).toHaveAttribute('href', `/api/v1/projects/product/issued-exports/${sha('b')}/files/bundle.json`)
   fail(503)
   await form.getByRole('button', { name: 'Submit document for review', exact: true }).click()
   await expect(panel.getByRole('alert')).toContainText('Publication uncertain')
@@ -79,7 +80,7 @@ test('historical review requires acknowledgment and pins exact current revision 
   await expect(detail).toContainText('Current recorded revision: submitted')
   await detail.getByText('Retained approved document', { exact: true }).click()
   await expect(detail).toContainText(`Approval is pinned to revision ${sha('2')}`)
-  await expect(detail.getByRole('link', { name: 'Download exact approved document', exact: true })).toHaveAttribute('href', `/api/v3/projects/product/states/${sha('a')}/artifacts/${sha('3')}`)
+  await expect(detail.getByRole('link', { name: 'Download exact approved document', exact: true })).toHaveAttribute('href', `/api/v1/projects/product/states/${sha('a')}/artifacts/${sha('3')}`)
   const review = detail.getByLabel('Independent documentary review', { exact: true })
   await review.getByLabel('Document review rationale', { exact: true }).fill('Reviewed these historical bytes and their exact declared input scope.')
   await expect(review.getByRole('button', { name: 'Approve document revision', exact: true })).toBeDisabled()
@@ -110,7 +111,7 @@ test('read-only registry offers exact raw downloads and server-counted bounded p
   await expect(panel.getByLabel('Independent documentary review', { exact: true })).toHaveCount(0)
   const link = panel.getByRole('link', { name: 'Download exact recorded document', exact: true })
   const href = await link.getAttribute('href')
-  expect(href).toBe(`/api/v3/projects/product/states/${sha('a')}/artifacts/${sha('c')}`)
+  expect(href).toBe(`/api/v1/projects/product/states/${sha('a')}/artifacts/${sha('c')}`)
   await expect(link).toHaveAttribute('download', '')
   const bytes = await page.evaluate(async path => Array.from(new Uint8Array(await (await fetch(path!)).arrayBuffer())), href)
   expect(Buffer.from(bytes)).toEqual(raw)

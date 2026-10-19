@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.domain import audit
 from dtvp.knowledge.journal import Conflict, Name
 from dtvp.knowledge.source_jobs import (
@@ -18,7 +19,7 @@ from dtvp.knowledge.source_jobs import (
 from dtvp.models import Job, Project
 from dtvp.schemas import RequestModel
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 class BindingInput(RequestModel):

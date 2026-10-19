@@ -3,12 +3,13 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 from dtvp.knowledge.metadata import MetadataInput, get_metadata, list_metadata, save_metadata
 from dtvp.knowledge.workspace import load_sections
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/states/{state}/metadata")

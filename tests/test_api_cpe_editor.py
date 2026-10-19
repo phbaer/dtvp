@@ -8,7 +8,7 @@ app = knowledge_app
 
 
 def path(project, suffix=""):
-    return f"/api/v3/projects/{project}/cpe{suffix}"
+    return f"/api/v1/projects/{project}/cpe{suffix}"
 
 
 def configuration(expected=None, request_id="configure-cpe"):

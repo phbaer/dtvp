@@ -1,3 +1,4 @@
+import { API_PREFIX } from './apiContract'
 import { ApiError } from './api'
 
 /** Presentation transport only; workflow rules and authorization live in v3. */
@@ -6,14 +7,16 @@ export async function knowledgeApi<T>(path: string, options: RequestInit = {}): 
   const csrf = document.cookie.split('; ').find(item => item.startsWith('dtvp_csrf='))?.split('=')[1]
   if (csrf) headers.set('X-CSRF-Token', decodeURIComponent(csrf))
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  const response = await fetch(`/api/v3${path}`, { ...options, headers, credentials: 'same-origin' })
+  const response = await fetch(`${API_PREFIX}${path}`, { ...options, headers, credentials: 'same-origin' })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new ApiError(response.status, typeof body.detail === 'string' ? body.detail : `Request failed (${response.status})`)
   }
   return response.status === 204 ? undefined as T : response.json()
 }
-export type KnowledgeAssessment = { revision: string; stage: string; payload: { assessment_id: string; state: string; rationale: string; justification?: string; author_id?: string; conditions?: string; evidence?: unknown[]; targets?: unknown[] } }
+export type SsvcSelection = { model: string; version: string; model_sha256: string; answers: Record<string, string>; rationale: string; evidence: { reference: string; description: string }[] }
+export type SsvcRecord = { selection: SsvcSelection; outcome: string | null; outcome_label: string | null; complete: boolean; model_sha256: string }
+export type KnowledgeAssessment = { revision: string; stage: string; payload: { assessment_id: string; state: string; rationale: string; justification?: string; author_id?: string; conditions?: string; ssvc?: SsvcRecord | null; evidence?: unknown[]; targets?: unknown[] } }
 export type KnowledgeProposal = {
   id: string; provider: string; source_label: string; current: boolean; eligible: boolean
   ineligibility_reasons: string[]; report_sha256: string
@@ -36,6 +39,8 @@ export type KnowledgeFinding = {
   component: { name: string; version?: string; purl?: string }
   context: { root_ref?: string; team_id?: string; status?: string; [key: string]: unknown }
   description: string
+  original_base_vectors?: { vector: string; version: string; score: number }[]
+  ssvc?: { current: SsvcRecord | null; approved: SsvcRecord | null; pending: boolean; status: string }
   source_ratings: { score?: number | null; vector?: string; method?: string; source?: string | { name?: string; url?: string }; observed_source?: string }[]
   coverage: { status: string; assessment?: KnowledgeAssessment | null; approved_assessment?: KnowledgeAssessment | null; [key: string]: unknown }
   published_score: { score: number; vector: string; current?: boolean } | null

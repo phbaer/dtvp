@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const firstState = 'a'.repeat(64), updatedState = 'b'.repeat(64)
@@ -9,8 +10,8 @@ async function fixture(page: Page) {
     const target = new URL(route.request().url()), path = target.pathname
     if (route.request().method() !== 'GET') { mutations.push(path); return route.fulfill({ json: {} }) }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team-a', name: 'Platform', capabilities: ['read'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'retained-project', name: 'Retained product', workspace_id: 'team-a', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team-a', name: 'Platform', capabilities: ['read'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'retained-project', name: 'Retained product', workspace_id: 'team-a', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state, project_id: 'retained-project', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0, retained_absent_assessments: 41 } }
     else if (path.endsWith('/retained-assessments')) {
@@ -21,8 +22,8 @@ async function fixture(page: Page) {
     }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Retained product' }).click()
   return { reads, mutations, advance: () => { state = updatedState }, fail: (value: boolean) => { fail = value } }
 }

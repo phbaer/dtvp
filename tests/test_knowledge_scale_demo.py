@@ -29,7 +29,7 @@ def test_real_native_imports_two_team_contexts_diff_raw_bytes_and_repeat_preserv
         result = seed(client, products=1, packages=12, vulnerabilities=6)
         assert result["totals"]["created_products"] == 1
         project = result["created"][0]
-        base = f"/api/v3/projects/{project['project_id']}"
+        base = f"/api/v1/projects/{project['project_id']}"
         workspaces = []
         for version in VERSIONS:
             response = client.get(f"{base}/versions/{version}/workspace", params={"limit": 200})
@@ -106,7 +106,7 @@ def test_non_playground_confirmation_blocks_all_resource_writes():
             return httpx.Response(
                 200, json={}, headers={"set-cookie": "dtvp_csrf=synthetic; Path=/"}
             )
-        if request.url.path == "/api/v2/me":
+        if request.url.path == "/api/v1/me":
             return httpx.Response(200, json={"playground": False})
         raise AssertionError("No resources may be read or written before playground confirmation")
 
@@ -115,7 +115,7 @@ def test_non_playground_confirmation_blocks_all_resource_writes():
     ) as client:
         with pytest.raises(RuntimeError, match="verified playground"):
             seed(client, products=1, packages=6, vulnerabilities=1)
-    assert requests == [("POST", "/api/v2/playground/login"), ("GET", "/api/v2/me")]
+    assert requests == [("POST", "/api/v1/playground/login"), ("GET", "/api/v1/me")]
 
 
 def test_production_has_no_playground_login_and_cannot_seed(tmp_path):

@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), source = sha('a'), target = sha('b'), digest = sha('c')
 async function fixture(page: Page, personas = false) {
@@ -8,10 +9,10 @@ async function fixture(page: Page, personas = false) {
     if (path.endsWith('/playground/login')) { actor = request.postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (request.method() !== 'GET') { mutations.push(path); return route.fulfill({ status: 400, json: { detail: 'Unexpected mutation' } }) }
     let data: unknown = { items: [], next_cursor: null, next_offset: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, playground: personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, playground: personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product' }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.2', state: target }] }
     else if (path.endsWith('/workspace')) data = { state: target, project_id: 'product', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/reconciliations')) data = { items: [], total: 0, next_offset: null, capabilities: [] }
@@ -25,8 +26,8 @@ async function fixture(page: Page, personas = false) {
     }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('Occurrence correspondence across imports', { exact: true }).click()
   await page.getByText('Component identity continuity', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Component identity comparison', exact: true })

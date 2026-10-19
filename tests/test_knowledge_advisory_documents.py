@@ -213,11 +213,13 @@ def test_malformed_advisory_documents_fail_closed(change):
 def test_feed_api_permissions_and_material_revalidation_preserve_human_pins(analyst, app):
     from conftest import login
 
-    demo_response = analyst.post("/api/v3/playground/knowledge/seed", json={})
+    from tests.test_playground_knowledge import scenario
+
+    demo_response = analyst.post("/api/v1/playground/knowledge/load", json=scenario())
     assert demo_response.status_code == 200
     demo = demo_response.json()
     project = demo["project_id"]
-    base = f"/api/v3/projects/{project}"
+    base = f"/api/v1/projects/{project}"
     workspace_url = f"{base}/versions/{demo['version']}/workspace"
     initial = analyst.get(workspace_url).json()
     approved = next(item for item in initial["items"] if item["coverage"]["status"] == "approved")

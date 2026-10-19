@@ -226,14 +226,14 @@ def test_readonly_api_uses_settings_keys_not_client_input_and_keeps_journal_unch
     analyst, app, signing_keys
 ):
     key = signing_keys["ES256"]
-    project = analyst.get("/api/v2/projects").json()[0]["id"]
+    project = analyst.get("/api/v1/projects").json()[0]["id"]
     policy = policy_for(key, project=project)
     foreign = policy_for(signing_keys["ES384"], "ES384", "other-project")[0]
     foreign["jwk"]["kid"] = "other-scope-key"
     policy.append(foreign)
     app.state.settings.evidence_jws_trust = policy
     before = app.state.knowledge.references()
-    path = f"/api/v3/projects/{project}/evidence"
+    path = f"/api/v1/projects/{project}/evidence"
     plan = analyst.get(path + "/signature-policy")
     assert plan.status_code == 200
     assert len(plan.json()["keys"]) == 1
@@ -255,7 +255,7 @@ def test_readonly_api_uses_settings_keys_not_client_input_and_keeps_journal_unch
     )
     assert (
         analyst.post(
-            "/api/v3/projects/unknown/evidence/signature-verification", data=fields, files=files
+            "/api/v1/projects/unknown/evidence/signature-verification", data=fields, files=files
         ).status_code
         == 404
     )

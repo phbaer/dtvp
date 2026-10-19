@@ -6,17 +6,18 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.issued_exports import issue_export, resolve_issued_export
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 from dtvp.knowledge.projection import catch_up
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 logger = logging.getLogger(__name__)
 
 
 def describe_issuance(issued):
-    root = f"/api/v3/projects/{quote(issued['project_id'], safe='')}/issued-exports/{issued['receipt_sha256']}"
+    root = f"{API_PREFIX}/projects/{quote(issued['project_id'], safe='')}/issued-exports/{issued['receipt_sha256']}"
     return {key: value for key, value in issued.items() if key not in {"payload", "files"}} | {
         "files": {
             name: {**file, "url": root + "/files/" + quote(name, safe="")}

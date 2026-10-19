@@ -18,7 +18,7 @@ def test_old_fixture_all_consumer_downloads_cached_preparation_and_current_auth(
 ):
     journal, expected, _ = restore(tmp_path, variant)
     project = expected["project_id"]
-    visible = analyst.get("/api/v2/projects").json()[0]["id"]
+    visible = analyst.get("/api/v1/projects").json()[0]["id"]
     with app.state.sessions.begin() as db:
         workspace = db.get(Project, visible).workspace_id
         db.add(
@@ -29,7 +29,7 @@ def test_old_fixture_all_consumer_downloads_cached_preparation_and_current_auth(
     before = journal.head()
     downloads = []
     for capture in expected["captures"]:
-        prefix = f"/api/v3/projects/{project}"
+        prefix = f"/api/v1/projects/{project}"
         path = prefix + "/issued-exports/" + capture["receipt_sha256"]
         description = analyst.get(path)
         assert description.status_code == 200, description.text

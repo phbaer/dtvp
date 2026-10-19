@@ -10,6 +10,8 @@ from uuid import uuid4
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 ROOT = Path(__file__).resolve().parent.parent
 VERSIONS = ("6.15.6", "7.1.1", "7.1.2", "7.2.0")
 
@@ -20,9 +22,9 @@ def checked(response):
 
 
 def login(client, persona):
-    checked(client.post("/api/v2/playground/login", json={"persona": persona}))
+    checked(client.post(f"{API_PREFIX}/playground/login", json={"persona": persona}))
     client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
-    if checked(client.get("/api/v2/me")).get("playground") is not True:
+    if checked(client.get(f"{API_PREFIX}/me")).get("playground") is not True:
         raise ValueError("Refusing writes outside an isolated playground")
 
 
@@ -41,18 +43,18 @@ def commit(label, parent=None):
 
 def seed(client):
     login(client, "administrator")
-    teams = checked(client.get("/api/v2/workspaces"))
+    teams = checked(client.get(f"{API_PREFIX}/workspaces"))
     team = next(item["id"] for item in teams if item["name"] == "Platform")
     project = checked(
         client.post(
-            "/api/v2/projects",
+            f"{API_PREFIX}/projects",
             json={
                 "workspace_id": team,
                 "name": "[SYNTHETIC] Cascading integrations " + uuid4().hex[:12],
             },
         )
     )["id"]
-    path = f"/api/v3/projects/{project}"
+    path = f"{API_PREFIX}/projects/{project}"
     bom = json.loads((ROOT / "playground/fixtures/release.cdx.json").read_text())
     objects, commits, states, subjects = {}, {}, {}, {}
     parent = None

@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const commit = 'a'.repeat(40)
@@ -26,15 +27,15 @@ async function fixture(page: Page, items: ReturnType<typeof analysis>[] = []) {
     const path = new URL(route.request().url()).pathname
     if (route.request().method() !== 'GET') { writes.push(path); return route.fulfill({ json: {} }) }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read', 'assess'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Analysis product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read', 'assess'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Analysis product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: 'state' }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: 'state', project_id: 'product', version: '7.1.2', items: [row], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: { unassessed: 1 }, by_team: { team: 1 }, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.includes('/workspace/')) result = { ...row, state: 'state' }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Analysis product', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
   return { writes, detail: page.getByLabel('Context finding detail', { exact: true }) }

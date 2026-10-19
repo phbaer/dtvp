@@ -7,6 +7,8 @@ from uuid import uuid4
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 NAME = "[SYNTHETIC] Advisory evolution playground"
 VERSION = "7.1.1"
 TAG = "synthetic-before-advisory-update"
@@ -69,11 +71,11 @@ def feed(publisher, description, score):
 
 
 def seed(client):
-    response(client.post("/api/v2/playground/login", json={"persona": "administrator"}))
+    response(client.post(f"{API_PREFIX}/playground/login", json={"persona": "administrator"}))
     client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
-    if response(client.get("/api/v2/me")).get("playground") is not True:
+    if response(client.get(f"{API_PREFIX}/me")).get("playground") is not True:
         raise ValueError("Refusing writes: server is not an isolated playground")
-    existing = response(client.get("/api/v2/catalog/projects", params={"q": NAME, "limit": 100}))
+    existing = response(client.get(f"{API_PREFIX}/catalog/projects", params={"q": NAME, "limit": 100}))
     project = next((item for item in existing["items"] if item["name"] == NAME), None)
     if project:
         return {
@@ -82,12 +84,12 @@ def seed(client):
             "skipped": True,
             "reason": "Existing exact-name project preserved, including any partial or interactive edits. Use a fresh isolated playground for reseeding.",
         }
-    teams = response(client.get("/api/v2/workspaces"))
+    teams = response(client.get(f"{API_PREFIX}/workspaces"))
     platform = next(item["id"] for item in teams if item["name"] == "Platform")
     project = response(
-        client.post("/api/v2/projects", json={"workspace_id": platform, "name": NAME})
+        client.post(f"{API_PREFIX}/projects", json={"workspace_id": platform, "name": NAME})
     )
-    path = f"/api/v3/projects/{project['id']}"
+    path = f"{API_PREFIX}/projects/{project['id']}"
     original = response(
         client.post(
             path + f"/versions/{VERSION}/imports",

@@ -7,7 +7,9 @@ from packageurl import PackageURL
 from pydantic import Field, model_validator
 
 from dtvp.knowledge.journal import SECTIONS, Conflict, Name, Ref, Sha, Update
-from dtvp.schemas import DecisionInput, RequestModel
+from dtvp.knowledge.ssvc import SsvcInput
+from dtvp.knowledge.ssvc import evaluate as evaluate_ssvc
+from dtvp.schemas import Justification, RequestModel
 from dtvp.storage import canonical, digest
 
 
@@ -23,10 +25,11 @@ class AssessmentInput(RequestModel):
     expected_revision: Sha | None
     targets: list[Target] = Field(min_length=1, max_length=1000)
     state: Literal["affected", "not_affected", "fixed", "under_investigation"]
-    justification: DecisionInput.model_fields["justification"].annotation = None
+    justification: Justification = None
     rationale: str = Field(min_length=1, max_length=6000)
     conditions: str = Field(default="", max_length=6000)
     evidence: list[dict] = Field(default_factory=list, max_length=100)
+    ssvc: SsvcInput | None = None
 
     @model_validator(mode="after")
     def distinct_targets(self):
@@ -225,7 +228,11 @@ def save_assessment(
 ):
     """Save a draft or explicitly submit; never create a human approval."""
     publication_checks = tuple(publication_checks)
-    operation = {**data.model_dump(mode="json"), "assessment_id": assessment_id, "submit": submit}
+    operation = {
+        **data.model_dump(mode="json", exclude={"ssvc"} if data.ssvc is None else set()),
+        "assessment_id": assessment_id,
+        "submit": submit,
+    }
     if publication_checks:
         operation["publication_checks"] = [
             {"ref": ref.model_dump(mode="json"), "expected": expected}
@@ -321,6 +328,8 @@ def save_assessment(
             mode="json", include={"state", "justification", "rationale", "conditions", "evidence"}
         ),
     }
+    if data.ssvc is not None:
+        payload["ssvc"] = evaluate_ssvc(data.ssvc, submit=submit)
     revision = journal.store(payload)
     for section in sections.values():
         section["assessments"][key] = {
@@ -464,7 +473,7 @@ def coverage_status(
         approved_payload = review["assessment"]
         pending_changes = []
         if latest and latest["revision"] != review["assessment_revision"]:
-            for field in ("state", "justification", "rationale", "conditions", "evidence"):
+            for field in ("state", "justification", "rationale", "conditions", "evidence", "ssvc"):
                 if latest["payload"].get(field) != approved_payload.get(field):
                     pending_changes.append(field)
             fields = ("version", "context_id", "vulnerability_id")

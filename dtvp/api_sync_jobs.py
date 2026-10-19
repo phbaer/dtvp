@@ -4,12 +4,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.journal import CommitUncertain, Conflict
 from dtvp.knowledge.sync_jobs import KIND, SynchronizationInput, configure, job_view, policy
 from dtvp.models import Job
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def selected(db, actor, project_id, job_id, capability="read", *, lock=False):

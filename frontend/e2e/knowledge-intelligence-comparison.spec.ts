@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), inventory = sha('a'), evidence = sha('b'), newerEvidence = sha('c'), digest = sha('d')
 async function fixture(page: Page, personas = false) {
@@ -6,7 +7,7 @@ async function fixture(page: Page, personas = false) {
   const reports: Record<string, unknown>[] = [], reads: string[] = []
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
-    if (path === '/api/v2/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
+    if (path === '/api/v1/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (path.endsWith('/compare/intelligence')) {
       const body = route.request().postDataJSON() as Record<string, unknown>; reports.push(body)
       if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve }) }
@@ -16,10 +17,10 @@ async function fixture(page: Page, personas = false) {
     }
     reads.push(path)
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product', workspace_id: 'team' }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Product', workspace_id: 'team' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.1', state: head }] }
     else if (path.endsWith('/workspace')) data = { state: head, project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/advisory-refresh')) data = { expected_versions: { '7.1.1': head }, expected_evidence: live, providers: [], identifiers: [], total: 0, next_offset: null, capabilities: [], limitations: [] }
@@ -27,8 +28,8 @@ async function fixture(page: Page, personas = false) {
     else if (path.endsWith('/evidence')) data = { evidence_state: live, items: [] }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('Advisory intelligence refresh', { exact: true }).click()
   await page.getByText('Compare retained inventory with advisory evidence', { exact: true }).click()
@@ -87,7 +88,7 @@ test('actor teardown prevents a late report response from restoring the previous
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toBeEnabled()
   await page.getByRole('combobox', { name: 'Persona', exact: true }).selectOption('person')
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toHaveValue('person')
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toContainText('Product')
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toContainText('Product')
   const response = page.waitForResponse(item => item.url().includes('/compare/intelligence'))
   f.release(); await response
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))

@@ -15,7 +15,7 @@ def prepared(client, bom):
     project = product(client)
     for version in ("7.1.1", "7.1.2"):
         imported(client, project, version, body(bom, request_id=version))
-    return project, f"/api/v3/projects/{project}"
+    return project, f"/api/v1/projects/{project}"
 
 
 def configuration():

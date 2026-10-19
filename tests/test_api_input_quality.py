@@ -9,7 +9,7 @@ app = knowledge_app
 
 
 def path(project, state):
-    return f"/api/v3/projects/{project}/states/{state}/input-quality"
+    return f"/api/v1/projects/{project}/states/{state}/input-quality"
 
 
 def test_report_is_full_scope_pinned_and_read_only(analyst, app, bom):

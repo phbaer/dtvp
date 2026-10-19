@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.evidence import (
     EvidenceInput,
@@ -21,7 +22,7 @@ from dtvp.knowledge.vex import parse_evidence, preview_evidence
 from dtvp.knowledge.workspace import load_sections
 from dtvp.storage import canonical, digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/evidence/artifacts/{artifact}")

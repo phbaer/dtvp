@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 VERSION = "assembly-demo"
 
 
@@ -159,13 +161,13 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:8900")
     args = parser.parse_args()
     with httpx.Client(base_url=args.url, timeout=30) as client:
-        checked(client.post("/api/v2/playground/login", json={"persona": "analyst"}))
+        checked(client.post(f"{API_PREFIX}/playground/login", json={"persona": "analyst"}))
         client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
-        projects = checked(client.get("/api/v2/projects"))
+        projects = checked(client.get(f"{API_PREFIX}/projects"))
         project = next((item for item in projects if item["name"] == "Demo Gateway"), None)
         if project is None:
             raise RuntimeError("Demo Gateway missing; start the isolated seeded playground first")
-        project_path = f"/api/v3/projects/{project['id']}"
+        project_path = f"{API_PREFIX}/projects/{project['id']}"
         path = f"{project_path}/versions/{VERSION}"
         print("Synthetic assembly demo; only dedicated assembly-demo state is updated.")
         backend = import_part(client, path, project_path, "backend")

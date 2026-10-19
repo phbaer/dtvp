@@ -7,7 +7,11 @@ from pathlib import Path
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 WORKSPACE_FILTERS = (
+    "ssvc_status",
+    "ssvc_action",
     "source_severity",
     "contextual_severity",
     "applicability",
@@ -64,6 +68,38 @@ def configure(parser):
     command.add_argument("--token-env", default="DTVP_API_TOKEN")
     command.add_argument("--persona", help="Synthetic playground login only")
     commands = command.add_subparsers(dest="knowledge_command", required=True)
+    demo = commands.add_parser("demo", help="Load explicit synthetic playground scenario data")
+    demo_commands = demo.add_subparsers(dest="demo_command", required=True)
+    loader = demo_commands.add_parser(
+        "load", help="Load a versioned JSON fixture without resetting work"
+    )
+    loader.add_argument("--file", required=True, help="Editable dtvp.demo-scenario/1 JSON file")
+    assess = commands.add_parser("assessment", help="Save or submit an exact scoped assessment")
+    assess_commands = assess.add_subparsers(dest="assessment_command", required=True)
+    for name in ("draft", "submit"):
+        action = assess_commands.add_parser(name)
+        action.add_argument("--project", required=True)
+        action.add_argument("--id", required=True, help="Logical assessment identifier")
+        action.add_argument(
+            "--file", required=True, help="Exact AssessmentInput JSON, including pins"
+        )
+    review = commands.add_parser("review", help="Submit exact independent approval/change request")
+    review.add_argument("--project", required=True)
+    review.add_argument(
+        "--file", required=True, help="Exact ReviewInput JSON, including revision and pins"
+    )
+    score = commands.add_parser("score", help="Read policies or explicitly preview/publish scoring")
+    score_commands = score.add_subparsers(dest="score_command", required=True)
+    for name in ("policy", "preview", "publish"):
+        action = score_commands.add_parser(name)
+        action.add_argument("--project", required=True)
+        action.add_argument(
+            "--file",
+            required=name != "policy",
+            help="Exact JSON request, including current pins and publication preview digest",
+        )
+        if name != "policy":
+            action.add_argument("--rules", action="store_true", help="Use configured rule scoring")
     for name in ("observation-import", "observation-selection", "observation-sources"):
         resource = commands.add_parser(
             name, help="Use pinned observation intake and explicit selection"
@@ -241,7 +277,7 @@ def configure(parser):
     evidence.add_argument("--preview", action="store_true", help="Read-only semantic scope preview")
     request = commands.add_parser("request", help="Read or mutate API resources using JSON")
     request.add_argument("method", choices=["GET", "POST", "PUT"])
-    request.add_argument("path", help="Absolute /api/v3/ path; query parameters supported")
+    request.add_argument("path", help=f"Absolute {API_PREFIX}/ path; query parameters supported")
     request.add_argument("--body", help="JSON filename, or - for standard input")
     upload = commands.add_parser(
         "import-file", help="Import original SBOM bytes with explicit metadata"
@@ -292,6 +328,11 @@ def display_workspace(result):
             f"team={result.get('team_labels', {}).get(row['context'].get('team_id'), row['context'].get('team_id') or 'unresolved')} "
             f"state={row['coverage']['status']}  source={source_text} contextual={score_text}"
         )
+        if (ssvc := row.get("ssvc")) and ssvc.get("status") != "missing":
+            print(
+                f"  ssvc={ssvc['status']} current={(ssvc.get('current') or {}).get('outcome_label') or 'Incomplete'} "
+                f"approved={(ssvc.get('approved') or {}).get('outcome_label') or 'Not approved'}"
+            )
         for claim in row.get("legacy_evidence", []):
             print(
                 f"  imported_dt={claim['status']} applicability={claim.get('proposed_applicability') or 'unknown'} (historical claim, not DTVP approval)"
@@ -342,8 +383,57 @@ def run(args):
         if args.persona:
             if token:
                 raise ValueError("Use either a machine credential or a playground persona")
-            read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
+            read_response(
+                client.post(API_PREFIX + "/playground/login", json={"persona": args.persona})
+            )
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "demo":
+            from dtvp.knowledge.demo_scenarios import MAX_SCENARIO_BYTES
+
+            if not args.persona:
+                raise ValueError(
+                    "Demo loading requires --persona for a synthetic playground session"
+                )
+            with Path(args.file).open("rb") as stream:
+                raw = stream.read(MAX_SCENARIO_BYTES + 1)
+            if len(raw) > MAX_SCENARIO_BYTES:
+                raise ValueError("Demo scenario exceeds 32 MiB")
+            value = json.loads(raw)
+            print(
+                json.dumps(
+                    read_response(
+                        client.post(API_PREFIX + "/playground/knowledge/load", json=value)
+                    ),
+                    indent=2,
+                )
+            )
+            return
+        if args.knowledge_command in {"score", "assessment", "review"}:
+            from urllib.parse import quote
+
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}"
+            payload = None
+            if args.file:
+                with Path(args.file).open("rb") as stream:
+                    raw = stream.read(1024 * 1024 + 1)
+                if len(raw) > 1024 * 1024:
+                    raise ValueError("Workflow request exceeds the CLI 1 MiB transport bound")
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise ValueError("Workflow request must be a JSON object")
+            if args.knowledge_command == "assessment":
+                path += f"/assessments/{quote(args.id, safe='')}/{args.assessment_command}"
+                response = client.post(path, json=payload)
+            elif args.knowledge_command == "review":
+                response = client.post(path + "/reviews", json=payload)
+            elif args.score_command == "policy":
+                path += "/scoring-policy"
+                response = client.put(path, json=payload) if args.file else client.get(path)
+            else:
+                path += "/scoring/" + ("rules/" if args.rules else "") + args.score_command
+                response = client.post(path, json=payload)
+            print(json.dumps(read_response(response), indent=2))
+            return
         if args.knowledge_command in {
             "observation-import",
             "observation-selection",
@@ -352,7 +442,7 @@ def run(args):
             from stat import S_ISREG
             from urllib.parse import quote
 
-            path = f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}"
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}"
             if args.knowledge_command == "observation-sources":
                 response = client.get(
                     path + "/observation-sources",
@@ -389,7 +479,7 @@ def run(args):
         }:
             from urllib.parse import quote
 
-            path = f"/api/v3/projects/{quote(args.project, safe='')}"
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}"
             if args.knowledge_command in {"pipeline-config", "synchronization-policy"}:
                 path += "/" + args.knowledge_command
                 response = (
@@ -424,7 +514,7 @@ def run(args):
         if args.knowledge_command == "identity-matches":
             from urllib.parse import quote
 
-            path = f"/api/v3/projects/{quote(args.project, safe='')}/states/{quote(args.target, safe='')}/identity-matches"
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}/states/{quote(args.target, safe='')}/identity-matches"
             result = read_response(
                 client.get(
                     path, params={"source": args.source, "offset": args.offset, "limit": args.limit}
@@ -455,7 +545,7 @@ def run(args):
             result = archive_request(
                 client,
                 args.archive,
-                f"/api/v3/projects/{quote(args.project, safe='')}/migration/v1-archive/preview",
+                f"{API_PREFIX}/projects/{quote(args.project, safe='')}/migration/v1-archive/preview",
                 params={"offset": args.offset, "limit": args.limit},
             )
             if args.json:
@@ -499,7 +589,7 @@ def run(args):
             if len(header) > MAX_HEADER:
                 raise ValueError("ASCII migration metadata header exceeds 8 KiB")
             endpoint = (
-                f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}/migration/v1-archive/"
+                f"{API_PREFIX}/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}/migration/v1-archive/"
                 + ("apply" if args.apply else "preview")
             )
             result = archive_request(client, args.archive, endpoint, metadata_header=header)
@@ -510,7 +600,7 @@ def run(args):
 
             result = read_response(
                 client.get(
-                    f"/api/v3/projects/{quote(args.project, safe='')}/states/{quote(args.state, safe='')}/evidence-summary"
+                    f"{API_PREFIX}/projects/{quote(args.project, safe='')}/states/{quote(args.state, safe='')}/evidence-summary"
                 )
             )
             if args.json:
@@ -533,7 +623,7 @@ def run(args):
 
             result = read_response(
                 client.get(
-                    f"/api/v3/projects/{quote(args.project, safe='')}/states/{quote(args.state, safe='')}/license-worklist",
+                    f"{API_PREFIX}/projects/{quote(args.project, safe='')}/states/{quote(args.state, safe='')}/license-worklist",
                     params={
                         name: getattr(args, name)
                         for name in (
@@ -567,7 +657,7 @@ def run(args):
 
             result = read_response(
                 client.get(
-                    f"/api/v3/projects/{quote(args.project, safe='')}/states/{quote(args.state, safe='')}/input-quality",
+                    f"{API_PREFIX}/projects/{quote(args.project, safe='')}/states/{quote(args.state, safe='')}/input-quality",
                     params={
                         "q": args.q,
                         "code": args.code,
@@ -615,7 +705,7 @@ def run(args):
                 params["expected_heads"] = args.expected_heads
             result = read_response(
                 client.get(
-                    f"/api/v3/projects/{quote(args.project, safe='')}/portfolio", params=params
+                    f"{API_PREFIX}/projects/{quote(args.project, safe='')}/portfolio", params=params
                 )
             )
             if args.json:
@@ -651,7 +741,7 @@ def run(args):
 
             result = read_response(
                 client.post(
-                    f"/api/v3/projects/{quote(args.project, safe='')}/compare/intelligence",
+                    f"{API_PREFIX}/projects/{quote(args.project, safe='')}/compare/intelligence",
                     params={"offset": args.offset, "limit": args.limit},
                     json={
                         "inventory_state": args.state,
@@ -685,7 +775,7 @@ def run(args):
 
             result = read_response(
                 client.post(
-                    f"/api/v3/projects/{quote(args.project, safe='')}/coverage/candidates",
+                    f"{API_PREFIX}/projects/{quote(args.project, safe='')}/coverage/candidates",
                     params={"offset": args.offset, "limit": args.limit},
                     json={
                         "source": args.state,
@@ -740,7 +830,7 @@ def run(args):
             metadata = json.loads(Path(args.metadata).read_text())
             if not isinstance(metadata, dict):
                 raise ValueError("Upload metadata must be a JSON object")
-            path = f"/api/v3/projects/{quote(args.project, safe='')}"
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}"
             if args.knowledge_command == "evidence-import":
                 path += "/evidence/files" + ("/preview" if args.preview else "")
             else:
@@ -767,7 +857,7 @@ def run(args):
             body = json.loads(Path(args.input).read_text())
             if not isinstance(body, dict):
                 raise ValueError("Correspondence draft input must be a JSON object")
-            path = f"/api/v3/projects/{quote(args.project, safe='')}/correspondence-drafts"
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}/correspondence-drafts"
             result = read_response(
                 client.post(path + ("" if args.apply else "/preview"), json=body)
             )
@@ -781,7 +871,7 @@ def run(args):
                 body["context_mapping"] = json.loads(Path(args.mapping).read_text())
             result = read_response(
                 client.post(
-                    f"/api/v3/projects/{quote(args.project, safe='')}/synchronization/preview",
+                    f"{API_PREFIX}/projects/{quote(args.project, safe='')}/synchronization/preview",
                     params={"offset": args.offset, "limit": args.limit},
                     json=body,
                 )
@@ -807,7 +897,7 @@ def run(args):
             suffix = (
                 "compare/details" if args.knowledge_command == "compare" else args.knowledge_command
             )
-            path = f"/api/v3/projects/{quote(args.project, safe='')}/{suffix}"
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}/{suffix}"
             params = {"offset": args.offset, "limit": args.limit}
             if args.knowledge_command == "history" and args.version:
                 params["version"] = args.version
@@ -833,7 +923,7 @@ def run(args):
         elif args.knowledge_command == "workspace":
             from urllib.parse import quote
 
-            path = f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}/workspace"
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}/workspace"
             params = {
                 "offset": args.offset,
                 "limit": args.limit,
@@ -852,8 +942,8 @@ def run(args):
                 display_workspace(result)
                 return
         else:
-            if not args.path.startswith("/api/v3/") or "\\" in args.path:
-                raise ValueError("Requests must address /api/v3/ on the configured server")
+            if not args.path.startswith(API_PREFIX + "/") or "\\" in args.path:
+                raise ValueError(f"Requests must address {API_PREFIX}/ on the configured server")
             options = {}
             if args.body:
                 options["json"] = (

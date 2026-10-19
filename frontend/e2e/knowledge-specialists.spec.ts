@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { createHash } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -28,15 +29,15 @@ async function fixture(page: Page, options: { denied?: boolean; wrongHash?: bool
       return route.fulfill({ json: { format: 'dtvp.agentyzer-input/1', ready_to_submit: false, request: null, receipt: { state, request_sha256: null }, coverage: { reasons: ['qualified_analysis_source_missing_or_invalid'], limitations: ['External orchestrator must authorize the repository.'], source_verification: 'producer_declared_only', repository_authorization: 'not_checked' } } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read', 'assess'] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Specialist product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read', 'assess'] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Specialist product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state, project_id: 'product', version: '7.1.2', items: [row], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: { unassessed: 1 }, by_team: { team: 1 }, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.includes('/workspace/')) result = { ...row, state }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Specialist product', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
   return { calls, advance: () => { state = nextState }, panel: page.locator('.knowledge-specialists') }
@@ -110,7 +111,7 @@ test('snapshot permission failures are transparent and do not trigger external s
   await panel.getByRole('button', { name: 'Prepare Agentyzer input', exact: true }).click()
   await expect(panel.getByRole('alert')).toContainText('Snapshot permission is required')
   await expect(panel.getByRole('button', { name: 'Download Agentyzer input JSON', exact: true })).toHaveCount(0)
-  expect(calls.map(call => call.path)).toEqual([`/api/v3/projects/product/states/${initialState}/agentyzer-input`])
+  expect(calls.map(call => call.path)).toEqual([`/api/v1/projects/product/states/${initialState}/agentyzer-input`])
 })
 
 test('missing source qualification stays explicit and a changed state clears derived inputs', async ({ page }) => {

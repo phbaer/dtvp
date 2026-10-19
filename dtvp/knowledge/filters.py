@@ -242,6 +242,8 @@ def received_evidence_matches(row, provider, selected):
 
 
 class KnowledgeFilters(RequestModel):
+    ssvc_status: Literal["", "missing", "draft", "submitted", "approved", "pending", "stale"] = ""
+    ssvc_action: Literal["", "DEFER", "SCHEDULED", "OUT_OF_CYCLE", "IMMEDIATE"] = ""
     agentyzer_evidence: EvidenceFilter = ""
     vscorer_evidence: EvidenceFilter = ""
     source_severity: Band = ""
@@ -280,6 +282,13 @@ class KnowledgeFilters(RequestModel):
         return "direct" if value == "known_direct" else value
 
     def matches(self, row):
+        from dtvp.knowledge.ssvc import action
+
+        ssvc = row.get("ssvc", {})
+        if self.ssvc_status and ssvc.get("status", "missing") != self.ssvc_status:
+            return False
+        if self.ssvc_action and action(ssvc) != self.ssvc_action:
+            return False
         for provider, selected in (
             ("agentyzer", self.agentyzer_evidence),
             ("vscorer", self.vscorer_evidence),

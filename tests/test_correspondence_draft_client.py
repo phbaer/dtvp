@@ -40,7 +40,7 @@ def test_cli_forwards_exact_explicit_request(monkeypatch, capsys, tmp_path, appl
     )
     result = {"category": "needs_review", "requires_new_target_review": True}
     route = respx.post(
-        "http://dtvp.test/api/v3/projects/product%2Fname/correspondence-drafts"
+        "http://dtvp.test/api/v1/projects/product%2Fname/correspondence-drafts"
         + ("" if apply else "/preview")
     ).mock(return_value=httpx.Response(201 if apply else 200, json=result))
     main()

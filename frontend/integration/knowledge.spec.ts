@@ -7,8 +7,8 @@ async function json(response: APIResponse) {
   return response.json()
 }
 async function login(page: Page, persona: string) {
-  await json(await page.request.post('/api/v2/playground/login', { data: { persona } }))
-  const me = await json(await page.request.get('/api/v2/me'))
+  await json(await page.request.post('/api/v1/playground/login', { data: { persona } }))
+  const me = await json(await page.request.get('/api/v1/me'))
   expect(me.playground, 'Native integration tests require an isolated playground').toBe(true)
   const token = (await page.context().cookies()).find(cookie => cookie.name === 'dtvp_csrf')?.value
   expect(token).toBeTruthy()
@@ -18,12 +18,12 @@ async function login(page: Page, persona: string) {
 test('real native intake, assessment, independent review and coordinator publication retain source and version scope', async ({ page }) => {
   test.setTimeout(120_000)
   const headers = await login(page, 'administrator')
-  const teams = await json(await page.request.get('/api/v2/workspaces'))
+  const teams = await json(await page.request.get('/api/v1/workspaces'))
   const team = teams.find((value: { name: string }) => value.name === 'Platform').id
-  const project = await json(await page.request.post('/api/v2/projects', {
+  const project = await json(await page.request.post('/api/v1/projects', {
     headers, data: { workspace_id: team, name: `[SYNTHETIC] Native browser integration ${randomUUID()}` },
   }))
-  const base = `/api/v3/projects/${project.id}`
+  const base = `/api/v1/projects/${project.id}`
   const original = readFileSync(new URL('../../playground/fixtures/release.cdx.json', import.meta.url))
   const changed = JSON.parse(original.toString())
   changed.components = changed.components.filter((component: { 'bom-ref': string }) => component['bom-ref'] !== 'utility')
@@ -51,7 +51,7 @@ test('real native intake, assessment, independent review and coordinator publica
   expect(delta.changes.inventory.removed).toContain('component:ref:utility')
   const visit = async (persona: string) => {
     await login(page, persona)
-    await page.goto(`/?page=Knowledge&k_project=${project.id}&k_version=7.1.1`)
+    await page.goto(`/?page=Review&k_project=${project.id}&k_version=7.1.1`)
     await expect(page.getByRole('button', { name: 'CVE-2099-20001', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'CVE-2099-20001', exact: true }).click()
     return page.getByRole('region', { name: 'Context finding detail' })
@@ -76,7 +76,7 @@ test('real native intake, assessment, independent review and coordinator publica
   const score = detail.getByRole('form', { name: 'Coordinator rescoring' })
   const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
   await score.getByRole('combobox', { name: 'Source Base vector', exact: true }).selectOption(vector)
-  await score.getByText('Contextual vector', { exact: true }).click()
+  await score.getByText('Advanced vector input', { exact: true }).click()
   await score.getByLabel('Proposed contextual vector', { exact: true }).fill(`${vector}/CR:L/IR:L/AR:L/MAV:P/MAC:H/MPR:H/MUI:R/MS:U/MC:N/MI:N/MA:N`)
   await score.getByLabel('Scoring rationale', { exact: true }).fill('Synthetic contextual scoring after independent team review; not a real assessment.')
   await score.getByRole('button', { name: 'Preview contextual score', exact: true }).click()

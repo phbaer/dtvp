@@ -150,12 +150,16 @@ def prepare_score(journal, *, project_id, data):
     )
 
 
-def publish_score(journal, *, project_id, actor_id, data):
+def publish_score(
+    journal, *, project_id, actor_id, data, provenance=None, publication_fingerprint=None, checks=()
+):
     fingerprint = digest(
         canonical(
             ["contextual-score.publish/1", project_id, actor_id, data.model_dump(mode="json")]
         )
     )
+    if publication_fingerprint is not None:
+        fingerprint = publication_fingerprint
     request_id = digest(canonical([project_id, actor_id, data.request_id]))
     with journal.writer():
         receipt = journal.receipt(request_id, fingerprint)
@@ -177,6 +181,8 @@ def publish_score(journal, *, project_id, actor_id, data):
             "rationale": data.rationale,
             "coverage_digest": gates[target.version, target.vulnerability_id]["digest"],
         }
+        if provenance is not None:
+            record["provenance"] = provenance
         state["scoring"][score_key(target.context_id, target.vulnerability_id)] = record
     for version, sections in states.items():
         parent = data.expected_versions[version]
@@ -193,7 +199,9 @@ def publish_score(journal, *, project_id, actor_id, data):
         updates.append(
             Update(ref=Ref(project_id=project_id, name=version), expected=parent, target=target)
         )
-    return journal.publish(request_id=request_id, fingerprint=fingerprint, updates=updates)
+    return journal.publish(
+        request_id=request_id, fingerprint=fingerprint, updates=updates, checks=checks
+    )
 
 
 def published_score(journal, sections, version, context_id, vulnerability_id, *, gate=None):
@@ -207,6 +215,7 @@ def published_score(journal, sections, version, context_id, vulnerability_id, *,
     gate = gate if gate is not None else review_gate(journal, sections, version, vulnerability_id)
     return {
         **record["proposal"],
+        **({"provenance": record["provenance"]} if "provenance" in record else {}),
         "rationale": record["rationale"],
         "actor_id": record["actor_id"],
         "current": gate["ready"] and gate["digest"] == record["coverage_digest"],

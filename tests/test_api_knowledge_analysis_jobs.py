@@ -74,7 +74,7 @@ def test_enqueue_idempotency_paging_scope_and_safe_job_dto(analyst, app, bom):
     item = url(project_id, f"/analysis-jobs/{first['id']}")
     assert analyst.get(item).json() == first
     assert "credential_id" not in response.text and "endpoint_digest" not in response.text
-    assert analyst.post(f"/api/v2/jobs/{first['id']}/retry").status_code == 409
+    assert analyst.post(f"/api/v1/jobs/{first['id']}/retry").status_code == 404
     login(analyst, "reviewer")
     assert analyst.get(item).json()["capabilities"] == []
     assert analyst.post(item + "/cancel").status_code == 403

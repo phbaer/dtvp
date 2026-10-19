@@ -35,19 +35,3 @@ def test_previous_schema_is_backed_up_and_upgraded_implicitly(tmp_path):
     assert json.loads(backups[0].with_suffix(".manifest.json").read_text())["schema"] == "0001"
     migrate(engine, tmp_path / "backups")
     assert len(list((tmp_path / "backups").glob("*.jsonl"))) == 1
-
-
-def test_attachment_context_and_access(analyst, release_id):
-    from tests.conftest import login
-
-    content = b"<ThreatModel>synthetic opaque context</ThreatModel>"
-    result = analyst.post(
-        f"/api/v2/releases/{release_id}/attachments",
-        files={"file": ("demo.tm7", content)},
-        data={"kind": "threat_model"},
-    )
-    assert result.status_code == 201
-    sha = result.json()["sha256"]
-    assert analyst.get(f"/api/v2/releases/{release_id}/attachments/{sha}").content == content
-    login(analyst, "operations")
-    assert analyst.get(f"/api/v2/releases/{release_id}/attachments/{sha}").status_code == 404

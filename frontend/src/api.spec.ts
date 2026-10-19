@@ -7,7 +7,8 @@ describe('API authentication and errors', () => {
     document.cookie = 'dtvp_csrf=synthetic-token'
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Evidence changed' }), { status: 409 }))
     vi.stubGlobal('fetch', fetch)
-    await expect(api('/findings/f/decisions', send({ rationale: 'Keep draft' }))).rejects.toThrow('Evidence changed')
+    await expect(api('/projects/p/assessments/a/draft', send({ rationale: 'Keep draft' }))).rejects.toThrow('Evidence changed')
+    expect(fetch.mock.calls[0]![0]).toBe('/api/v1/projects/p/assessments/a/draft')
     const headers = fetch.mock.calls[0]![1].headers as Headers
     expect(headers.get('X-CSRF-Token')).toBe('synthetic-token')
     expect(fetch.mock.calls[0]![1].credentials).toBe('same-origin')

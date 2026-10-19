@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 async function fixture(page: Page, readonly = false, author = 'person') {
@@ -25,15 +26,15 @@ async function fixture(page: Page, readonly = false, author = 'person') {
       return route.fulfill({ status: 201, json: { committed: true, projection: 'current' } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read', ...(readonly ? [] : ['assess', 'approve'])] }] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read', ...(readonly ? [] : ['assess', 'approve'])] }] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: head }] }
     else if (path.endsWith('/workspace')) result = { state: head, project_id: 'product', version: '7.1.1', items: [finding], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: { submitted: 1 }, by_team: { team: 1 }, severity: { critical: 1 }, recorded: 1, submitted: 1, approved: 0 } }
     else if (path.includes('/workspace/')) result = { ...finding, state: head }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByRole('button', { name: finding.vulnerability_id, exact: true }).click()
   const detail = page.getByLabel('Context finding detail', { exact: true })

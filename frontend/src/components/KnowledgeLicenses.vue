@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -46,7 +47,7 @@ function claimText(value: unknown): string {
 function originalArtifact(artifact: unknown) {
   const scope = selectedScope.value
   if (!scope || typeof artifact !== 'string' || !/^[a-f0-9]{64}$/.test(artifact) || !/^[a-f0-9]{64}$/.test(scope.state)) return undefined
-  return `/api/v3/projects/${encodeURIComponent(scope.project)}/states/${encodeURIComponent(scope.state)}/artifacts/${artifact}`
+  return `${API_PREFIX}/projects/${encodeURIComponent(scope.project)}/states/${encodeURIComponent(scope.state)}/artifacts/${artifact}`
 }
 function open(row: Row) {
   if (locked.value || !listScope.value) return

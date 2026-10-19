@@ -1,135 +1,144 @@
-# API and adapter contract
+# Native API contract
 
-The executable schema is `/openapi.json`. Native journal workflows use `/api/v3`;
-the [README](../README.md#ground-up-redesign) is the current native API guide.
-The resource table and ingestion examples below describe `/api/v2` compatibility
-contracts. With `DTVP_LEGACY_REVIEW_ENABLED=false`, compatibility review routes
-are unavailable; shared identity/catalog/job services retain their existing paths.
-Machine access uses `Authorization: Bearer TOKEN`. Cookie mutations require
-`X-CSRF-Token` and a matching browser Origin. Credentials are hashed, expiring,
-revocable and scoped; membership/sharing is rechecked for every read/write/job.
-Unauthorized resource IDs return 404. Administrative rights alone cannot approve.
+[README](../README.md) is canonical; [native reference](native-reference.md) retains
+expanded workflows, bounds and integration limitations. `/openapi.json` is the
+executable request schema. All application routes use `API_PREFIX`, derived from
+`API_VERSION` in `dtvp/api_contract.py` (currently `/api/v1`). Frontend builds read
+the same Python constant. Historical data-format names do not mount old runtimes.
+
+## Authentication and concurrency
+
+Machine requests use `Authorization: Bearer TOKEN`. Browser sessions use an
+HTTP-only session cookie; mutations require `X-CSRF-Token` and, when supplied,
+a matching browser Origin. Credentials expire and can be revoked. Current
+membership, project sharing and credential scope are checked on reads, mutations,
+artifact downloads and worker requests. Inaccessible resources normally return 404.
+Administrator, analyst, reviewer and coordinator capabilities are distinct.
+
+Native mutations carry explicit request IDs and expected immutable version/policy
+heads. Stale pins return 409. Preserve the exact request after uncertain responses:
+replay returns the original receipt instead of silently replacing scope or pins.
+Publication can succeed while projection remains pending; responses report that
+condition explicitly. Preview operations never publish decisions.
+
+All paths below are relative to `API_PREFIX` unless stated otherwise.
 
 ## Main resources
 
-| Resource | Behavior |
+| Resource | Contract |
 | :--- | :--- |
-| `/workspaces`, `/workspaces/{id}/members` | Explicit issuer/subject/role mappings |
-| `/projects`, `/projects/{id}/sharing` | Owner workspace and explicit capability grants |
-| `/projects/{id}/releases` | Product release identity |
-| `/releases/{id}/components`, `/components/{id}/metadata` | Complete scoped inventory and optimistic curated metadata |
-| `/releases/{id}/dependencies`, `/revisions/{id}/artifact` | Exact source graphs and verified original files |
-| `/releases/{id}/metadata`, `/attachments` | Owned deployment context and opaque TM7/evidence/attestation files |
-| `/releases/{id}/ingestions`, `/uploads` | Shared pipeline JSON-envelope and file import |
-| `/findings`, `/findings/{id}` | Cursor summary pages and full evidence/history |
-| `/findings/{id}/decisions`, `/approvals` | Version-checked submission, independent approval or change request |
-| `/approvals/preview`, `/approvals/apply` | Revision-bound atomic bulk approval |
-| `/statistics` | Full authorized state, severity, owning-team, component-owner and project counts |
-| `/findings/{id}/rescoring/preview`, `/rescoring/proposals` | Revision-bound CVSS previews and eligible provider proposals |
-| `/projects/{id}/rescore-policy`, `/cvss/metrics/{version}` | Versioned rules and calculator metadata |
-| `/findings/{id}/evidence` | Immutable attributed advisory/match/context evidence |
-| `/snapshots` and snapshot subresources | Immutable consumer bundle, SBOM, worklist, reviewed VEX and coverage |
-| `/providers`, `/jobs` | Configured read-only matching/enrichment/import operations; explicit retry/cancel |
-| `/credentials`, `/projects/{id}/audit` | Scoped machine access and append-only action history |
+| `/me`, `/workspaces`, `/workspaces/{id}/members` | Current identity and explicit issuer/subject/role mappings |
+| `/projects`, `/catalog/projects`, `/projects/{id}/sharing` | Searchable authorized products and capability grants |
+| `/projects/{id}/versions`, `/versions/{version}/workspace` | Independent version heads, contextual work queue and scoped statistics |
+| `/projects/{id}/versions/{version}/imports`, `/files` | Complete scoped JSON or exact-byte multipart SBOM intake |
+| `/projects/{id}/versions/{version}/parts/{part}/imports`, `/files` | Independently ordered constituent-source intake |
+| `/projects/{id}/versions/{version}/assembly` | Explicit immutable part selection into a product baseline |
+| `/projects/{id}/ownership` | Versioned recursive team selectors and consuming roots |
+| `/projects/{id}/assessments/{assessment}/draft`, `/submit` | Context/version-pinned applicability and optional SSVC |
+| `/projects/{id}/reviews` | Independent approval or change request on the exact assessment revision |
+| `/projects/{id}/scoring/preview`, `/publish` | Explicit coordinator contextual CVSS proposal/publication |
+| `/projects/{id}/scoring-policy` | Journal-backed project scoring rules; manager CAS configuration |
+| `/projects/{id}/scoring/rules/preview`, `/publish` | Pinned rules evaluated against approved applicability |
+| `/ssvc/models`, `/cvss/metrics/{version}` | Authenticated local model and metric metadata |
+| `/projects/{id}/states/{state}/bundle`, `/manifest` | Immutable consumer representation under current access |
+| `/projects/{id}/states/{state}/source`, `/artifacts/{sha}` | Exact original files explicitly retained by the selected state |
+| `/projects/{id}/compare`, `/tags` | Pinned state comparison and immutable released-state references |
+| `/credentials`, `/jobs`, `/projects/{id}/audit` | Scoped credentials, native job inspection and operational audit |
 
-## Pipeline envelope
+Some displayed paths continue a project-scoped prefix: use the exact full path
+from OpenAPI when constructing a client. Native evidence, licenses, documentary
+review, issued exports, synchronization, CPE discovery and source-specific jobs
+have their own typed resources in that schema.
+
+## Inventory intake
+
+Submit JSON to `/projects/{id}/versions/{version}/imports`:
 
 ```json
 {
-  "schema_version": "dtvp.ingestion/1",
-  "source": "pipeline:my-ci",
-  "event_id": "job-123:sbom",
-  "occurred_at": "2026-10-14T00:00:00Z",
+  "request_id": "build-123-sbom",
+  "expected": null,
+  "source": "pipeline/main",
+  "build_number": 123,
+  "occurred_at": "2026-10-19T00:00:00Z",
   "completeness": "complete",
-  "context": {"provider": "my-ci", "run_id": "123", "commit": "abc", "branch": "main"},
-  "sbom": {"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "components": []}
+  "sbom": {
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.6",
+    "version": 1,
+    "components": []
+  }
 }
 ```
 
-Submit to `/releases/{id}/ingestions`. Same source/event/content is idempotent;
-reuse with different content returns 409. Older events remain history and cannot
-overwrite newer source results. Partial snapshots preserve prior coverage.
-Format/parser revisions and provider fields remain in the immutable source document.
+`expected: null` creates a new branch; subsequent imports require its current
+state SHA. `source` authority and monotonic build ordering prevent an unrelated
+pipeline or older build from silently replacing the baseline. Optional
+`predecessor` branches a new version from an existing product state.
+Optional collection context records source revision, target/platform, subject
+bindings, producer methods, limitations and separately declared coverage.
+Missing coverage remains unknown; `complete` means replacement within that scope,
+not independent verification that the producer discovered the entire product.
 
-Administrators bind each DTVP product to its DT project through
-`PUT /projects/{id}/connectors/dependency-track`. Import jobs cannot use the
-shared source credential to fetch an arbitrary unbound project.
+For byte-exact intake, send multipart `file` and JSON `metadata` to `/files`;
+metadata contains the import fields without `sbom`. Supported semantic formats
+include CycloneDX JSON/XML and SPDX 2.3 JSON. Parser losses and relationship kinds
+remain visible; containment does not silently become a dependency edge.
+Constituent intake does not advance the product until explicit assembly.
 
-## Provider boundaries
+## Assessment, review and scoring
 
-`Matcher.query(purl)` returns matching assertions and checked/unsupported coverage.
-`AdvisoryProvider.get(identifier)` returns attributed advisory records, never a
-component affectedness decision. Register implementations separately in
-`dtvp/providers.py` and enable outbound providers through deployment configuration.
-Transport is bounded, timed and rejects redirects. Durable leases are renewed
-between requests; publication is atomic and rejects changed release inventory.
+An assessment names explicit targets (`version`, `context_id`, `vulnerability_id`),
+current `expected_versions`, its prior `expected_revision` or null, applicability,
+rationale and evidence. `not_affected` requires an explicit `justification`;
+other states omit it. Submitted revisions remain immutable.
 
-OSV cannot supply trustworthy variant matching for qualified PURLs in this adapter;
-those remain unsupported. NVD/CIRCL records preserve upstream content. Use
-`dtvp.evidence/1` to import other official/vendor advisory evidence while a native
-feed adapter is being verified. Native `/api/v3` known-ID enrichment now includes
-EUVD (exact CVE/EUVD) and MyJVN (exact JVNDB); unsupported IDs remain explicit.
-These adapters do not establish package matching or automatic assessment approval.
-Optional journal-pinned known-ID schedules use the native advisory-schedule API;
-manual and scheduled jobs share durable provider pacing. See the README for bounds.
+Optional `ssvc` supplies the exact model/version/hash, explicit answers, rationale
+and optional declared evidence. The backend evaluates the pinned model itself;
+clients cannot choose an outcome. Incomplete answers are draft-only. Approval
+references the exact assessment revision and requires an independent authorized
+reviewer for the owning team/context.
 
-Job failures retain unknown coverage and require explicit retry. A successful
-empty match response never records `not_affected`. No import, job or approval
-writes to the source. Consumer exports are explicit local downloads.
+Manual scoring supplies exact targets/heads, an original `base_vector`, contextual
+`vector` and rationale. Publication additionally supplies its preview digest.
+Every original Base metric remains unchanged. All required contexts for the
+vulnerability must currently be independently approved before publication.
 
-## Bounds and concurrency
+Rule requests additionally pin `expected_policy` and choose `rule_basis`
+(`applicability` or explicit `false_positive`). Applicability comes exclusively
+from approved assessments; selected targets must agree. False-positive rules
+require approved not-affected status. Rule publication atomically checks the
+policy and version heads and retains complete configuration/assessment provenance.
+Policy edits do not rewrite prior scores or tags. SSVC, imported proposals and
+source severity never create automatic approvals or contextual score publication.
 
-Requests/uploads default to 32 MiB, metadata/evidence to 64 KiB. Summary/component
-pages are bounded; lifecycle filtering uses a bounded scan and may return an empty
-page with a continuation cursor. Bulk approvals allow 100 items. All inventory and
-decision mutations lock their release; stale revisions return 409. Source observations
-and decisions are retained. Snapshot reads are immutable but current access is required.
+## Providers and retained documentation
 
-## Previous DT documentation
+Sources produce attributed facts, not DTVP approval. Native jobs implement bound
+DT intake, Agentyzer analysis, OSV matching, known-ID advisory enrichment and
+synchronization proposals. API/worker configuration must enable the provider.
+Retries and cancellation use their explicit scoped resource; generic legacy job
+enqueue/retry endpoints are absent. Retained old jobs are never executed.
 
-Imports decode DTVP `[Team:]`, `[State:]`, `[Assessed By:]`, `[Reviewed By:]`,
-`[Date:]`, `[Assigned:]`, `[Historical:]`, `[Copied From:]`, contextual rescoring
-and SSVC records. General precedence and latest dated case-insensitive duplicate
-teams are retained. SSVC JSON is isolated from tag scanning. Plain text with
-no metadata is valid: explicit DT applicability is retained; prose without an
-applicability stays documented with unknown state. Missing authors/reviewers
-are never invented.
+Known-ID providers include NVD, CIRCL, EUVD and JVN with different supported
+identifiers. JVN CVE keyword matching is unsupported; unsupported coverage is
+reported rather than silently counted as checked. Empty match/not-found results
+do not establish absence, remediation or not-affected status.
 
-The finding detail/snapshot exposes `imported_assessments`; list rows distinguish
-legacy assessed, pending, conflicting and documented states. Original analysis
-and comments remain intact. DT polling retrieves the full occurrence analysis,
-not only the abbreviated finding status. New DTVP decisions take precedence;
-source imports cannot overwrite them or create new DTVP approvals.
+DT imports preserve prior DTVP team/state/author/reviewer/date documentation,
+contextual scoring and SSVC claims with original text. Plain documentation without
+metadata is accepted; absent applicability/identity remains unknown. Source claims
+never overwrite a native decision or manufacture reviewers/approval.
 
-### Searchable catalogs and review queues
+Explicit migration resources under `/migration/v2` and `/migration/v1-archive`
+read retained historical snapshots or reviewed sanitized single-version exports.
+Their names identify source formats. No old finding/release/snapshot runtime is
+available, and imported historical approvals remain evidence only.
 
-`GET /catalog/projects?q=&workspace_id=&cursor=&limit=` returns bounded
-`items` with team name, release count and active-finding count.
-`GET /catalog/projects/{id}/releases?q=&cursor=&limit=` searches release versions, newest first.
-`GET /projects/{id}` resolves a selected product without loading every product.
-Original array endpoints remain available for existing consumers.
+## Scope and assurance
 
-`GET /findings` additionally accepts `project_id`, `workspace_id`, `owner` and
-`sort=id|identifier|component|project`. Text search includes project, release,
-component, PURL and vulnerability ID. Non-ID sort cursors are tied to the current
-filters; changing filters requires restarting pagination. Lifecycle filtering
-retains bounded scans: an empty batch may still have a next cursor.
-Component pages accept `q` for name/version/PURL search. Finding rows include
-`latest_decision` for independent bulk-approval selection. Duplicate findings in
-a selection are rejected. Authorization is applied
-before catalog pagination and counts; saved browser views never grant access.
-
-Agentyzer analysis submission/history/report endpoints and their eligibility and
-restart semantics are documented in [external analysis integration](agentyzer.md).
-
-Statistics scopes, score ordering, preview/adoption and policy contracts are detailed
-in [statistics and rescoring](statistics-rescoring.md). Component-owner filters support
-`owner_match=contains|exact`; finding ordering supports `original_score` and
-`effective_score`, highest first.
-
-New `not_affected` decisions require the top-level `justification` field: a
-CycloneDX justification code or `other` (with the explanation in `rationale`).
-Other states must omit it. The server stores it in immutable decision details;
-`details.justification` cannot bypass validation. Reviewed VEX uses CycloneDX
-analysis states and includes standard justification codes; `other` remains in the
-snapshot and its explanation is exported as analysis detail.
+Inputs and responses are bounded per resource; use the schema and native reference
+for exact limits. Original raw files/responses and normalized facts retain separate
+provenance. All downloads require current project access and a retained-state pin.
+Mirrors are not independent corroboration; signature/META consistency does not
+establish producer completeness. Human review remains explicit and attributable.

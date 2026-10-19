@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -18,7 +19,7 @@ const selected = computed(() => result.value?.items.find(row => row.document_id 
 const can = (cap: string) => result.value?.capabilities.includes(cap)
 const human = (value: string) => value.replaceAll('_', ' ')
 const root = computed(() => `/projects/${encodeURIComponent(props.project)}`)
-const artifact = (sha: string) => `/api/v3${root.value}/states/${encodeURIComponent(props.state)}/artifacts/${encodeURIComponent(sha)}`
+const artifact = (sha: string) => `${API_PREFIX}${root.value}/states/${encodeURIComponent(props.state)}/artifacts/${encodeURIComponent(sha)}`
 let sequence = 0, pending: { signature: string; requestId: string } | null = null
 function reset() { form.value = empty(); expectedRevision.value = null; file.value = null; if (fileInput.value) fileInput.value.value = ''; issued.value = null; pending = null }
 function create() { reset(); selectedId.value = ''; editing.value = true; error.value = ''; notice.value = '' }
@@ -126,7 +127,7 @@ onBeforeUnmount(() => { ++sequence })
           <h3>{{ expectedRevision ? 'Replacement document revision' : 'New document' }}</h3>
           <label>Document title<input v-model="form.title" required maxlength="1000"></label><label>Document purpose<select v-model="form.purpose"><option value="architecture">Architecture</option><option value="soup">SOUP</option><option value="license">License</option><option value="combined">Combined</option></select></label>
           <label>Issued input receipt SHA-256<input v-model="form.issued_receipt_sha" required pattern="[0-9a-f]{64}"></label><button type="button" :disabled="busy" @click="issue">Issue input bundle for this state</button>
-          <ul v-if="issued"><li v-for="(item, name) in issued.files" :key="name"><a :href="`/api/v3${root}/issued-exports/${encodeURIComponent(issued.receipt_sha256)}/files/${encodeURIComponent(name)}`" download>Download issued {{ name }}</a> · <code>{{ item.sha256 }}</code></li></ul>
+          <ul v-if="issued"><li v-for="(item, name) in issued.files" :key="name"><a :href="`${API_PREFIX}${root}/issued-exports/${encodeURIComponent(issued.receipt_sha256)}/files/${encodeURIComponent(name)}`" download>Download issued {{ name }}</a> · <code>{{ item.sha256 }}</code></li></ul>
           <div class="renderer"><label>Renderer name<input v-model="form.renderer_name" required maxlength="200"></label><label>Renderer version<input v-model="form.renderer_version" required maxlength="200"></label></div>
           <details><summary>Renderer source revision</summary><label>Declared renderer source revision<input v-model="form.renderer_revision" maxlength="1000"></label></details>
           <label>Exact renderer configuration (JSON object)<textarea v-model="form.configuration" required spellcheck="false" placeholder='{"template": "reviewed-template"}' /></label>

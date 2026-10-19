@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64), revision = 'b'.repeat(64)
 async function fixture(page: Page, manage = true) {
@@ -9,8 +10,8 @@ async function fixture(page: Page, manage = true) {
     const url = new URL(route.request().url()), path = url.pathname
     if (route.request().method() !== 'GET') posts.push({ path, body: route.request().postDataJSON() as Record<string, unknown> })
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Ownership product', capabilities: manage ? ['read', 'manage'] : ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') data = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Ownership product', capabilities: manage ? ['read', 'manage'] : ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.1', state: pin }], next_offset: null }
     else if (path.endsWith('/workspace')) data = { state: pin, project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/ownership/editor')) data = { policy_state: applied ? revision : pin, policy: { rules: [original], context_roots: { '7.1.1': ['root-a'] } }, versions: { '7.1.1': pin, '7.1.2': revision }, selectors: [{ raw: original.selector, fields, representable: false }], capabilities: manage ? ['manage'] : [], available_teams: [{ id: 'platform', name: 'Platform' }, { id: 'operations', name: 'Operations' }] }
@@ -19,8 +20,8 @@ async function fixture(page: Page, manage = true) {
     else if (path.endsWith('/editor/apply')) { if (fail) return route.fulfill({ status: fail, json: { detail: 'Changed or unavailable' } }); applied = true; data = { committed: true, projection: 'current' } }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Ownership product' }).click()
   await page.getByText('Component ownership', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Component ownership editor' })

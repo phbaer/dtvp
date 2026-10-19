@@ -1,13 +1,15 @@
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
 from dtvp.parsers import identity, parse
-from dtvp.playground import FIXTURES
 from dtvp.providers import CIRCL, OSV
 from dtvp.storage import Artifacts
+
+FIXTURES = Path(__file__).resolve().parent.parent / "playground/fixtures"
 
 
 def test_spdx_and_xml_and_unsafe_xml():

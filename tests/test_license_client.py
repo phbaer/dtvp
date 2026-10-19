@@ -62,7 +62,7 @@ def test_license_cli_forwards_selection(monkeypatch, capsys, as_json):
         "next_offset": 30,
     }
     route = respx.get(
-        "http://dtvp.test/api/v3/projects/product%2Fname/states/" + "a" * 64 + "/license-worklist"
+        "http://dtvp.test/api/v1/projects/product%2Fname/states/" + "a" * 64 + "/license-worklist"
     ).mock(return_value=httpx.Response(200, json=result))
     main()
     assert dict(route.calls[0].request.url.params) == {

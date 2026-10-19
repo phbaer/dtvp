@@ -3,6 +3,7 @@
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref
 from dtvp.knowledge.observations import (
@@ -16,7 +17,7 @@ from dtvp.knowledge.observations import (
 from dtvp.knowledge.workspace import load_sections
 from dtvp.storage import canonical, digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def _import(project_id, version, data, request, db, actor, raw=None):

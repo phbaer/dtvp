@@ -1,0 +1,525 @@
+{
+  "format": "dtvp.demo-scenario/1",
+  "synthetic": true,
+  "fixture_id": "native-workflow/1",
+  "project_name": "Native Workflow Playground",
+  "selected_version": "7.1.2",
+  "baselines": [
+    {
+      "id": "import-7.1.1-1",
+      "version": "7.1.1",
+      "source": "playground:native-scenario",
+      "build_number": 1,
+      "occurred_at": "2026-01-01T00:00:00+00:00",
+      "sbom": {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+          "component": {
+            "type": "application",
+            "bom-ref": "product",
+            "name": "Synthetic workflow product",
+            "version": "7.1.1"
+          }
+        },
+        "components": [
+          {
+            "type": "application",
+            "bom-ref": "platform-app",
+            "name": "platform-app",
+            "version": "1.0",
+            "purl": "pkg:generic/platform-app@1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "operations-app",
+            "name": "operations-app",
+            "version": "1.0",
+            "purl": "pkg:generic/operations-app@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-tls",
+            "name": "shared-tls",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-tls@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-parser",
+            "name": "shared-parser",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-parser@1.0"
+          }
+        ],
+        "dependencies": [
+          {
+            "ref": "product",
+            "dependsOn": [
+              "platform-app",
+              "operations-app"
+            ]
+          },
+          {
+            "ref": "platform-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser"
+            ]
+          },
+          {
+            "ref": "operations-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser"
+            ]
+          },
+          {
+            "ref": "shared-tls",
+            "dependsOn": []
+          },
+          {
+            "ref": "shared-parser",
+            "dependsOn": []
+          }
+        ],
+        "vulnerabilities": [
+          {
+            "id": "CVE-2099-31001",
+            "description": "Synthetic TLS defect. Determine whether the vulnerable protocol is enabled in each consuming application.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-tls"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-31002",
+            "description": "Synthetic parser defect. Review whether untrusted input reaches this parser and retain deployment evidence.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-parser"
+              }
+            ]
+          }
+        ]
+      },
+      "context": {
+        "subject_kind": "build",
+        "configuration": "synthetic",
+        "pipeline_run": "fixture-1",
+        "collector": "DTVP playground",
+        "method": "build",
+        "limitations": [
+          "Synthetic composition and decisions; not a real assessment or release."
+        ]
+      }
+    },
+    {
+      "id": "import-7.1.2-1",
+      "version": "7.1.2",
+      "source": "playground:native-scenario",
+      "build_number": 1,
+      "occurred_at": "2026-01-01T00:00:00+00:00",
+      "sbom": {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+          "component": {
+            "type": "application",
+            "bom-ref": "product",
+            "name": "Synthetic workflow product",
+            "version": "7.1.2"
+          }
+        },
+        "components": [
+          {
+            "type": "application",
+            "bom-ref": "platform-app",
+            "name": "platform-app",
+            "version": "1.0",
+            "purl": "pkg:generic/platform-app@1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "operations-app",
+            "name": "operations-app",
+            "version": "1.0",
+            "purl": "pkg:generic/operations-app@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-tls",
+            "name": "shared-tls",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-tls@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-parser",
+            "name": "shared-parser",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-parser@1.0"
+          }
+        ],
+        "dependencies": [
+          {
+            "ref": "product",
+            "dependsOn": [
+              "platform-app",
+              "operations-app"
+            ]
+          },
+          {
+            "ref": "platform-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser"
+            ]
+          },
+          {
+            "ref": "operations-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser"
+            ]
+          },
+          {
+            "ref": "shared-tls",
+            "dependsOn": []
+          },
+          {
+            "ref": "shared-parser",
+            "dependsOn": []
+          }
+        ],
+        "vulnerabilities": [
+          {
+            "id": "CVE-2099-31001",
+            "description": "Synthetic TLS defect. Determine whether the vulnerable protocol is enabled in each consuming application.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-tls"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-31002",
+            "description": "Synthetic parser defect. Review whether untrusted input reaches this parser and retain deployment evidence.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-parser"
+              }
+            ]
+          }
+        ]
+      },
+      "context": {
+        "subject_kind": "build",
+        "configuration": "synthetic",
+        "pipeline_run": "fixture-1",
+        "collector": "DTVP playground",
+        "method": "build",
+        "limitations": [
+          "Synthetic composition and decisions; not a real assessment or release."
+        ]
+      }
+    }
+  ],
+  "ownership": {
+    "rules": [
+      {
+        "selector": "platform-app",
+        "team": "Platform"
+      },
+      {
+        "selector": "operations-app",
+        "team": "Operations"
+      }
+    ],
+    "context_roots": {
+      "7.1.1": [
+        "platform-app",
+        "operations-app"
+      ],
+      "7.1.2": [
+        "platform-app",
+        "operations-app"
+      ]
+    }
+  },
+  "assessments": [
+    {
+      "id": "fixture-earlier-draft",
+      "version": "7.1.1",
+      "root_ref": "platform-app",
+      "component_ref": "shared-parser",
+      "vulnerability_id": "CVE-2099-31002",
+      "persona": "analyst",
+      "stage": "draft",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      }
+    },
+    {
+      "id": "fixture-approved-tls",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "shared-tls",
+      "vulnerability_id": "CVE-2099-31001",
+      "persona": "analyst",
+      "stage": "approved",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      },
+      "review": {
+        "persona": "reviewer",
+        "rationale": "Synthetic independent review confirms the example scope and deployment evidence."
+      }
+    },
+    {
+      "id": "fixture-submitted-tls",
+      "version": "7.1.2",
+      "root_ref": "operations-app",
+      "component_ref": "shared-tls",
+      "vulnerability_id": "CVE-2099-31001",
+      "persona": "operations",
+      "stage": "submitted",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      }
+    },
+    {
+      "id": "fixture-stale-parser",
+      "version": "7.1.2",
+      "root_ref": "platform-app",
+      "component_ref": "shared-parser",
+      "vulnerability_id": "CVE-2099-31002",
+      "persona": "analyst",
+      "stage": "approved",
+      "assessment": {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "rationale": "Synthetic deployment evidence: this application's configuration excludes the vulnerable execution path. Verify the equivalent evidence for a real product.",
+        "evidence": [
+          {
+            "source": "synthetic-playground",
+            "description": "Example deployment report; no real security conclusion."
+          }
+        ]
+      },
+      "review": {
+        "persona": "reviewer",
+        "rationale": "Synthetic independent review confirms the example scope and deployment evidence."
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "workflow-demo-reviewed-baseline",
+      "version": "7.1.2"
+    }
+  ],
+  "updates": [
+    {
+      "id": "import-7.1.2-2",
+      "version": "7.1.2",
+      "source": "playground:native-scenario",
+      "build_number": 2,
+      "occurred_at": "2026-01-02T00:00:00+00:00",
+      "sbom": {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+          "component": {
+            "type": "application",
+            "bom-ref": "product",
+            "name": "Synthetic workflow product",
+            "version": "7.1.2"
+          }
+        },
+        "components": [
+          {
+            "type": "application",
+            "bom-ref": "platform-app",
+            "name": "platform-app",
+            "version": "1.0",
+            "purl": "pkg:generic/platform-app@1.0"
+          },
+          {
+            "type": "application",
+            "bom-ref": "operations-app",
+            "name": "operations-app",
+            "version": "1.0",
+            "purl": "pkg:generic/operations-app@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-tls",
+            "name": "shared-tls",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-tls@1.0"
+          },
+          {
+            "type": "library",
+            "bom-ref": "shared-parser",
+            "name": "shared-parser",
+            "version": "1.0",
+            "purl": "pkg:generic/shared-parser@1.0"
+          }
+        ],
+        "dependencies": [
+          {
+            "ref": "product",
+            "dependsOn": [
+              "platform-app",
+              "operations-app"
+            ]
+          },
+          {
+            "ref": "platform-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser"
+            ]
+          },
+          {
+            "ref": "operations-app",
+            "dependsOn": [
+              "shared-tls",
+              "shared-parser"
+            ]
+          },
+          {
+            "ref": "shared-tls",
+            "dependsOn": []
+          },
+          {
+            "ref": "shared-parser",
+            "dependsOn": []
+          }
+        ],
+        "vulnerabilities": [
+          {
+            "id": "CVE-2099-31001",
+            "description": "Synthetic TLS defect. Determine whether the vulnerable protocol is enabled in each consuming application.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-tls"
+              }
+            ]
+          },
+          {
+            "id": "CVE-2099-31002",
+            "description": "Synthetic parser defect. Review whether untrusted input reaches this parser and retain deployment evidence. Updated supplier evidence identifies another potentially reachable entry point; reassessment is required.",
+            "source": {
+              "name": "Synthetic workflow evidence"
+            },
+            "ratings": [
+              {
+                "method": "CVSSv31",
+                "score": 9.8,
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+              }
+            ],
+            "affects": [
+              {
+                "ref": "shared-parser"
+              }
+            ]
+          }
+        ]
+      },
+      "context": {
+        "subject_kind": "build",
+        "configuration": "synthetic",
+        "pipeline_run": "fixture-2",
+        "collector": "DTVP playground",
+        "method": "build",
+        "limitations": [
+          "Synthetic composition and decisions; not a real assessment or release."
+        ]
+      }
+    }
+  ],
+  "licenses": [],
+  "vscorer_proposals": [],
+  "code_analysis": []
+}

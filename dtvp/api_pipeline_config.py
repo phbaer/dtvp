@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Sha
 from dtvp.knowledge.pipeline_config import (
@@ -14,7 +15,7 @@ from dtvp.knowledge.pipeline_config import (
     retained_config,
 )
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/pipeline-config")

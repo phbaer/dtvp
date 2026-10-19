@@ -3,6 +3,7 @@
 from collections import Counter
 from urllib.parse import quote
 
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.comparison import product_state
 from dtvp.knowledge.documents import list_documents
 from dtvp.knowledge.filters import metadata_status, scoring_status
@@ -47,7 +48,7 @@ def pipeline_summary(journal, state):
         source_coverage[dimension] = _counts(
             source["collection"].get(dimension, "unknown") for source in quality["sources"]
         )
-    path = f"/api/v3/projects/{quote(revision.project_id, safe='')}/states/{state}"
+    path = f"{API_PREFIX}/projects/{quote(revision.project_id, safe='')}/states/{state}"
     content = {
         "format": FORMAT,
         "state": state,

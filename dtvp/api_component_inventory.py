@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.comparison import reachable_states
 from dtvp.knowledge.component_inventory import inventory_page
@@ -14,7 +15,7 @@ from dtvp.knowledge.metadata import component_at
 from dtvp.knowledge.workspace import load_sections
 from dtvp.models import Workspace
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def pinned(request, project_id, state):

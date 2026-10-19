@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -29,15 +31,15 @@ def main():
         if edge["ref"] != "utility"
     ]
     with httpx.Client(base_url=args.url, timeout=30) as client:
-        response = client.post("/api/v2/playground/login", json={"persona": "analyst"})
+        response = client.post(f"{API_PREFIX}/playground/login", json={"persona": "analyst"})
         response.raise_for_status()
         client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
-        response = client.get("/api/v2/projects")
+        response = client.get(f"{API_PREFIX}/projects")
         response.raise_for_status()
         project_id = response.json()[0]["id"]
         states = []
         for version, document in (("7.1.1", bom), ("7.1.2", changed)):
-            path = f"/api/v3/projects/{project_id}/versions/{version}"
+            path = f"{API_PREFIX}/projects/{project_id}/versions/{version}"
             current = client.get(f"{path}/inventory")
             if current.status_code == 404:
                 previous, build = None, 1
@@ -72,13 +74,13 @@ def main():
             states.append(result["updates"][0]["target"])
             print(f"{version}: build {build}, state {states[-1]}")
             if args.files:
-                original = client.get(f"/api/v3/projects/{project_id}/states/{states[-1]}/source")
+                original = client.get(f"{API_PREFIX}/projects/{project_id}/states/{states[-1]}/source")
                 original.raise_for_status()
                 if original.content != raw:
                     raise RuntimeError("Original-byte verification failed")
                 print(f"  Original bytes verified: {original.headers['x-content-sha256']}")
         response = client.post(
-            f"/api/v3/projects/{project_id}/tags",
+            f"{API_PREFIX}/projects/{project_id}/tags",
             json={
                 "request_id": str(uuid4()),
                 "name": f"demo-7.1.1-{uuid4().hex[:8]}",
@@ -87,7 +89,7 @@ def main():
         )
         response.raise_for_status()
         response = client.get(
-            f"/api/v3/projects/{project_id}/compare",
+            f"{API_PREFIX}/projects/{project_id}/compare",
             params={
                 "before": states[0],
                 "after": states[1],

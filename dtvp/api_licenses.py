@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name
 from dtvp.knowledge.license_reviews import (
@@ -12,7 +13,7 @@ from dtvp.knowledge.license_reviews import (
     save_license,
 )
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def operation(project_id, version, data, request, db, actor, action):

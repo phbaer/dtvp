@@ -4,7 +4,6 @@ import httpx
 import respx
 
 from dtvp.legacy_dt import decode
-from dtvp.models import now
 from dtvp.providers import import_dt
 
 
@@ -60,36 +59,6 @@ def test_pending_conflict_duplicates_and_historical_blocks():
     assert parsed["current_records"][0]["rationale"] == "New."
 
 
-def test_imported_documentation_visible_without_fabricated_approval(analyst, release_id, bom):
-    bom["vulnerabilities"][0]["analysis"] = {
-        "state": "not_affected",
-        "detail": "Legacy prose without authors.",
-    }
-    assert (
-        analyst.post(
-            f"/api/v2/releases/{release_id}/ingestions",
-            json={
-                "source": "legacy-dt",
-                "event_id": "legacy",
-                "occurred_at": now().isoformat(),
-                "sbom": bom,
-            },
-        ).status_code
-        == 201
-    )
-    finding = next(
-        row
-        for row in analyst.get("/api/v2/findings").json()["items"]
-        if row["identifier"] == "CVE-2099-20001"
-    )
-    detail = analyst.get(f"/api/v2/findings/{finding['id']}").json()
-    assert detail["lifecycle"] == "legacy_assessed"
-    assert (
-        detail["imported_assessments"][0]["current_records"][0]["rationale"]
-        == "Legacy prose without authors."
-    )
-    assert not detail["approval"] and not detail["decisions"]
-    assert detail["original_score"] == 9.8
 
 
 @respx.mock

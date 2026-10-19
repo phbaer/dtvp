@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64), revision = 'b'.repeat(64), older = 'c'.repeat(64)
 function finding(index: number, status = 'submitted', author = 'analyst') {
@@ -12,8 +13,8 @@ async function fixture(page: Page) {
     const body = route.request().method() === 'POST' ? route.request().postDataJSON() as Record<string, unknown> : undefined
     if (body) posts.push({ path, body })
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: 'reviewer', name: 'Reviewer', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Bulk product', capabilities: ['read', 'approve'] }], next_cursor: null }
+    if (path === '/api/v1/me') data = { id: 'reviewer', name: 'Reviewer', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Bulk product', capabilities: ['read', 'approve'] }], next_cursor: null }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.1', state }, { version: '7.1.2', state: older }], next_offset: null }
     else if (path.endsWith('/workspace')) data = { state, project_id: 'product', version: path.includes('7.1.2') ? '7.1.2' : '7.1.1', items: rows, next_offset: null, statistics: { totals: { context_findings: rows.length, unique_vulnerabilities: rows.length }, by_status: { submitted: 3, draft: 1, reassessment_needed: 1 }, by_team: { team: 5 }, severity: { high: 5 }, recorded: 5, submitted: 4, approved: 1 } }
     else if (path.endsWith('/reviews/bulk/preview')) {
@@ -25,8 +26,8 @@ async function fixture(page: Page) {
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Bulk product', exact: true }).click()
   return { posts, fail: (value: number) => { failure = value }, panel: page.getByRole('region', { name: 'Explicit bulk review' }), queue: page.getByRole('region', { name: 'Context finding queue' }) }
 }

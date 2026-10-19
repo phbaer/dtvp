@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -132,7 +133,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <label>Retained policy SHA (empty uses current)<input v-model="historical" :disabled="busy" placeholder="Current CPE policy"></label>
       <label>Retained source kind<select v-model="pageKind" aria-label="Retained source kind" :disabled="busy"><option value="dictionary">Dictionary</option><option value="mapping_history">Mapping history</option></select></label>
       <button :disabled="busy" @click="read()">Read retained source</button>
-      <template v-if="page"><p>{{ page.total }} retained records · {{ page.source?.source || 'No source captured' }} · {{ page.source?.revision }}</p><code>{{ pagePin }}</code><a v-if="page.source" :href="`/api/v3${path()}/${pagePin}/${pageSourceKind}/artifact`" download>Download exact retained source</a><pre>{{ JSON.stringify(page.items, null, 2) }}</pre><button :disabled="busy || pageOffset === 0" @click="read(Math.max(0, pageOffset - 25), true)">Previous source records</button><button :disabled="busy || page.next_offset === null" @click="read(page.next_offset || 0, true)">Next source records</button></template>
+      <template v-if="page"><p>{{ page.total }} retained records · {{ page.source?.source || 'No source captured' }} · {{ page.source?.revision }}</p><code>{{ pagePin }}</code><a v-if="page.source" :href="`${API_PREFIX}${path()}/${pagePin}/${pageSourceKind}/artifact`" download>Download exact retained source</a><pre>{{ JSON.stringify(page.items, null, 2) }}</pre><button :disabled="busy || pageOffset === 0" @click="read(Math.max(0, pageOffset - 25), true)">Previous source records</button><button :disabled="busy || page.next_offset === null" @click="read(page.next_offset || 0, true)">Next source records</button></template>
     </details>
   </details>
 </template>

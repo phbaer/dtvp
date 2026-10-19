@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 async function fixture(page: Page, reviewer = false, personas = false) {
   const writes: Record<string, unknown>[] = [], reads: URLSearchParams[] = [], details: string[] = []
@@ -6,7 +7,7 @@ async function fixture(page: Page, reviewer = false, personas = false) {
   function finding(index: number) { return { id: `finding-${index}`, context_id: `context-${index}`, vulnerability_id: `CVE-2099-${index}`, component: { name: `Parser ${index}`, version: '2' }, context: { component_ref: `parser-${index}`, root_ref: `application-${index}`, team_id: 'team', status: 'resolved' }, description: `Evidence for context ${index}`, source_ratings: [{ score: 8.1, method: 'CVSSv3' }], published_score: null, capabilities: reviewer ? ['approve'] : ['assess'], coverage: { status: reviewer ? 'submitted' : 'unassessed', assessment: reviewer ? { revision: `revision-${index}`, stage: 'submitted', payload: { assessment_id: `decision-${index}`, author_id: 'analyst', state: 'affected', rationale: `Reviewed source context ${index}` } } : null } } }
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
-    if (path === '/api/v2/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
+    if (path === '/api/v1/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (route.request().method() === 'POST') {
       writes.push(route.request().postDataJSON())
       if (outcome === 'hold') await new Promise<void>(resolve => { releasePost = resolve })
@@ -16,16 +17,16 @@ async function fixture(page: Page, reviewer = false, personas = false) {
       return route.fulfill({ json: { committed: outcome !== 'uncommitted', projection: outcome === 'pending' ? 'pending' : 'current' } })
     }
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/playground/personas') data = personas ? [{ id: 'analyst', name: 'analyst' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Continuity product', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/playground/personas') data = personas ? [{ id: 'analyst', name: 'analyst' }, { id: 'other', name: 'other' }] : []
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Continuity product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.1', state }], next_offset: null }
     else if (path.endsWith('/workspace')) { reads.push(new URLSearchParams(url.search)); const offset = Number(url.searchParams.get('offset') || 0); data = { state, project_id: 'product', version: '7.1.1', items: [finding(offset), finding(offset + 1)], next_offset: offset === 0 ? 30 : null, statistics: { totals: { context_findings: 32, unique_vulnerabilities: 32 }, by_status: {}, by_team: { team: 32 }, severity: {}, recorded: reviewer ? 32 : 0, submitted: reviewer ? 32 : 0, approved: 0 } } }
     else if (path.includes('/workspace/')) { const index = Number(path.split('/').at(-1)!.replace('CVE-2099-', '')); details.push(`CVE-2099-${index}`); if (detailError) return route.fulfill({ status: 409, json: { detail: 'Detail evidence changed' } }); data = { ...finding(index), state } }
     await route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Continuity product', exact: true }).click()
   await page.getByRole('combobox', { name: 'Review status', exact: true }).selectOption(reviewer ? 'submitted' : 'unassessed')
   await page.getByRole('button', { name: 'Next page', exact: true }).click()
@@ -110,7 +111,7 @@ test('an old actor response cannot resume navigation after an A to B to A login 
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toBeEnabled()
   await page.getByRole('combobox', { name: 'Persona', exact: true }).selectOption('analyst')
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toHaveValue('analyst')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Continuity product', exact: true }).click()
   await expect(page.getByRole('button', { name: 'CVE-2099-0', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'CVE-2099-0', exact: true }).click()

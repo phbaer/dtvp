@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64), newer = 'b'.repeat(64), head = 'c'.repeat(64)
 async function fixture(page: Page, existing = false) {
@@ -10,16 +11,16 @@ async function fixture(page: Page, existing = false) {
       const body = request.postDataJSON(); writes.push({ path, body })
       if (path.endsWith('/assembly-preview')) result = { preview_digest: 'd'.repeat(64), readiness: body.parts.some((part: any) => part.required && !part.state) ? 'incomplete' : 'selected', missing_required_parts: body.parts.filter((part: any) => part.required && !part.state).map((part: any) => part.part_id), selected_part_count: body.parts.filter((part: any) => part.state).length, counts: { component_occurrences: 4, source_findings: 2, dependency_edges: 1 }, changes: { removed_parts: body.removed_parts, withdrawn_parts: body.withdrawn_parts }, limitations: ['Structural preview only. Ownership, evidence and review status are not previewed.'] }
       else if (path.endsWith('/assembly-apply')) { attempts++; status = attempts === 1 ? 503 : 201; applied = status === 201; result = status === 503 ? { detail: 'Publication uncertain' } : { committed: true, updates: [{ target: head }] } }
-    } else if (path === '/api/v2/me') result = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Assembly product', workspace_id: 'team', capabilities: ['read', 'write'] }, { id: 'other', name: 'Other product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    } else if (path === '/api/v1/me') result = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Assembly product', workspace_id: 'team', capabilities: ['read', 'write'] }, { id: 'other', name: 'Other product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: existing || applied ? [{ version: '7.2', state: head }] : [], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: head, project_id: 'product', version: '7.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/assembly-target')) result = { state: existing ? head : null, predecessor: null, previous_kind: existing ? 'assembly' : 'none', parts: existing ? [{ part_id: 'application', state: pin, required: true, role: 'delivery' }] : [], coherence: existing ? { status: 'producer_declared', build_id: 'old-build' } : null, capabilities: ['assemble'], limitations: [] }
     else if (path.endsWith('/assembly-parts')) result = { items: [{ part_id: 'application', state: newer, source: 'CI' }], total: 1, next_offset: null }
     await route.fulfill({ status, json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Assembly product', exact: true }).click()
   await page.locator('.knowledge-assembly > summary').click()
   const panel = page.getByRole('region', { name: 'Product assembly editor' })
@@ -35,7 +36,7 @@ test('empty product explicitly selects source parts and retries identical frozen
   await panel.getByRole('button', { name: 'Add application', exact: true }).click()
   await panel.getByRole('button', { name: 'Preview exact assembly', exact: true }).click()
   await expect(panel).toContainText('review status are not previewed')
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   const publish = panel.getByRole('button', { name: 'Publish selected assembly', exact: true })
   await publish.click(); await expect(panel.getByRole('alert')).toContainText('Exact selection, preview and request ID retained')
   await publish.click(); await expect(page.getByRole('status').filter({ hasText: 'Product assembly published' })).toContainText('Product assembly published')
@@ -44,7 +45,7 @@ test('empty product explicitly selects source parts and retries identical frozen
   expect(applications[0]!.body.assembly).toMatchObject({ expected: null, parts: [{ part_id: 'application', state: newer, required: true, role: 'delivery' }], coherence: { status: 'unverified', build_id: null, rationale: '' } })
   expect(applications[0]!.body.assembly.request_id).toMatch(/^[0-9a-f-]{36}$/)
   expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Other product', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Product assembly published' })).toHaveCount(0)
 })

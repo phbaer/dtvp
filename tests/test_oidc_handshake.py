@@ -159,10 +159,10 @@ def test_real_signed_login_unknown_identity_has_no_membership_and_pkce_nonce_are
     result = finish()
     assert result.status_code == 307 and result.headers["location"] == "/", result.text
     assert endpoint.call_count == 1
-    me = client.get("/api/v2/me")
+    me = client.get("/api/v1/me")
     assert me.status_code == 200 and me.json()["name"] == "OIDC Person"
     assert me.json()["workspaces"] == [] and not me.json()["org_admin"]
-    assert client.get("/api/v2/catalog/projects").json()["items"] == []
+    assert client.get("/api/v1/catalog/projects").json()["items"] == []
     user, count = identities(app)
     assert user and count == 1 and not user.org_admin
     with app.state.sessions() as db:
@@ -294,7 +294,7 @@ def test_revoked_session_is_denied_after_valid_oidc_login(app, handshake):
     with app.state.sessions.begin() as db:
         credential = db.scalar(select(Credential).where(Credential.user_id == user.id))
         credential.revoked = True
-    assert client.get("/api/v2/me").status_code == 401
+    assert client.get("/api/v1/me").status_code == 401
 
 
 @pytest.mark.parametrize("failure", ["http", "timeout", "malformed-json"])

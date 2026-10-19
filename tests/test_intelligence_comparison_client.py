@@ -34,7 +34,7 @@ def test_cli_explicit_evidence_selection(monkeypatch, capsys, empty):
         + (["--no-evidence"] if empty else ["--evidence-state", "b" * 64]),
     )
     result = {"items": [], "report_digest": "c" * 64}
-    route = respx.post("http://dtvp.test/api/v3/projects/product%2Fname/compare/intelligence").mock(
+    route = respx.post("http://dtvp.test/api/v1/projects/product%2Fname/compare/intelligence").mock(
         return_value=httpx.Response(200, json=result)
     )
     main()

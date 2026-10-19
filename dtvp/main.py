@@ -6,22 +6,22 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from dtvp.api import legacy_router, router
+from dtvp.api import router
 from dtvp.api_advisory_jobs import router as advisory_jobs_router
 from dtvp.api_advisory_schedule import router as advisory_schedule_router
 from dtvp.api_agentyzer_results import router as agentyzer_results_router
-from dtvp.api_analysis import legacy_router as legacy_analysis_router
-from dtvp.api_analysis import router as analysis_router
 from dtvp.api_analysis_jobs import router as analysis_jobs_router
 from dtvp.api_assembly_editor import router as assembly_editor_router
 from dtvp.api_assessment_archive import router as assessment_archive_router
 from dtvp.api_bulk_reviews import router as bulk_reviews_router
 from dtvp.api_component_inventory import router as component_inventory_router
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_coverage import router as coverage_router
 from dtvp.api_cpe_catalog import router as cpe_catalog_router
 from dtvp.api_cpe_editor import router as cpe_editor_router
 from dtvp.api_cpe_ranking import router as cpe_ranking_router
 from dtvp.api_cpe_sources import router as cpe_sources_router
+from dtvp.api_cvss import router as cvss_router
 from dtvp.api_cybeats import router as cybeats_router
 from dtvp.api_documents import router as documents_router
 from dtvp.api_evidence import router as evidence_router
@@ -32,8 +32,6 @@ from dtvp.api_input_quality import router as input_quality_router
 from dtvp.api_intake import router as intake_router
 from dtvp.api_integration_events import router as integration_events_router
 from dtvp.api_intelligence_comparison import router as intelligence_comparison_router
-from dtvp.api_inventory import legacy_router as legacy_inventory_router
-from dtvp.api_inventory import router as inventory_router
 from dtvp.api_issued_exports import router as issued_exports_router
 from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_legacy_archive import router as legacy_archive_router
@@ -51,8 +49,7 @@ from dtvp.api_portfolio import router as portfolio_router
 from dtvp.api_proposals import router as proposal_router
 from dtvp.api_reconciliation import router as reconciliation_router
 from dtvp.api_reconciliation_catalog import router as reconciliation_catalog_router
-from dtvp.api_rescoring import legacy_router as legacy_rescoring_router
-from dtvp.api_rescoring import router as rescoring_router
+from dtvp.api_rule_scoring import router as rule_scoring_router
 from dtvp.api_source_jobs import router as source_jobs_router
 from dtvp.api_sync_jobs import router as sync_jobs_router
 from dtvp.api_synchronization import router as synchronization_router
@@ -64,10 +61,8 @@ from dtvp.knowledge.journal import Journal
 from dtvp.knowledge.maintenance_lock import RuntimeLease
 from dtvp.knowledge.projection import catch_up, is_current
 from dtvp.oidc import install_oidc
-from dtvp.playground import legacy_router as legacy_playground_router
 from dtvp.playground import router as playground_router
 from dtvp.playground import seed
-from dtvp.statistics import router as statistics_router
 from dtvp.storage import Artifacts
 
 
@@ -134,11 +129,9 @@ def _create_app(settings, lease):
     app.include_router(advisory_jobs_router)
     app.include_router(advisory_schedule_router)
     app.include_router(integration_events_router)
-    app.include_router(inventory_router)
     app.include_router(intake_router)
     app.include_router(issued_exports_router)
     app.include_router(knowledge_router)
-    app.include_router(analysis_router)
     app.include_router(analysis_jobs_router)
     app.include_router(assembly_editor_router)
     app.include_router(assessment_archive_router)
@@ -151,10 +144,7 @@ def _create_app(settings, lease):
     app.include_router(cybeats_router)
     app.include_router(documents_router)
     app.include_router(agentyzer_results_router)
-    if settings.legacy_review_enabled:
-        for legacy in (legacy_router, legacy_analysis_router, legacy_inventory_router, legacy_rescoring_router, statistics_router):
-            app.include_router(legacy)
-    app.include_router(rescoring_router)
+    app.include_router(cvss_router)
     app.include_router(reconciliation_router)
     app.include_router(reconciliation_catalog_router)
     app.include_router(workflow_router)
@@ -177,6 +167,7 @@ def _create_app(settings, lease):
     app.include_router(component_inventory_router)
     app.include_router(synchronization_router)
     app.include_router(source_jobs_router)
+    app.include_router(rule_scoring_router)
     app.include_router(licenses_router)
     app.include_router(legacy_archive_router)
     if settings.playground:
@@ -184,15 +175,13 @@ def _create_app(settings, lease):
 
         app.include_router(knowledge_playground_router)
         app.include_router(playground_router)
-        if settings.legacy_review_enabled:
-            app.include_router(legacy_playground_router)
 
     @app.middleware("http")
     async def protect(request, call_next):
         archive_stream = (
             request.method == "POST"
             and re.fullmatch(
-                r"/api/v3/projects/[^/]+/(?:migration/v1-archive/preview|versions/[^/]+/migration/v1-archive/(?:preview|apply)|integration-events(?:/[a-f0-9]{64}/synchronization-preview)?)",
+                rf"{re.escape(API_PREFIX)}/projects/[^/]+/(?:migration/v1-archive/preview|versions/[^/]+/migration/v1-archive/(?:preview|apply)|integration-events(?:/[a-f0-9]{{64}}/synchronization-preview)?)",
                 request.url.path,
             )
             is not None

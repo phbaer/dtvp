@@ -35,10 +35,10 @@ def test_preview_apply_manifest_target_and_exact_replay_preserve_pinned_declarat
     applied = analyst.post(prefix + "/assembly-apply", json=request)
     assert applied.status_code == 201, applied.text
     target = analyst.get(
-        f"/api/v3/projects/{project}/assembly-target", params={"version": "7.1.1"}
+        f"/api/v1/projects/{project}/assembly-target", params={"version": "7.1.1"}
     ).json()
     assert target["cross_part_relationships"] == value["cross_part_relationships"]
-    manifest = analyst.get(f"/api/v3/projects/{project}/states/{target['state']}/assembly").json()[
+    manifest = analyst.get(f"/api/v1/projects/{project}/states/{target['state']}/assembly").json()[
         "manifest"
     ]
     assert manifest["cross_part_relationships"] == value["cross_part_relationships"]

@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64)
 const counts = { context_findings: 0, unique_vulnerabilities: 0, unique_latest_logical_assessments: 0, unique_approved_logical_assessments: 0, reviewed_covered_targets: 0, pending_revision_targets: 0, by_status: {}, source_severity: {}, current_published_severity: {}, scoring_status: {}, required_context_review_workload: { required_targets: 0, approved_targets: 0, remaining_targets: 0, unresolved_targets: 0, not_assessable_targets: 0 } }
@@ -7,23 +8,23 @@ async function fixture(page: Page, query = '') {
     const url = new URL(route.request().url()), path = url.pathname
     if (route.request().method() !== 'GET') writes.push(path)
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/playground/personas') data = []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'p', name: 'Product' }], next_cursor: null }
-    else if (path === '/api/v2/projects/p') data = { id: 'p', name: 'Product' }
+    if (path === '/api/v1/me') data = { id: 'analyst', name: 'Analyst', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/playground/personas') data = []
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'p', name: 'Product' }], next_cursor: null }
+    else if (path === '/api/v1/projects/p') data = { id: 'p', name: 'Product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.2', state: pin }], next_offset: null }
     else if (path.endsWith('/workspace')) { reads.push(url); data = { state: pin, project_id: 'p', version: '7.1.2', items: [], next_offset: null, statistics: { totals: counts, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } } }
     else if (path.endsWith('/portfolio')) {
       reads.push(url)
-      data = path === '/api/v3/portfolio'
+      data = path === '/api/v1/portfolio'
         ? { heads: { p: { '7.1.2': pin } }, heads_digest: pin, statistics: counts, by_team: {}, team_labels: {}, team_counts_overlap: true, project_count: 1, version_count: 1, total: 1, next_offset: null, items: [], limitations: [] }
         : { heads: { '7.1.2': pin }, heads_digest: pin, statistics: counts, by_version: { '7.1.2': counts }, by_team: {}, team_labels: {}, team_counts_overlap: true, state_evidence: {}, limitations: [] }
     }
     return route.fulfill({ json: data })
   })
-  await page.goto(`/?page=Knowledge${query}`)
+  await page.goto(`/?page=Review${query}`); await openNativeTools(page)
   if (!query) {
-    await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+    await page.getByRole('button', { name: 'Product scope', exact: false }).click()
     await page.getByRole('option', { name: 'Product', exact: true }).click()
   }
   await expect(page.getByLabel('Filtered workspace statistics')).toBeVisible()

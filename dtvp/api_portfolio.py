@@ -1,15 +1,18 @@
 """Authorized project statistics over a single immutable selection of version heads."""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for, visible_project_query
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_workflow import team_labels
 from dtvp.knowledge.filters import EvidenceFilter, KnowledgeFilters
 from dtvp.knowledge.journal import Name, Sha
 from dtvp.knowledge.organization_portfolio import MAX_PROJECTS, organization_portfolio
 from dtvp.knowledge.portfolio import load_portfolio
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/portfolio")
@@ -39,6 +42,8 @@ def portfolio(
     metadata_status: str = "",
     agentyzer_evidence: EvidenceFilter = "",
     vscorer_evidence: EvidenceFilter = "",
+    ssvc_status: Literal["", "missing", "draft", "submitted", "approved", "pending", "stale"] = "",
+    ssvc_action: Literal["", "DEFER", "SCHEDULED", "OUT_OF_CYCLE", "IMMEDIATE"] = "",
 ):
     project_for(db, actor, project_id)
     filters = KnowledgeFilters(
@@ -58,6 +63,8 @@ def portfolio(
         metadata_status=metadata_status,
         agentyzer_evidence=agentyzer_evidence,
         vscorer_evidence=vscorer_evidence,
+        ssvc_status=ssvc_status,
+        ssvc_action=ssvc_action,
     )
     result = load_portfolio(
         request.app.state.knowledge,

@@ -63,7 +63,7 @@ def test_native_dt_job_roundtrip_retains_originals_and_plain_legacy_claims(analy
     )
     assert all(call.request.method == "GET" for call in respx.calls)
     assert "read-only-secret" not in str(result)
-    assert analyst.post(f"/api/v2/jobs/{job['id']}/retry").status_code == 409
+    assert analyst.post(f"/api/v1/jobs/{job['id']}/retry").status_code == 404
 
 
 def test_version_bindings_are_conditional_independent_and_management_only(analyst, app):
@@ -79,10 +79,10 @@ def test_version_bindings_are_conditional_independent_and_management_only(analys
     assert analyst.get(second).json()["project_id"] == OTHER
     assert (
         analyst.put(
-            f"/api/v2/projects/{project_id}/connectors/dependency-track",
+            f"/api/v1/projects/{project_id}/connectors/dependency-track",
             json={"external_project_id": OTHER},
         ).status_code
-        == 200
+        == 404
     )
     assert analyst.get(first).json()["project_id"] == EXTERNAL
     assert analyst.get(second).json()["project_id"] == OTHER

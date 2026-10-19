@@ -84,7 +84,7 @@ def test_current_authorization_and_product_binding_apply_to_historical_exports(a
         assert download(analyst, project_id, state, resource).status_code == 404
     login(analyst, "administrator")
     response = analyst.put(
-        f"/api/v2/projects/{project_id}/sharing",
+        f"/api/v1/projects/{project_id}/sharing",
         json={"workspace_id": teams["Operations"], "capabilities": ["read"]},
     )
     assert response.status_code == 200, response.text
@@ -93,7 +93,7 @@ def test_current_authorization_and_product_binding_apply_to_historical_exports(a
         assert download(analyst, project_id, state, resource).status_code == 200
     login(analyst, "administrator")
     response = analyst.put(
-        f"/api/v2/projects/{project_id}/sharing",
+        f"/api/v1/projects/{project_id}/sharing",
         json={"workspace_id": teams["Operations"], "capabilities": []},
     )
     assert response.status_code == 200, response.text
@@ -102,7 +102,7 @@ def test_current_authorization_and_product_binding_apply_to_historical_exports(a
         assert download(analyst, project_id, state, resource).status_code == 404
     login(analyst, "administrator")
     response = analyst.post(
-        "/api/v2/projects", json={"workspace_id": teams["Platform"], "name": "Different product"}
+        "/api/v1/projects", json={"workspace_id": teams["Platform"], "name": "Different product"}
     )
     assert response.status_code == 201, response.text
     other_id = response.json()["id"]

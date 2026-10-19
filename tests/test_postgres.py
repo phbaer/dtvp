@@ -1,3 +1,5 @@
+"""Disposable PostgreSQL startup and durable native workflow qualification."""
+
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -7,144 +9,100 @@ from sqlalchemy import inspect, text
 
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready
-from dtvp.jobs import work_once
 from dtvp.main import create_app
+from dtvp.storage import digest
 from tests.conftest import login
+from tests.test_workflow_api import reviewed, score_input, setup, url, workspace
 
 
 @pytest.mark.postgres
-def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path):
-    url = os.getenv("DTVP_TEST_DATABASE_URL")
-    if not url:
+def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path, bom):
+    database_url = os.getenv("DTVP_TEST_DATABASE_URL")
+    if not database_url:
         pytest.skip("Set DTVP_TEST_DATABASE_URL to a disposable database")
-    if not url.rsplit("/", 1)[-1].endswith("_test"):
+    if not database_url.rsplit("/", 1)[-1].endswith("_test"):
         pytest.fail("Disposable test database name must end in _test")
-    engine = engine_for(url)
+    engine = engine_for(database_url)
     with engine.begin() as connection:
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
+    settings = Settings(
+        _env_file=None,
+        playground=True,
+        database_url=database_url,
+        artifact_dir=tmp_path / "artifacts",
+        frontend_dir=tmp_path / "absent",
+    )
+    # First application startup implicitly creates the complete schema.
+    with TestClient(create_app(settings)) as client:
+        assert schema_ready(engine)
+        assert client.get("/api/v1/me").status_code == 401
+        login(client, "administrator")
+        teams = client.get("/api/v1/workspaces").json()
+        platform = next(team["id"] for team in teams if team["name"] == "Platform")
+        created = client.post(
+            "/api/v1/projects", json={"workspace_id": platform, "name": "PG native product"}
+        )
+        assert created.status_code == 201, created.text
+        project, _ = setup(client, bom)
+        row, _ = reviewed(client, project)
+        login(client, "coordinator")
+        data = score_input(client, project, row)
+        preview = client.post(url(project, "/scoring/preview"), json=data)
+        assert preview.status_code == 200 and preview.json()["eligible"], preview.text
+        published = client.post(
+            url(project, "/scoring/publish"), json={**data, "preview": preview.json()["preview"]}
+        )
+        assert published.status_code == 201, published.text
+        scored = workspace(client, project)
+        selected = next(item for item in scored["items"] if item["id"] == row["id"])
+        assert selected["published_score"]["current"]
+        assert selected["published_score"]["base_score"] == 9.8
+        state = scored["state"]
+        bundle_path = url(project, f"/states/{state}/bundle")
+        bundle = client.get(bundle_path)
+        assert bundle.status_code == 200
+        original = bundle.content
+        assert bundle.headers["x-content-sha256"] == digest(original)
+        assert client.get("/readyz").status_code == 200
+    # Concurrent implicit-upgrade machinery must remain idempotent after startup.
     with ThreadPoolExecutor(max_workers=3) as pool:
         list(pool.map(lambda _: migrate(engine), range(3)))
     assert schema_ready(engine)
-    assert str(inspect(engine).get_columns("revisions")[7]["type"])
-    settings = Settings(
-        _env_file=None, playground=True, database_url=url, artifact_dir=tmp_path / "artifacts"
-    )
+    # Retained historical schema remains available for explicit offline migration.
+    assert {"releases", "revisions", "snapshots"} <= set(inspect(engine).get_table_names())
+    assert "document" in {column["name"] for column in inspect(engine).get_columns("revisions")}
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM releases")) == 0
+    # Restart recovers exactly the same immutable bundle and reviewed contextual score.
     with TestClient(create_app(settings)) as client:
-        login(client)
-        project = client.get("/api/v2/projects").json()[0]
-        release = client.get(f"/api/v2/projects/{project['id']}/releases").json()[0]
-        result = client.post("/api/v2/snapshots", json={"release_id": release["id"]})
-        assert result.status_code == 201
-        snapshot_id = result.json()["id"]
-        original = client.get(f"/api/v2/snapshots/{snapshot_id}/bundle").content
-        assert (
-            client.get("/api/v2/catalog/projects?q=Gateway").json()["items"][0]["id"]
-            == project["id"]
-        )
-        finding = client.get("/api/v2/findings?sort=identifier&limit=1").json()
-        assert client.get(
-            "/api/v2/findings", params={"sort": "identifier", "cursor": finding["next_cursor"]}
-        ).json()["items"]
-        target = finding["items"][0]
-        analysis = client.post(
-            f"/api/v2/findings/{target['id']}/analyses",
-            json={"expected_version": target["state_version"]},
-        )
-        assert analysis.status_code == 202
-        analysis_id = analysis.json()["id"]
-        assert work_once(client.app.state.sessions, client.app.state.artifacts, settings)
-        assert (
-            client.get(f"/api/v2/findings/{target['id']}/analyses").json()["items"][0]["result"][
-                "proposal_state"
-            ]
-            == "affected"
-        )
-        login(client, "administrator")
-        teams = client.get("/api/v2/me").json()["workspaces"]
-        operations = next(team["id"] for team in teams if team["name"] == "Operations")
-        assert (
-            client.put(
-                f"/api/v2/projects/{project['id']}/sharing",
-                json={"workspace_id": operations, "capabilities": ["read"]},
-            ).status_code
-            == 200
-        )
-        login(client, "operations")
-        assert len(client.get("/api/v2/catalog/projects").json()["items"]) == 2
-    with TestClient(create_app(settings)) as client:
-        login(client)
-        assert client.get("/readyz").status_code == 200
-        statistics = client.get("/api/v2/statistics").json()
-        assert statistics["totals"]["findings"] == 2
-        assert statistics["workflow"] == {"open": 2}
-        from tests.test_rescoring import BASE, VECTOR
-
-        finding = next(
-            row
-            for row in client.get("/api/v2/findings").json()["items"]
-            if row["identifier"] == "CVE-2099-20001"
-        )
-        body = {
-            "kind": "manual",
-            "base_vector": BASE,
-            "vector": VECTOR,
-            "rationale": "PostgreSQL context verified.",
-        }
-        result = client.post(
-            f"/api/v2/findings/{finding['id']}/decisions",
-            json={
-                "expected_version": finding["state_version"],
-                "state": "not_affected",
-                "rationale": "Reviewed scoped exposure.",
-                "justification": "protected_at_runtime",
-            },
-        )
-        assert result.status_code == 201, result.text
-        login(client, "reviewer")
-        current = client.get(f"/api/v2/findings/{finding['id']}").json()
-        assert (
-            client.post(
-                f"/api/v2/findings/{finding['id']}/approvals",
-                json={
-                    "expected_version": current["state_version"],
-                    "decision_id": result.json()["id"],
-                },
-            ).status_code
-            == 200
-        )
-        assert client.get("/api/v2/statistics").json()["totals"]["adopted_rescoring"] == 0
         login(client, "coordinator")
-        finding = client.get(f"/api/v2/findings/{finding['id']}").json()
-        preview = client.post(
-            f"/api/v2/findings/{finding['id']}/rescoring/preview",
-            json={
-                "expected_version": finding["state_version"],
-                "state": "not_affected",
-                "rescoring": body,
-            },
-        )
-        assert preview.status_code == 200, preview.text
-        published = client.post(
-            f"/api/v2/findings/{finding['id']}/rescoring",
-            json={
-                "expected_version": finding["state_version"],
-                "rescoring": body | {"preview_digest": preview.json()["preview_digest"]},
-            },
-        )
-        assert published.status_code == 201, published.text
-        assert client.get("/api/v2/statistics").json()["totals"]["adopted_rescoring"] == 1
-        assert (
-            client.get("/api/v2/findings?sort=effective_score").json()["items"][-1][
-                "effective_score"
-            ]
-            == 0
-        )
-        assert client.get(f"/api/v2/snapshots/{snapshot_id}/bundle").content == original
-        assert (
-            client.get(f"/api/v2/analyses/{analysis_id}/report").json()["assessment"][
-                "application_eligible"
-            ]
-            is True
-        )
+        assert client.get("/readyz").status_code == 200
+        assert client.get(bundle_path).content == original
+        current = workspace(client, project)
+        assert current["state"] == state
+        assert next(item for item in current["items"] if item["id"] == row["id"])[
+            "published_score"
+        ]["current"]
+        # Revoke a live principal's membership using the manager API. Its existing
+        # session must immediately lose both current and pinned historical access.
+        manager = TestClient(client.app)
+        try:
+            login(manager, "administrator")
+            response = manager.put(
+                f"/api/v1/workspaces/{platform}/members",
+                json={
+                    "issuer": "playground",
+                    "subject": "coordinator",
+                    "name": "Security coordinator",
+                    "roles": [],
+                },
+            )
+            assert response.status_code == 200, response.text
+            assert client.get(bundle_path).status_code == 404
+            assert client.get(url(project, "/versions/7.1.1/workspace")).status_code == 404
+            assert client.post(url(project, "/scoring/preview"), json=data).status_code == 404
+            assert manager.get(bundle_path).content == original
+        finally:
+            manager.close()
     engine.dispose()

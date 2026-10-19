@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const before = 'a'.repeat(64), after = 'b'.repeat(64), historic = 'c'.repeat(64)
@@ -24,8 +25,8 @@ async function fixture(page: Page, options: { draftAllowed?: boolean; draftRespo
     }
     if (request.method() !== 'GET') { mutations.push(path); return route.fulfill({ json: {} }) }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'comparison-project', name: 'Comparison product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'comparison-project', name: 'Comparison product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: after }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: after, project_id: 'comparison-project', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/refs')) result = { items: [{ kind: 'branch', name: '7.1.1', version: '7.1.1', state: before }, { kind: 'branch', name: '7.1.2', version: '7.1.2', state: created ? updatedAfter : after }, { kind: 'tag', name: 'released-7.1.1', version: '7.1.1', state: historic }], next_offset: null }
@@ -55,8 +56,8 @@ async function fixture(page: Page, options: { draftAllowed?: boolean; draftRespo
     }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Comparison product' }).click()
   return { requests, historyRequests, mutations, drafts, fail: () => { fail = true } }
 }
@@ -135,7 +136,7 @@ test('assessment reuse is a pinned read-only preview with new target review requ
   await expect(preview).toContainText('New target coverage requires independent review.')
   await page.getByRole('button', { name: 'Next candidates', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Next candidates', exact: true })).toBeDisabled()
-  expect(state.mutations).toEqual(['/api/v3/projects/comparison-project/synchronization/preview', '/api/v3/projects/comparison-project/synchronization/preview'])
+  expect(state.mutations).toEqual(['/api/v1/projects/comparison-project/synchronization/preview', '/api/v1/projects/comparison-project/synchronization/preview'])
   await expect(page.getByRole('button', { name: /apply|merge|approve/i })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Create target draft', exact: true })).toHaveCount(0)
 })
@@ -165,7 +166,7 @@ test('eligible source author creates only a pinned target draft with explicit co
   await expect(page.getByRole('region', { name: 'Assessment reuse preview', exact: true })).toHaveCount(0)
   expect(state.drafts).toHaveLength(1)
   expect(state.drafts[0]).toEqual({ source: before, target: after, basis: null, preview_digest: 'd'.repeat(64), source_context_id: sourceContext, target_context_id: targetContext, vulnerability_id: 'CVE-2099-1234', source_assessment_revision: assessmentRevision, context_mapping: {}, conditions: 'Target parser remains unreachable.', reason: 'Same maintained configuration; independent target review follows.', request_id: expect.stringMatching(/^[0-9a-f-]{36}$/) })
-  expect(state.mutations).toEqual(['/api/v3/projects/comparison-project/synchronization/preview', '/api/v3/projects/comparison-project/synchronization/drafts'])
+  expect(state.mutations).toEqual(['/api/v1/projects/comparison-project/synchronization/preview', '/api/v1/projects/comparison-project/synchronization/drafts'])
   await page.getByRole('button', { name: 'Refresh version references', exact: true }).click()
   await expect(page.getByRole('combobox', { name: 'After state', exact: true })).toHaveValue(`branch:7.1.2:${updatedAfter}`)
   await expect(page.getByRole('button', { name: /approve|publish score|merge/i })).toHaveCount(0)

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.evidence import evidence_ref
 from dtvp.knowledge.journal import Conflict, Sha
 from dtvp.knowledge.osv_jobs import KIND, enqueue_matching, job_view, retry_matching
@@ -12,7 +13,7 @@ from dtvp.knowledge.ownership import product_heads
 from dtvp.models import Job
 from dtvp.storage import canonical, digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def selected(db, actor, project_id, job_id, *, lock=False):

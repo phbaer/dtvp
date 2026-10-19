@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     public_url: str = "http://127.0.0.1:8000"
     session_secret: str = ""
     playground: bool = False
-    legacy_review_enabled: bool = True
     evidence_jws_trust: list[dict] = []
     frontend_dir: Path = Path("frontend/dist")
     max_upload_bytes: int = 32 * 1024 * 1024

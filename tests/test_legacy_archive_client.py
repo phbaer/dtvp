@@ -87,7 +87,7 @@ def test_archive_cli_exact_bytes_header_bounded_chunks_and_paging(
         Path, "open", lambda self, *args, **kwargs: Tracked(native(self, *args, **kwargs))
     )
     route = respx.post(
-        "http://dtvp.test/api/v3/projects/product%2Fname/migration/v1-archive/preview"
+        "http://dtvp.test/api/v1/projects/product%2Fname/migration/v1-archive/preview"
     ).mock(return_value=httpx.Response(200, json=result()))
     main()
     request = route.calls[0].request
@@ -128,7 +128,7 @@ def test_archive_cli_preserves_backend_failure(monkeypatch, tmp_path, capsys, st
     path.write_bytes(b"unparsed input")
     argv(monkeypatch, path, "--json")
     route = respx.post(
-        "http://dtvp.test/api/v3/projects/product%2Fname/migration/v1-archive/preview"
+        "http://dtvp.test/api/v1/projects/product%2Fname/migration/v1-archive/preview"
     ).mock(return_value=httpx.Response(status, json={"detail": "Archive rejected by backend"}))
     with pytest.raises(SystemExit) as error:
         main()

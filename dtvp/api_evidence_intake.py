@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.evidence import EvidenceInput, evidence_ref
 from dtvp.knowledge.journal import SECTIONS, Name, Sha
 from dtvp.knowledge.ownership import product_heads
@@ -13,7 +14,7 @@ from dtvp.knowledge.workspace import load_sections
 from dtvp.schemas import RequestModel
 from dtvp.storage import canonical, digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 LIMITATIONS = [
     "Semantic scope preview only: matching, unresolved scope and contradictions are not an exact simulation of source supersession or ordinal ordering.",
     "Import separately validates producer revision ordering and all current evidence/version pins; preview never publishes or approves anything.",

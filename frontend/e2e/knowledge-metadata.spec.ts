@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const state = 'a'.repeat(64), revision = 'b'.repeat(64), newer = 'c'.repeat(64), context = 'd'.repeat(64)
 const annotations = { cybersecurity: { criticality: 'moderate', exposure: 'internal', mitigations: ['Firewall\nseparate note'], testing_evidence: ['TEST-42'] }, deployment: { environment: 'Production', usage: 'Report generation', configuration: 'Default' }, support: { status: 'supported', supplier: 'Supplier', support_until: null, end_of_life: null, references: ['SUPPORT-42'] }, notes: 'Keep this note', properties: { preserved: 'yes' } }
@@ -12,8 +13,8 @@ async function fixture(page: Page, options: { manage?: boolean; stale?: boolean;
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     let result: unknown = { items: [], next_offset: null, next_cursor: null }, status = 200
     if (request.method() === 'PUT') { const body = request.postDataJSON(); writes.push(body); attempts++; status = attempts === 1 ? options.conflict ? 409 : 503 : 201; result = status === 201 ? { committed: true, updates: [{ target: newer }] } : { detail: status === 409 ? 'Product version changed; reload before editing metadata' : 'Publication uncertain' }; if (status === 201) current = newer }
-    else if (path === '/api/v2/me') result = { id: 'manager', name: 'Manager', org_admin: options.manage, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Metadata product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/me') result = { id: 'manager', name: 'Manager', org_admin: options.manage, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Metadata product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1', state: current }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: current, project_id: 'product', version: '7.1', items: options.delayedRead ? [finding, second] : [finding], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.includes('/workspace/')) result = { ...(path.includes(second.context_id) ? second : finding), state: current }
@@ -26,8 +27,8 @@ async function fixture(page: Page, options: { manage?: boolean; stale?: boolean;
     else if (path.endsWith('/component-context')) { reads++; if (options.delayedRead && reads === 1) await readGate; result = { state: current, head: current, version: '7.1', component_ref: 'library', component: { name: 'Runtime library', 'bom-ref': 'library' }, metadata, defaults: annotations, capabilities: options.manage ? ['curate'] : [], blocked_reasons: options.manage ? [] : ['component_metadata_requires_management_permission'], limitations: [], topology: { dependency_graph: 'reported', consuming_root: url.searchParams.get('context_id') === second.context_id ? 'second-root' : 'application', incoming: options.manyNeighbors ? Array.from({ length: 50 }, (_, index) => ({ ref: `consumer-${String(index).padStart(3, '0')}`, name: `Consumer ${index}`, version: '1', resolved: true })) : [{ ref: 'application', name: 'Application', version: '7.1', resolved: true }], outgoing: [], incoming_total: options.manyNeighbors ? 75 : 1, outgoing_total: 0, neighbor_limit: 50, limitations: ['Edges do not establish runtime reachability or complete discovery.'] } } }
     await route.fulfill({ status, json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Metadata product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Metadata product', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2026-1234', exact: true }).click()
   await page.locator('.component-context > summary').click()
   return { writes, neighborReads, releaseRead, panel: page.locator('.component-context') }

@@ -16,7 +16,7 @@ VERSION = "7.1.1"
 
 
 def url(project_id, suffix=""):
-    return f"/api/v3/projects/{project_id}{suffix}"
+    return f"/api/v1/projects/{project_id}{suffix}"
 
 
 def workspace(client, project_id, version=VERSION, **params):
@@ -28,7 +28,7 @@ def workspace(client, project_id, version=VERSION, **params):
 def setup(client, bom, versions=(VERSION,)):
     login(client, "administrator")
     project_id = product(client)
-    teams = {item["name"]: item["id"] for item in client.get("/api/v2/workspaces").json()}
+    teams = {item["name"]: item["id"] for item in client.get("/api/v1/workspaces").json()}
     for version in versions:
         imported(client, project_id, version, body(bom, request_id="build-" + version))
     apply_policy(client, project_id, [{"selector": "*", "team_id": teams["Platform"]}])
@@ -318,7 +318,7 @@ def test_all_consuming_teams_must_review_same_vulnerability(analyst, bom):
     project_id, teams = setup(analyst, bom)
     login(analyst, "administrator")
     response = analyst.put(
-        f"/api/v2/projects/{project_id}/sharing",
+        f"/api/v1/projects/{project_id}/sharing",
         json={"workspace_id": teams["Operations"], "capabilities": ["read", "assess", "approve"]},
     )
     assert response.status_code == 200, response.text

@@ -3,11 +3,12 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.agentyzer_results import FORMAT, AgentyzerResultInput, import_agentyzer_result
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.post("/projects/{project_id}/versions/{version}/proposals/agentyzer", status_code=201)

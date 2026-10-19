@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), first = sha('a'), evidence = sha('b'), packages = Array.from({ length: 23 }, (_, n) => `pkg:pypi/library-${String(n).padStart(2, '0')}@1.0`)
 async function fixture(page: Page, readonly = false, personas = false) {
@@ -15,10 +16,10 @@ async function fixture(page: Page, readonly = false, personas = false) {
       return route.fulfill({ json: { ...saved, status: 'queued', capabilities: ['cancel'] } })
     }
     let data: unknown = { items: [], next_cursor: null, next_offset: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product' }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.2', state: head }] }
     else if (path.endsWith('/workspace')) data = { state: head, project_id: 'product', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/advisory-refresh')) data = { expected_versions: { '7.1.2': head }, expected_evidence: evidence, providers: [], identifiers: [], total: 0, next_offset: null, capabilities: [], limitations: [] }
@@ -27,7 +28,7 @@ async function fixture(page: Page, readonly = false, personas = false) {
     else if (path.endsWith('/osv-jobs/saved-job')) { jobReads++; data = { ...saved, ...(mismatch === 'id' ? { id: 'unrelated-job' } : mismatch === 'kind' ? { kind: 'agentyzer-native' } : mismatch === 'scope' ? { expected_evidence: sha('f') } : {}), status: mismatch ? 'succeeded' : saved.status } }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge'); await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page); await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('Advisory intelligence refresh', { exact: true }).click()
   return { panel: page.getByRole('region', { name: 'OSV package matching', exact: true }), requests, plans, jobReads: () => jobReads, fail: (status: number) => { failure = status }, advance: () => { head = sha('9') }, hold: () => { hold = true }, mismatch: (mode: string) => { mismatch = mode }, release: () => release?.() }
 }
@@ -91,7 +92,7 @@ test('uncertain enqueue and job actions block product and Review navigation unti
   const f = await fixture(page); await open(page); await f.panel.getByRole('checkbox').first().check(); f.fail(503)
   await f.panel.getByRole('button', { name: 'Queue selected OSV queries', exact: true }).click()
   await expect(f.panel.getByRole('alert')).toContainText('Recording uncertain')
-  const product = page.getByRole('button', { name: 'Knowledge product', exact: false })
+  const product = page.getByRole('button', { name: 'Product scope', exact: false })
   const review = page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('button', { name: 'Review', exact: true })
   await expect(product).toBeDisabled(); await expect(review).toBeDisabled()
   await f.panel.getByRole('button', { name: 'Discard OSV request capture', exact: true }).click()

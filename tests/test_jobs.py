@@ -1,67 +1,116 @@
+"""Native worker leases never execute or mutate retained legacy jobs."""
+
 from datetime import timedelta
+from types import SimpleNamespace
 
-import httpx
-import respx
-from sqlalchemy import select
+import pytest
 
-from dtvp.jobs import claim, work_once
-from dtvp.models import Job, now
+from dtvp.db import engine_for, migrate, sessions
+from dtvp.jobs import claim, execute, work_once
+from dtvp.models import Job, Project, User, Workspace, now
+from dtvp.storage import Artifacts
 
 
-@respx.mock
-def test_matching_job_coverage_failure_and_lease_recovery(analyst, release_id):
-    app = analyst.app
-    app.state.settings.providers_enabled = ["osv"]
-    route = respx.post("https://api.osv.dev/v1/query").mock(
-        return_value=httpx.Response(200, json={"vulns": []})
+@pytest.fixture
+def worker(tmp_path):
+    engine = engine_for("sqlite:///:memory:")
+    migrate(engine)
+    factory = sessions(engine)
+    with factory.begin() as db:
+        db.add(Workspace(id="team", name="Team"))
+        db.add(User(id="author", issuer="test", subject="author", name="Author"))
+        db.flush()
+        db.add(Project(id="product", workspace_id="team", name="Product"))
+    yield factory, Artifacts(tmp_path / "artifacts"), SimpleNamespace()
+    engine.dispose()
+
+
+def add(factory, identifier, kind="propose-sync-native", **changes):
+    with factory.begin() as db:
+        db.add(
+            Job(
+                id=identifier,
+                project_id="product",
+                actor_id="author",
+                kind=kind,
+                payload={"preserved": True},
+                **changes,
+            )
+        )
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_retained_jobs_do_not_starve_native_jobs_or_mutate_history(worker, status):
+    factory, _, _ = worker
+    add(
+        factory,
+        "old",
+        "match",
+        status=status,
+        lease_until=now() - timedelta(seconds=1),
+        created_at=now() - timedelta(days=1),
+        result={"retained": True},
     )
-    response = analyst.post(
-        "/api/v2/jobs", json={"kind": "match", "release_id": release_id, "provider": "osv"}
-    )
-    assert response.status_code == 202
-    first = claim(app.state.sessions)
-    assert first
-    assert claim(app.state.sessions) is None
-    with app.state.sessions.begin() as db:
-        db.get(Job, first[0]).lease_until = now() - timedelta(seconds=1)
-    assert work_once(app.state.sessions, app.state.artifacts, app.state.settings)
-    with app.state.sessions() as db:
-        job = db.get(Job, first[0])
-        assert job.status == "succeeded"
-        assert job.attempts == 2
-        assert all(c["status"] == "checked" for c in job.result["coverage"])
-    # No match does not convert imported findings to not-affected or remove them.
-    assert len(analyst.get("/api/v2/findings").json()["items"]) == 2
-    route.mock(return_value=httpx.Response(503))
-    response = analyst.post(
-        "/api/v2/jobs", json={"kind": "match", "release_id": release_id, "provider": "osv"}
-    )
-    assert work_once(app.state.sessions, app.state.artifacts, app.state.settings)
-    with app.state.sessions() as db:
-        job = db.get(Job, response.json()["id"])
-        assert job.status == "failed"
-        assert not job.result
-    assert analyst.post(f"/api/v2/jobs/{response.json()['id']}/retry").status_code == 202
+    add(factory, "native")
+    identifier, token = claim(factory)
+    assert identifier == "native" and token
+    assert claim(factory) is None
+    with factory() as db:
+        old = db.get(Job, "old")
+        assert (old.status, old.attempts, old.payload, old.result) == (
+            status,
+            0,
+            {"preserved": True},
+            {"retained": True},
+        )
 
 
-def test_disabled_providers_no_network(analyst, release_id):
-    assert (
-        analyst.post(
-            "/api/v2/jobs", json={"kind": "match", "release_id": release_id, "provider": "osv"}
-        ).status_code
-        == 422
-    )
-    assert analyst.get("/api/v2/jobs").json() == []
+def test_native_expired_lease_can_be_recovered(worker):
+    factory, _, _ = worker
+    add(factory, "native")
+    first = claim(factory)
+    with factory.begin() as db:
+        db.get(Job, "native").lease_until = now() - timedelta(seconds=1)
+    second = claim(factory)
+    assert first[0] == second[0] and first[1] != second[1]
+    with factory() as db:
+        assert db.get(Job, "native").attempts == 2
 
 
-def test_cancelled_job_cannot_publish(analyst, release_id):
-    app = analyst.app
-    app.state.settings.providers_enabled = ["osv"]
-    response = analyst.post(
-        "/api/v2/jobs", json={"kind": "match", "release_id": release_id, "provider": "osv"}
-    )
-    job_id = response.json()["id"]
-    assert analyst.post(f"/api/v2/jobs/{job_id}/cancel").json()["status"] == "cancelled"
-    assert not work_once(app.state.sessions, app.state.artifacts, app.state.settings)
-    with app.state.sessions() as db:
-        assert db.scalar(select(Job).where(Job.id == job_id)).status == "cancelled"
+def test_cancelled_and_future_jobs_are_not_claimed(worker):
+    factory, _, _ = worker
+    add(factory, "cancelled", status="cancelled")
+    add(factory, "future", available_at=now() + timedelta(days=1))
+    assert claim(factory) is None
+
+
+def test_worker_dispatches_native_job_and_updates_projection(worker, monkeypatch):
+    from dtvp.knowledge import sync_jobs
+
+    factory, artifacts, settings = worker
+    add(factory, "native")
+    calls = []
+
+    def complete(factory, journal, settings, identifier, token):
+        calls.append((identifier, token))
+        with factory.begin() as db:
+            job = db.get(Job, identifier)
+            assert job.lease_token == token
+            job.status = "succeeded"
+            job.result = {"publication": "retained"}
+
+    monkeypatch.setattr(sync_jobs, "execute", complete)
+    assert work_once(factory, artifacts, settings)
+    with factory() as db:
+        job = db.get(Job, "native")
+        assert job.result == {"publication": "retained", "projection": "current"}
+        assert calls == [(job.id, job.lease_token)]
+
+
+def test_legacy_direct_execution_rejected_without_mutation(worker):
+    factory, artifacts, settings = worker
+    add(factory, "old", "import-dt")
+    with pytest.raises(ValueError, match="only native"):
+        execute(factory, artifacts, settings, "old", "unused")
+    with factory() as db:
+        assert db.get(Job, "old").status == "queued"

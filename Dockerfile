@@ -4,6 +4,7 @@ COPY frontend/package*.json ./
 RUN --mount=type=secret,id=build_ca,target=/run/secrets/build_ca \
     if [ -f /run/secrets/build_ca ]; then NODE_EXTRA_CA_CERTS=/run/secrets/build_ca npm ci --include=optional; else npm ci --include=optional; fi
 COPY frontend/ ./
+COPY dtvp/api_contract.py /app/dtvp/api_contract.py
 RUN npm run build
 
 FROM ghcr.io/astral-sh/uv:0.13.1 AS uv

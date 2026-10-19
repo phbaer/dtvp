@@ -69,7 +69,7 @@ def test_received_evidence_filters_apply_before_queue_paging_and_all_portfolio_c
         assert not result["items"][0]["coverage"]["approved"]
         for path, params in (
             (url(project, "/portfolio"), {}),
-            ("/api/v3/portfolio", {"project": project, "limit": 1}),
+            ("/api/v1/portfolio", {"project": project, "limit": 1}),
         ):
             response = analyst.get(
                 path, params=params | {"agentyzer_evidence": value, "vscorer_evidence": "missing"}
@@ -94,7 +94,7 @@ def test_received_filter_values_are_typed_on_each_api(analyst, bom, field):
     for path in (
         url(project, "/versions/7.1.1/workspace"),
         url(project, "/portfolio"),
-        "/api/v3/portfolio",
+        "/api/v1/portfolio",
     ):
         response = analyst.get(path, params={field: "approved"})
         assert response.status_code == 422, response.text

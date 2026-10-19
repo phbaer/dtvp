@@ -2,11 +2,13 @@
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import Field
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
-from dtvp.api_analysis import AnalysisBinding, bind
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
+from dtvp.domain import audit
 from dtvp.knowledge.analysis_followups import FollowUpInput, enqueue_followup
 from dtvp.knowledge.analysis_jobs import (
     KIND,
@@ -18,8 +20,31 @@ from dtvp.knowledge.analysis_jobs import (
 from dtvp.knowledge.analysis_reconciliation import ReconcileInput, configured, reconcile_analysis
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Sha
 from dtvp.models import Job
+from dtvp.schemas import RequestModel
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
+
+
+class AnalysisBinding(RequestModel):
+    component_name: str = Field(min_length=1, max_length=200)
+
+
+
+def bind(project_id: str, data: AnalysisBinding, db: DB, actor: Auth):
+    project = project_for(db, actor, project_id, "manage")
+    db.refresh(project, with_for_update=True)
+    if not data.component_name.strip():
+        raise HTTPException(422, "Repository name must not be empty")
+    project.metadata_json = {
+        **project.metadata_json,
+        "connectors": {
+            **project.metadata_json.get("connectors", {}),
+            "agentyzer": {"component_name": data.component_name.strip()},
+        },
+    }
+    audit(db, actor.user.id, "connector.bind", project.id, project.id, {"provider": "agentyzer"})
+    return project.metadata_json["connectors"]["agentyzer"]
+
 
 
 @router.put("/projects/{project_id}/connectors/agentyzer")

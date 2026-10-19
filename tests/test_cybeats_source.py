@@ -115,8 +115,8 @@ def test_forged_or_incomplete_capture_rejected(change):
 
 def prepare(analyst, app, monkeypatch):
     login(analyst, "administrator")
-    project = analyst.get("/api/v2/projects").json()[0]["id"]
-    base = f"/api/v3/projects/{project}/versions/cybeats-version"
+    project = analyst.get("/api/v1/projects").json()[0]["id"]
+    base = f"/api/v1/projects/{project}/versions/cybeats-version"
     for key, value in vars(settings()).items():
         monkeypatch.setattr(app.state.settings, key, value)
     seen = []
@@ -168,7 +168,7 @@ def test_mocked_read_capture_explicit_export_import_retains_raw_and_never_invent
     )
     assert replay.json()["publication"] == imported.json()["publication"]
     state = imported.json()["updates"][0]["target"]
-    bundle = analyst.get(f"/api/v3/projects/{base.split('/')[4]}/states/{state}/bundle").json()
+    bundle = analyst.get(f"/api/v1/projects/{base.split('/')[4]}/states/{state}/bundle").json()
     assert (
         bundle["inventory"]["baseline"]["source_provenance"]["composition_binding"]
         == "operator_declared_supplied_export"

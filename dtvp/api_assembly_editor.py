@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_intake import intake_parts
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.assembly import (
@@ -18,7 +19,7 @@ from dtvp.knowledge.workspace import load_sections
 from dtvp.schemas import RequestModel
 from dtvp.storage import canonical, digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 LIMITATIONS = [
     "Preview describes the exact selected immutable source parts, structural counts and declared coherence only.",
     "Ownership, external evidence, assessment coverage and final review status are not previewed; publication applies current policy/evidence with CAS.",

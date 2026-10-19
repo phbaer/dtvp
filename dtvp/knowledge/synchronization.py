@@ -16,7 +16,14 @@ def _content(record):
     payload = record.get("payload", {})
     return {
         key: payload.get(key)
-        for key in ("state", "justification", "rationale", "conditions", "evidence")
+        for key in (
+            "state",
+            "justification",
+            "rationale",
+            "conditions",
+            "evidence",
+            *(["ssvc"] if "ssvc" in payload else []),
+        )
     }
 
 

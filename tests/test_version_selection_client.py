@@ -47,7 +47,7 @@ def test_coverage_cli_preserves_default_body_and_forwards_closed_selection(
         ]
     monkeypatch.setattr(sys, "argv", args)
     response = {"preview_digest": "c" * 64, "items": []}
-    route = respx.post("http://dtvp.test/api/v3/projects/product%2Fname/coverage/candidates").mock(
+    route = respx.post("http://dtvp.test/api/v1/projects/product%2Fname/coverage/candidates").mock(
         return_value=httpx.Response(200, json=response)
     )
     main()

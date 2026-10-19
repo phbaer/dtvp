@@ -3,12 +3,13 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name
 from dtvp.knowledge.proposals import VScorerProposalInput, import_vscorer_proposal
 from dtvp.knowledge.vscorer_minimal import MinimalMappingSelection, VScorerMinimalProposalInput
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.post("/projects/{project_id}/versions/{version}/proposals/vscorer", status_code=201)

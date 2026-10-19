@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.auth import authenticate
 from dtvp.knowledge.git_ancestry import MAX_OBJECTS
@@ -21,7 +22,7 @@ from dtvp.knowledge.integration_events import (
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Sha
 from dtvp.knowledge.legacy_archive import strict_json
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 async def capture(request, db, actor, project_id, model, capability):

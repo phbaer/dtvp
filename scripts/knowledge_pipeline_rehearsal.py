@@ -13,6 +13,8 @@ from uuid import uuid4
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = "7.1.1"
 BASE = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
@@ -25,27 +27,27 @@ def checked(response):
 
 
 def login(client, persona):
-    checked(client.post("/api/v2/playground/login", json={"persona": persona}))
+    checked(client.post(f"{API_PREFIX}/playground/login", json={"persona": persona}))
     client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
-    if checked(client.get("/api/v2/me")).get("playground") is not True:
+    if checked(client.get(f"{API_PREFIX}/me")).get("playground") is not True:
         raise ValueError("Refusing rehearsal writes outside an isolated playground")
 
 
 def rehearse(client, *, simulate_reviews=False, keep_observations=False, output=None):
     """Use backend workflows only; return a report and exact consumer artifact bytes."""
     login(client, "administrator")
-    teams = checked(client.get("/api/v2/workspaces"))
+    teams = checked(client.get(f"{API_PREFIX}/workspaces"))
     platform = next(item["id"] for item in teams if item["name"] == "Platform")
     project = checked(
         client.post(
-            "/api/v2/projects",
+            f"{API_PREFIX}/projects",
             json={
                 "workspace_id": platform,
                 "name": "[SYNTHETIC] Pipeline rehearsal " + uuid4().hex[:12],
             },
         )
     )["id"]
-    path = f"/api/v3/projects/{project}"
+    path = f"{API_PREFIX}/projects/{project}"
     product = path + f"/versions/{VERSION}"
     files = {}
     steps = []

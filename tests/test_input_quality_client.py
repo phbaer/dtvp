@@ -33,7 +33,7 @@ def test_input_quality_cli_forwards_selection_and_keeps_full_counts(monkeypatch,
         ],
     )
     route = respx.get(
-        "http://dtvp.test/api/v3/projects/project/states/" + "a" * 64 + "/input-quality"
+        "http://dtvp.test/api/v1/projects/project/states/" + "a" * 64 + "/input-quality"
     ).mock(
         return_value=httpx.Response(
             200,

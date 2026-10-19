@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), target = sha('b'), source = sha('a'), eventId = sha('c'), digest = sha('d')
 async function fixture(page: Page, personas = false) {
@@ -16,18 +17,18 @@ async function fixture(page: Page, personas = false) {
       return route.fulfill({ json: { integration_event: event(), basis_selection: body.basis ? 'explicit' : 'none_no_inferred_common_basis', apply_supported: false, limitations: ['No automatic draft or approval transfer.'], proposals: { source, target: body.target, basis: body.basis, preview_digest: digest, total: 21, next_offset: later ? null : 20, summary: { by_category: { needs_review: 21 } }, items: [{ id: later ? 'second' : 'first', category: 'needs_review', vulnerability_id: later ? 'CVE-2099-43' : 'CVE-2099-42', source_context_id: sha('1'), target_context_id: sha('2'), reasons: ['material_context_or_source_evidence_differs'], requires_new_target_review: true }], limitations: ['New target review is required.'] } } })
     }
     let data: unknown = { items: [], next_cursor: null, next_offset: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, playground: personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, playground: personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product' }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.2', state: head }] }
     else if (path.endsWith('/workspace')) data = { state: head, project_id: 'product', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/reconciliations')) data = { items: [], total: 0, next_offset: null, capabilities: [] }
     else if (path.endsWith('/integration-events')) { reads.push(url); const state = path.split('/states/')[1]!.split('/')[0]; data = { state, items: url.searchParams.get('offset') === '20' ? [event(sha('f'), false)] : [event()], total: 21, next_offset: url.searchParams.get('offset') === '20' ? null : 20, limitations: [] } }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('Occurrence correspondence across imports', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Pipeline integration evidence', exact: true })
   return { panel, reads, posts, fail: (code: number) => { failure = code }, advance: () => { head = sha('9') }, hold: () => { hold = true }, release: () => release?.() }

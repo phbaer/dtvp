@@ -247,9 +247,9 @@ def test_comparisons_are_restricted_to_one_product_line(supplied):
 
 def test_supplied_fixture_is_verified_against_real_native_retained_bytes(supplied, analyst):
     root, manifest, raw = supplied
-    project = analyst.get("/api/v2/projects").json()[0]["id"]
+    project = analyst.get("/api/v1/projects").json()[0]["id"]
     response = analyst.post(
-        f"/api/v3/projects/{project}/versions/7.1.1/files",
+        f"/api/v1/projects/{project}/versions/7.1.1/files",
         data={
             "metadata": json.dumps(
                 {

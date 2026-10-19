@@ -65,7 +65,7 @@ def test_context_expansion_limit_keeps_previous_inventory(analyst, monkeypatch):
     project_id = product(analyst)
     first = imported(analyst, project_id, "7.1.1", body(graph({"root": []})))
     monkeypatch.setattr(ownership, "MAX_CONTEXTS", 1)
-    path = f"/api/v3/projects/{project_id}/versions/7.1.1"
+    path = f"/api/v1/projects/{project_id}/versions/7.1.1"
     response = analyst.post(
         f"{path}/imports",
         json=body(
@@ -100,7 +100,7 @@ def test_policy_projection_failure_retries_committed_transaction_once(analyst, m
         raise RuntimeError("Projection unavailable after authoritative publication")
 
     monkeypatch.setattr(api, "catch_up", failed)
-    path = f"/api/v3/projects/{project_id}"
+    path = f"/api/v1/projects/{project_id}"
     first = analyst.put(f"{path}/ownership", json=payload)
     assert first.status_code == 202
     committed = current_policy(analyst, project_id)
@@ -128,7 +128,7 @@ def test_historical_context_is_readable_after_reassignment_with_current_permissi
     old = contexts(analyst, project_id)
     item = next(item for item in old["items"] if item["component_ref"] == "X")
     apply_policy(analyst, project_id, [rule("root", teams["Operations"])], request_id="reassign")
-    base = f"/api/v3/projects/{project_id}/states/{old['state']}/contexts"
+    base = f"/api/v1/projects/{project_id}/states/{old['state']}/contexts"
     historical = analyst.get(f"{base}/{item['id']}")
     assert historical.status_code == 200
     assert historical.json()["item"] == item

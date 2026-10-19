@@ -398,7 +398,7 @@ def test_minimal_proposal_http_route_uses_native_authorization_and_explicit_publ
         db.add(Project(id="product", workspace_id=workspace.id, name="Mocked specialist contract"))
     app.state.knowledge = journal
     response = analyst.post(
-        "/api/v3/projects/product/versions/1/proposals/vscorer-minimal",
+        "/api/v1/projects/product/versions/1/proposals/vscorer-minimal",
         json=data.model_dump(mode="json"),
     )
     assert response.status_code == 201, response.text
@@ -409,7 +409,7 @@ def test_minimal_proposal_http_route_uses_native_authorization_and_explicit_publ
     )
     assert (
         analyst.post(
-            "/api/v3/projects/absent/versions/1/proposals/vscorer-minimal",
+            "/api/v1/projects/absent/versions/1/proposals/vscorer-minimal",
             json=data.model_dump(mode="json"),
         ).status_code
         == 404

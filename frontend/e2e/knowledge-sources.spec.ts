@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const stateSha = 'a'.repeat(64), updatedState = 'b'.repeat(64)
@@ -29,14 +30,14 @@ async function fixture(page: Page, options: { readonly?: boolean; configured?: b
     if (path.endsWith('/connectors/dependency-track')) { reads.push({ path, query: new URLSearchParams(url.search) }); result = { project_id: external, configured: options.configured !== false, capabilities: options.readonly ? [] : ['bind', 'import'] } }
     else if (path.endsWith('/source-jobs')) { reads.push({ path, query: new URLSearchParams(url.search) }); const later = url.searchParams.get('offset') === '20'; result = { items: [sourceJob(later ? 'older-source' : 'source-job', 'failed', options.readonly ? [] : ['retry'])], next_offset: later ? null : 20 } }
     else if (path.includes('/source-jobs/')) { reads.push({ path, query: new URLSearchParams(url.search) }); result = sourceJob(path.split('/').at(-1)!, 'failed', options.readonly ? [] : ['retry']) }
-    else if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Source product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Source product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state, project_id: 'product', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Source product', exact: true }).click()
   return { reads, writes, panel: page.getByRole('region', { name: 'Dependency-Track source imports', exact: true }), rebind: () => { external = externalB }, advance: () => { state = updatedState } }
 }
@@ -64,7 +65,7 @@ test('readers see explicit version binding and bounded retained captures without
   expect(state.reads.at(-1)?.query.get('offset')).toBe('20')
   expect(state.reads.at(-1)?.query.get('limit')).toBe('20')
   await state.panel.getByRole('button', { name: 'Refresh import status', exact: true }).click()
-  expect(state.reads.at(-1)?.path).toBe('/api/v3/projects/product/source-jobs/older-source')
+  expect(state.reads.at(-1)?.path).toBe('/api/v1/projects/product/source-jobs/older-source')
   expect(state.writes).toHaveLength(0)
   expect(await state.panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
 })
@@ -131,7 +132,7 @@ test('source retry/cancel actions require server capabilities and a new state cl
   await expect(state.panel.getByRole('article')).toContainText('queued')
   await state.panel.getByRole('button', { name: 'Cancel DTVP import job', exact: true }).click()
   await expect(state.panel.getByRole('article')).toContainText('cancelled')
-  expect(state.writes.map(write => write.path)).toEqual(['/api/v3/projects/product/source-jobs/source-job/retry', '/api/v3/projects/product/source-jobs/source-job/cancel'])
+  expect(state.writes.map(write => write.path)).toEqual(['/api/v1/projects/product/source-jobs/source-job/retry', '/api/v1/projects/product/source-jobs/source-job/cancel'])
   await inputImport(page)
   state.advance()
   await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click()

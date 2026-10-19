@@ -16,7 +16,7 @@ app = knowledge_app
 
 
 def endpoint(project_id):
-    return f"/api/v3/projects/{project_id}"
+    return f"/api/v1/projects/{project_id}"
 
 
 def graph(edges, roots=("root",)):
@@ -48,7 +48,7 @@ def graph(edges, roots=("root",)):
 def administrator(client):
     project_id = product(client)
     login(client, "administrator")
-    teams = {item["name"]: item["id"] for item in client.get("/api/v2/workspaces").json()}
+    teams = {item["name"]: item["id"] for item in client.get("/api/v1/workspaces").json()}
     return project_id, teams
 
 

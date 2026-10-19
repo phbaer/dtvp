@@ -37,7 +37,7 @@ def app(tmp_path, request):
 
 
 def product(client):
-    return client.get("/api/v2/projects").json()[0]["id"]
+    return client.get("/api/v1/projects").json()[0]["id"]
 
 
 def body(bom, **changes):
@@ -54,7 +54,7 @@ def body(bom, **changes):
 
 
 def imported(client, project_id, version, data):
-    response = client.post(f"/api/v3/projects/{project_id}/versions/{version}/imports", json=data)
+    response = client.post(f"/api/v1/projects/{project_id}/versions/{version}/imports", json=data)
     assert response.status_code == 201, response.text
     return response.json()["updates"][0]["target"]
 
@@ -79,15 +79,15 @@ def test_parallel_versions_diff_tags_retries_and_projection_rebuild(analyst, app
         ),
     )
     diff = analyst.get(
-        f"/api/v3/projects/{project_id}/compare", params={"before": first, "after": second}
+        f"/api/v1/projects/{project_id}/compare", params={"before": first, "after": second}
     )
     assert diff.status_code == 200, diff.text
     assert "component:ref:utility" in diff.json()["changes"]["inventory"]["removed"]
-    path = f"/api/v3/projects/{project_id}/versions/7.1.1/inventory"
+    path = f"/api/v1/projects/{project_id}/versions/7.1.1/inventory"
     before = analyst.get(path).json()
     assert before["state"] == first
     tagged = analyst.post(
-        f"/api/v3/projects/{project_id}/tags",
+        f"/api/v1/projects/{project_id}/tags",
         json={
             "name": "release-7.1.1",
             "state": first,
@@ -111,7 +111,7 @@ def test_parallel_versions_diff_tags_retries_and_projection_rebuild(analyst, app
     assert analyst.get(path).json()["state"] == next_state
     assert analyst.get(path, params={"expected": first}).status_code == 409
     tag_again = analyst.post(
-        f"/api/v3/projects/{project_id}/tags",
+        f"/api/v1/projects/{project_id}/tags",
         json={
             "name": "release-7.1.1",
             "state": next_state,
@@ -125,16 +125,16 @@ def test_parallel_versions_diff_tags_retries_and_projection_rebuild(analyst, app
     catch_up(app.state.engine, app.state.knowledge, rebuild=True)
     assert analyst.get(path).json()["state"] == next_state
     assert (
-        analyst.get(f"/api/v3/projects/{project_id}/versions/7.1.2/inventory").json()["state"]
+        analyst.get(f"/api/v1/projects/{project_id}/versions/7.1.2/inventory").json()["state"]
         == second
     )
-    # Legacy data survives rebuilding only the new projection.
-    assert analyst.get("/api/v2/findings").json()["items"]
+    # Rebuilding native projections never re-enables the retired review API.
+    assert analyst.get("/api/v1/findings").status_code == 404
 
 
 def test_stale_partial_conflicting_and_unauthorized_imports(analyst, bom):
     project_id = product(analyst)
-    path = f"/api/v3/projects/{project_id}/versions/7.1.1/imports"
+    path = f"/api/v1/projects/{project_id}/versions/7.1.1/imports"
     first = imported(analyst, project_id, "7.1.1", body(bom))
     for changes, status in [
         ({"request_id": "stale", "expected": first, "build_number": 0}, 409),
@@ -148,7 +148,7 @@ def test_stale_partial_conflicting_and_unauthorized_imports(analyst, bom):
         assert response.status_code == status, response.text
     assert (
         analyst.get(
-            f"/api/v3/projects/{project_id}/compare",
+            f"/api/v1/projects/{project_id}/compare",
             params={"before": first, "after": "a" * 64},
         ).status_code
         == 404
@@ -157,7 +157,7 @@ def test_stale_partial_conflicting_and_unauthorized_imports(analyst, bom):
     assert analyst.post(path, json=body(bom)).status_code == 404
     assert (
         analyst.get(
-            f"/api/v3/projects/{project_id}/compare", params={"before": first, "after": first}
+            f"/api/v1/projects/{project_id}/compare", params={"before": first, "after": first}
         ).status_code
         == 404
     )
@@ -175,7 +175,7 @@ def test_committed_import_with_failed_projection_returns_pending_and_retries(
         raise RuntimeError("Database unavailable after journal commit")
 
     monkeypatch.setattr(module, "catch_up", failed)
-    path = f"/api/v3/projects/{project_id}/versions/7.1.1/imports"
+    path = f"/api/v1/projects/{project_id}/versions/7.1.1/imports"
     response = analyst.post(path, json=body(bom))
     assert response.status_code == 202
     assert response.json()["committed"] is True
@@ -197,7 +197,7 @@ def test_committed_import_with_failed_projection_returns_pending_and_retries(
         ),
     )
     assert newer.status_code == 202
-    current = analyst.get(f"/api/v3/projects/{project_id}/versions/7.1.1/inventory").json()
+    current = analyst.get(f"/api/v1/projects/{project_id}/versions/7.1.1/inventory").json()
     assert current["state"] == first
     assert current["reference_state"] == newer.json()["updates"][0]["target"]
     assert current["projection_current"] is False
@@ -216,7 +216,7 @@ def test_uncertain_publication_is_explicit_and_safe_to_retry(
         raise OSError("Interrupted publication")
 
     project_id = product(analyst)
-    path = f"/api/v3/projects/{project_id}/versions/7.1.1/imports"
+    path = f"/api/v1/projects/{project_id}/versions/7.1.1/imports"
     monkeypatch.setattr(journal, "_replace_head", interrupted)
     result = analyst.post(path, json=body(bom))
     assert result.status_code == 503
@@ -247,7 +247,7 @@ def test_file_intake_preserves_bytes_and_declared_scope_without_claiming_coverag
         "limitations": ["Statically linked vendored code has not been identified."],
     }
     raw = (json.dumps(bom, indent=3) + "\n\n").encode()
-    path = f"/api/v3/projects/{project_id}/versions/7.1.1/files"
+    path = f"/api/v1/projects/{project_id}/versions/7.1.1/files"
 
     def upload(content, meta=metadata):
         return analyst.post(
@@ -261,12 +261,12 @@ def test_file_intake_preserves_bytes_and_declared_scope_without_claiming_coverag
     state = first.json()["updates"][0]["target"]
     assert upload(raw).json()["updates"][0]["target"] == state
     assert upload(json.dumps(bom).encode()).status_code == 409
-    source_path = f"/api/v3/projects/{project_id}/states/{state}/source"
+    source_path = f"/api/v1/projects/{project_id}/states/{state}/source"
     original = analyst.get(source_path)
     assert original.content == raw
     assert original.headers["x-content-sha256"] == hashlib.sha256(raw).hexdigest()
     assert original.headers["x-dtvp-representation"] == "original_bytes"
-    inventory = analyst.get(f"/api/v3/projects/{project_id}/versions/7.1.1/inventory").json()
+    inventory = analyst.get(f"/api/v1/projects/{project_id}/versions/7.1.1/inventory").json()
     assert inventory["baseline"]["coverage_verification"] == "not_verified"
     assert inventory["baseline"]["collection"]["license_coverage"] == "partial"
     assert (
@@ -289,7 +289,7 @@ def test_missing_graph_and_missing_coverage_stay_unknown(analyst, bom):
     changed = copy.deepcopy(bom)
     changed.pop("dependencies")
     imported(analyst, project_id, "7.1.1", body(changed))
-    baseline = analyst.get(f"/api/v3/projects/{project_id}/versions/7.1.1/inventory").json()[
+    baseline = analyst.get(f"/api/v1/projects/{project_id}/versions/7.1.1/inventory").json()[
         "baseline"
     ]
     assert baseline["dependency_graph"] == "not_reported"
@@ -301,7 +301,7 @@ def test_xml_file_round_trip_and_invalid_file_do_not_advance_baseline(analyst, a
     project_id = product(analyst)
     metadata = body(bom)
     metadata.pop("sbom")
-    path = f"/api/v3/projects/{project_id}/versions/7.1.1/files"
+    path = f"/api/v1/projects/{project_id}/versions/7.1.1/files"
     raw = b"""<?xml version="1.0" encoding="UTF-8"?>
 <bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1">
   <components><component type="library" bom-ref="vendored-library">
@@ -315,7 +315,7 @@ def test_xml_file_round_trip_and_invalid_file_do_not_advance_baseline(analyst, a
     )
     assert response.status_code == 201, response.text
     state = response.json()["updates"][0]["target"]
-    assert analyst.get(f"/api/v3/projects/{project_id}/states/{state}/source").content == raw
+    assert analyst.get(f"/api/v1/projects/{project_id}/states/{state}/source").content == raw
     head = app.state.knowledge.head()
     metadata.update(request_id="bad-file", expected=state, build_number=2)
     result = analyst.post(

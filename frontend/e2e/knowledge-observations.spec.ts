@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string) => value.repeat(64), state = sha('a'), configuration = sha('b'), observation = sha('c')
 async function fixture(page: Page, writable = true) {
@@ -16,10 +17,10 @@ async function fixture(page: Page, writable = true) {
       return route.fulfill({ json: { committed: true, projection: 'current' } })
     }
     let data: unknown = { items: [], next_offset: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, playground: true, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, playground: true, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }]
-    else if (path === '/api/v2/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
-    else if (path === '/api/v2/projects/product') data = { id: 'product', name: 'Product' }
+    else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') data = { id: 'product', name: 'Product' }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.2', state }] }
     else if (path.endsWith('/workspace')) data = { state, project_id: 'product', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/pipeline-config')) data = { configuration_state: configuration, expected_versions: { '7.1.2': state }, configuration: { format: 'dtvp.pipeline-configuration/1', parts: [], models: [], mappings: [] }, capabilities: [] }
@@ -27,8 +28,8 @@ async function fixture(page: Page, writable = true) {
     else if (path.endsWith('/observation-sources')) data = { head: state, digest: changedListing ? sha('9') : sha('d'), total: 21, offset: Number(url.searchParams.get('offset') || 0), limit: 20, next_offset: url.searchParams.get('offset') === '20' ? null : 20, capabilities: writable ? ['write'] : [], items: [{ source: url.searchParams.get('offset') === '20' ? 'second-scanner' : 'scanner', part_id: null, state: observation, build_number: 4, subject_declaration: { assurance: 'producer_declared' }, baseline: { source: 'scanner' } }] }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
   return { writes, fail: (value: boolean) => { failed = value }, wrongPreview: () => { wrongPreview = true }, changeListing: () => { changedListing = true }, hold: () => { held = true }, release: () => release?.() }
 }
 async function panel(page: Page) { await page.getByText('SBOM observations and reconciliation', { exact: true }).click(); const result = page.getByRole('region', { name: 'SBOM observations and reconciliation', exact: true }); await expect(result).toContainText('21 source bindings'); return result }

@@ -178,9 +178,9 @@ def test_readonly_schema_endpoint_keeps_publications_and_intake_profiles_unchang
     from dtvp.knowledge.evidence_conformance import PROFILES as consumed_profiles
 
     before = app.state.knowledge.references()
-    project = analyst.get("/api/v2/projects").json()[0]["id"]
+    project = analyst.get("/api/v1/projects").json()[0]["id"]
     response = analyst.post(
-        f"/api/v3/projects/{project}/evidence/schema-validation",
+        f"/api/v1/projects/{project}/evidence/schema-validation",
         json={
             "document": document("cyclonedx-1.6-json-schema/1"),
             "validation_profile": "cyclonedx-1.6-json-schema/1",
@@ -192,7 +192,7 @@ def test_readonly_schema_endpoint_keeps_publications_and_intake_profiles_unchang
     assert not set(PROFILES) & set(consumed_profiles)
     assert (
         analyst.post(
-            f"/api/v3/projects/{project}/evidence/conformance",
+            f"/api/v1/projects/{project}/evidence/conformance",
             json={
                 "document": document("cyclonedx-1.6-json-schema/1"),
                 "validation_profile": "cyclonedx-1.6-json-schema/1",

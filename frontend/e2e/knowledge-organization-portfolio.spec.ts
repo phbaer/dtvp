@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64), changed = 'b'.repeat(64)
 const counts = (total = 79) => ({ context_findings: total, unique_vulnerabilities: 31, unique_latest_logical_assessments: 12, unique_approved_logical_assessments: 8, reviewed_covered_targets: 50, pending_revision_targets: 2, by_status: { approved: 50, submitted: 29 }, source_severity: { critical: 60, unknown: 19 }, current_published_severity: { low: 40, unknown: 39 }, scoring_status: { published: 40, outdated: 39 }, required_context_review_workload: { required_targets: 79, approved_targets: 50, remaining_targets: 29, unresolved_targets: 2, not_assessable_targets: 2 } })
@@ -7,13 +8,13 @@ async function fixture(page: Page, personas = false) {
   const reads: URL[] = [], catalog: URL[] = [], writes: string[] = []
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
-    if (path === '/api/v2/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
+    if (path === '/api/v1/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (route.request().method() !== 'GET') writes.push(path)
     let data: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') { catalog.push(url); data = { items: [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }], next_cursor: 'next-catalog-page' } }
-    else if (path === '/api/v3/portfolio') {
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
+    else if (path === '/api/v1/catalog/projects') { catalog.push(url); data = { items: [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }], next_cursor: 'next-catalog-page' } }
+    else if (path === '/api/v1/portfolio') {
       reads.push(url)
       if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve }) }
       if (tooMany && !url.searchParams.has('project')) return route.fulfill({ status: 422, json: { detail: 'Portfolio exceeds 100 projects; select projects explicitly' } })
@@ -23,7 +24,7 @@ async function fixture(page: Page, personas = false) {
     }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Knowledge')
+  await page.goto('/?page=Review'); await openNativeTools(page)
   const panel = page.getByRole('region', { name: 'Statistics across products', exact: true })
   return { panel, reads, catalog, writes, advance: () => { digest = changed }, tooMany: () => { tooMany = true }, hold: () => { hold = true }, release: () => { release?.() } }
 }
@@ -104,7 +105,7 @@ test('actor remount invalidates a late portfolio response through an actor round
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toBeEnabled()
   await page.getByRole('combobox', { name: 'Persona', exact: true }).selectOption('person')
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toHaveValue('person')
-  const response = page.waitForResponse(item => item.url().includes('/api/v3/portfolio?'))
+  const response = page.waitForResponse(item => item.url().includes('/api/v1/portfolio?'))
   f.release(); await response
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   await expect(page.getByLabel('Cross-product portfolio totals')).toHaveCount(0)

@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
@@ -22,14 +23,14 @@ async function fixture(page: Page, available = true) {
       return route.fulfill({ json: { available, generation: available ? current : null, records: 2003, synthetic: true, source: 'Synthetic catalog demonstration', assurance: 'META_consistent_complete_archive', limitations: [] } })
     }
     let json: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') json = { id: 'person', name: 'Person', org_admin: false, playground: false, workspaces: [] }
-    else if (path === '/api/v2/catalog/projects') json = { items: [{ id: 'product', name: 'Catalog product', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') json = { id: 'person', name: 'Person', org_admin: false, playground: false, workspaces: [] }
+    else if (path === '/api/v1/catalog/projects') json = { items: [{ id: 'product', name: 'Catalog product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) json = { items: [] }
     else if (path.endsWith('/cpe/editor')) json = { policy_state: sha('d'), configuration: { catalog: [], rules: {}, offline_sources: {} }, capabilities: [], limitations: [] }
     await route.fulfill({ json })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Catalog product', exact: true }).click()
   await page.getByText('CPE discovery policy and reviewed mappings', { exact: true }).click()
   await page.getByText('Offline curated sources', { exact: true }).click()

@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.assessment_archive import (
     ArchiveInput,
@@ -15,7 +16,7 @@ from dtvp.knowledge.assessment_archive import (
 )
 from dtvp.knowledge.journal import CommitUncertain, Conflict
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.post("/projects/{project_id}/maintenance/assessment-archive/preview")

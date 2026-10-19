@@ -14,6 +14,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
 from dtvp.parsers import parse
 from dtvp.storage import canonical, digest
 
@@ -194,7 +195,7 @@ def verify(manifest, root, *, client=None):
         if not isinstance(deployment, dict):
             raise InvalidEvidence("Deployment scope must be an object")
         project = _text(deployment.get("project_id"))
-        path = "/api/v3/projects/" + quote(project, safe="")
+        path = f"{API_PREFIX}/projects/" + quote(project, safe="")
         states = _rows(deployment.get("states", []), 20)
         for row in states:
             state, version = _sha(row.get("state")), _text(row.get("version"))

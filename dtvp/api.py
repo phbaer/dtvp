@@ -1,80 +1,35 @@
-import json
-import math
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import (
     APIRouter,
     Depends,
-    File,
-    Form,
     HTTPException,
     Query,
     Request,
-    Response,
-    UploadFile,
 )
-from fastapi.responses import JSONResponse
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dtvp import __version__
+from dtvp.api_contract import API_PREFIX, API_VERSION
 from dtvp.auth import Actor, authenticate, issue
 from dtvp.domain import (
-    approve_decision,
     audit,
-    current_observations,
-    finding_detail,
-    finding_details,
-    import_evidence,
-    import_sbom,
-    inventory,
-    lock_release,
-    submit_decision,
 )
-from dtvp.jobs import NATIVE_JOB_KINDS, enqueue
-from dtvp.models import (
-    Audit,
-    Component,
-    Credential,
-    Finding,
-    Grant,
-    Job,
-    Membership,
-    Project,
-    Release,
-    Revision,
-    Snapshot,
-    User,
-    Workspace,
-    now,
-)
-from dtvp.parsers import validate_advisory
-from dtvp.providers import ADVISORY_PROVIDERS, MATCHERS
+from dtvp.jobs import NATIVE_JOB_KINDS
+from dtvp.migration_models import Snapshot
+from dtvp.models import Audit, Credential, Grant, Job, Membership, Project, User, Workspace
 from dtvp.schemas import (
-    ApprovalInput,
-    BulkApply,
-    BulkInput,
-    DecisionInput,
-    EvidenceInput,
-    ImportInput,
-    JobInput,
     MemberInput,
-    MetadataInput,
     ProjectInput,
-    ReleaseInput,
     ShareInput,
-    SnapshotInput,
     TokenInput,
     WorkspaceInput,
 )
-from dtvp.snapshots import create_snapshot
-from dtvp.storage import canonical, digest
-from dtvp.team_reviews import actor_detail
+from dtvp.storage import canonical
 
-router = APIRouter(prefix="/api/v2")
-legacy_router = APIRouter(prefix="/api/v2")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def database(request: Request):
@@ -101,22 +56,6 @@ Auth = Annotated[Actor, Depends(actor)]
 
 def project_for(db, actor, project_id, capability="read"):
     return actor.require(db, db.get(Project, project_id), capability)
-
-
-def release_for(db, actor, release_id, capability="read"):
-    release = db.get(Release, release_id)
-    if not release:
-        raise HTTPException(404, "Release unavailable")
-    project_for(db, actor, release.project_id, capability)
-    return release
-
-
-def finding_for(db, actor, finding_id, capability="read"):
-    finding = db.get(Finding, finding_id)
-    if not finding:
-        raise HTTPException(404, "Finding unavailable")
-    release_for(db, actor, finding.release_id, capability)
-    return finding
 
 
 def snapshot_for(db, actor, snapshot_id):
@@ -191,59 +130,17 @@ def project_catalog(
     for project in rows[:limit]:
         item = project_summary(db, actor, project)
         item["workspace"] = db.get(Workspace, project.workspace_id).name
-        item["release_count"] = db.scalar(
-            select(func.count()).select_from(Release).where(Release.project_id == project.id)
-        )
-        item["finding_count"] = db.scalar(
+        from dtvp.knowledge.projection import heads
+
+        item["version_count"] = db.scalar(
             select(func.count())
-            .select_from(Finding)
-            .join(Release)
-            .where(Release.project_id == project.id, Finding.active.is_(True))
+            .select_from(heads)
+            .where(heads.c.project_id == project.id, heads.c.kind == "branch")
         )
         items.append(item)
     return {
         "items": items,
         "next_cursor": page_cursor(rows[limit - 1].name, rows[limit - 1].id, scope)
-        if len(rows) > limit
-        else None,
-    }
-
-
-@legacy_router.get("/catalog/projects/{project_id}/releases")
-def release_catalog(
-    project_id: str,
-    db: DB,
-    actor: Auth,
-    q: str = "",
-    cursor: str = "",
-    limit: int = Query(25, ge=1, le=100),
-):
-    from dtvp.catalog import after_cursor, page_cursor
-
-    project_for(db, actor, project_id)
-    scope = ["releases", project_id, q]
-    query = select(Release).where(Release.project_id == project_id)
-    if q:
-        query = query.where(Release.version.icontains(q, autoescape=True))
-    query = after_cursor(
-        query,
-        Release.created_at,
-        Release.id,
-        cursor,
-        scope,
-        descending=True,
-        value_parser=datetime.fromisoformat,
-    )
-    rows = list(
-        db.scalars(query.order_by(Release.created_at.desc(), Release.id.desc()).limit(limit + 1))
-    )
-    return {
-        "items": [
-            {"id": r.id, "version": r.version, "generation": r.generation} for r in rows[:limit]
-        ],
-        "next_cursor": page_cursor(
-            rows[limit - 1].created_at.isoformat(), rows[limit - 1].id, scope
-        )
         if len(rows) > limit
         else None,
     }
@@ -263,15 +160,9 @@ def bounded_metadata(value):
         raise HTTPException(422, "Metadata exceeds 64 KiB")
 
 
-def check_time(value):
-    if value.tzinfo is None or value > now():
-        raise HTTPException(422, "Source time must have a timezone and cannot be in the future")
-    return value.astimezone(UTC)
-
-
 @router.get("/version")
 def version():
-    return {"version": __version__, "api": "v2"}
+    return {"version": __version__, "api": API_VERSION}
 
 
 @router.get("/me")
@@ -281,7 +172,6 @@ def me(db: DB, actor: Auth, request: Request):
         "name": actor.user.name,
         "org_admin": actor.user.org_admin and actor.credential.kind == "session",
         "playground": request.app.state.settings.playground,
-        "legacy_review_enabled": request.app.state.settings.legacy_review_enabled,
         "vscorer_url": request.app.state.settings.vscorer_url,
         "agentyzer": {
             "enabled": request.app.state.settings.playground
@@ -470,25 +360,8 @@ def share_project(project_id: str, data: ShareInput, db: DB, actor: Auth):
     project = project_for(db, actor, project_id, "manage")
     if not db.get(Workspace, data.workspace_id):
         raise HTTPException(404, "Workspace unavailable")
-    # Sharing changes serialize with review/scoring publication and invalidate
-    # required-team evidence bindings when review access is revoked.
-    releases = list(
-        db.scalars(select(Release).where(Release.project_id == project.id).order_by(Release.id))
-    )
-    for release in releases:
-        lock_release(db, release.id)
+    db.refresh(project, with_for_update=True)
     grant = db.get(Grant, (project.id, data.workspace_id))
-    had_review_access = bool(grant and {"read", "assess", "approve"}.issubset(grant.capabilities))
-    if had_review_access and not {"read", "assess", "approve"}.issubset(data.capabilities):
-        from dtvp.models import ReviewScope
-
-        for finding in db.scalars(
-            select(Finding).where(Finding.release_id.in_([r.id for r in releases]))
-        ):
-            scope = db.get(ReviewScope, finding.id)
-            if scope and data.workspace_id in scope.workspace_ids:
-                finding.evidence_revision += 1
-                finding.state_version += 1
     if grant:
         grant.capabilities = data.capabilities
     else:
@@ -510,670 +383,6 @@ def share_project(project_id: str, data: ShareInput, db: DB, actor: Auth):
     return data.model_dump()
 
 
-@legacy_router.get("/projects/{project_id}/releases")
-def releases(project_id: str, db: DB, actor: Auth):
-    project_for(db, actor, project_id)
-    return [
-        {"id": r.id, "version": r.version, "generation": r.generation, "metadata": r.metadata_json}
-        for r in db.scalars(
-            select(Release)
-            .where(Release.project_id == project_id)
-            .order_by(Release.created_at.desc())
-        )
-    ]
-
-
-@legacy_router.post("/projects/{project_id}/releases", status_code=201)
-def create_release(project_id: str, data: ReleaseInput, db: DB, actor: Auth):
-    project_for(db, actor, project_id, "write")
-    release = Release(project_id=project_id, version=data.version)
-    db.add(release)
-    db.flush()
-    audit(db, actor.user.id, "release.create", release.id, project_id)
-    return {"id": release.id, "version": release.version}
-
-
-@legacy_router.get("/releases/{release_id}/components")
-def components(
-    release_id: str,
-    db: DB,
-    actor: Auth,
-    cursor: str = "",
-    q: str = "",
-    limit: int = Query(50, ge=1, le=200),
-):
-    release = release_for(db, actor, release_id)
-    effective, values, active_ids = inventory(db, release)
-    selected = sorted(
-        (
-            c
-            for c in values.values()
-            if c.id in active_ids
-            and c.id > cursor
-            and (not q or q.casefold() in f"{c.name} {c.version} {c.purl}".casefold())
-        ),
-        key=lambda c: c.id,
-    )
-    rows = selected[:limit]
-    return {
-        "items": [
-            {
-                "id": c.id,
-                "name": c.name,
-                "version": c.version,
-                "purl": c.purl,
-                "metadata": c.metadata_json,
-                "metadata_version": c.metadata_version,
-                "sources": [
-                    {"revision_id": r.id, "source": r.source, "ref": ref}
-                    for r in effective
-                    for ref, cid in r.document["component_ids"].items()
-                    if cid == c.id
-                ],
-            }
-            for c in rows
-        ],
-        "next_cursor": rows[-1].id if len(selected) > limit else None,
-        "total": len(active_ids),
-        "coverage": [r.completeness for r in effective],
-    }
-
-
-@legacy_router.put("/components/{component_id}/metadata")
-def component_metadata(component_id: str, data: MetadataInput, db: DB, actor: Auth):
-    component = db.get(Component, component_id)
-    if not component:
-        raise HTTPException(404, "Component unavailable")
-    release_for(db, actor, component.release_id, "write")
-    lock_release(db, component.release_id)
-    db.refresh(component)
-    if component.metadata_version != data.expected_version:
-        raise HTTPException(409, "Metadata changed; reload first")
-    bounded_metadata(data.metadata)
-    component.metadata_json = data.metadata
-    component.metadata_version += 1
-    release = db.get(Release, component.release_id)
-    for finding in db.scalars(select(Finding).where(Finding.component_id == component.id)):
-        finding.evidence_revision += 1
-        finding.state_version += 1
-    audit(db, actor.user.id, "metadata.update", component.id, release.project_id)
-    return {"metadata": component.metadata_json, "metadata_version": component.metadata_version}
-
-
-@legacy_router.get("/releases/{release_id}/revisions")
-def release_revisions(release_id: str, db: DB, actor: Auth):
-    release_for(db, actor, release_id)
-    return [
-        {
-            "id": r.id,
-            "source": r.source,
-            "event_id": r.event_id,
-            "sha256": r.artifact_sha,
-            "occurred_at": r.occurred_at.isoformat(),
-            "format": r.format,
-            "completeness": r.completeness,
-            "context": r.context,
-        }
-        for r in db.scalars(
-            select(Revision)
-            .where(Revision.release_id == release_id)
-            .order_by(Revision.occurred_at.desc())
-        )
-    ]
-
-
-@legacy_router.get("/revisions/{revision_id}/artifact")
-def original_artifact(revision_id: str, db: DB, actor: Auth, request: Request):
-    revision = db.get(Revision, revision_id)
-    if not revision:
-        raise HTTPException(404, "Revision unavailable")
-    release_for(db, actor, revision.release_id)
-    return Response(
-        request.app.state.artifacts.read(revision.artifact_sha),
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": 'attachment; filename="original-sbom"'},
-    )
-
-
-@legacy_router.post("/releases/{release_id}/ingestions", status_code=201)
-def ingest(release_id: str, data: ImportInput, db: DB, actor: Auth, request: Request):
-    release = release_for(db, actor, release_id, "write")
-    bounded_metadata(data.context)
-    revision = import_sbom(
-        db,
-        request.app.state.artifacts,
-        release,
-        canonical(data.sbom),
-        source=data.source,
-        event_id=data.event_id,
-        occurred_at=check_time(data.occurred_at),
-        completeness=data.completeness,
-        context=data.context,
-        actor_id=actor.user.id,
-    )
-    return {
-        "id": revision.id,
-        "sha256": revision.artifact_sha,
-        "completeness": revision.completeness,
-    }
-
-
-@legacy_router.post("/releases/{release_id}/uploads", status_code=201)
-def upload(
-    release_id: str,
-    db: DB,
-    actor: Auth,
-    request: Request,
-    file: UploadFile = File(),
-    source: str = Form("file"),
-    event_id: str = Form(""),
-    completeness: str = Form("complete"),
-):
-    release = release_for(db, actor, release_id, "write")
-    if completeness not in {"complete", "partial"} or not source or len(source) > 200:
-        raise HTTPException(422, "Invalid source/completeness")
-    raw = file.file.read(request.app.state.settings.max_upload_bytes + 1)
-    if len(raw) > request.app.state.settings.max_upload_bytes:
-        raise HTTPException(413, "Upload too large")
-    event_id = event_id or digest(raw)
-    previous = db.scalar(
-        select(Revision).where(
-            Revision.release_id == release.id,
-            Revision.source == source,
-            Revision.event_id == event_id,
-        )
-    )
-    occurred_at = previous.occurred_at.replace(tzinfo=UTC) if previous else now()
-    revision = import_sbom(
-        db,
-        request.app.state.artifacts,
-        release,
-        raw,
-        source=source,
-        event_id=event_id,
-        occurred_at=occurred_at,
-        completeness=completeness,
-        context={"filename": file.filename},
-        actor_id=actor.user.id,
-    )
-    return {"id": revision.id, "sha256": revision.artifact_sha}
-
-
-@legacy_router.get("/findings")
-def findings(
-    db: DB,
-    actor: Auth,
-    release_id: str | None = None,
-    project_id: str = "",
-    workspace_id: str = "",
-    owner: str = "",
-    owner_match: str = Query("contains", pattern="^(contains|exact)$"),
-    sort: str = Query(
-        "id", pattern="^(id|identifier|component|project|original_score|effective_score)$"
-    ),
-    q: str = "",
-    lifecycle: str = "",
-    cursor: str = "",
-    limit: int = Query(25, ge=1, le=100),
-):
-    authorized = visible_project_query(actor).with_only_columns(Project.id)
-    query = (
-        select(Finding, Release, Project)
-        .join(Release, Finding.release_id == Release.id)
-        .join(Project)
-        .join(Component, Finding.component_id == Component.id)
-    )
-    query = query.where(Project.id.in_(authorized), Finding.active.is_(True))
-    if project_id:
-        project_for(db, actor, project_id)
-        query = query.where(Project.id == project_id)
-    if workspace_id:
-        query = query.where(Project.workspace_id == workspace_id)
-    if owner:
-        column = Component.metadata_json["owner"].as_string()
-        query = query.where(
-            or_(column.is_(None), func.trim(column).in_(["", "Unassigned"]))
-            if owner == "Unassigned"
-            else column == owner
-            if owner_match == "exact"
-            else column.icontains(owner, autoescape=True)
-        )
-    from dtvp.catalog import after_cursor, page_cursor
-
-    order = {
-        "id": Finding.id,
-        "identifier": Finding.identifier,
-        "component": Component.name,
-        "project": Project.name,
-    }.get(sort, Finding.id)
-    scope = [
-        "findings",
-        release_id,
-        project_id,
-        workspace_id,
-        owner,
-        owner_match,
-        sort,
-        q,
-        lifecycle,
-    ]
-    if sort == "id":
-        query = query.where(Finding.id > cursor)
-    elif sort not in {"original_score", "effective_score"}:
-        query = after_cursor(query, order, Finding.id, cursor, scope)
-    if release_id:
-        release_for(db, actor, release_id)
-        query = query.where(Release.id == release_id)
-    if q:
-        query = query.where(
-            or_(
-                Finding.identifier.icontains(q, autoescape=True),
-                Component.name.icontains(q, autoescape=True),
-                Component.purl.icontains(q, autoescape=True),
-                Project.name.icontains(q, autoescape=True),
-                Release.version.icontains(q, autoescape=True),
-            )
-        )
-    if sort in {"original_score", "effective_score"}:
-        from itertools import islice
-
-        from dtvp.catalog import decode_cursor
-
-        selected, observation_cache, capability_cache = [], {}, {}
-        iterator = iter(
-            db.execute(
-                query.order_by(Finding.release_id, Finding.id).execution_options(yield_per=250)
-            )
-        )
-        while batch := list(islice(iterator, 250)):
-            details = finding_details(db, [row[0] for row in batch], observation_cache)
-            for (stored, release, project), detail in zip(batch, details, strict=True):
-                if lifecycle and detail["lifecycle"] != lifecycle:
-                    continue
-                if project.id not in capability_cache:
-                    capability_cache[project.id] = [
-                        c
-                        for c in {"assess", "approve", "evidence", "rescore", "manage"}
-                        if actor.allowed(db, project, c)
-                    ]
-                detail.update(
-                    project=project.name,
-                    project_id=project.id,
-                    release=release.version,
-                    latest_decision=detail["decisions"][0] if detail["decisions"] else None,
-                    capabilities=capability_cache[project.id],
-                )
-                actor_detail(db, actor, project, detail)
-                selected.append(
-                    {
-                        key: value
-                        for key, value in detail.items()
-                        if key
-                        not in {
-                            "observations",
-                            "evidence",
-                            "decisions",
-                            "approval",
-                            "imported_assessments",
-                        }
-                    }
-                )
-            last_release = batch[-1][1].id
-            observation_cache = {last_release: observation_cache[last_release]}
-
-        def key(row):
-            return (-(row[sort] if row[sort] is not None else -1), row["id"])
-
-        selected.sort(key=key)
-        if cursor:
-            value, identifier = decode_cursor(cursor, scope)
-            try:
-                boundary = (float(value), identifier)
-                if not math.isfinite(boundary[0]):
-                    raise ValueError()
-            except ValueError:
-                raise HTTPException(422, "Invalid score cursor") from None
-            selected = [row for row in selected if key(row) > boundary]
-        items = selected[:limit]
-        return {
-            "items": items,
-            "next_cursor": page_cursor(str(key(items[-1])[0]), items[-1]["id"], scope)
-            if len(selected) > limit
-            else None,
-        }
-    items, last = [], None
-    observations = {}
-    # Cursor advances over scanned rows even when a lifecycle filter rejects a row.
-    # Bounded scanning prevents an empty result from expanding without limit.
-    scanned = list(db.execute(query.order_by(order, Finding.id).limit(501)))
-    consumed = 0
-    for finding, release, project in scanned:
-        if len(items) == limit:
-            break
-        consumed += 1
-        value = {
-            "id": finding.id,
-            "identifier": finding.identifier,
-            "component": db.get(Component, finding.component_id).name,
-            "project": project.name,
-        }[sort]
-        last = finding.id if sort == "id" else page_cursor(value, finding.id, scope)
-        if release.id not in observations:
-            observations[release.id] = current_observations(db, release.id)
-        detail = finding_detail(db, finding, observations=observations[release.id])
-        if lifecycle and detail["lifecycle"] != lifecycle:
-            continue
-        detail.update(
-            project=project.name,
-            project_id=project.id,
-            release=release.version,
-            capabilities=[
-                c
-                for c in {"assess", "approve", "evidence", "rescore", "manage"}
-                if actor.allowed(db, project, c)
-            ],
-            latest_decision=detail["decisions"][0] if detail["decisions"] else None,
-        )
-        actor_detail(db, actor, project, detail)
-        items.append(
-            {
-                key: value
-                for key, value in detail.items()
-                if key
-                not in {"observations", "evidence", "decisions", "approval", "imported_assessments"}
-            }
-        )
-    return {
-        "items": items,
-        "next_cursor": last if consumed < len(scanned) or len(scanned) == 501 else None,
-    }
-
-
-@legacy_router.get("/findings/{finding_id}")
-def finding(finding_id: str, db: DB, actor: Auth, workspace_id: str | None = None):
-    stored = finding_for(db, actor, finding_id)
-    detail = finding_detail(db, stored)
-    release = db.get(Release, stored.release_id)
-    project = db.get(Project, release.project_id)
-    detail.update(
-        project=project.name,
-        release=release.version,
-        capabilities=[
-            c
-            for c in {"assess", "approve", "evidence", "rescore", "manage"}
-            if actor.allowed(db, project, c)
-        ],
-    )
-    return actor_detail(db, actor, project, detail, workspace_id)
-
-
-@legacy_router.post("/findings/{finding_id}/decisions", status_code=201)
-def decision(finding_id: str, data: DecisionInput, db: DB, actor: Auth):
-    finding = finding_for(db, actor, finding_id, "assess")
-    bounded_metadata(data.details)
-    details = dict(data.details)
-    if "justification" in details:
-        raise HTTPException(422, "Use the validated justification field")
-    if data.justification:
-        if data.state != "not_affected":
-            raise HTTPException(422, "A not-affected justification requires the not_affected state")
-        details["justification"] = data.justification
-    if "rescoring" in details:
-        raise HTTPException(422, "Use the validated rescoring field")
-    if data.rescoring:
-        raise HTTPException(422, "Rescoring is a separate security coordinator action")
-    result = submit_decision(
-        db,
-        actor,
-        finding,
-        data.expected_version,
-        data.state,
-        data.rationale,
-        details,
-        data.workspace_id,
-    )
-    return {"id": result.id, "state_version": finding.state_version}
-
-
-@legacy_router.post("/findings/{finding_id}/approvals")
-def approval(finding_id: str, data: ApprovalInput, db: DB, actor: Auth):
-    stored = finding_for(db, actor, finding_id, "approve")
-    approve_decision(
-        db,
-        actor,
-        stored,
-        data.expected_version,
-        data.decision_id,
-        request_changes=data.action == "request_changes",
-    )
-    return {"state_version": stored.state_version}
-
-
-@legacy_router.post("/approvals/preview")
-def bulk_preview(data: BulkInput, db: DB, actor: Auth):
-    for item in data.items:
-        stored = finding_for(db, actor, item.finding_id, "approve")
-        detail = actor_detail(
-            db,
-            actor,
-            db.get(Project, db.get(Release, stored.release_id).project_id),
-            finding_detail(db, stored),
-        )
-        if (
-            detail["state_version"] != item.expected_version
-            or detail["review_lifecycle"] != "ready"
-            or (
-                not detail["latest_decision"]
-                or detail["latest_decision"]["id"] != item.decision_id
-                or detail["latest_decision"]["author_id"] == actor.user.id
-            )
-        ):
-            raise HTTPException(
-                409, "Selection includes changed, incomplete, or self-authored decisions"
-            )
-    return {"count": len(data.items), "preview_digest": digest(canonical(data.model_dump()))}
-
-
-@legacy_router.post("/approvals/apply")
-def bulk_apply(data: BulkApply, db: DB, actor: Auth):
-    if data.preview_digest != digest(
-        canonical({"items": [item.model_dump() for item in data.items]})
-    ):
-        raise HTTPException(409, "Selection differs from preview")
-    stored = [finding_for(db, actor, item.finding_id, "approve") for item in data.items]
-    for release_id in sorted({f.release_id for f in stored}):
-        lock_release(db, release_id)
-    for item, finding in zip(data.items, stored, strict=True):
-        approve_decision(db, actor, finding, item.expected_version, item.decision_id)
-    return {"approved": len(stored)}
-
-
-@legacy_router.post("/findings/{finding_id}/evidence", status_code=201)
-def evidence(finding_id: str, data: EvidenceInput, db: DB, actor: Auth):
-    finding = finding_for(db, actor, finding_id, "evidence")
-    bounded_metadata(data.assertion)
-    if "advisory" in data.assertion:
-        validate_advisory(data.assertion["advisory"])
-    if data.snapshot_id:
-        snapshot = snapshot_for(db, actor, data.snapshot_id)
-        if snapshot.release_id != finding.release_id:
-            raise HTTPException(422, "Evidence snapshot belongs to a different release")
-        if data.source == "vscorer":
-            if data.assertion.get("kind") != "contextual-assessment":
-                raise HTTPException(
-                    422, "VScorer returns contextual evidence, not affectedness decisions"
-                )
-            if not data.assertion.get("assessment_id") or not data.assertion.get("base_vector"):
-                raise HTTPException(422, "VScorer assessment ID and original Base vector required")
-            from dtvp.storage import Artifacts
-
-            artifacts = Artifacts(db.info["artifact_dir"])
-            payload = json.loads(artifacts.read(snapshot.sha))
-            exported = next(
-                (
-                    entry
-                    for entry in payload["vscorer"]["cves"]
-                    if entry["cve_id"] == finding.identifier
-                ),
-                None,
-            )
-            frozen = next(
-                (entry for entry in payload["findings"] if entry["id"] == finding.id), None
-            )
-            if (
-                not frozen
-                or not exported
-                or exported["cvss_vector"] != data.assertion["base_vector"]
-            ):
-                raise HTTPException(
-                    422, "VScorer result does not match the exported finding and Base vector"
-                )
-            if data.assertion.get("component_refs") != exported["component_refs"]:
-                raise HTTPException(
-                    422, "VScorer result must identify the exact exported component refs"
-                )
-    elif data.source == "vscorer":
-        raise HTTPException(422, "VScorer evidence must identify its source snapshot")
-    result = import_evidence(
-        db,
-        actor.user.id,
-        finding,
-        source=data.source,
-        external_id=data.external_id,
-        assertion=data.assertion,
-        snapshot_id=data.snapshot_id,
-    )
-    return {"id": result.id, "state_version": finding.state_version}
-
-
-@legacy_router.post("/snapshots", status_code=201)
-def snapshot(data: SnapshotInput, db: DB, actor: Auth, request: Request):
-    release = release_for(db, actor, data.release_id, "snapshot")
-    result = create_snapshot(db, request.app.state.artifacts, actor, release, data.revision_id)
-    return {"id": result.id, **result.manifest}
-
-
-@legacy_router.get("/snapshots/{snapshot_id}")
-def manifest(snapshot_id: str, db: DB, actor: Auth):
-    result = snapshot_for(db, actor, snapshot_id)
-    return {"id": result.id, **result.manifest}
-
-
-@legacy_router.get("/snapshots/{snapshot_id}/bundle")
-def snapshot_bundle(snapshot_id: str, db: DB, actor: Auth, request: Request):
-    stored = snapshot_for(db, actor, snapshot_id)
-    return Response(
-        request.app.state.artifacts.read(stored.sha),
-        media_type="application/json",
-        headers={
-            "ETag": f'"{stored.sha}"',
-            "Content-Disposition": 'attachment; filename="dtvp-snapshot.json"',
-        },
-    )
-
-
-@legacy_router.get("/snapshots/{snapshot_id}/sbom")
-def snapshot_sbom(snapshot_id: str, db: DB, actor: Auth, request: Request):
-    stored = snapshot_for(db, actor, snapshot_id)
-    payload = json.loads(request.app.state.artifacts.read(stored.sha))
-    return JSONResponse(
-        payload["sbom"], headers={"Content-Disposition": 'attachment; filename="sbom.cdx.json"'}
-    )
-
-
-@legacy_router.get("/snapshots/{snapshot_id}/vulnerabilities")
-def snapshot_vulnerabilities(
-    snapshot_id: str,
-    db: DB,
-    actor: Auth,
-    request: Request,
-    cursor: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=200),
-):
-    stored = snapshot_for(db, actor, snapshot_id)
-    payload = json.loads(request.app.state.artifacts.read(stored.sha))
-    items = payload["findings"]
-    return {
-        "items": items[cursor : cursor + limit],
-        "next_cursor": cursor + limit if cursor + limit < len(items) else None,
-        "snapshot_id": snapshot_id,
-        "sha256": stored.sha,
-    }
-
-
-@legacy_router.get("/snapshots/{snapshot_id}/exports/vscorer")
-def vscorer_export(snapshot_id: str, db: DB, actor: Auth, request: Request):
-    stored = snapshot_for(db, actor, snapshot_id)
-    payload = json.loads(request.app.state.artifacts.read(stored.sha))
-    return {
-        "snapshot_id": snapshot_id,
-        "manifest": stored.manifest,
-        "cves": payload["vscorer"],
-        "sbom": payload["sbom"],
-        "finding_mapping": [
-            {
-                "finding_id": f["id"],
-                "component_id": f["component_id"],
-                "identifier": f["identifier"],
-            }
-            for f in payload["findings"]
-        ],
-    }
-
-
-@legacy_router.get("/snapshots/{snapshot_id}/exports/vscorer/worklist")
-def vscorer_worklist(snapshot_id: str, db: DB, actor: Auth, request: Request):
-    stored = snapshot_for(db, actor, snapshot_id)
-    payload = json.loads(request.app.state.artifacts.read(stored.sha))
-    return JSONResponse(
-        payload["vscorer"], headers={"Content-Disposition": 'attachment; filename="cves.json"'}
-    )
-
-
-@legacy_router.get("/providers")
-def providers(actor: Auth, request: Request):
-    enabled = request.app.state.settings.providers_enabled
-    return [
-        {"id": provider, "kind": kind, "enabled": provider in enabled}
-        for kind, registry in [("matcher", MATCHERS), ("advisory", ADVISORY_PROVIDERS)]
-        for provider in registry
-    ]
-
-
-@legacy_router.post("/jobs", status_code=202)
-def new_job(data: JobInput, db: DB, actor: Auth, request: Request):
-    settings = request.app.state.settings
-    release = release_for(
-        db, actor, data.release_id, "evidence" if data.kind == "enrich" else "write"
-    )
-    if data.kind == "import-dt":
-        if not settings.dt_url or not settings.dt_api_key or not data.external_project_id:
-            raise HTTPException(
-                422, "Configure the read-only DT source and select its project UUID"
-            )
-        project = db.get(Project, release.project_id)
-        configured = (
-            project.metadata_json.get("connectors", {})
-            .get("dependency-track", {})
-            .get("project_id")
-        )
-        if not configured or data.external_project_id != configured:
-            raise HTTPException(
-                403, "An administrator must bind this DTVP product to the DT project first"
-            )
-    else:
-        registry = MATCHERS if data.kind == "match" else ADVISORY_PROVIDERS
-        if data.provider not in registry or data.provider not in settings.providers_enabled:
-            raise HTTPException(
-                422, "Provider is unavailable or disabled by deployment configuration"
-            )
-    if data.provider and data.provider.startswith("demo") and not settings.playground:
-        raise HTTPException(422, "Synthetic providers are playground-only")
-    result = enqueue(db, actor, release, data.kind, data.model_dump(exclude={"kind", "release_id"}))
-    audit(db, actor.user.id, "job.enqueue", result.id, release.project_id, {"kind": data.kind})
-    return {"id": result.id, "status": result.status}
-
-
 @router.get("/jobs")
 def jobs(db: DB, actor: Auth):
     project_ids = [p.id for p in visible_projects(db, actor)]
@@ -1181,6 +390,8 @@ def jobs(db: DB, actor: Auth):
         {
             "id": j.id,
             "kind": j.kind,
+            "project_id": j.project_id,
+            "version": j.payload.get("version"),
             "finding_id": j.payload.get("finding_id"),
             "status": j.status,
             "error": j.error,
@@ -1190,47 +401,11 @@ def jobs(db: DB, actor: Auth):
         }
         for j in db.scalars(
             select(Job)
-            .where(Job.project_id.in_(project_ids))
+            .where(Job.project_id.in_(project_ids), Job.kind.in_(NATIVE_JOB_KINDS))
             .order_by(Job.created_at.desc())
             .limit(100)
         )
     ]
-
-
-@router.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: str, db: DB, actor: Auth):
-    job = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
-    if not job:
-        raise HTTPException(404, "Job unavailable")
-    project_for(
-        db, actor, job.project_id, "evidence" if job.kind in {"enrich", "analyse"} else "write"
-    )
-    if job.status in {"queued", "running"}:
-        job.status = "cancelled"
-    return {"status": job.status}
-
-
-@router.post("/jobs/{job_id}/retry", status_code=202)
-def retry_job(job_id: str, db: DB, actor: Auth, request: Request):
-    old = db.get(Job, job_id)
-    if not old:
-        raise HTTPException(404, "Job unavailable")
-    if old.kind in NATIVE_JOB_KINDS:
-        project_for(db, actor, old.project_id)
-        raise HTTPException(409, "Use the native job retry endpoint")
-    project_for(
-        db, actor, old.project_id, "evidence" if old.kind in {"enrich", "analyse"} else "write"
-    )
-    if not request.app.state.settings.legacy_review_enabled:
-        raise HTTPException(410, "Legacy review is disabled; use a native source or analysis job")
-    if old.status not in {"failed", "cancelled"}:
-        raise HTTPException(409, "Only failed or cancelled jobs can be retried")
-    if old.kind == "analyse":
-        raise HTTPException(
-            409, "Reload the finding and explicitly submit a new analysis against current evidence"
-        )
-    result = enqueue(db, actor, db.get(Release, old.payload["release_id"]), old.kind, old.payload)
-    return {"id": result.id, "status": result.status}
 
 
 @router.get("/projects/{project_id}/audit")

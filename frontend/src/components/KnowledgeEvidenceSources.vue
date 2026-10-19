@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 import { send } from '../api'
@@ -105,7 +106,7 @@ async function withdraw() {
   finally { if (current === sequence) busy.value = false }
   if (current === sequence && succeeded) await load(0, true)
 }
-const download = (row: Document) => `/api/v3${root()}/artifacts/${encodeURIComponent(row.artifact_sha)}?expected_evidence=${encodeURIComponent(registry.value!.evidence_state || '')}`
+const download = (row: Document) => `${API_PREFIX}${root()}/artifacts/${encodeURIComponent(row.artifact_sha)}?expected_evidence=${encodeURIComponent(registry.value!.evidence_state || '')}`
 watch(() => props.project, () => { ++sequence; busy.value = false; registry.value = null; editUpload(); selected.value = ''; retained.value = null; withdrawal.value = ''; reason.value = ''; withdrawalAttempt.value = null; source.value = ''; ordinal.value = ''; validationProfile.value = ''; file.value = null; if (fileInput.value) fileInput.value.value = ''; previous.value = []; offset.value = 0; if (expanded.value) void load() })
 onBeforeUnmount(() => { ++sequence })
 </script>

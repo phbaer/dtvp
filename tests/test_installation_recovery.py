@@ -170,7 +170,7 @@ def test_offline_installation_restore_preserves_permissions_jobs_history_and_iss
         archived = {
             name: client.get(details["url"]).content for name, details in issued["files"].items()
         }
-        actor = client.get("/api/v2/me").json()["id"]
+        actor = client.get("/api/v1/me").json()["id"]
         # Operational remote outcomes must survive; journal replay cannot recover them.
         with original.state.sessions.begin() as db:
             db.add(
@@ -213,7 +213,7 @@ def test_offline_installation_restore_preserves_permissions_jobs_history_and_iss
     assert operational_rows(restored) == before_rows
     with TestClient(restored) as client:
         client.cookies.update(auth_cookies)
-        assert client.get("/api/v2/me").json()["id"] == actor
+        assert client.get("/api/v1/me").json()["id"] == actor
         assert workspace(client, project_id) == before_workspace
         receipt = client.get(url(project_id, f"/issued-exports/{issued['receipt_sha256']}"))
         assert receipt.status_code == 200, receipt.text
@@ -222,7 +222,7 @@ def test_offline_installation_restore_preserves_permissions_jobs_history_and_iss
         }
         for name, details in issued["files"].items():
             assert client.get(details["url"]).content == archived[name]
-        assert client.get("/api/v2/findings").json()["items"]
+        assert client.get("/api/v1/findings").status_code == 404
         login(client, "operations")
         assert client.get(url(project_id, "/versions/7.1.1/workspace")).status_code == 404
         assert client.get(issued["files"]["bundle.json"]["url"]).status_code == 404

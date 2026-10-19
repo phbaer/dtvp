@@ -3,11 +3,12 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import projected_response, uncertain_response
 from dtvp.knowledge.advisory_schedule import MIN_INTERVAL, AdvisoryScheduleInput, configure, policy
 from dtvp.knowledge.journal import CommitUncertain, Conflict
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/advisory-schedule")

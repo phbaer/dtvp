@@ -3,10 +3,11 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.input_quality import input_quality
 from dtvp.knowledge.journal import Ref, Sha
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def composition_member(journal, project_id, state):

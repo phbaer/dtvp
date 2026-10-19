@@ -95,7 +95,9 @@ def apply_synchronization(journal, *, project_id, actor_id, data, authorize):
     # Use the native save identity, including guarded references, so a durable
     # publication can replay even after either branch has subsequently advanced.
     operation = {
-        **assessment.model_dump(mode="json"),
+        **assessment.model_dump(
+            mode="json", exclude={"ssvc"} if assessment.ssvc is None else set()
+        ),
         "assessment_id": assessment_id,
         "submit": False,
         "publication_checks": [

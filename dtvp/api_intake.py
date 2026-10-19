@@ -3,11 +3,12 @@
 from fastapi import APIRouter, Query, Request
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.composition import CollectionContext
 from dtvp.knowledge.journal import Name, Ref
 from dtvp.knowledge.service import part_ref
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 def target(journal, project_id, version, part_id=None):

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import Field
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_issued_exports import project_issuance
 from dtvp.api_knowledge import projected_response, require_state, uncertain_response
 from dtvp.knowledge.cpe import (
@@ -17,7 +18,7 @@ from dtvp.knowledge.journal import CommitUncertain, Conflict, Sha
 from dtvp.schemas import RequestModel
 from dtvp.storage import canonical
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 
 
 @router.get("/projects/{project_id}/cpe")

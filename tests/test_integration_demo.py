@@ -14,7 +14,7 @@ def test_cascade_demo_records_each_edge_and_rejects_stale_nightly_evidence(clien
     assert set(before) == set(after) == set(VERSIONS)
     assert before["7.2.0"] != after["7.2.0"]
     assert all(before[version] == after[version] for version in VERSIONS[:-1])
-    prefix = f"/api/v3/projects/{report['project_id']}"
+    prefix = f"/api/v1/projects/{report['project_id']}"
     for event in report["events"]:
         value = client.get(
             prefix + f"/states/{event['target_state']}/integration-events/{event['event_id']}"

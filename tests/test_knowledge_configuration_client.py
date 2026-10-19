@@ -15,7 +15,7 @@ from dtvp.cli import main
 def test_configuration_get_and_exact_explicit_put(command, monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
     arguments = ["dtvp", "knowledge", "--url", "http://dtvp.test", command, "--project", "project"]
-    path = "http://dtvp.test/api/v3/projects/project/" + command
+    path = "http://dtvp.test/api/v1/projects/project/" + command
     read = respx.get(path).mock(return_value=httpx.Response(200, json={"state": "frozen"}))
     monkeypatch.setattr(sys, "argv", arguments)
     main()
@@ -48,7 +48,7 @@ def test_jobs_are_explicit_presentational_operations(action, method, monkeypatch
     ]
     if action:
         arguments += ["--action", action]
-    path = "http://dtvp.test/api/v3/projects/project/synchronization-jobs/job" + (
+    path = "http://dtvp.test/api/v1/projects/project/synchronization-jobs/job" + (
         "/" + action if action else ""
     )
     route = respx.request(method, path).mock(return_value=httpx.Response(200, json={"id": "job"}))
@@ -78,7 +78,7 @@ def test_context_forwards_both_pins(monkeypatch):
         ],
     )
     route = respx.get(
-        "http://dtvp.test/api/v3/projects/project/states/" + "a" * 64 + "/pipeline-context"
+        "http://dtvp.test/api/v1/projects/project/states/" + "a" * 64 + "/pipeline-context"
     ).mock(return_value=httpx.Response(200, json={}))
     main()
     assert route.calls[0].request.url.params["configuration"] == "b" * 64
@@ -107,7 +107,7 @@ def test_observation_selection_is_preview_unless_explicitly_applied(apply, monke
     if apply:
         arguments.append("--apply")
     route = respx.post(
-        "http://dtvp.test/api/v3/projects/project/versions/7.1.2/observation-selection"
+        "http://dtvp.test/api/v1/projects/project/versions/7.1.2/observation-selection"
         + ("" if apply else "/preview")
     ).mock(return_value=httpx.Response(200, json={}))
     monkeypatch.setattr(sys, "argv", arguments)
@@ -125,7 +125,7 @@ def test_observation_import_preserves_file_bytes_and_metadata(monkeypatch, tmp_p
     raw = b'{\n  "bomFormat": "CycloneDX"\n}\n'
     source.write_bytes(raw)
     route = respx.post(
-        "http://dtvp.test/api/v3/projects/project/versions/7.1.2/observation-files"
+        "http://dtvp.test/api/v1/projects/project/versions/7.1.2/observation-files"
     ).mock(return_value=httpx.Response(201, json={}))
     monkeypatch.setattr(
         sys,

@@ -38,7 +38,7 @@ def test_labels_cover_complete_paginated_authorized_selection_not_just_actor_mem
     analyst, app, bom
 ):
     project_id, teams, hidden = prepared(analyst, app, bom)
-    me = analyst.get("/api/v2/me").json()
+    me = analyst.get("/api/v1/me").json()
     assert teams["Operations"] not in {item["id"] for item in me["workspaces"]}
     response = workspace(analyst, project_id, limit=1)
     assert len(response["items"]) == 1 and response["statistics"]["context_findings"] == 2

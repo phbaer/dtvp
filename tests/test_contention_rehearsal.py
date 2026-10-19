@@ -25,13 +25,13 @@ def server(*, broken=None):
                 return httpx.Response(200, json={}, headers={'set-cookie': 'dtvp_csrf=synthetic'})
             if path.endswith('/me'):
                 return httpx.Response(200, json={'playground': True, 'workspaces': [{'id': 'team', 'capabilities': ['write']}]})
-            if path == '/api/v2/projects':
+            if path == '/api/v1/projects':
                 assert json.loads(request.content)['name'].startswith('[SYNTHETIC]')
                 return httpx.Response(201, json={'id': 'new-synthetic'})
             if path.endswith('/workspace'):
                 assert request.url.params['expected'] == current
                 return httpx.Response(200, json={'state': current})
-            assert path == '/api/v3/projects/new-synthetic/versions/contention/imports'
+            assert path == '/api/v1/projects/new-synthetic/versions/contention/imports'
             body = json.loads(request.content)
             if body['request_id'] in receipts:
                 result = receipts[body['request_id']]
@@ -87,15 +87,15 @@ def test_production_and_invalid_bounds_are_rejected_before_inventory_writes():
         assert calls == []
         with pytest.raises(ValueError, match='isolated playground'):
             rehearse(client)
-    assert calls == ['/api/v2/playground/login', '/api/v2/me']
+    assert calls == ['/api/v1/playground/login', '/api/v1/me']
 
 
 def test_real_postgres_concurrent_publications_keep_existing_projects(client, app, tmp_path):
     if app.state.engine.dialect.name != 'postgresql':
         pytest.skip('Concurrent SQL projection qualification requires disposable PostgreSQL')
     login(client, 'administrator')
-    before = {row['id'] for row in client.get('/api/v2/projects').json()}
+    before = {row['id'] for row in client.get('/api/v1/projects').json()}
     report = rehearse(client, rounds=3, writers=3, output=tmp_path)
     assert report['passed'], report
-    after = {row['id'] for row in client.get('/api/v2/projects').json()}
+    after = {row['id'] for row in client.get('/api/v1/projects').json()}
     assert after == before | {report['project_id']}

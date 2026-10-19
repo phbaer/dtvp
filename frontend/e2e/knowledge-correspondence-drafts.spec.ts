@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64)
 const source = sha('a'), target = sha('b'), revision = sha('c'), policy = sha('d'), oldContext = sha('1'), newContext = sha('2')
@@ -9,7 +10,7 @@ async function fixture(page: Page, allowed = true, personas = false) {
   const record = (id: string, char: string) => ({ revision: sha(char), in_version_scope: true, payload: { reconciliation_id: id, source, target, stage: 'active', rationale: `Explicit ${id}`, evidence: [], actor_id: 'curator', preview: { source, target, items: [] } } })
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
-    if (path === '/api/v2/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
+    if (path === '/api/v1/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (route.request().method() === 'POST' && path.includes('/correspondence-drafts')) {
       const body = route.request().postDataJSON() as Record<string, unknown>; writes.push({ path, body })
       if (path.endsWith('/preview')) return route.fulfill({ json: { preview_digest: sha('e'), draft_allowed: allowed, source_version: '7.1.1', target_version: '7.1.2', source_assessment: assessment, requires_new_target_review: true, limitations: ['Human correspondence does not verify identity or applicability.'] } })
@@ -18,9 +19,9 @@ async function fixture(page: Page, allowed = true, personas = false) {
       head = sha('f'); return route.fulfill({ json: { committed: true, projection } })
     }
     let result: unknown = { items: [], next_cursor: null }
-    if (path === '/api/v2/me') result = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
-    else if (path === '/api/v2/playground/personas') result = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
+    if (path === '/api/v1/me') result = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    else if (path === '/api/v1/playground/personas') result = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: head }] }
     else if (path.endsWith('/workspace')) result = { state: head, project_id: 'product', version: '7.1.2', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/refs')) result = { items: [{ kind: 'tag', name: 'reviewed-source', version: '7.1.1', state: source }], next_offset: null }
@@ -31,8 +32,8 @@ async function fixture(page: Page, allowed = true, personas = false) {
     else if (path.endsWith('/reconciliation-candidates')) { contextReads.push(url); result = { items: [{ id: newContext, component_ref: 'new-library', root_ref: 'app', component: { name: 'New library' } }], total: 21, next_offset: url.searchParams.get('offset') === '20' ? null : 20 } }
     return route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByText('Occurrence correspondence across imports', { exact: true }).click()
   await page.getByRole('combobox', { name: 'Source branch or tag', exact: true }).selectOption(source)
@@ -76,7 +77,7 @@ test('503, advanced target,409 and pending projection retain one exact captured 
   await preview(panel); await fill(panel); fail(503)
   await panel.getByRole('button', { name: 'Create new linked target draft', exact: true }).click()
   await expect(panel.getByRole('alert')).toContainText('Retry the identical captured request')
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   advance(); await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click()
   await expect(panel).toContainText('The target advanced')
   fail(409); await panel.getByRole('button', { name: 'Retry exact linked draft request', exact: true }).click()
@@ -111,7 +112,7 @@ test('an old actor publication response cannot restore captured input after an a
   const f = await fixture(page, true, true)
   await preview(f.panel); await fill(f.panel); f.hold()
   await f.panel.getByRole('button', { name: 'Create new linked target draft', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await page.getByRole('combobox', { name: 'Persona', exact: true }).selectOption('other')
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toHaveValue('other')
   await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toBeEnabled()

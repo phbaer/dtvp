@@ -10,7 +10,7 @@ app = knowledge_app
 
 
 def endpoint(project, state):
-    return f"/api/v3/projects/{project}/states/{state}/evidence-summary"
+    return f"/api/v1/projects/{project}/states/{state}/evidence-summary"
 
 
 def test_pinned_summary_matches_full_workspace_and_remains_historical(analyst, app, bom):

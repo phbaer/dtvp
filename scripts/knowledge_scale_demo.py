@@ -12,6 +12,8 @@ from uuid import uuid4
 
 import httpx
 
+from dtvp.api_contract import API_PREFIX
+
 VERSIONS = ("7.1.1", "7.1.2")
 ROOTS = ("scale-platform", "scale-operations")
 LIMITATIONS = [
@@ -130,20 +132,20 @@ def seed(client, *, products=3, packages=250, vulnerabilities=50):
     ):
         if type(value) is not int or not low <= value <= high:
             raise ValueError(f"{name} must be an integer between {low} and {high}")
-    checked(client.post("/api/v2/playground/login", json={"persona": "administrator"}))
+    checked(client.post(f"{API_PREFIX}/playground/login", json={"persona": "administrator"}))
     token = client.cookies.get("dtvp_csrf")
     if not token:
         raise RuntimeError("Playground login did not provide a CSRF token")
     client.headers["X-CSRF-Token"] = token
-    me = checked(client.get("/api/v2/me"))
+    me = checked(client.get(f"{API_PREFIX}/me"))
     if me.get("playground") is not True:
         raise RuntimeError(
             "Synthetic scale seeding requires a verified playground; no project writes were attempted"
         )
-    teams = {row["name"]: row["id"] for row in checked(client.get("/api/v2/workspaces"))}
+    teams = {row["name"]: row["id"] for row in checked(client.get(f"{API_PREFIX}/workspaces"))}
     if not {"Platform", "Operations"}.issubset(teams):
         raise RuntimeError("Playground Platform and Operations teams are required")
-    existing = {row["name"]: row["id"] for row in checked(client.get("/api/v2/projects"))}
+    existing = {row["name"]: row["id"] for row in checked(client.get(f"{API_PREFIX}/projects"))}
     result = {"synthetic": True, "limitations": list(LIMITATIONS), "created": [], "skipped": []}
     for index in range(products):
         name = f"[SYNTHETIC] Knowledge Scale Playground {index + 1:02}"
@@ -151,20 +153,20 @@ def seed(client, *, products=3, packages=250, vulnerabilities=50):
             result["skipped"].append({"project_id": existing[name], "name": name})
             continue
         project = checked(
-            client.post("/api/v2/projects", json={"name": name, "workspace_id": teams["Platform"]})
+            client.post(f"{API_PREFIX}/projects", json={"name": name, "workspace_id": teams["Platform"]})
         )
         project_id = project["id"]
         existing[name] = project_id
         checked(
             client.put(
-                f"/api/v2/projects/{project_id}/sharing",
+                f"{API_PREFIX}/projects/{project_id}/sharing",
                 json={
                     "workspace_id": teams["Operations"],
                     "capabilities": ["read", "assess", "approve", "snapshot", "evidence"],
                 },
             )
         )
-        base = f"/api/v3/projects/{project_id}"
+        base = f"{API_PREFIX}/projects/{project_id}"
         states = {}
         for version in VERSIONS:
             raw = (

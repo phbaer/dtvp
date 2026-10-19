@@ -7,6 +7,7 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import InventoryMetadata, projected_response, uncertain_response
 from dtvp.auth import authenticate
 from dtvp.domain import audit
@@ -26,7 +27,7 @@ from dtvp.models import Project
 from dtvp.schemas import RequestModel
 from dtvp.storage import digest
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 MAX_CAPTURE = 12 * 1024 * 1024
 
 

@@ -1,3 +1,4 @@
+import { openNativeTools } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string) => value.repeat(64)
 async function fixture(page: Page, options: { readonly?: boolean; personas?: boolean; hold?: boolean } = {}) {
@@ -16,17 +17,17 @@ async function fixture(page: Page, options: { readonly?: boolean; personas?: boo
     }
     reads.push(path)
     let result: unknown = { items: [], next_cursor: null, next_offset: null }
-    if (path === '/api/v2/me') result = { id: actor, name: actor, playground: !!options.personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') result = { id: actor, name: actor, playground: !!options.personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) result = options.personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
-    else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: sha('f') }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: sha('f'), project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/advisory-refresh')) result = { expected_versions: { '7.1.1': sha('f') }, expected_evidence: null, providers: [{ id: 'circl', publisher: 'CVE mirror', enabled: true, next_revision: 0 }, { id: 'nvd', publisher: 'NVD', enabled: false, next_revision: 0 }], identifiers: [], total: 0, next_offset: null, capabilities: [], limitations: [] }
     else if (path.endsWith('/advisory-schedule')) result = { state: pin, providers: schedules, actor_id: 'policy-author', capabilities: options.readonly ? [] : ['configure'], provider_minimum_seconds: { nvd: 6, circl: 1 }, limitations: ['Only exact known identifiers; no approval.'] }
     await route.fulfill({ json: result })
   })
-  await page.goto('/?page=Knowledge')
-  await page.getByRole('button', { name: 'Knowledge product', exact: false }).click()
+  await page.goto('/?page=Review'); await openNativeTools(page)
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.locator('.knowledge-advisories > summary').click()
   await expect(page.getByText('0 matching baseline IDs', { exact: false })).toBeVisible()
@@ -50,7 +51,7 @@ test('policy capture is local; publishing requires confirmation and exact retrie
   await prepare(panel)
   expect(writes).toHaveLength(0)
   await expect(panel.getByRole('button', { name: 'Publish advisory schedule', exact: true })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Refresh advisory plan', exact: true })).toBeDisabled()
   await panel.getByRole('checkbox').check(); fail(503)
   await panel.getByRole('button', { name: 'Publish advisory schedule', exact: true }).click()
@@ -61,7 +62,7 @@ test('policy capture is local; publishing requires confirmation and exact retrie
   await expect(panel.getByRole('status')).toContainText('schedule saved')
   expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1])
   expect(writes[0]).toMatchObject({ expected_policy: sha('a'), providers: [{ provider: 'circl', versions: ['7.1.1', '7.1.2'], interval_seconds: 3600, batch_size: 10 }] })
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })
 test('empty replacement explicitly stops scheduling and pending projection retains exact receipt', async ({ page }) => {
   const { panel, writes, pending, current } = await fixture(page)
@@ -87,7 +88,7 @@ test('discard releases the captured schedule and restores current policy fields'
   await prepare(panel)
   await panel.getByRole('button', { name: 'Discard schedule draft', exact: true }).click()
   await expect(panel.getByLabel('Captured advisory schedule', { exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Knowledge product', exact: false })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
   expect(writes).toHaveLength(0)
 })
 test('actor roundtrip invalidates a late schedule response', async ({ page }) => {

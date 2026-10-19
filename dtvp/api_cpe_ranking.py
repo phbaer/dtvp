@@ -6,13 +6,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field, ValidationError
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.api_contract import API_PREFIX
 from dtvp.knowledge.comparison import reachable_states
 from dtvp.knowledge.cpe import current_discovery_policy
 from dtvp.knowledge.cpe_ranking import DictionaryRecord, rank_candidates
 from dtvp.knowledge.journal import Sha
 from dtvp.schemas import RequestModel
 
-router = APIRouter(prefix="/api/v3")
+router = APIRouter(prefix=API_PREFIX)
 MAX_BODY = 2 * 1024 * 1024
 
 
