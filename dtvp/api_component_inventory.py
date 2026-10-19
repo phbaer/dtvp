@@ -10,6 +10,7 @@ from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.comparison import reachable_states
 from dtvp.knowledge.component_inventory import inventory_page
+from dtvp.knowledge.dependency_tree import dependency_tree
 from dtvp.knowledge.journal import Name, Ref, Sha
 from dtvp.knowledge.metadata import component_at
 from dtvp.knowledge.workspace import load_sections
@@ -23,6 +24,31 @@ def pinned(request, project_id, state):
     if state not in reachable_states(journal, project_id):
         raise HTTPException(404, "Committed state unavailable in this product line")
     return journal, require_state(journal, state, project_id), load_sections(journal, state)
+
+
+@router.get("/projects/{project_id}/states/{state}/dependency-tree")
+def tree(
+    project_id: str,
+    state: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    root_ref: str | None = Query(
+        None, min_length=1, max_length=4096, pattern=r"^[^\x00-\x1f\x7f]+$"
+    ),
+    max_depth: int = Query(3, ge=0, le=20),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+):
+    project_for(db, actor, project_id)
+    _, revision, sections = pinned(request, project_id, state)
+    try:
+        result = dependency_tree(
+            sections, root_ref=root_ref, max_depth=max_depth, offset=offset, limit=limit
+        )
+    except KeyError:
+        raise HTTPException(404, "Dependency root absent from selected state") from None
+    return {**result, "state": state, "version": revision.version}
 
 
 @router.get("/projects/{project_id}/states/{state}/components")

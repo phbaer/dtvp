@@ -187,6 +187,24 @@ Publication requires a current preview. Preserve an uncertain request unchanged;
 exact replay returns its original committed receipt rather than repinning it.
 See [API contracts](docs/api.md) for scope, authentication and example intake.
 
+Print dependencies using the same pinned backend read model as the UI:
+
+```sh
+uv run dtvp knowledge --persona analyst tree --project PROJECT_ID --version 7.2.0 --depth 4
+```
+
+Use `--state HASH` for retained history, `--root COMPONENT_REF` to inspect a subtree,
+and `--json` for structured output. Depth is bounded at 20; pages contain at most
+200 rows (`--limit`/`--offset`), with an explicit 10,000-row traversal cap. The CLI
+prints continuation offsets and state pins. Counts are distinct imported IDs on
+each component, not descendant totals or approvals.
+
+In **Review**, expand **Dependency tree** above the queue. It loads lazily for the
+selected immutable state, independently of queue filters; collapse branches,
+change depth, browse subtrees or page through entries. Shared dependencies, cycles,
+missing component metadata and unavailable graph declarations remain explicit.
+API: `GET /api/v1/projects/{id}/states/{state}/dependency-tree`.
+
 ## Deployment, recovery and migration
 
 ```sh

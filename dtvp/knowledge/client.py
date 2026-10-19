@@ -68,7 +68,9 @@ def configure(parser):
     command.add_argument("--url", default=os.getenv("DTVP_URL", "http://127.0.0.1:8900"))
     command.add_argument("--token-env", default="DTVP_API_TOKEN")
     command.add_argument("--persona", help="Synthetic playground login only")
-    command.add_argument("--timeout", type=float, default=60, help="HTTP timeout in seconds (default: 60)")
+    command.add_argument(
+        "--timeout", type=float, default=60, help="HTTP timeout in seconds (default: 60)"
+    )
     commands = command.add_subparsers(dest="knowledge_command", required=True)
     demo = commands.add_parser("demo", help="Load explicit synthetic playground scenario data")
     demo_commands = demo.add_subparsers(dest="demo_command", required=True)
@@ -159,6 +161,18 @@ def configure(parser):
     workspace.add_argument("--offset", type=int, default=0)
     workspace.add_argument("--limit", type=int, default=50)
     workspace.add_argument("--json", action="store_true")
+    tree = commands.add_parser("tree", help="Print a pinned, bounded dependency tree")
+    tree.add_argument("--project", required=True)
+    selection = tree.add_mutually_exclusive_group(required=True)
+    selection.add_argument(
+        "--version", help="Resolve this version once, then read its pinned state"
+    )
+    selection.add_argument("--state", help="Read an exact retained state")
+    tree.add_argument("--root", help="Browse a component's subtree by its source reference")
+    tree.add_argument("--depth", type=int, default=3)
+    tree.add_argument("--offset", type=int, default=0)
+    tree.add_argument("--limit", type=int, default=100)
+    tree.add_argument("--json", action="store_true")
     portfolio = commands.add_parser(
         "portfolio", help="Show project statistics across current versions"
     )
@@ -374,6 +388,37 @@ def display_workspace(result):
         print(f"Next offset: {result['next_offset']} (pin --expected {result['state']})")
 
 
+def display_tree(result):
+    print(f"Dependency tree · {result['version']} · State: {result['state']}")
+    if result.get("dependency_graph") != "reported":
+        print(
+            "Declared dependency graph unavailable or incomplete; isolated rows do not imply no dependencies."
+        )
+    if result["items"] and result["items"][0]["depth"]:
+        print("Page starts beneath: " + " → ".join(result["items"][0]["path"][:-1]))
+    for row in result["items"]:
+        component = row["component"]
+        name = component.get("name") or row["component_ref"]
+        version = f" @{component['version']}" if component.get("version") else ""
+        markers = [key for key in ("cycle", "shared", "missing") if row[key]]
+        if row["child_count"] and row["depth"] == result["max_depth"] and not markers:
+            markers.append("depth limit; browse --root " + row["component_ref"])
+        suffix = " · " + ", ".join(markers) if markers else ""
+        print(
+            f"{'  ' * row['depth']}{'└─ ' if row['depth'] else ''}{name}{version} "
+            f"[{row['component_ref']}] · {row['vulnerability_count']} vulnerabilities{suffix}"
+        )
+    print(
+        f"Rows {result['offset']}..{result['offset'] + len(result['items'])} of {result['total']}"
+    )
+    if result["next_offset"] is not None:
+        print(f"Next offset: {result['next_offset']} (pin --state {result['state']})")
+    if result["truncated"]:
+        print(f"Traversal limited to {result['row_limit']} rows; browse a specific --root.")
+    for limitation in result["limitations"]:
+        print(limitation)
+
+
 def run(args):
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         raise ValueError("HTTP timeout must be a positive finite number of seconds")
@@ -391,6 +436,32 @@ def run(args):
                 client.post(API_PREFIX + "/playground/login", json={"persona": args.persona})
             )
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "tree":
+            from urllib.parse import quote
+
+            base = f"{API_PREFIX}/projects/{quote(args.project, safe='')}"
+            state = args.state
+            if args.version:
+                selection = read_response(
+                    client.get(
+                        base + f"/versions/{quote(args.version, safe='')}/inventory",
+                        params={"limit": 1},
+                    )
+                )
+                state = selection.get("reference_state", selection["state"])
+                if not state:
+                    raise ValueError("Version has no current journal head")
+            params = {"max_depth": args.depth, "offset": args.offset, "limit": args.limit}
+            if args.root is not None:
+                params["root_ref"] = args.root
+            result = read_response(
+                client.get(base + f"/states/{quote(state, safe='')}/dependency-tree", params=params)
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                display_tree(result)
+            return
         if args.knowledge_command == "demo":
             from dtvp.knowledge.demo_scenarios import MAX_SCENARIO_BYTES
 
