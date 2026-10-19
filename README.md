@@ -225,7 +225,13 @@ Publication requires a current preview. Preserve an uncertain request unchanged;
 exact replay returns its original committed receipt rather than repinning it.
 See [API contracts](docs/api.md) for scope, authentication and example intake.
 
-The UI's expandable dependency hierarchy includes **Show paths** on each component.
+The dependency tree and finding-location paths start collapsed and load on demand.
+Opening the tree shows collapsed roots. Expand individual branches; **Collapse all**
+returns to roots. Compact rows show component/version, direct dependency counts and
+vulnerability counts. Select a component to reveal **Show paths**, subtree navigation
+and identifiers, without repeating those controls on every row. **Back** restores the
+previous subtree; depth/refresh controls and coverage notes stay under disclosures.
+The UI's expandable dependency hierarchy includes **Show paths** for the selected component.
 This switches to a compact path-only view; **Back to dependency tree** restores the
 hierarchy without losing its page or expansion. Finding evidence also shows the
 path from that finding's consuming root to the affected component. Named components

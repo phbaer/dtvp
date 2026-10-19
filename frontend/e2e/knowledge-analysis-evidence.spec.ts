@@ -120,8 +120,13 @@ test('CPE declarations, configured mappings and candidates remain separate from 
 })
 
 test('finding evidence includes only its consuming dependency path', async ({ page }) => {
+  const reads: string[] = []
+  page.on('request', request => { if (request.url().includes('/dependency-paths?')) reads.push(request.url()) })
   const requested = page.waitForRequest(request => request.url().includes('/dependency-paths?'))
   const { detail, writes } = await fixture(page)
+  await expect(detail.getByRole('list', { name: 'Dependency path components' })).toHaveCount(0)
+  expect(reads).toHaveLength(0)
+  await detail.getByText('Location in dependency tree', { exact: true }).click()
   const location = detail.getByRole('region', { name: 'Location in dependency tree', exact: true })
   await expect(location.getByRole('list', { name: 'Dependency path components' })).toContainText('application')
   await expect(location.getByRole('list')).toContainText('parser')
@@ -129,5 +134,6 @@ test('finding evidence includes only its consuming dependency path', async ({ pa
   expect((await location.boundingBox())!.height).toBeLessThan(120)
   const params = new URL((await requested).url()).searchParams
   expect(params.get('root_ref')).toBe('application'); expect(params.get('component_ref')).toBe('parser')
+  expect(reads).toHaveLength(1)
   expect(writes).toHaveLength(0)
 })
