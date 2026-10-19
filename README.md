@@ -637,11 +637,15 @@ each selected version. Unrelated findings/versions do not block it. Original Bas
 metrics stay unchanged; pending drafts do not revoke valid approved score inputs.
 Material changes make old coverage/scores visibly outdated rather than deleting them.
 
-The CLI uses the same HTTP contracts without opening the application database:
+From the repository root, use `uv run dtvp`; uv installs the project entry point
+automatically. No shell alias/function or separate installation is required.
+`uv run dtvp --help` lists commands; `uv run dtvp knowledge --help` lists remote
+workflows. The CLI uses the same HTTP contracts without opening the application
+database:
 
 ```bash
-uv run python -m dtvp.cli knowledge --persona analyst workspace --project PROJECT_ID --version 7.1.1
-uv run python -m dtvp.cli knowledge --persona reviewer request POST /api/v3/projects/PROJECT_ID/reviews --body review.json
+uv run dtvp knowledge --persona analyst workspace --project PROJECT_ID --version 7.1.1
+uv run dtvp knowledge --persona reviewer request POST /api/v3/projects/PROJECT_ID/reviews --body review.json
 ```
 
 Production CLI calls read a bearer credential from `DTVP_API_TOKEN` (or the named
@@ -748,9 +752,9 @@ assessment lineage checks and synchronization receipt formats remain unchanged.
 CLI uses the same backend requests, with JSON files containing the exact fields:
 
 ```bash
-uv run python -m dtvp.cli knowledge --persona analyst correspondence-draft \
+uv run dtvp knowledge --persona analyst correspondence-draft \
   --project PROJECT --input preview.json
-uv run python -m dtvp.cli knowledge --persona analyst correspondence-draft \
+uv run dtvp knowledge --persona analyst correspondence-draft \
   --project PROJECT --input apply.json --apply
 ```
 
@@ -2314,7 +2318,7 @@ closed. No background garbage collection is enabled in this slice.
 Rebuild only the new projection, preserving v2/auth/job data:
 
 ```bash
-uv run python -m dtvp.cli rebuild-knowledge
+uv run dtvp rebuild-knowledge
 uv run pytest tests/test_knowledge_journal.py tests/test_knowledge_api.py
 ```
 
@@ -2662,7 +2666,7 @@ legacy SQL reset. Keep manual integration runs on an explicitly disposable targe
 CI runs the same API, PostgreSQL and browser gates on pushes and pull requests.
 
 For separate processes, set the configuration in [development](docs/development.md),
-run `uv run python -m dtvp.cli serve` and `uv run python -m dtvp.cli worker`, then
+run `uv run dtvp serve` and `uv run dtvp worker`, then
 `npm run dev` in `frontend/`. Theme and technical-detail preferences persist locally;
 assessment drafts are retained per user/finding in the browser session.
 

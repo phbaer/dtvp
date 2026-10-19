@@ -231,7 +231,7 @@ wheels = [
 [[package]]
 name = "dtvp"
 version = "2.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "authlib" },

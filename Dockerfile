@@ -14,9 +14,10 @@ COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=secret,id=build_ca,target=/run/secrets/build_ca \
     if [ -f /run/secrets/build_ca ]; then \
       cat /etc/ssl/certs/ca-certificates.crt /run/secrets/build_ca > /tmp/dtvp-build-ca.pem && \
-      SSL_CERT_FILE=/tmp/dtvp-build-ca.pem uv sync --locked --no-dev && rm /tmp/dtvp-build-ca.pem; \
-    else uv sync --locked --no-dev; fi
+      SSL_CERT_FILE=/tmp/dtvp-build-ca.pem uv sync --locked --no-dev --no-install-project && rm /tmp/dtvp-build-ca.pem; \
+    else uv sync --locked --no-dev --no-install-project; fi
 COPY dtvp ./dtvp
+RUN uv sync --locked --no-dev --offline
 COPY alembic.ini ./
 COPY playground/fixtures ./playground/fixtures
 COPY --from=frontend /app/frontend/dist ./frontend/dist
