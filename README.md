@@ -57,7 +57,9 @@ selectors, team and status filters, scope statistics and a compact work queue le
 to contextual assessment, independent review and coordinator scoring. Source and
 published severity remain visible together. Expandable evidence and advanced tools
 support detailed analysis without filling the ordinary review view.
-System, light and dark themes are available.
+System, light and dark themes are available. Dark mode uses warm charcoal surfaces,
+cream text and Catppuccin-inspired mauve accents; System follows the same palette
+when the operating system prefers dark mode.
 
 Overview retains the searchable queue and a wider detail pane on desktop. Narrow
 screens show the selected finding directly, with **Back to results** restoring the
