@@ -62,8 +62,15 @@ current/inactive/withheld status and recorded assessment citations. Expand an en
 for claims, vectors, report references and provenance. Matching scores alone never
 prove that an analysis was used in a published decision.
 CPE details distinguish source declarations, configured mappings and candidates;
-none becomes an approved identity implicitly. Analysis-input preparation and job
-actions remain optional controls within the analysis section.
+none becomes an approved identity implicitly.
+The Evidence tab opens with description/consuming context, vulnerability sources
+and analysis results visible. Paths, CPE details, VScorer input files, Agentyzer
+repository input and Agentyzer analysis jobs have their own directly visible,
+collapsed sections. Input preparation and jobs are siblings of the evidence;
+there is no enclosing “Analysis tools and input files” accordion. Detailed
+provenance, vectors, raw records and editing controls remain collapsed. Opening
+sections does not prepare inputs or submit jobs; captured operations remain mounted
+across workflow tabs.
 
 1. A pipeline imports complete source snapshots or separately identified delivery
    parts, with explicit source/build ordering, scope and collection limitations.

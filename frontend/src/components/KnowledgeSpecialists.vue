@@ -67,12 +67,10 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence; emit('locked', false) })
 </script>
 
 <template>
-  <details class="knowledge-specialists">
-    <summary>Analysis tools and input files</summary>
-    <p class="hint">Preparing or downloading specialist inputs does not submit work or adopt an assessment, identity or score. External analysis needs a separate explicit job request.</p>
-    <p v-if="!componentRef" class="hint">The source component reference is unavailable; VScorer inputs cannot be prepared.</p>
+  <div class="knowledge-specialists">
     <details>
       <summary>VScorer input files</summary>
+      <p v-if="!componentRef" class="hint">The source component reference is unavailable; VScorer inputs cannot be prepared.</p>
       <p class="hint">Select an original source Base explicitly for {{ finding.vulnerability_id }}. The backend validates it; other context vulnerabilities remain explicit exclusions. No published or contextual score is substituted.</p>
       <label>Original source Base<select v-model="sourceBase" :disabled="vscorerBusy"><option value="" disabled>Select a source vector</option><option v-for="vector in vectors" :key="vector" :value="vector">{{ ratingLabels(vector) }} · {{ vector }}</option></select></label>
       <code v-if="sourceBase">{{ sourceBase }}</code><p v-if="!vectors.length">No original source vectors are available for selection.</p>
@@ -97,15 +95,18 @@ onBeforeUnmount(() => { ++sequence; ++vectorSequence; emit('locked', false) })
         <details><summary>Agentyzer source pin and request</summary><pre>{{ JSON.stringify({ receipt: agentyzer.receipt, request: agentyzer.request }, null, 2) }}</pre></details>
         <button @click="downloadJson(agentyzer, 'dtvp-agentyzer-input.json')">Download Agentyzer input JSON</button>
       </template>
-      <KnowledgeAnalysisJobs :project="project" :state="state" :version="version" :context-id="finding.context_id" :vulnerability-id="finding.vulnerability_id" :source-ready="agentyzer?.ready_to_submit === true" @locked="emit('locked', $event)" />
+
     </details>
-  </details>
+    <KnowledgeAnalysisJobs :project="project" :state="state" :version="version" :context-id="finding.context_id" :vulnerability-id="finding.vulnerability_id" :source-ready="agentyzer?.ready_to_submit === true" @locked="emit('locked', $event)" />
+  </div>
 </template>
 
 <style scoped>
-.knowledge-specialists { padding: 6px 0; margin-top:6px; border-block: 1px solid var(--border, #64748b33); min-width: 0; }
+.knowledge-specialists { min-width:0; }
 summary { cursor: pointer; overflow-wrap: anywhere; }
-.knowledge-specialists > details { margin-top: .75rem; }
+.knowledge-specialists > details { border-top:1px solid var(--line);padding:7px 0;margin:0;font-size:.78rem; }
+.knowledge-specialists > details > summary { margin:0;font-size:.8rem; }
+.knowledge-specialists > details[open] > summary { margin-bottom:6px; }
 label { display: grid; gap: .3rem; margin-block: .6rem; min-width: 0; }
 select { width: 100%; min-width: 0; }
 code, pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: .8rem; }

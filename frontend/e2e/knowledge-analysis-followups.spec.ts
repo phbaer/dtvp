@@ -31,7 +31,6 @@ async function fixture(page: Page, allowed = true, personas = false) {
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Follow-up product', exact: true }).click()
   await page.getByRole('button', { name: vuln, exact: true }).click()
-  await page.getByText('Analysis tools and input files', { exact: true }).click()
   await page.getByText('Agentyzer repository input', { exact: true }).click()
   await page.getByText('Agentyzer analysis jobs', { exact: true }).click()
   await page.getByRole('button', { name: 'Load analysis jobs', exact: true }).click()

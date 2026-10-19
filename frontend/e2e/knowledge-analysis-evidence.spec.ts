@@ -56,7 +56,7 @@ test('sources and analyses show backend contributions without implying missing s
   await expect(sources).toContainText('description · ratings')
   await expect(sources).not.toContainText('Not recorded')
   await expect(detail.getByRole('region', { name: 'Vulnerability analyses', exact: true })).toContainText('No contributions recorded.')
-  await expect(detail.getByText('Analysis tools and input files', { exact: true })).toBeVisible()
+  await expect(detail.getByText('Analysis tools and input files', { exact: true })).toHaveCount(0)
   await expect(detail.getByText('Specialist inputs and CPE candidates', { exact: true })).toHaveCount(0)
   expect(writes).toHaveLength(0)
 })
@@ -135,5 +135,22 @@ test('finding evidence includes only its consuming dependency path', async ({ pa
   const params = new URL((await requested).url()).searchParams
   expect(params.get('root_ref')).toBe('application'); expect(params.get('component_ref')).toBe('parser')
   expect(reads).toHaveLength(1)
+  expect(writes).toHaveLength(0)
+})
+
+test('default evidence shows review information and exposes tool sections without a parent accordion', async ({ page }) => {
+  const { detail, writes } = await fixture(page)
+  await expect(detail.getByRole('region', { name: 'Vulnerability overview', exact: true })).toContainText('Imported source advisory description.')
+  for (const name of ['Vulnerability sources', 'Vulnerability analyses']) await expect(detail.getByRole('region', { name, exact: true })).toBeVisible()
+  for (const name of ['VScorer input files', 'Agentyzer repository input', 'Agentyzer analysis jobs']) {
+    const summary = detail.getByText(name, { exact: true })
+    await expect(summary).toBeVisible()
+    await expect(summary.locator('..')).not.toHaveAttribute('open', '')
+  }
+  await expect(detail.getByRole('button', { name: 'Prepare VScorer inputs', exact: true })).not.toBeVisible()
+  // Jobs are accessible without opening repository preparation, and opening a section never queues work.
+  await detail.getByText('Agentyzer analysis jobs', { exact: true }).click()
+  await expect(detail.getByRole('button', { name: 'Load analysis jobs', exact: true })).toBeVisible()
+  await expect(detail.getByRole('button', { name: 'Prepare Agentyzer input', exact: true })).not.toBeVisible()
   expect(writes).toHaveLength(0)
 })

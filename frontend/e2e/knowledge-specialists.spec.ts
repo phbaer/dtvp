@@ -43,7 +43,6 @@ async function fixture(page: Page, options: { denied?: boolean; wrongHash?: bool
   return { calls, advance: () => { state = nextState }, panel: page.locator('.knowledge-specialists') }
 }
 
-async function openPanel(page: Page) { await page.getByText('Analysis tools and input files', { exact: true }).click() }
 
 test('CPE lookup is explicit, attributed and pinned without changing identity or findings', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -71,7 +70,6 @@ test('CPE lookup is explicit, attributed and pinned without changing identity or
 
 test('VScorer needs an explicit competing Base choice and downloads exact receipt-bound bytes', async ({ page }) => {
   const { calls, panel } = await fixture(page)
-  await openPanel(page)
   await panel.getByText('VScorer input files', { exact: true }).click()
   const base = panel.getByRole('combobox', { name: 'Original source Base', exact: true })
   await expect(base).toHaveValue('')
@@ -96,7 +94,6 @@ test('VScorer needs an explicit competing Base choice and downloads exact receip
 
 test('receipt hash mismatches withhold native file downloads', async ({ page }) => {
   const { panel } = await fixture(page, { wrongHash: true })
-  await openPanel(page)
   await panel.getByText('VScorer input files', { exact: true }).click()
   await panel.getByRole('combobox', { name: 'Original source Base', exact: true }).selectOption(vectorA)
   await panel.getByRole('button', { name: 'Prepare VScorer inputs', exact: true }).click()
@@ -107,7 +104,6 @@ test('receipt hash mismatches withhold native file downloads', async ({ page }) 
 
 test('snapshot permission failures are transparent and do not trigger external submission', async ({ page }) => {
   const { calls, panel } = await fixture(page, { denied: true })
-  await openPanel(page)
   await panel.getByText('Agentyzer repository input', { exact: true }).click()
   await panel.getByRole('button', { name: 'Prepare Agentyzer input', exact: true }).click()
   await expect(panel.getByRole('alert')).toContainText('Snapshot permission is required')
@@ -117,7 +113,6 @@ test('snapshot permission failures are transparent and do not trigger external s
 
 test('missing source qualification stays explicit and a changed state clears derived inputs', async ({ page }) => {
   const state = await fixture(page, { noVectors: true })
-  await openPanel(page)
   await state.panel.getByText('VScorer input files', { exact: true }).click()
   await expect(state.panel).toContainText('No original source vectors are available')
   await state.panel.getByText('Agentyzer repository input', { exact: true }).click()
@@ -128,7 +123,6 @@ test('missing source qualification stays explicit and a changed state clears der
   state.advance()
   await page.getByRole('button', { name: 'Refresh workspace', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await openPanel(page)
   await state.panel.getByText('Agentyzer repository input', { exact: true }).click()
   await expect(state.panel.getByRole('button', { name: 'Download Agentyzer input JSON', exact: true })).toHaveCount(0)
   await state.panel.getByRole('button', { name: 'Prepare Agentyzer input', exact: true }).click()
@@ -138,7 +132,7 @@ test('missing source qualification stays explicit and a changed state clears der
 
 test('optional pipeline context downloads exact receipt-bound text alongside the existing files', async ({ page }) => {
   const { panel } = await fixture(page, { pipeline: 'valid' })
-  await openPanel(page); await panel.getByText('VScorer input files', { exact: true }).click()
+  await panel.getByText('VScorer input files', { exact: true }).click()
   await panel.getByRole('combobox', { name: 'Original source Base', exact: true }).selectOption(vectorA)
   await panel.getByRole('button', { name: 'Prepare VScorer inputs', exact: true }).click()
   await expect(panel.getByRole('button', { name: 'Download CVE list', exact: true })).toBeVisible()
@@ -153,7 +147,7 @@ test('optional pipeline context downloads exact receipt-bound text alongside the
 for (const kind of ['missing', 'tampered', 'unpinned'] as const) {
   test(`${kind} pipeline metadata withholds every native specialist file`, async ({ page }) => {
     const { panel } = await fixture(page, { pipeline: kind })
-    await openPanel(page); await panel.getByText('VScorer input files', { exact: true }).click()
+    await panel.getByText('VScorer input files', { exact: true }).click()
     await panel.getByRole('combobox', { name: 'Original source Base', exact: true }).selectOption(vectorA)
     await panel.getByRole('button', { name: 'Prepare VScorer inputs', exact: true }).click()
     await expect(panel.getByRole('alert')).toContainText('withheld')
