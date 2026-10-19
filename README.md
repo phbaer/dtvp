@@ -14,8 +14,9 @@ The [UI review and proposed structure](docs/ui-review.md) and
 [interactive wireframe](docs/ui-proposal.html) describe a proposed navigation and
 workflow redesign, including automatic My teams work scope and a focused
 [assessment preview](docs/ui-proposal.html#assessment) with v1-style CVSS vector
-comparison; they do not describe shipped screens. Record links also work when
-the prototype is already open.
+comparison. The assessment workspace and vector comparison are integrated into
+Review; the broader navigation and automatic My teams scope remain proposals.
+Prototype record links also work when the prototype is already open.
 The design document retains historical decisions; implemented behavior and
 `/openapi.json` take precedence over older planning notes.
 
@@ -55,11 +56,31 @@ published severity remain visible together. Expandable evidence and advanced too
 support detailed analysis without filling the ordinary review view.
 System, light and dark themes are available.
 
-Selecting a finding gives its detail pane about 60% of desktop review space.
-Fixed team and score columns keep source/published values aligned while long
-component names wrap. Narrow screens stack the queue and detail. Workflow tabs
-stay above the evidence, and captured analysis operations remain available across
-steps until resolved or explicitly discarded.
+Overview retains the searchable queue and a wider detail pane on desktop. Narrow
+screens show the selected finding directly, with **Back to results** restoring the
+queue. Rows distinguish the consuming root as well as the affected component.
+**Assessment**, **Independent review** and **Coordinator scoring** open a focused,
+full-width workspace. Evidence and decisions sit side by side on wide screens and
+stack on narrow screens. Team/version/context and source/published scores remain
+visible; unrelated filters and configuration leave the focused view.
+
+The v1-style **CVSS vectors** comparison aligns source ratings, external proposals,
+publication and the coordinator's server preview. Added and changed metrics are
+explicitly labelled. All metrics, exact vectors and comparison baseline are
+selectable; CVSS methods stay separate. Metric descriptions come from the backend;
+comparison never calculates or adopts a score. Analysts compare read-only.
+
+Analysts record applicability, not-affected justification, reasoning and explicitly
+selected evidence citations. Existing unrecognized citations remain retained.
+Submitted assessments are read-only; **Start new assessment** creates a separate
+proposal. Text, citations and optional SSVC answers survive returning to the queue
+within the same workspace session, bound to the input state and assessment revision.
+They are not browser-persistent: use **Save draft** before leaving. Reload warns
+about unsaved drafts. Additional version coverage requires an explicit preview;
+leaving the Assessment tab clears that additional selection. Captured pending
+submissions retain their exact scope, payload and retry identity across navigation.
+Final rescoring remains a separate coordinator task, gated per vulnerability on
+current independent approvals of all required contexts.
 
 The vulnerability pane compares **Vulnerability sources** (imported SBOM/DT facts,
 NVD and other advisory/VEX inputs) with **Vulnerability analyses** (VScorer,
@@ -69,7 +90,7 @@ for claims, vectors, report references and provenance. Matching scores alone nev
 prove that an analysis was used in a published decision.
 CPE details distinguish source declarations, configured mappings and candidates;
 none becomes an approved identity implicitly.
-The Evidence tab opens with description/consuming context, vulnerability sources
+The Overview tab opens with description/consuming context, vulnerability sources
 and analysis results visible. Paths, CPE details, VScorer input files, Agentyzer
 repository input and Agentyzer analysis jobs have their own directly visible,
 collapsed sections. Input preparation and jobs are siblings of the evidence;

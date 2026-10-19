@@ -102,10 +102,10 @@ test('independent review pins exact assessment and blocks a stale publication', 
   const fixtureState = await fixture(page, true)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
   const detail = page.getByLabel('Context finding detail')
-  await detail.getByRole('button', { name: 'review', exact: true }).click()
+  await detail.getByRole('button', { name: 'Independent review', exact: true }).click()
   await expect(detail.getByRole('button', { name: 'Approve assessment', exact: true })).toBeDisabled()
   await detail.getByLabel('Review rationale', { exact: true }).fill('Independent review confirmed the deployment evidence.')
-  await detail.getByRole('checkbox').check()
+  await detail.getByRole('checkbox', { name: 'I checked the evidence, applicability and context of this assessment.', exact: true }).check()
   fixtureState.conflict()
   await detail.getByRole('button', { name: 'Approve assessment', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('baseline or assessment changed')
@@ -134,7 +134,7 @@ test('coordinator previews required-review gate before explicit contextual score
   const fixtureState = await fixture(page, false, true)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
   const detail = page.getByLabel('Context finding detail')
-  await detail.getByRole('button', { name: 'scoring', exact: true }).click()
+  await detail.getByRole('button', { name: 'Coordinator scoring', exact: true }).click()
   const editor = detail.getByLabel('Coordinator rescoring')
   await editor.getByText('Advanced vector input', { exact: true }).click()
   const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L'
@@ -254,7 +254,7 @@ test('coordinator uses readable contextual metrics without changing source Base'
     { key: 'MAV', name: 'Modified Attack Vector', base: false, values: [{ value: 'P', name: 'Physical' }] },
   ] } }))
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'scoring', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Coordinator scoring', exact: true }).click()
   const form = page.getByRole('form', { name: 'Coordinator rescoring' })
   const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
   await form.getByRole('combobox', { name: 'Source Base vector', exact: true }).selectOption(vector)
@@ -270,7 +270,7 @@ test('coordinator uses readable contextual metrics without changing source Base'
 test('rule proposal pins project policy and publishes only an explicit eligible preview', async ({ page }) => {
   const f = await fixture(page, false, true)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'scoring', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Coordinator scoring', exact: true }).click()
   const form = page.getByRole('form', { name: 'Coordinator rescoring' })
   const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
   await form.getByRole('combobox', { name: 'Source Base vector', exact: true }).selectOption(vector)
@@ -311,7 +311,7 @@ test('optional SSVC records explicit model, answers, rationale and evidence in t
     action: { name: 'Outcome', values: [{ key: 'I', name: 'Immediate' }] },
   } }] } }))
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'assessment', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Assessment', exact: true }).click()
   await page.getByText('SSVC prioritization (optional)', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'SSVC assessment', exact: true })
   await panel.getByRole('combobox', { name: 'SSVC decision model', exact: true }).selectOption('ssvc:DT_DP')
@@ -336,7 +336,7 @@ test('CVSS4 normalized source Base and contextual controls preserve raw rating e
     { key: 'CR', name: 'Confidentiality Requirement', base: false, values: [{ value: 'L', name: 'Low' }] },
   ] } }))
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'scoring', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Coordinator scoring', exact: true }).click()
   const form = page.getByRole('form', { name: 'Coordinator rescoring' })
   await expect(form.getByRole('combobox', { name: 'Source Base vector', exact: true })).toHaveValue(base)
   await form.getByRole('combobox', { name: 'Confidentiality Requirement', exact: true }).selectOption('L')
@@ -353,7 +353,7 @@ test('revising recorded SSVC sends authored selection only and preserves evidenc
   ;(f.row.coverage as any).assessment = { revision: 'draft-revision', stage: 'draft', payload: { assessment_id: 'existing', author_id: 'analyst', state: 'affected', rationale: 'Recorded deployment analysis.', ssvc: { selection, outcome: 'I', outcome_label: 'Immediate', complete: true, model_sha256: sha } } }
   await page.route('**/api/v1/ssvc/models', route => route.fulfill({ json: { models: [{ id: 'ssvc:DT_DP', version: '1.0.0', sha256: sha, name: 'Deployer priority', outcome: 'action', decision_points: { exploitation: { name: 'Exploitation', values: [{ key: 'A', name: 'Active' }] }, action: { name: 'Outcome', values: [{ key: 'I', name: 'Immediate' }] } } }] } }))
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'assessment', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Assessment', exact: true }).click()
   await page.getByText('SSVC prioritization · 1 answers (optional)', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'SSVC assessment', exact: true })
   await expect(panel.getByRole('combobox', { name: 'Exploitation', exact: true })).toHaveValue('A')
@@ -361,4 +361,72 @@ test('revising recorded SSVC sends authored selection only and preserves evidenc
   await page.getByRole('button', { name: 'Submit assessment', exact: true }).click()
   expect(f.writes[0]!.body.ssvc).toEqual({ ...selection, rationale: 'Updated prioritization rationale.' })
   expect(selection.rationale).toBe('Previous prioritization evidence.')
+})
+
+test('assessment focus shows evidence beside the form at every width and returns to its queue', async ({ page }) => {
+  await fixture(page)
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  const detail = page.getByLabel('Context finding detail', { exact: true })
+  await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
+  for (const width of [1440, 1024, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expect(page.getByRole('region', { name: 'Context finding queue', includeHidden: true, exact: true })).toBeHidden()
+    await expect(detail.getByRole('region', { name: 'Evidence alongside assessment', exact: true })).toBeVisible()
+    await expect(detail.getByRole('form', { name: 'Team assessment', exact: true })).toBeVisible()
+    await expect(detail.getByRole('region', { name: 'CVSS vector comparison', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  }
+  await detail.getByRole('button', { name: 'Back to results', exact: false }).click()
+  await expect(page.getByRole('region', { name: 'Context finding queue', exact: true })).toBeVisible()
+})
+
+test('unsaved assessment and citations survive returning to the queue without requiring any scoring', async ({ page }) => {
+  const f = await fixture(page)
+  const contributions = (f.row as any).contributions
+  contributions.vulnerability_sources.push({ id: 'nvd-observation', provider: 'NVD', label: 'NVD advisory', status: 'current', current: true, ratings: [], proposal: null, claims: {}, adoption: { status: 'not_recorded', assessment_revisions: [], published_score: false }, provenance: { observation_id: 'exact-observation' }, diagnostics: [] })
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  const detail=page.getByLabel('Context finding detail', { exact: true })
+  await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
+  await detail.getByLabel('Reason and evidence', { exact: true }).fill('Deployment inspection confirms this assessment.')
+  await detail.getByRole('checkbox', { name: 'NVD advisory · current', exact: true }).check()
+  await detail.getByRole('button', { name: 'Back to results', exact: false }).click()
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Assessment', exact: true }).click()
+  await expect(detail.getByLabel('Reason and evidence', { exact: true })).toHaveValue('Deployment inspection confirms this assessment.')
+  await expect(detail.getByRole('checkbox', { name: 'NVD advisory · current', exact: true })).toBeChecked()
+  await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect(f.writes).toHaveLength(1)
+  expect(f.writes[0]?.body.evidence).toEqual([{ proposal_id: 'nvd-observation', observation_id: 'exact-observation', label: 'NVD advisory' }])
+  expect(f.writes[0]?.path).toContain('/draft')
+  expect(f.writes[0]?.body).not.toHaveProperty('vector')
+})
+
+test('submitted assessment is read-only to its author until an explicit new assessment starts', async ({ page }) => {
+  const f=await fixture(page)
+  ;(f.row.coverage as any).assessment={revision:'submitted-revision',stage:'submitted',payload:{assessment_id:'submitted',author_id:'analyst',state:'affected',rationale:'Original submitted decision.',evidence:[]}}
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  const detail=page.getByLabel('Context finding detail', { exact: true })
+  await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
+  await expect(detail.getByLabel('Reason and evidence', { exact: true })).toBeDisabled()
+  await expect(detail.getByRole('button', { name: 'Submit assessment', exact: true })).toBeDisabled()
+  await detail.getByRole('button', { name: 'Start new assessment', exact: true }).click()
+  await expect(detail.getByLabel('Reason and evidence', { exact: true })).toBeEnabled()
+  expect(f.writes).toHaveLength(0)
+})
+
+test('vector comparison separates source disagreement, added modifiers and historical proposals', async ({ page }) => {
+  const f=await fixture(page, false, true)
+  f.row.source_ratings.push({source:'Supplier',method:'CVSSv31',score:8.1,vector:f.row.source_ratings[0]!.vector.replace('/AC:L','/AC:H')})
+  f.row.scoring_proposals[0]!.current=false
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  const widget=page.getByRole('region', { name:'CVSS vector comparison',exact:true })
+  await expect(widget).toContainText('Changed from L')
+  await expect(widget).toContainText('Added')
+  await expect(widget).toContainText('Historical proposal')
+  await expect(widget).toContainText('Published contextual score')
+  await widget.getByRole('checkbox', {name:'Full vectors',exact:true}).check()
+  await expect(widget.locator('code').first()).toContainText('CVSS:3.1/')
+  await widget.getByRole('combobox', {name:'Compare against',exact:true}).selectOption('source-1')
+  await expect(widget).toContainText('Changed from H')
+  expect(f.writes).toHaveLength(0)
 })

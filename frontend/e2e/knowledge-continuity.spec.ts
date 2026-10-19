@@ -32,8 +32,8 @@ async function fixture(page: Page, reviewer = false, personas = false) {
   await page.getByRole('button', { name: 'Next page', exact: true }).click()
   await page.getByRole('button', { name: 'CVE-2099-30', exact: true }).click()
   const detail = page.getByRole('region', { name: 'Context finding detail', exact: true })
-  await detail.getByRole('button', { name: reviewer ? 'review' : 'assessment', exact: true }).click()
-  if (reviewer) { await detail.getByLabel('Review rationale', { exact: true }).fill('Reviewed exact evidence and usage'); await detail.getByRole('checkbox').check() }
+  await detail.getByRole('button', { name: reviewer ? 'Independent review' : 'Assessment', exact: true }).click()
+  if (reviewer) { await detail.getByLabel('Review rationale', { exact: true }).fill('Reviewed exact evidence and usage'); await detail.getByRole('checkbox', { name: 'I checked the evidence, applicability and context of this assessment.', exact: true }).check() }
   else await detail.getByLabel('Reason and evidence', { exact: true }).fill('Assessed this exact consuming context')
   return { detail, writes, reads, details, outcome: (value: string) => { outcome = value }, detailError: () => { detailError = true }, release: () => { releasePost?.() } }
 }
@@ -41,7 +41,7 @@ test('submit and next preserves pinned queue filters, pagination and scroll with
   const { detail, writes, reads } = await fixture(page)
   await detail.getByRole('button', { name: 'Submit and next', exact: true }).click()
   await expect(detail.getByRole('heading', { name: 'CVE-2099-31', exact: true })).toBeVisible()
-  await expect(detail.getByRole('button', { name: 'evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(detail.getByRole('button', { name: 'Overview', exact: true })).toHaveAttribute('aria-pressed', 'true')
   expect(writes).toHaveLength(1)
   expect(writes[0]).toMatchObject({ expected_versions: { '7.1.1': 'head-before' }, targets: [{ version: '7.1.1', context_id: 'context-30', vulnerability_id: 'CVE-2099-30' }] })
   expect(reads.at(-1)!.get('offset')).toBe('30'); expect(reads.at(-1)!.get('lifecycle')).toBe('unassessed'); expect(reads.at(-1)!.has('expected')).toBe(false)
@@ -82,6 +82,7 @@ test('changing queue scope during an uncertain request never resumes automatic n
   const f = await fixture(page)
   f.outcome('503'); await f.detail.getByRole('button', { name: 'Submit and next', exact: true }).click()
   await expect(page.getByRole('region', { name: 'Pending assessment workflow request' })).toBeVisible()
+  await f.detail.getByRole('button', { name: 'Back to results', exact: false }).click()
   await page.getByRole('combobox', { name: 'Review status', exact: true }).selectOption('submitted')
   await expect(page.getByRole('region', { name: 'Context finding detail', exact: true })).toHaveCount(0)
   f.outcome('current'); await page.getByRole('button', { name: 'Retry exact assessment workflow request' }).click()
@@ -93,7 +94,7 @@ test('changing queue scope during an uncertain request never resumes automatic n
 test('the end of the visible queue retains position rather than selecting another page implicitly', async ({ page }) => {
   const f = await fixture(page)
   await f.detail.getByRole('button', { name: 'Next finding', exact: true }).click()
-  await f.detail.getByRole('button', { name: 'assessment', exact: true }).click()
+  await f.detail.getByRole('button', { name: 'Assessment', exact: true }).click()
   await f.detail.getByLabel('Reason and evidence', { exact: true }).fill('Last current page context assessed')
   await f.detail.getByRole('button', { name: 'Submit and next', exact: true }).click()
   await expect(f.detail.getByRole('heading', { name: 'CVE-2099-31', exact: true })).toBeVisible()

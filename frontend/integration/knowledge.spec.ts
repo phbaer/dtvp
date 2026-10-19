@@ -57,7 +57,7 @@ test('real native intake, assessment, independent review and coordinator publica
     return page.getByRole('region', { name: 'Context finding detail' })
   }
   let detail = await visit('analyst')
-  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'assessment', exact: true }).click()
+  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Assessment', exact: true }).click()
   await detail.getByRole('combobox', { name: 'Applicability', exact: true }).selectOption('affected')
   await detail.getByLabel('Reason and evidence', { exact: true }).fill('Synthetic browser integration: reviewed the declared deployment context.')
   await detail.getByRole('button', { name: 'Submit assessment', exact: true }).click()
@@ -65,14 +65,14 @@ test('real native intake, assessment, independent review and coordinator publica
   expect((await workspace()).items.find((row: any) => row.vulnerability_id === 'CVE-2099-20001').published_score).toBeNull()
 
   detail = await visit('reviewer')
-  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'review', exact: true }).click()
+  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Independent review', exact: true }).click()
   await detail.getByLabel('Review rationale', { exact: true }).fill('Synthetic independent review of the exact assessment and context.')
   await detail.getByRole('checkbox', { name: 'I checked the evidence, applicability and context of this assessment.', exact: true }).check()
   await detail.getByRole('button', { name: 'Approve assessment', exact: true }).click()
   await expect.poll(async () => (await workspace()).items.find((row: any) => row.vulnerability_id === 'CVE-2099-20001').coverage.status).toBe('approved')
 
   detail = await visit('coordinator')
-  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'scoring', exact: true }).click()
+  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Coordinator scoring', exact: true }).click()
   const score = detail.getByRole('form', { name: 'Coordinator rescoring' })
   const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
   await score.getByRole('combobox', { name: 'Source Base vector', exact: true }).selectOption(vector)

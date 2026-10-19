@@ -74,8 +74,8 @@ test('eligible and withheld reports remain distinct supporting proposals and nev
   await detail.getByRole('button', { name: 'Assess this context', exact: true }).click()
   await expect(detail.getByRole('combobox', { name: 'Applicability', exact: true })).toHaveValue('under_investigation')
   await expect(detail.getByLabel('Reason and evidence', { exact: true })).toBeEmpty()
-  await expect(panel).not.toBeVisible()
-  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'evidence', exact: true }).click()
+  await expect(panel).toBeVisible()
+  await detail.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Overview', exact: true }).click()
   await expect(panel).toBeVisible(); expect(writes).toHaveLength(0)
 })
 test('untrusted report text stays escaped and detailed provenance fits a narrow review workspace', async ({ page }) => {

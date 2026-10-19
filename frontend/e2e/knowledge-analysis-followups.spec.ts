@@ -47,7 +47,7 @@ test('a completed parent and explicit question create only a separate source-bou
   await prepare(page, f.panel)
   await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Close context finding', exact: true })).toBeDisabled()
-  await expect(page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'assessment', exact: true })).toBeDisabled()
+  await expect(page.getByRole('navigation', { name: 'Assessment workflow' }).getByRole('button', { name: 'Assessment', exact: true })).toBeDisabled()
   await f.panel.getByRole('button', { name: 'Queue bound follow-up', exact: true }).click()
   await expect(f.panel).toContainText('Follow-up job child recorded')
   expect(f.posts).toHaveLength(1)
@@ -82,6 +82,7 @@ test('a dirty first question retains its original head and requires explicit dis
   expect((await f.panel.boundingBox())!.width).toBeLessThanOrEqual(390)
   await f.panel.getByRole('button', { name: 'Discard follow-up input', exact: true }).click()
   await expect(f.panel).toHaveCount(0)
+  await page.getByRole('button', { name: 'Back to results', exact: false }).click()
   await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
 })
 test('read-only job capabilities expose no follow-up action', async ({ page }) => {

@@ -8,6 +8,19 @@ team ownership, version history and explicit human decisions.
 
 [Interactive wireframe](ui-proposal.html) · [Current application](../README.md)
 
+## Implementation status
+
+Review now includes the focused assessment/review/scoring layout, responsive return
+to the queue, consuming-root labels and v1-style attributed vector comparisons.
+Evidence remains visible beside the assessment and review controls. Explicit
+assessment citations and in-session draft retention use the existing pinned backend
+contracts. Submitted assessments require a new decision before editing. Independent
+review and per-vulnerability coordinator publication remain separate operations.
+
+The wider application navigation and automatic multi-team work scope described
+below remain proposals. The findings record the original inspection, before these
+assessment changes; the README describes current runtime behavior.
+
 ## Findings from the current application
 
 The review covers the current screen structure and component inventory, with live

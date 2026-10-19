@@ -38,7 +38,7 @@ async function fixture(page: Page, personas = false) {
     await page.getByRole('button', { name: 'Product scope', exact: false }).click()
     await page.getByRole('option', { name: 'Score product', exact: true }).click()
     await page.getByRole('button', { name: 'CVE-2099-0', exact: true }).click()
-    await page.getByRole('button', { name: 'scoring', exact: true }).click()
+    await page.getByRole('button', { name: 'Coordinator scoring', exact: true }).click()
   }
   await select()
   const detail = page.getByRole('region', { name: 'Context finding detail', exact: true }), editor = page.getByRole('form', { name: 'Coordinator rescoring' })

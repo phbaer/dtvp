@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test'
 async function fixture(page: Page, readonly = false, author = 'person') {
   let head = 'source-head', failWrite = 0, failPage = false
   const writes: { path: string; body: Record<string, unknown> }[] = [], previews: Record<string, unknown>[] = []
-  const assessment = { revision: 'revision-one', stage: 'submitted', payload: { assessment_id: 'logical-one', author_id: author, state: 'affected', rationale: 'Existing recorded reasoning', conditions: '', evidence: [] } }
+  const assessment = { revision: 'revision-one', stage: author === 'person' ? 'draft' : 'submitted', payload: { assessment_id: 'logical-one', author_id: author, state: 'affected', rationale: 'Existing recorded reasoning', conditions: '', evidence: [] } }
   const finding = { id: 'finding', context_id: 'context', vulnerability_id: 'CVE-2099-1234', component: { name: 'TLS', version: '1.0', purl: 'pkg:generic/tls@1.0' }, context: { root_ref: 'app', component_ref: 'tls', team_id: 'team', status: 'resolved' }, description: 'Source description', source_ratings: [{ vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', score: 9.8 }], coverage: { status: 'submitted', assessment }, published_score: null, capabilities: readonly ? [] : ['assess', 'approve'] }
   function row(version: string, extra = {}) { return { id: version, state: `${version}-head`, version, context_id: 'context', vulnerability_id: finding.vulnerability_id, component: { name: 'TLS', version: '1.0' }, context: { root_ref: 'app' }, capabilities: readonly ? [] : ['assess'], assessment_candidate: true, classification: 'matching_material', reasons: [], coverage: { status: 'unassessed' }, comparison: { same_context_references: true, lineage_compatible: true }, ...extra } }
   const rows = [row('7.1.1', { state: 'source-head', coverage: finding.coverage }), row('7.1.2', { classification: 'material_changed', component: { name: 'TLS', version: '1.1' } }), row('7.2.0', { comparison: { same_context_references: false, lineage_compatible: true }, classification: 'different_context', context: { root_ref: 'other-app' } }), row('6.15.6', { capabilities: [] }), row('7.0.0', { coverage: { status: 'submitted', assessment: { ...assessment, revision: 'independent', payload: { ...assessment.payload, assessment_id: 'different' } } } }), row('8.0.0', { context: null, assessment_candidate: false, classification: 'absent' })]
@@ -38,7 +38,7 @@ async function fixture(page: Page, readonly = false, author = 'person') {
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   await page.getByRole('button', { name: finding.vulnerability_id, exact: true }).click()
   const detail = page.getByLabel('Context finding detail', { exact: true })
-  await detail.getByRole('button', { name: 'assessment', exact: true }).click()
+  await detail.getByRole('button', { name: 'Assessment', exact: true }).click()
   const matrix = detail.getByLabel('Cross-version assessment scope', { exact: true })
   await matrix.getByText('Coverage across product versions', { exact: true }).click()
   await matrix.getByRole('button', { name: 'Find coverage candidates', exact: true }).click()
@@ -73,16 +73,16 @@ test('shared assessment requires conditions and retains full scope plus UUID on 
   await page.getByRole('button', { name: 'Retry exact assessment workflow request', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Assessment submitted' })).toContainText('Assessment submitted')
   expect(writes[2]!.body).toEqual(writes[0]!.body)
-  await detail.getByRole('button', { name: 'assessment', exact: true }).click()
+  await detail.getByRole('button', { name: 'Assessment', exact: true }).click()
   await expect(detail.getByLabel('Cross-version assessment scope').locator(':scope > summary')).not.toContainText('additional')
 })
 
 test('review scope remains current context after choosing assessment targets', async ({ page }) => {
   const { detail, matrix, writes } = await fixture(page)
   await matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true }).check()
-  await detail.getByRole('button', { name: 'review', exact: true }).click()
+  await detail.getByRole('button', { name: 'Independent review', exact: true }).click()
   await detail.getByLabel('Review rationale', { exact: true }).fill('Independent review applies to the selected current context.')
-  await detail.getByRole('checkbox').check()
+  await detail.getByRole('checkbox', { name: 'I checked the evidence, applicability and context of this assessment.', exact: true }).check()
   await detail.getByRole('button', { name: 'Approve assessment', exact: true }).click()
   expect(writes[0]!.body).toMatchObject({ expected_versions: { '7.1.1': 'source-head' }, targets: [{ version: '7.1.1', context_id: 'context', vulnerability_id: 'CVE-2099-1234' }], action: 'approve' })
 })
@@ -119,8 +119,8 @@ test('leaving assessment clears extra scope and paginated drafts retain explicit
   await matrix.getByRole('button', { name: 'Previous candidate page', exact: true }).click()
   await expect(matrix.getByRole('checkbox', { name: 'Include 7.1.2 app', exact: true })).toBeChecked()
   await expect(matrix).toContainText('One shared assessment for 3 explicit targets.')
-  await detail.getByRole('button', { name: 'review', exact: true }).click()
-  await detail.getByRole('button', { name: 'assessment', exact: true }).click()
+  await detail.getByRole('button', { name: 'Independent review', exact: true }).click()
+  await detail.getByRole('button', { name: 'Assessment', exact: true }).click()
   await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
   expect(writes[0]!.body).toMatchObject({ expected_versions: { '7.1.1': 'source-head' }, targets: [{ version: '7.1.1', context_id: 'context', vulnerability_id: 'CVE-2099-1234' }] })
 })
@@ -131,7 +131,7 @@ test('a replacement author starts a separate decision and retains evidence on un
   await expect(detail.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled()
   await expect(detail.getByRole('button', { name: 'Submit assessment', exact: true })).toBeDisabled()
   await detail.getByRole('button', { name: 'Start new assessment', exact: true }).click()
-  await expect(detail.getByRole('status')).toHaveCount(0)
+  await expect(detail.getByRole('status').filter({ hasText: 'Unsaved text and citations' })).toContainText('Unsaved text and citations')
   await expect(detail.getByLabel('Reason and evidence', { exact: true })).toHaveValue('Existing recorded reasoning')
   fail(503)
   await detail.getByRole('button', { name: 'Save draft', exact: true }).click()
