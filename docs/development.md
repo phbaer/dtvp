@@ -18,7 +18,7 @@ uv run python -m dtvp.cli worker
 
 Run `npm run dev` from `frontend/`. The Vite proxy targets port 8000; public URL
 must match the browser origin for request protection. Production never enables
-playground persona login or reset routes.
+playground persona login or scenario-loading routes.
 
 ## Automatic tests
 
@@ -33,8 +33,8 @@ test resets that database's public schema and refuses an unmarked database.
 
 `npm run test:unit` covers API request/error handling. Set `DTVP_UI_URL` to an
 explicit disposable playground before browser commands; there is no default URL.
-`npm run test:ui` combines mocked transport/UI contract checks with live legacy
-import, review, snapshot, theme, isolation and mobile flows.
+`npm run test:ui` checks native workspace transport, assessment/review, scoring,
+theme, isolation and compact layouts. Existing historical SQL review screens are removed.
 
 `npm run test:integration` uses the separate `frontend/integration/` configuration
 and real native HTTP/storage without mocked responses. It creates a unique synthetic
@@ -44,12 +44,15 @@ score. Assertions retain original Base severity/bytes, per-vulnerability review
 gates and independent version scope. Playground mode is required before resource
 writes; existing projects are not reset. It has passed on SQLite and PostgreSQL.
 
-The one-command `uv run python scripts/playground.py test` runs this lane after
-legacy browser cases. Its PostgreSQL stack is disposable. Native journal data blocks
-the legacy SQL reset intentionally, so keep that ordering when running both lanes
-manually. Keep browser versions aligned with the npm lockfile.
+The one-command `uv run python scripts/playground.py test` uses a disposable
+PostgreSQL stack. Keep browser versions aligned with the npm lockfile.
 
 ## Shared scenarios
+
+Load editable `playground/scenarios/workflow.json` or `specialists.json` with
+`uv run dtvp knowledge --persona administrator demo load --file PATH`.
+Startup creates identities/workspaces only. Loading a scenario explicitly publishes
+synthetic inventory and retained provenance through the native journal.
 
 Fixtures in `playground/fixtures/` are public, synthetic and offline. Use
 `CVE-2099-*` to avoid real-advisory collisions. Baseline has two private teams;

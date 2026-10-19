@@ -1,71 +1,62 @@
 # External Agentyzer integration
 
-Agentyzer stays in `../agentyzer`, with separate deployment, dependencies and
-releases. DTVP uses its existing HTTP contract: `POST /assess`,
-`GET /jobs/{id}`, `GET /jobs/{id}/result`, and
-`POST /jobs/{id}/follow-up`. No analyzer source is bundled.
+Agentyzer is a separately deployed service in `../agentyzer`; no analyzer source,
+dependencies or runtime are bundled. All DTVP paths below use `API_PREFIX`, currently
+`/api/v1`, from `dtvp/api_contract.py`. Upstream Agentyzer routes are its own
+contract, not DTVP API versions.
 
-Configure API and worker with `DTVP_AGENTYZER_ENABLED=true`,
-`DTVP_AGENTYZER_URL` and, optionally, `DTVP_AGENTYZER_TOKEN` for your gateway.
-The URL is deployment-controlled; users cannot submit arbitrary destinations.
-The optional bearer credential assumes gateway authentication; it does not add
-authentication to Agentyzer itself. Observation timeout defaults to one hour.
+Configure API/worker with `DTVP_AGENTYZER_ENABLED=true`, deployment-controlled
+`DTVP_AGENTYZER_URL` and optional `DTVP_AGENTYZER_TOKEN` for the gateway. The bearer
+credential does not itself add authentication to Agentyzer. Users cannot select
+arbitrary destinations. Observation timeout defaults to one hour.
 
-A product administrator sets `PUT /api/v2/projects/{id}/connectors/agentyzer`
-with `{"component_name":"logical-repository-name"}`. This name resolves through
-Agentyzer's repository configuration. Analysts cannot select another product's
-repository mapping. Deployment endpoint/token configuration remains server-side.
+A product manager sets `PUT /api/v1/projects/{id}/connectors/agentyzer` with
+`{"component_name":"logical-repository-name"}`. This resolves through the service's
+repository configuration. Source import `context.analysis_source` must separately
+identify that repository and a full 40-hex `source_commit`. All relevant current
+observations must agree; a generic product commit is insufficient.
 
-For external proposal eligibility, SBOM import `context.analysis_source` must
-contain `repository_name` matching that connector and a full 40-hex `source_commit`.
-All current occurrence observations must agree. Generic product commit metadata
-does not identify an analyzer repository. DTVP sends the qualified commit and
-requires returned `source_input.binding: verified_git_commit` with matching
-requested/resolved commits. Changing this import context invalidates earlier
-evidence. Missing or conflicting bindings remain visible, ineligible evidence.
-These checks establish consistency with the service-reported checkout; they do not independently verify source authenticity, delivered binaries, submodules or LFS.
+## Native inputs, jobs and retained results
 
-`POST /api/v2/findings/{id}/analyses` accepts `expected_version`, optional
-`guidance`, and optional `parent_job_id` plus `question` for a follow-up.
-DTVP sends the vulnerability ID, bound repository name, project/release hints,
-and guidance using repository scope. Pending identical requests are deduplicated.
-Completed parent runs must still match current evidence and repository binding.
+- `POST /api/v1/projects/{id}/states/{state}/agentyzer-input` prepares a contextual
+  request/receipt pinned to component, vulnerability, repository and source commit.
+- `POST /api/v1/projects/{id}/versions/{version}/analysis-jobs` submits an explicit
+  request with `request_id`, current `expected` state, `context_id`,
+  `vulnerability_id` and optional `user_guidance`.
+- `GET .../versions/{version}/analysis-jobs` lists bounded local jobs;
+  `GET .../analysis-jobs/{job}` returns one authorized operational status.
+- Explicit `/cancel` stops local collection/publication, not the external run.
+  `/retry` is capability/status dependent and never blindly repeats an unknown POST.
+- `POST .../versions/{version}/proposals/agentyzer` retains an external result with
+  its exact DTVP input receipt. `GET .../states/{state}/proposals/agentyzer/{result}/report`
+  retrieves the retained full report under current project authorization.
 
-`GET /api/v2/findings/{id}/analyses` returns newest-first cursor pages.
-`GET /api/v2/analyses/{job_id}/report` retrieves the immutable full report with
-current authorization. Collection can be cancelled using the existing job API;
-this prevents publication, but does not terminate or delete an external run.
-Generic job retry is intentionally unavailable for analyses: reload the finding
-and explicitly submit against current evidence.
+Workers checkpoint remote IDs and exact requests/results in operational SQL;
+knowledge evidence is retained in the journal. Expired leases resume safe polling.
+An uncertain POST becomes `submission_unknown` and is never automatically repeated.
+Upstream jobs may be memory-only: restart can lose remote IDs, while already
+retained DTVP reports survive. Full operational backup remains necessary for job
+credentials/private correlation; journal recovery alone restores knowledge evidence.
 
-Worker polling checkpoints the remote ID. An expired lease resumes polling;
-if a crash leaves submission outcome uncertain, DTVP fails the observation
-without sending another POST. No implicit remote retry or deletion occurs.
-Agentyzer currently keeps its jobs in memory: a service restart can invalidate
-remote IDs, including follow-up parents. Already imported DTVP reports survive.
+The inspected default Agentyzer `8ff8372` supports `/assess`, `/jobs/{id}`,
+`/jobs/{id}/result` and `/jobs/{id}/follow-up`, but lacks the required qualified
+checkout-commit proof. Source-pinned offline mocks retain these reports with explicit
+diagnostics; they do **not** establish deployable compatibility with every extended
+workflow. Missing bindings are never fabricated. An unqualified result remains
+readable and cannot establish contextual applicability, an exclusion or a lower score.
 
-DTVP preserves complete reports plus a compact evidence summary, exact occurrence
-coordinates and input evidence revision. Proposal eligibility requires a literal
-`application_eligible=true`, verified qualified source binding, an exact package
-name and detected-version match,
-and consistent affectedness/analysis state. `not_affected` also requires literal
-`code_coverage.permits_exclusion=true`. Missing fields, mismatches and incomplete
-coverage remain evidence without an applicable proposal. Current proposals only
-fill the user's draft on explicit action. Submission and independent approval
-remain separate. Original scores and manual decisions are never overwritten.
-Adjusted scores remain in the report. Eligible native runs may supply a contextual
-score proposal through the rescoring API. DTVP correlates the immutable report,
-job and occurrence, validates the vector against original Base facts, and requires
-an explicit preview, submission and independent approval. No automatic copying
-occurs.
+Qualified results require consistent issued input, exact repository/requested/resolved
+commit, component/version/CVE and analysis coverage. Not-affected proposals require
+explicit exclusion-permitting coverage. These checks establish reported input/result
+consistency, not source/binary authenticity or analysis completeness. Optional scoring
+vectors must preserve the occurrence's validated source Base and reproduce its score.
+Proposal selection, scoped human assessment, independent review and coordinator
+preview/publication remain separate. Imported results never approve themselves.
 
-The playground explicitly labels its source binding synthetic and unverified;
-its eligible scenarios are an offline workflow exception. It runs deterministic
-eligible, inconclusive and failed scenarios
-through the same durable workflow without external calls. Contract tests cover
-submission, restart/poll recovery, follow-ups, cancellation during completion,
-revoked credentials, stale evidence, scope isolation and strict proposal gates.
-Live model execution is deployment-specific and is not part of offline tests.
+The optional extensions below require a compatible qualified deployment; they are
+not silently enabled for the current default. The playground retains explicit mock
+reports and simulated personas, with no exception granting unqualified results
+real approval or lowering eligibility.
 
 ## Native unknown-submission reconciliation
 
@@ -82,7 +73,7 @@ independent Bearer check protects that endpoint only; legacy API access still
 needs the deployment gateway. Empty/invalid tokens cannot enable reconciliation.
 
 The original requesting actor explicitly posts `request_id` and `remote_id` to
-`POST /api/v3/projects/{id}/analysis-jobs/{job}/reconcile`. Current read/snapshot/
+`POST /api/v1/projects/{id}/analysis-jobs/{job}/reconcile`. Current read/snapshot/
 evidence permissions, current credential, configured endpoint/repository, material
 source pins and a SQL lease are checked before authenticated GET and again before
 attachment. Only completed jobs with exact request, issued-input/private binding
@@ -122,7 +113,7 @@ it blocks reconciliation without rewriting already captured request identities.
 
 With the private reconciliation extension enabled, a completed native analysis
 can start a separate child through
-`POST /api/v3/projects/{id}/versions/{version}/analysis-jobs/{parent}/follow-up`.
+`POST /api/v1/projects/{id}/versions/{version}/analysis-jobs/{parent}/follow-up`.
 Supply a new `request_id`, current `expected` state, exact retained
 `parent_report_sha256`, meaningful `question` and optional `user_guidance`.
 Current read/snapshot/evidence authorization applies to the child actor; the
@@ -152,7 +143,7 @@ follow-up policy). Create `follow-up.json` containing `request_id`, `expected`,
 
 ```bash
 uv run dtvp knowledge request POST \
-  /api/v3/projects/PRODUCT/versions/7.1.1/analysis-jobs/PARENT_JOB/follow-up \
+  /api/v1/projects/PRODUCT/versions/7.1.1/analysis-jobs/PARENT_JOB/follow-up \
   --body follow-up.json
 ```
 

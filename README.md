@@ -105,6 +105,8 @@ component identities or transfers approval.
 
 Current sibling service contracts, mocked qualification and unsupported features
 are documented in the [native reference](docs/native-reference.md).
+See the focused [consumer](docs/consumers.md), [Agentyzer](docs/agentyzer.md) and
+[statistics and rescoring](docs/statistics-rescoring.md) guides for operation.
 The current minimal VScorer does not echo DTVP receipts; operator-bound exchanges
 are labeled accordingly. Current default Agentyzer reports do not prove the requested
 source commit and cannot qualify as verified contextual application proposals.

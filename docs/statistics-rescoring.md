@@ -1,95 +1,109 @@
-# Statistics and contextual scores
+# Native statistics and contextual decisions
 
-`GET /api/v2/statistics` accepts the Review scope: `project_id`, `release_id`,
-`workspace_id`, `owner`, `owner_match=contains|exact`, `q` and `lifecycle`. Counts cover every active finding
-matching the authorized scope; pagination affects only `project_page`.
-`project_cursor`/`project_limit` paginate its alphabetically sorted project rows.
-Owning teams are project workspaces. Component owners are separate responsibility
-metadata; `owner=Unassigned` selects missing/empty owner values. Shared grants
-never multiply counts. Unknown severity and legacy decisions remain separate.
+All paths below use the release's `API_PREFIX`, currently `/api/v1`, configured
+once in `dtvp/api_contract.py`. The retired SQL-finding/Review runtime and its
+statistics, review-team and rescoring endpoints are unavailable.
 
-The response includes occurrence and unique-ID totals, lifecycle/applicability,
-original/effective severity, per-team and per-owner states, consistency of unique
-IDs, changed evidence and coverage diagnostics. Different occurrences of one ID
-can be incomplete or inconsistent. Unique IDs do not imply resolved advisory
-alias equivalence. PostgreSQL authorization and aggregation run under one
-repeatable-read, read-only transaction. Score sorting and statistics derive
-current review facts from DTVP storage; no DT request or source cache is used.
+## Reviewer workspace and statistics
 
-## Coordinator scoring API
+`GET /projects/{id}/versions/{version}/workspace` returns contextual findings,
+attributed source facts, descriptions, dependency/ownership evidence, current
+assessment and independently approved pins, SSVC, external proposals and published
+contextual scores. A dependency used by distinct consuming roots has distinct
+review targets. Recursive ownership stops at another team's owned component;
+namespace and case-sensitive v1 selectors remain supported. Ownership policy and
+source imports are versioned; current reassignment does not rewrite past reviews.
 
-Only workspace role `coordinator` grants `rescore`; analyst, reviewer and admin
-roles do not. Cross-team coordinators need explicit project `rescore` sharing;
-machine credentials remain restricted by current membership and token scope.
+`GET /projects/{id}/portfolio` compares selected current version heads, grouped by
+version and responsible team. `GET /portfolio` provides an authorized organization
+view. Counts distinguish unique vulnerability IDs, logical assessments/revisions,
+recorded targets, reviewed coverage and remaining contextual review workload.
+One shared assessment can cover several explicit targets without reducing their
+required review count. Overlapping team counts are labeled; source findings
+without usable context and retained absent assessments remain diagnostics.
 
-Required review teams default to the project's owning workspace. Administrators
-can `GET /findings/{id}/review-teams` for eligible teams and `PUT` with
-`expected_version` and a nonempty `workspace_ids` list. Additional teams require
-read, assess and approve grants. Changing assignments reopens evidence review.
-Revoked review access blocks completion and invalidates existing scores.
-Decision submission accepts optional `workspace_id`; approvals require a reviewer
-in that decision's team, a current latest team assessment and a different author.
-Finding details include `review_coverage`, each team's current status and decision,
-`review_workspace_id`, `review_lifecycle`, and the actor's `latest_decision`.
-`GET /findings/{id}?workspace_id=...` selects an authorized review team.
-Aggregate lifecycle is approved only when every required team has approved.
+Workspace/portfolio filtering occurs before counting and pagination. Filters
+include source/published severity, applicability, scoring status, team assessment,
+provider, CVSS version, dependency relation, source discrepancy, component,
+criticality, exposure, support/annotation status and specialist evidence. SSVC
+status/action filters distinguish provisional from approved priorities. Project
+portfolio responses pin selected heads with `heads_digest`; pass `expected_heads`
+to detect changed selections. Counts represent recorded evidence and decisions,
+not proof that producer SBOMs or vulnerability discovery are complete.
 
-- `GET /cvss/metrics/{version}` supplies specification metric labels and values.
-- `GET /projects/{id}/rescore-policy` supplies current project rules, version,
-  digest and v1 defaults. Version zero denotes the shipped default template.
-- `PUT /projects/{id}/rescore-policy` requires manage permission and
-  `expected_version`. It validates the rule structure, metric values and Base
-  invariants. Changed policies invalidate rule scores and previews; team approvals remain valid.
-- `GET /findings/{id}/rescoring/proposals` returns current provider proposals,
-  original vectors and the policy digest. Ineligible results include reasons.
-- `POST /findings/{id}/rescoring/preview` accepts `expected_version`, applicability
-  optional `state` and `rescoring`. All current team approvals and `rescore` permission
-  are required. If supplied, state must equal consolidated team applicability. Its response includes the calculated proposal and
-  `preview_digest` bound to the occurrence, state version, applicability and
-  scoring proposal.
-- `POST /findings/{id}/rescoring` publishes the previewed score with `expected_version`
-  and `rescoring.preview_digest`. The server rechecks every team approval under
-  the release lock. Any relevant change requires a fresh preview. Analyst decisions
-  reject both `rescoring` and the generic `details.rescoring` extension.
+## Assessment and independent review
 
-A rescoring request includes `kind=manual|rule|evidence` and a rationale. Manual
-requests supply `base_vector` and contextual `vector`; rules supply the Base and
-current `policy_digest`; evidence requests supply an occurrence-bound
-`evidence_id`. The false-positive rule basis remains available under
-`not_affected` applicability using `rule_basis=false_positive`. Rule transforms
-retain optional input metrics not explicitly overridden by the rule and freeze
-the actual rule configuration in the immutable scoring record for audit and snapshot export.
+- `POST /projects/{id}/assessments/{assessment_id}/draft` saves a scoped draft.
+- `POST /projects/{id}/assessments/{assessment_id}/submit` submits exact targets,
+  applicability, justification, rationale, conditions and evidence.
+- `POST /projects/{id}/reviews` approves or requests changes against an exact
+  assessment revision and current expected version heads.
 
-The calculator validates CVSS 2.0, 3.0, 3.1 and 4.0. It preserves every Base
-metric and version, rejects malformed/duplicate metrics, and calculates scores
-on the server. Custom rules cannot redefine specification Base metrics. A lower
-contextual score never establishes non-applicability. Source facts remain intact.
+Native `AssessmentInput` and `ReviewInput` reject unknown fields. Team permissions,
+matching scope/material and independent author/reviewer identity are checked on
+the server. Not-affected submission requires an explicit justification. New drafts
+retain approved history; material changes require revalidation. Analysts assess
+applicability; they do not publish contextual CVSS scores.
 
-VScorer proposals require a matching source snapshot, exact Base assertion,
-Environmental vector and consistent numeric score. Native Agentyzer proposals
-also require explicit eligibility, verified package/version and an exact link
-between the owned job, evidence and immutable report. Earlier evidence without
-revision bindings remains readable but requires a new assessment for adoption.
-Missing vectors, Base changes, mismatched scores and stale results are ineligible.
+Optional SSVC is evaluated from the pinned local model returned by
+`GET /ssvc/models`. The assessment supplies model/version/hash, explicit answers,
+rationale and optional evidence references/descriptions. DTVP derives the outcome;
+clients cannot supply it. Incomplete SSVC can be drafted, never submitted. The same
+independent team review approves the exact SSVC assessment revision. Workspace
+`ssvc.current`, `approved`, `pending` and `status` expose changes without replacing
+a retained approved priority. Imported legacy SSVC remains source evidence.
+SSVC does not publish a CVSS score, and references do not establish independent
+verification of external exploitation evidence.
 
-Only an explicitly published coordinator score bound to all current required
-team approvals exposes `adopted_rescoring` and changes `effective_score`/`effective_vector`. Unpublished or stale proposals keep
-original severity effective. Those fields appear in detail, list and immutable
-consumer snapshots. `sort=original_score|effective_score` orders the full scoped
-queue highest-first, with stable ID ties and filter-bound cursors. Score ordering
-uses bounded batch reads followed by server-side ordering; it is intentionally
-not limited to the first cursor batch. Future measured scale work can add a
-relational projection without changing this API.
+## Coordinator scoring
 
-## Review and playground
+The `coordinator` role grants `rescore`; ordinary analyst/reviewer/admin roles do
+not. Cross-team coordinators require explicit project sharing, and machine tokens
+remain limited by current membership and token scope.
 
-The default workspace shows evidence and applicability side by side. Reviewers
-check their team's rationale and justification. Teams & scoring shows required
-team progress, admin assignment controls, coordinator calculation/publication and
-immutable scoring history. Scoring never writes back to imported providers.
+- `GET /cvss/metrics/{version}` returns specification labels/values for the metric
+  editor. CVSS 2.0, 3.0, 3.1 and 4.0 are supported.
+- `GET|PUT /projects/{id}/scoring-policy` reads/replaces the pinned project rules;
+  replacement requires manage permission, request ID and `expected_policy`.
+- `POST /projects/{id}/scoring/preview` calculates a supplied contextual vector.
+- `POST /projects/{id}/scoring/publish` explicitly publishes its preview digest.
+- `POST /projects/{id}/scoring/rules/preview|publish` derives the vector from
+  approved applicability and the exact pinned project policy.
 
-The offline playground includes Security coordinator and Operations reviewer.
-**Load large inventory** adds 100 projects with 20 findings each. Tests retain
-all CVSS versions, Base preservation, preview changes, stale sources, policy
-edits, frozen exports and severity ordering, plus coordinator permissions,
-independent team approvals and the per-vulnerability completion gate.
+Scoring requests include targets, exact expected version heads, original Base
+vector, contextual/input vector and rationale. Rule requests additionally pin
+`expected_policy` and declare `rule_basis`. Publication requires the exact preview
+hash. The server rechecks current independent reviews for **every required context
+of that vulnerability** in each selected version, including unresolved ownership.
+It preserves every original Base metric/version and rejects malformed/duplicate
+metrics, Base changes and inconsistent source scores. Workspace
+`original_base_vectors` contains validated choices; raw source ratings remain
+visible separately. A lower score does not establish non-applicability.
+
+`rule_basis=false_positive` is an explicit coordinator interpretation under approved
+not-affected applicability; it is not an independently approved false-positive
+classification. Immutable publications retain the actual policy configuration,
+input vector, triggering applicability and approved assessment provenance. Policy
+edits do not rewrite existing publications. Changed review/material coverage makes
+previous contextual publication outdated; source facts remain intact.
+
+External VScorer/Agentyzer proposals remain attributed evidence with explicit
+eligibility and stale/withheld diagnostics. Selecting a proposal fills coordinator
+inputs; it never approves an assessment or publishes automatically. Current default
+Agentyzer lacks qualified checkout proof and remains ineligible for contextual
+application/scoring. See [consumer contracts](consumers.md).
+
+## UI, CLI and local scenarios
+
+The native queue shows source and published severity together. Detail tabs guide
+evidence, assessment, independent review and coordinator scoring. Metric controls
+hide advanced vectors by default; power-user provenance remains available. CLI
+`knowledge workspace` and `portfolio` use the same filters/read models; `score
+policy|preview|publish`, `assessment draft|submit` and `review` forward exact JSON
+requests. Pins and answers are never guessed locally.
+
+Playground startup creates identities/workspaces only. Load editable synthetic data
+explicitly using `knowledge --persona administrator demo load --file
+playground/scenarios/workflow.json` (or `specialists.json`). Repeating the same
+fixture preserves interactive work. Simulated reviews are labeled synthetic and
+never qualify real deployments or human approval.

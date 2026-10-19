@@ -2,8 +2,7 @@
 
 Start with [README](../README.md). The production runtime has PostgreSQL 18,
 the API/UI and one durable worker. No external source is mandatory. Artifacts
-are stored locally. V2 database rows own its inventory, metadata and decisions.
-Native v3 knowledge lives in the immutable local journal; SQL holds rebuildable
+are stored locally. Knowledge lives in the immutable local journal; SQL holds rebuildable
 projections. Accounts, permissions, connectors and operational jobs remain SQL-owned.
 
 ## Configuration
@@ -140,8 +139,8 @@ deployment-specific qualification gates.
 
 ## Legacy migration
 
-Legacy local data and the old Git revision remain intact. Import original SBOMs
-and DT finding data through the new ingestion endpoints. Historical DTVP-tagged and metadata-free DT analysis is decoded into owned
+Retained local data and historical Git revisions remain intact. Original SBOMs
+and DT findings enter through native imports. Historical DTVP-tagged and metadata-free DT analysis is decoded into owned
 source records, including plain rationale, applicability, team blocks, dates,
 assignments, claimed reviewers, historical/copied teams, suppression and SSVC.
 Legacy rescoring remains separate from Base severity. Missing metadata stays
