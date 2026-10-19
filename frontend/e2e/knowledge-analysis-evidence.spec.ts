@@ -18,7 +18,7 @@ async function fixture(page: Page, items: ReturnType<typeof analysis>[] = []) {
   const row = {
     id: 'finding', context_id: 'context', vulnerability_id: 'CVE-2099-1234',
     component: { name: 'ParserWithALongCorporateComponentName'.repeat(5), version: '2.0', purl: 'pkg:generic/parser@2.0' },
-    context: { root_ref: 'application', team_id: 'team', status: 'resolved' },
+    context: { component_ref: 'parser', root_ref: 'application', team_id: 'team', status: 'resolved' },
     description: 'Imported source advisory description.', source_ratings: [],
     coverage: { status: 'unassessed', assessment: null }, published_score: null,
     capabilities: ['assess'], code_analysis: items,
@@ -38,6 +38,7 @@ async function fixture(page: Page, items: ReturnType<typeof analysis>[] = []) {
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Analysis product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: 'state' }], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: 'state', project_id: 'product', version: '7.1.2', items: [row], next_offset: null, statistics: { totals: { context_findings: 1, unique_vulnerabilities: 1 }, by_status: { unassessed: 1 }, by_team: { team: 1 }, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
+    else if (path.endsWith('/dependency-paths')) result = { state: 'state', component_ref: 'parser', root_ref: 'application', paths: [['application', 'parser'].map(ref => ({ component_ref: ref, component: { name: ref, version: '2.0' }, missing: false }))], truncated: false, dependency_graph: 'reported', limitations: ['Shortest declared paths only.'] }
     else if (path.includes('/workspace/')) result = { ...row, state: 'state' }
     await route.fulfill({ json: result })
   })
@@ -115,5 +116,18 @@ test('CPE declarations, configured mappings and candidates remain separate from 
   await expect(cpe.locator('.cpe-groups > section').filter({ hasText: 'Accepted identities' })).toContainText('None recorded')
   await cpe.getByText('Identity limitations', { exact: true }).click()
   await expect(cpe).toContainText('No native accepted identity record is available.')
+  expect(writes).toHaveLength(0)
+})
+
+test('finding evidence includes only its consuming dependency path', async ({ page }) => {
+  const requested = page.waitForRequest(request => request.url().includes('/dependency-paths?'))
+  const { detail, writes } = await fixture(page)
+  const location = detail.getByRole('region', { name: 'Location in dependency tree', exact: true })
+  await expect(location.getByRole('list', { name: 'Dependency path components' })).toContainText('application')
+  await expect(location.getByRole('list')).toContainText('parser')
+  await expect(location.getByRole('listitem')).toHaveCount(2)
+  expect((await location.boundingBox())!.height).toBeLessThan(120)
+  const params = new URL((await requested).url()).searchParams
+  expect(params.get('root_ref')).toBe('application'); expect(params.get('component_ref')).toBe('parser')
   expect(writes).toHaveLength(0)
 })

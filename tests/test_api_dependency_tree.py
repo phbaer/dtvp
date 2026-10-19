@@ -54,3 +54,28 @@ def test_tree_does_not_accept_another_products_state(analyst, bom):
         "/api/v1/projects", json={"workspace_id": teams["Platform"], "name": "Other product"}
     ).json()["id"]
     assert analyst.get(url(other, f"/states/{state}/dependency-tree")).status_code == 404
+    assert (
+        analyst.get(
+            url(other, f"/states/{state}/dependency-paths"), params={"component_ref": "root"}
+        ).status_code
+        == 404
+    )
+
+
+def test_dependency_paths_are_pinned_read_only_and_authorized(analyst, app, bom):
+    project, _ = setup(analyst, bom)
+    state = workspace(analyst, project)["state"]
+    tree = analyst.get(url(project, f"/states/{state}/dependency-tree")).json()
+    ref = tree["items"][-1]["component_ref"]
+    endpoint = url(project, f"/states/{state}/dependency-paths")
+    before = app.state.knowledge.head()
+    response = analyst.get(endpoint, params={"component_ref": ref, "root_ref": ref})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["state"] == state and result["component_ref"] == ref
+    assert result["paths"][0][0]["component_ref"] == ref
+    assert analyst.get(endpoint, params={"component_ref": "absent"}).status_code == 404
+    assert analyst.get(endpoint, params={"component_ref": ref, "limit": 51}).status_code == 422
+    assert app.state.knowledge.head() == before
+    login(analyst, "operations")
+    assert analyst.get(endpoint, params={"component_ref": ref}).status_code == 404

@@ -225,6 +225,19 @@ Publication requires a current preview. Preserve an uncertain request unchanged;
 exact replay returns its original committed receipt rather than repinning it.
 See [API contracts](docs/api.md) for scope, authentication and example intake.
 
+The UI's expandable dependency hierarchy includes **Show paths** on each component.
+This switches to a compact path-only view; **Back to dependency tree** restores the
+hierarchy without losing its page or expansion. Finding evidence also shows the
+path from that finding's consuming root to the affected component. Named components
+and versions replace raw reference chains; alternative shortest paths are selectable.
+The authorized, pinned `GET /api/v1/projects/{project}/states/{state}/dependency-paths`
+endpoint takes `component_ref`, optional `root_ref` and `limit` (default 20, maximum
+50). Reverse graph search avoids unfolding shared dependencies and cycles, with
+explicit 10,000-node/100-edge-depth limits. Only shortest declared routes are shown;
+longer routes and runtime reachability are not inferred. Missing paths and truncated
+searches remain explicit. Path lookup reads inventory only, independent of tree
+pages, display depth and the size of the vulnerability worklist.
+
 Print dependencies using the same pinned backend read model as the UI:
 
 ```sh

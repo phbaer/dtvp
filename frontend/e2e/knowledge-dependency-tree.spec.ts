@@ -7,6 +7,13 @@ async function fixture(page: Page, graph = 'reported') {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
     if (route.request().method() !== 'GET') writes.push(path)
+    if (path.endsWith('/dependency-paths')) {
+      const component = url.searchParams.get('component_ref')!, pin = path.includes(second) ? second : first
+      return route.fulfill({ json: { state: pin, component_ref: component, root_ref: null, paths: [
+        ['application', 'parser', component].map(ref => ({ component_ref: ref, component: { name: ref, version: '1.0' }, missing: false })),
+        ['application', 'alternative-parent', component].map(ref => ({ component_ref: ref, component: { name: ref }, missing: false })),
+      ], truncated: false, dependency_graph: 'reported', limitations: ['Shortest declared paths only.'] } })
+    }
     if (path.endsWith('/dependency-tree')) {
       reads.push(url)
       if (hold && url.searchParams.get('offset') === '100') await new Promise<void>(resolve => { release = resolve })
@@ -97,5 +104,21 @@ test('late old-state pages cannot restore a previous version tree', async ({ pag
 test('unknown dependency declarations never imply isolated components have no dependencies', async ({ page }) => {
   const f = await fixture(page, 'unknown'); await f.panel.locator(':scope > summary').click()
   await expect(f.panel.getByText(/Components shown as isolated roots do not prove they have no dependencies/)).toBeVisible()
+  expect(f.writes).toHaveLength(0)
+})
+
+test('path-only view removes siblings and compares alternative routes without losing the tree', async ({ page }) => {
+  const f = await fixture(page); await f.panel.locator(':scope > summary').click()
+  await f.panel.getByRole('button', { name: 'Show paths to shared-lib', exact: true }).click()
+  const location = f.panel.getByRole('region', { name: 'Location in dependency tree', exact: true })
+  await expect(location.getByRole('list', { name: 'Dependency path components' })).toContainText('shared-lib')
+  await expect(location).toContainText('parser')
+  await expect(f.panel.getByRole('table', { name: 'Dependency hierarchy' })).not.toBeVisible()
+  await location.getByRole('combobox', { name: 'Dependency path', exact: true }).selectOption('1')
+  await expect(location).toContainText('alternative-parent')
+  await expect(location.getByRole('list')).not.toContainText('parser')
+  await f.panel.getByRole('button', { name: 'Back to dependency tree', exact: true }).click()
+  await expect(f.panel.getByRole('table', { name: 'Dependency hierarchy' })).toBeVisible()
+  await expect(f.panel.getByRole('button', { name: 'Collapse application', exact: true })).toBeVisible()
   expect(f.writes).toHaveLength(0)
 })

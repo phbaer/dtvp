@@ -114,3 +114,98 @@ def dependency_tree(sections, *, root_ref=None, max_depth=3, offset=0, limit=100
         "dependency_graph": inventory.get("baseline", {}).get("dependency_graph", "unknown"),
         "limitations": list(LIMITATIONS),
     }
+
+
+def dependency_paths(sections, *, component_ref, root_ref=None, limit=20):
+    """Shortest declared paths, using reverse BFS rather than unfolding the graph."""
+    from collections import deque
+
+    if not 1 <= limit <= 50:
+        raise ValueError("Path limit must be between 1 and 50")
+    inventory = sections["inventory"]
+    components = {
+        value["bom-ref"]: value
+        for key, value in inventory.items()
+        if (key == "root" or key.startswith(("component:", "part-root:")))
+        and isinstance(value, dict)
+        and value.get("bom-ref")
+    }
+    children, parents = defaultdict(set), defaultdict(set)
+    refs = set(components)
+    for edge in inventory.get("dependencies", {}).get("edges", []):
+        parent = edge["ref"]
+        refs.add(parent)
+        for child in edge.get("dependsOn", []):
+            refs.add(child)
+            children[parent].add(child)
+            parents[child].add(parent)
+    if component_ref not in refs or (root_ref is not None and root_ref not in refs):
+        raise KeyError(component_ref)
+
+    def order(ref):
+        component = components.get(ref, {})
+        return (component.get("name", ref).casefold(), component.get("version", ""), ref)
+
+    distances = {component_ref: 0}
+    pending = deque([component_ref])
+    search_truncated = False
+    while pending:
+        current = pending.popleft()
+        # A supplied consuming root bounds the search; ancestors above it are irrelevant.
+        if current == root_ref:
+            break
+        for parent in sorted(parents[current], key=order):
+            if parent in distances:
+                continue
+            if distances[current] >= 100 or len(distances) >= MAX_ROWS:
+                search_truncated = True
+                continue
+            distances[parent] = distances[current] + 1
+            pending.append(parent)
+    primary = inventory.get("root", {}).get("bom-ref")
+    roots = (
+        [root_ref]
+        if root_ref
+        else sorted((ref for ref in distances if not parents[ref] or ref == primary), key=order)
+    )
+    pending_paths = [(root, [root]) for root in reversed(roots) if root in distances]
+    paths = []
+    while pending_paths and len(paths) < limit:
+        current, path = pending_paths.pop()
+        if current == component_ref:
+            paths.append(
+                [
+                    {
+                        "component_ref": ref,
+                        "component": {
+                            key: components[ref][key]
+                            for key in ("name", "group", "version", "purl", "type")
+                            if ref in components and key in components[ref]
+                        },
+                        "missing": ref not in components,
+                    }
+                    for ref in path
+                ]
+            )
+        else:
+            pending_paths.extend(
+                (child, [*path, child])
+                for child in sorted(children[current], key=order, reverse=True)
+                if distances.get(child) == distances[current] - 1
+            )
+    return {
+        "component_ref": component_ref,
+        "root_ref": root_ref,
+        "paths": paths,
+        "truncated": search_truncated or bool(pending_paths),
+        "limit": limit,
+        "visited_count": len(distances),
+        "node_limit": MAX_ROWS,
+        "depth_limit": 100,
+        "dependency_graph": inventory.get("baseline", {}).get("dependency_graph", "unknown"),
+        "limitations": [
+            "Shows shortest declared paths per root; longer alternative routes are omitted.",
+            "Declared dependencies do not establish runtime reachability or complete discovery.",
+            "Disconnected cycles without a declared root have no product-root path.",
+        ],
+    }

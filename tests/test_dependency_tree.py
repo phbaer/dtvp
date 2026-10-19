@@ -65,3 +65,72 @@ def test_pagination_is_stable_and_hard_cap_is_explicit(monkeypatch):
 def test_empty_inventory_has_no_invented_root():
     result = dependency_tree({"inventory": {}, "vulnerabilities": {}})
     assert result["items"] == [] and result["total"] == 0
+
+
+def test_shortest_paths_keep_both_shared_routes_and_ignore_cycles():
+    from dtvp.knowledge.dependency_tree import dependency_paths
+
+    result = dependency_paths(graph(), component_ref="shared", root_ref="root")
+    assert [[node["component_ref"] for node in path] for path in result["paths"]] == [
+        ["root", "a", "shared"],
+        ["root", "b", "shared"],
+    ]
+    assert result["paths"][0][0]["component"]["name"] == "Application"
+    assert not result["truncated"]
+    focused = dependency_paths(graph(), component_ref="shared", root_ref="b")
+    assert [[node["component_ref"] for node in path] for path in focused["paths"]] == [
+        ["b", "shared"],
+    ]
+    assert dependency_paths(graph(), component_ref="island")["paths"] == []
+    assert dependency_paths(graph(), component_ref="island", root_ref="root")["paths"] == []
+
+
+def test_paths_limits_missing_metadata_and_root_component():
+    import pytest
+
+    from dtvp.knowledge.dependency_tree import dependency_paths
+
+    result = dependency_paths(graph(), component_ref="shared", root_ref="root", limit=1)
+    assert len(result["paths"]) == 1 and result["truncated"]
+    assert dependency_paths(graph(), component_ref="missing")["paths"][0][-1]["missing"]
+    root = dependency_paths(graph(), component_ref="root", root_ref="root")
+    assert len(root["paths"]) == 1 and len(root["paths"][0]) == 1
+    with pytest.raises(KeyError):
+        dependency_paths(graph(), component_ref="absent")
+    with pytest.raises(KeyError):
+        dependency_paths(graph(), component_ref="a", root_ref="absent")
+    with pytest.raises(ValueError):
+        dependency_paths(graph(), component_ref="a", limit=51)
+
+
+def test_path_search_is_bounded_and_does_not_unfold_longer_alternatives(monkeypatch):
+    from dtvp.knowledge.dependency_tree import dependency_paths
+
+    sections = graph()
+    sections["inventory"]["dependencies"]["edges"].append({"ref": "root", "dependsOn": ["shared"]})
+    result = dependency_paths(sections, component_ref="shared", root_ref="root")
+    assert [[node["component_ref"] for node in path] for path in result["paths"]] == [
+        ["root", "shared"]
+    ]
+    monkeypatch.setattr("dtvp.knowledge.dependency_tree.MAX_ROWS", 2)
+    result = dependency_paths(graph(), component_ref="shared", root_ref="root")
+    assert result["truncated"] and result["visited_count"] <= 2
+    assert result["paths"] == []
+
+
+def test_path_search_handles_depth_beyond_tree_pages_but_reports_its_own_cap():
+    from dtvp.knowledge.dependency_tree import dependency_paths
+
+    sections = {
+        "inventory": {
+            "dependencies": {
+                "edges": [{"ref": f"n{i}", "dependsOn": [f"n{i + 1}"]} for i in range(102)]
+            }
+        },
+        "vulnerabilities": {},
+    }
+    result = dependency_paths(sections, component_ref="n40", root_ref="n0")
+    assert len(result["paths"][0]) == 41 and not result["truncated"]
+    result = dependency_paths(sections, component_ref="n102", root_ref="n0")
+    assert result["paths"] == [] and result["truncated"]
+    assert result["visited_count"] == 101 and result["depth_limit"] == 100

@@ -10,7 +10,7 @@ from dtvp.api_contract import API_PREFIX
 from dtvp.api_knowledge import require_state
 from dtvp.knowledge.comparison import reachable_states
 from dtvp.knowledge.component_inventory import inventory_page
-from dtvp.knowledge.dependency_tree import dependency_tree
+from dtvp.knowledge.dependency_tree import dependency_paths, dependency_tree
 from dtvp.knowledge.journal import Name, Ref, Sha
 from dtvp.knowledge.metadata import component_at
 from dtvp.knowledge.workspace import load_sections
@@ -19,11 +19,21 @@ from dtvp.models import Workspace
 router = APIRouter(prefix=API_PREFIX)
 
 
-def pinned(request, project_id, state):
+def pinned(request, project_id, state, *, inventory_only=False):
     journal = request.app.state.knowledge
     if state not in reachable_states(journal, project_id):
         raise HTTPException(404, "Committed state unavailable in this product line")
-    return journal, require_state(journal, state, project_id), load_sections(journal, state)
+    revision = require_state(journal, state, project_id)
+    sections = (
+        {
+            "inventory": {
+                key: journal.load(sha) for key, sha in journal.records(state, "inventory").items()
+            }
+        }
+        if inventory_only
+        else load_sections(journal, state)
+    )
+    return journal, revision, sections
 
 
 @router.get("/projects/{project_id}/states/{state}/dependency-tree")
@@ -48,6 +58,32 @@ def tree(
         )
     except KeyError:
         raise HTTPException(404, "Dependency root absent from selected state") from None
+    return {**result, "state": state, "version": revision.version}
+
+
+@router.get("/projects/{project_id}/states/{state}/dependency-paths")
+def paths(
+    project_id: str,
+    state: Sha,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    component_ref: str = Query(min_length=1, max_length=4096, pattern=r"^[^\x00-\x1f\x7f]+$"),
+    root_ref: str | None = Query(
+        None, min_length=1, max_length=4096, pattern=r"^[^\x00-\x1f\x7f]+$"
+    ),
+    limit: int = Query(20, ge=1, le=50),
+):
+    project_for(db, actor, project_id)
+    _, revision, sections = pinned(request, project_id, state, inventory_only=True)
+    try:
+        result = dependency_paths(
+            sections, component_ref=component_ref, root_ref=root_ref, limit=limit
+        )
+    except KeyError:
+        raise HTTPException(
+            404, "Component or dependency root absent from selected state"
+        ) from None
     return {**result, "state": state, "version": revision.version}
 
 
