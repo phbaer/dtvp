@@ -374,6 +374,8 @@ test('assessment focus shows evidence beside the form at every width and returns
     await expect(detail.getByRole('region', { name: 'Evidence alongside assessment', exact: true })).toBeVisible()
     await expect(detail.getByRole('form', { name: 'Team assessment', exact: true })).toBeVisible()
     await expect(detail.getByRole('region', { name: 'CVSS vector comparison', exact: true })).toBeVisible()
+    const available = (await page.locator('.knowledge-columns').boundingBox())!.width
+    expect((await detail.boundingBox())!.width / available).toBeGreaterThan(.98)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
   }
   await detail.getByRole('button', { name: 'Back to results', exact: false }).click()
@@ -428,5 +430,27 @@ test('vector comparison separates source disagreement, added modifiers and histo
   await expect(widget.locator('code').first()).toContainText('CVSS:3.1/')
   await widget.getByRole('combobox', {name:'Compare against',exact:true}).selectOption('source-1')
   await expect(widget).toContainText('Changed from H')
+  expect(f.writes).toHaveLength(0)
+})
+
+
+test('a changed assessment revision keeps the old local draft inspectable without applying it', async ({ page }) => {
+  const f=await fixture(page)
+  await page.getByRole('button', {name:'CVE-2099-1234',exact:true}).click()
+  const detail=page.getByLabel('Context finding detail', {exact:true})
+  await detail.getByRole('button', {name:'Assess this context',exact:true}).click()
+  await detail.getByLabel('Reason and evidence', {exact:true}).fill('Unsaved reasoning for the original input.')
+  await detail.getByRole('button', {name:'Back to results',exact:false}).click()
+  ;(f.row.coverage as any).assessment={revision:'new-assessment-revision',stage:'draft',payload:{assessment_id:'another-decision',author_id:'analyst',state:'affected',rationale:'New recorded decision.',evidence:[]}}
+  await page.getByRole('button', {name:'CVE-2099-1234',exact:true}).click()
+  await detail.getByRole('button', {name:'Assess this context',exact:true}).click()
+  await expect(detail.getByLabel('Reason and evidence', {exact:true})).toHaveValue('New recorded decision.')
+  const drafts=page.locator('.retained-drafts')
+  await drafts.locator(':scope > summary').click()
+  await drafts.getByText('Original draft and input binding',{exact:true}).click()
+  await expect(drafts).toContainText('Unsaved reasoning for the original input.')
+  await expect(drafts).toContainText('baseline-sha')
+  await drafts.getByRole('button',{name:'Discard this unsaved draft',exact:true}).click()
+  await expect(drafts).toHaveCount(0)
   expect(f.writes).toHaveLength(0)
 })

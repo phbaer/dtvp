@@ -61,7 +61,8 @@ screens show the selected finding directly, with **Back to results** restoring t
 queue. Rows distinguish the consuming root as well as the affected component.
 **Assessment**, **Independent review** and **Coordinator scoring** open a focused,
 full-width workspace. Evidence and decisions sit side by side on wide screens and
-stack on narrow screens. Team/version/context and source/published scores remain
+stack on narrow screens. Assessment actions stay in form flow so they do not
+cover fields. Team/version/context and source/published scores remain
 visible; unrelated filters and configuration leave the focused view.
 
 The v1-style **CVSS vectors** comparison aligns source ratings, external proposals,
@@ -75,6 +76,8 @@ selected evidence citations. Existing unrecognized citations remain retained.
 Submitted assessments are read-only; **Start new assessment** creates a separate
 proposal. Text, citations and optional SSVC answers survive returning to the queue
 within the same workspace session, bound to the input state and assessment revision.
+Drafts from earlier input states or other contexts remain inspectable in the
+unsaved-drafts disclosure; they are never silently applied to a changed baseline.
 They are not browser-persistent: use **Save draft** before leaving. Reload warns
 about unsaved drafts. Additional version coverage requires an explicit preview;
 leaving the Assessment tab clears that additional selection. Captured pending
