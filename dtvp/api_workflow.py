@@ -271,6 +271,9 @@ def workspace_detail(
     row["published_score"] = published_score(
         journal, load_sections(journal, state), version, context_id, vulnerability_id
     )
+    from dtvp.knowledge.contributions import contributions
+
+    row["contributions"] = contributions(journal, state, row)
     return {
         "state": state,
         **with_capabilities(db, actor, project, row),

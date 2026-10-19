@@ -4,6 +4,7 @@ import json
 import math
 import os
 import sys
+import textwrap
 from pathlib import Path
 
 import httpx
@@ -161,6 +162,20 @@ def configure(parser):
     workspace.add_argument("--offset", type=int, default=0)
     workspace.add_argument("--limit", type=int, default=50)
     workspace.add_argument("--json", action="store_true")
+    workspace.add_argument(
+        "--show-context",
+        action="store_true",
+        help="Print full context IDs for detailed vulnerability inspection",
+    )
+    finding = commands.add_parser(
+        "vulnerability", help="Show source, analysis and CPE contributions for one context"
+    )
+    finding.add_argument("--project", required=True)
+    finding.add_argument("--version", required=True)
+    finding.add_argument("--context", required=True)
+    finding.add_argument("--id", required=True, help="Exact vulnerability identifier")
+    finding.add_argument("--expected", help="Pin the expected version head")
+    finding.add_argument("--json", action="store_true")
     tree = commands.add_parser("tree", help="Print a pinned, bounded dependency tree")
     tree.add_argument("--project", required=True)
     selection = tree.add_mutually_exclusive_group(required=True)
@@ -319,7 +334,7 @@ def read_response(response):
     return response.json()
 
 
-def display_workspace(result):
+def display_workspace(result, *, show_context=False):
     counts = result["statistics"]
     print(f"State: {result['state']}")
     print(
@@ -344,6 +359,8 @@ def display_workspace(result):
             f"team={result.get('team_labels', {}).get(row['context'].get('team_id'), row['context'].get('team_id') or 'unresolved')} "
             f"state={row['coverage']['status']}  source={source_text} contextual={score_text}"
         )
+        if show_context:
+            print(f"  context={row['context_id']}")
         if (ssvc := row.get("ssvc")) and ssvc.get("status") != "missing":
             print(
                 f"  ssvc={ssvc['status']} current={(ssvc.get('current') or {}).get('outcome_label') or 'Incomplete'} "
@@ -386,6 +403,75 @@ def display_workspace(result):
             )
     if result.get("next_offset") is not None:
         print(f"Next offset: {result['next_offset']} (pin --expected {result['state']})")
+
+
+def display_vulnerability(result):
+    """Render the backend's classification without inferring adoption or validity."""
+
+    def plain(value):
+        return " ".join("".join(char if char.isprintable() else " " for char in str(value)).split())
+
+    def entries(title, values):
+        print(f"\n{title} ({len(values)})")
+        if not values:
+            print("  None recorded.")
+            return
+        for item in values:
+            label = plain(item["label"])
+            label = label if len(label) <= 24 else label[:23] + "…"
+            status = plain(item["status"]).replace("_", " ")
+            status = status if len(status) <= 20 else status[:19] + "…"
+            summary = plain(item["summary"])
+            if item.get("adoption", {}).get("status") == "referenced":
+                summary += " · Cited in an assessment (not proof of adoption)."
+            if item.get("diagnostics"):
+                summary += " · " + "; ".join(
+                    plain(value).replace("_", " ") for value in item["diagnostics"]
+                )
+            prefix = f"  {label:24} {status:20} "
+            print(
+                textwrap.fill(
+                    summary, width=116, initial_indent=prefix, subsequent_indent=" " * len(prefix)
+                )
+            )
+
+    component = result["component"]
+    print(
+        f"{plain(result['vulnerability_id'])} · {plain(component.get('name') or component.get('bom-ref', 'Unknown component'))} {plain(component.get('version') or '')}"
+    )
+    print(f"State: {result['state']}\nContext: {result['context_id']}")
+    score = result.get("published_score")
+    score_text = str(score["score"]) if score else "Not published"
+    if score and score.get("current") is False:
+        score_text += " (outdated)"
+    print(
+        f"Source severity: {plain(result.get('source_severity', 'unknown'))} · Published: {score_text} · Assessment: {plain(result.get('coverage', {}).get('status', 'unknown'))}"
+    )
+    contributions = result.get("contributions")
+    if contributions is None:
+        raise ValueError("Server did not supply vulnerability contributions; update the server")
+    entries("Vulnerability sources", contributions["vulnerability_sources"])
+    entries("Vulnerability analyses", contributions["vulnerability_analyses"])
+    cpe = contributions["cpe"]
+    print("\nCPE identification")
+    present = False
+    for key, title in (
+        ("declared", "Declared CPEs"),
+        ("curated", "Configured mappings"),
+        ("accepted", "Accepted CPEs"),
+        ("candidates", "CPE candidates"),
+    ):
+        if cpe[key]:
+            entries(title, cpe[key])
+            present = True
+    if not present:
+        print("  No declarations, configured mappings or candidates recorded.")
+    for diagnostic in cpe["diagnostics"]:
+        print(
+            textwrap.fill(plain(diagnostic), width=116, initial_indent="  ", subsequent_indent="  ")
+        )
+    print("\nEvidence and proposals do not approve assessments; citations do not prove adoption.")
+    print("Use --json for full facts, record references, artifact hashes, provenance and limits.")
 
 
 def display_tree(result):
@@ -436,6 +522,18 @@ def run(args):
                 client.post(API_PREFIX + "/playground/login", json={"persona": args.persona})
             )
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "vulnerability":
+            from urllib.parse import quote
+
+            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}/workspace/{quote(args.context, safe='')}/{quote(args.id, safe='')}"
+            result = read_response(
+                client.get(path, params={"expected": args.expected} if args.expected else {})
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                display_vulnerability(result)
+            return
         if args.knowledge_command == "tree":
             from urllib.parse import quote
 
@@ -1014,7 +1112,7 @@ def run(args):
                 params["expected"] = args.expected
             result = read_response(client.get(path, params=params))
             if not args.json:
-                display_workspace(result)
+                display_workspace(result, show_context=args.show_context)
                 return
         else:
             if not args.path.startswith(API_PREFIX + "/") or "\\" in args.path:

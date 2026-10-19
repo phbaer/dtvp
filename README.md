@@ -49,6 +49,16 @@ published severity remain visible together. Expandable evidence and advanced too
 support detailed analysis without filling the ordinary review view.
 System, light and dark themes are available.
 
+The vulnerability pane compares **Vulnerability sources** (imported SBOM/DT facts,
+NVD and other advisory/VEX inputs) with **Vulnerability analyses** (VScorer,
+Agentyzer and historical analysis claims). Each entry identifies received content,
+current/inactive/withheld status and recorded assessment citations. Expand an entry
+for claims, vectors, report references and provenance. Matching scores alone never
+prove that an analysis was used in a published decision.
+CPE details distinguish source declarations, configured mappings and candidates;
+none becomes an approved identity implicitly. Analysis-input preparation and job
+actions remain optional controls within the analysis section.
+
 1. A pipeline imports complete source snapshots or separately identified delivery
    parts, with explicit source/build ordering, scope and collection limitations.
 2. An integrator explicitly assembles selected parts into a product version.
@@ -204,6 +214,19 @@ selected immutable state, independently of queue filters; collapse branches,
 change depth, browse subtrees or page through entries. Shared dependencies, cycles,
 missing component metadata and unavailable graph declarations remain explicit.
 API: `GET /api/v1/projects/{id}/states/{state}/dependency-tree`.
+
+Inspect the same classified vulnerability detail in the CLI:
+
+```sh
+uv run dtvp knowledge --persona analyst workspace --project PROJECT_ID --version 7.2.0 --q CVE-2099-50000 --show-context
+uv run dtvp knowledge --persona analyst vulnerability --project PROJECT_ID --version 7.2.0 --context CONTEXT_ID --id CVE-2099-50000
+```
+
+The first command exposes context IDs; the second prints compact source, analysis
+and CPE contributions. Add `--expected STATE_HASH` to reject a changed version head,
+or `--json` for complete retained facts and hashes. Classification is computed by
+the backend for the selected vulnerability detail, not duplicated in either client
+or added to every row of the large review queue.
 
 ## Deployment, recovery and migration
 

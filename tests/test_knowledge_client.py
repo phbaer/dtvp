@@ -144,6 +144,7 @@ def test_machine_workspace_cli_uses_http_without_opening_database(monkeypatch, c
             "project",
             "--version",
             "7.1.1",
+            "--show-context",
         ],
     )
     route = respx.get("http://dtvp.test/api/v1/projects/project/versions/7.1.1/workspace").mock(
@@ -156,6 +157,7 @@ def test_machine_workspace_cli_uses_http_without_opening_database(monkeypatch, c
                 "items": [
                     {
                         "vulnerability_id": "CVE-test",
+                        "context_id": "c" * 64,
                         "component": {"name": "library", "version": "1"},
                         "context": {"root_ref": "app", "team_id": "team"},
                         "coverage": {"status": "approved"},
@@ -185,6 +187,7 @@ def test_machine_workspace_cli_uses_http_without_opening_database(monkeypatch, c
     output = capsys.readouterr().out
     assert "source=9.8 contextual=0" in output
     assert "team=Shared Libraries" in output
+    assert "context=" + "c" * 64 in output
     assert "analysis=analysis-one provider=agentyzer" in output
     assert "native_vulnerability_request_binding_missing" in output
     assert "machine-test-token" not in output

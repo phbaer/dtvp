@@ -31,6 +31,7 @@ All paths below are relative to `API_PREFIX` unless stated otherwise.
 | `/projects`, `/catalog/projects`, `/projects/{id}/sharing` | Searchable authorized products and capability grants |
 | `/projects/{id}/versions`, `/versions/{version}/workspace` | Independent version heads, contextual work queue and scoped statistics |
 | `/projects/{id}/states/{state}/dependency-tree` | Pinned, bounded dependency traversal; `root_ref`, `max_depth`, `offset`, `limit`, explicit cycle/shared/missing markers |
+| `/projects/{id}/versions/{version}/workspace/{context}/{vulnerability}` | Scoped detail plus shared `contributions`: vulnerability sources, analyses and CPE declarations/mappings/candidates; `expected` guards the selected head |
 | `/projects/{id}/versions/{version}/imports`, `/files` | Complete scoped JSON or exact-byte multipart SBOM intake |
 | `/projects/{id}/versions/{version}/parts/{part}/imports`, `/files` | Independently ordered constituent-source intake |
 | `/projects/{id}/versions/{version}/assembly` | Explicit immutable part selection into a product baseline |
