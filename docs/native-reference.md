@@ -704,10 +704,11 @@ renamed display label cannot reorder a pinned selection. CLI consumers can use
 `knowledge request GET /api/v1/portfolio` with the same query parameters. This
 read-only report creates no assessments, approvals or completeness claims.
 
-My work shows scoped product/version queues and workload; product Overview also
-offers **Statistics across products**. Opening it requests complete server-derived statistics for
-all currently accessible products (up to 100), or use the bounded searchable
-catalog to select products explicitly. Team and current workspace finding filters
+My work shows scoped product/version queues and workload, with the detailed
+**Statistics across products** report. Product Overview contains only the selected
+product’s statistics. Opening the cross-product report requests server-derived
+statistics for all currently accessible products (up to 100), or use the bounded
+searchable catalog to select products explicitly. Team and current workspace finding filters
 apply on explicit load/refresh. Findings, unique vulnerability IDs, project-scoped
 logical assessments and required context-review workload remain separate counts.
 Source severity and current published contextual severity remain separate; missing

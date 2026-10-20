@@ -78,7 +78,9 @@ coordinators/managers default to all accessible teams. Responsibility views do n
 grant access or decision permission. My teams, all accessible teams, unassigned and
 conflicting ownership scopes filter server statistics before pagination. Counts
 separate context cases from unique vulnerabilities; overlapping team workloads are
-not additive. My work lists actual product/version queues and review workload.
+not additive. My work lists actual product/version queues and review workload,
+with the detailed **Statistics across products** report available there. Product
+Overview shows only the selected product; cross-product statistics never appear inside it.
 The CLI exposes the same scope through `knowledge workspace --work-scope my_teams`
 and `knowledge portfolio --work-scope my_teams`, with the required product/version
 arguments. Product browsing retains the existing explicit team filters.

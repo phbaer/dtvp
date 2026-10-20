@@ -11,7 +11,7 @@ async function fixture(page: Page, personas = false) {
     if (path === '/api/v1/playground/login') { actor = route.request().postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (route.request().method() !== 'GET') writes.push(path)
     let data: unknown = { items: [], capabilities: [], next_cursor: null }
-    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
+    if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'oversight', name: 'Oversight', capabilities: ['read', 'manage'] }] }
     else if (path === '/api/v1/playground/personas') data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v1/catalog/projects') { catalog.push(url); data = { items: [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }], next_cursor: 'next-catalog-page' } }
     else if (path === '/api/v1/portfolio') {
@@ -24,16 +24,15 @@ async function fixture(page: Page, personas = false) {
     }
     return route.fulfill({ json: data })
   })
-  await page.goto('/?page=Review'); await openNativeTools(page)
-  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
-  await page.getByRole('option', { name: 'Alpha', exact: true }).click()
+  await page.goto('/?page=My%20work'); await openNativeTools(page)
+  await expect(page.getByRole('region', { name: 'My work across products' }).getByRole('button', { name: 'Refresh workload' })).toBeEnabled()
   const panel = page.getByRole('region', { name: 'Statistics across products', exact: true })
   return { panel, reads, catalog, writes, advance: () => { digest = changed }, tooMany: () => { tooMany = true }, hold: () => { hold = true }, release: () => { release?.() } }
 }
-async function open(page: Page) { await openProductView(page, 'Overview'); await openDisclosure(page.getByText('Statistics across products', { exact: true })) }
-test('lazy complete counts and separate severity are available from the product overview', async ({ page }) => {
+async function open(page: Page) { await openDisclosure(page.getByText('Statistics across products', { exact: true })) }
+test('global detailed statistics are lazy within My work', async ({ page }) => {
   const f = await fixture(page)
-  expect(f.reads).toHaveLength(0)
+  await expect(f.panel.getByLabel('Cross-product portfolio totals')).toHaveCount(0)
   await open(page)
   await expect(f.panel.getByLabel('Cross-product portfolio totals')).toContainText('Context findings79')
   await expect(f.panel.getByLabel('Cross-product portfolio totals')).toContainText('Latest logical assessments12')
@@ -44,7 +43,7 @@ test('lazy complete counts and separate severity are available from the product 
   await expect(f.panel).toContainText('Team counts can overlap')
   await f.panel.getByRole('button', { name: 'Next portfolio products', exact: true }).click()
   await expect(f.panel.getByRole('table', { name: 'Review workload across products', exact: true })).toContainText('Beta')
-  expect(f.reads[1]!.searchParams.get('expected_heads')).toBe(pin)
+  expect(f.reads.at(-1)!.searchParams.get('expected_heads')).toBe(pin)
   await expect(f.panel.getByLabel('Cross-product portfolio totals')).toContainText('Context findings79')
   expect(f.writes).toHaveLength(0)
 })
@@ -55,26 +54,23 @@ test('bounded explicit project selection and applied team/filter snapshot surviv
   await f.panel.getByRole('button', { name: 'Add portfolio product', exact: false }).click()
   await page.getByRole('option', { name: 'Alpha', exact: true }).click()
   await f.panel.getByRole('combobox', { name: 'Cross-product team', exact: true }).selectOption('platform')
-  await openProductView(page, 'Vulnerabilities')
   await page.getByRole('searchbox', { name: 'Search', exact: true }).fill('openssl')
-  await openProductView(page, 'Overview')
-  expect(f.reads).toHaveLength(1)
+  await expect(page.getByRole('region', { name: 'My work across products' }).getByLabel('Displayed workload scope')).toContainText('openssl')
   await f.panel.getByRole('button', { name: 'Refresh cross-product statistics', exact: true }).click()
-  expect(f.reads[1]!.searchParams.getAll('project')).toEqual(['alpha'])
-  expect(f.reads[1]!.searchParams.get('team_id')).toBe('platform')
-  expect(f.reads[1]!.searchParams.get('q')).toBe('openssl')
+  expect(f.reads.at(-1)!.searchParams.getAll('project')).toEqual(['alpha'])
+  expect(f.reads.at(-1)!.searchParams.get('team_id')).toBe('platform')
+  expect(f.reads.at(-1)!.searchParams.get('q')).toBe('openssl')
   await expect(f.panel.getByLabel('Displayed cross-product scope')).toContainText('Products: Alpha · All responsible teams · Team: Platform · q: openssl')
   expect(f.catalog.some(url => url.searchParams.get('limit') === '25')).toBe(true)
   await f.panel.getByRole('combobox', { name: 'Portfolio products', exact: true }).selectOption('all')
   await f.panel.getByRole('combobox', { name: 'Cross-product team', exact: true }).selectOption('operations')
-  await openProductView(page, 'Vulnerabilities')
   await page.getByRole('searchbox', { name: 'Search', exact: true }).fill('edited search')
-  await openProductView(page, 'Overview')
+  await expect(page.getByRole('region', { name: 'My work across products' }).getByLabel('Displayed workload scope')).toContainText('edited search')
   await f.panel.getByRole('button', { name: 'Next portfolio products', exact: true }).click()
-  expect(f.reads[2]!.searchParams.getAll('project')).toEqual(['alpha'])
-  expect(f.reads[2]!.searchParams.get('team_id')).toBe('platform')
-  expect(f.reads[2]!.searchParams.get('q')).toBe('openssl')
-  expect(f.reads[2]!.searchParams.get('expected_heads')).toBe(pin)
+  expect(f.reads.at(-1)!.searchParams.getAll('project')).toEqual(['alpha'])
+  expect(f.reads.at(-1)!.searchParams.get('team_id')).toBe('platform')
+  expect(f.reads.at(-1)!.searchParams.get('q')).toBe('openssl')
+  expect(f.reads.at(-1)!.searchParams.get('expected_heads')).toBe(pin)
   await expect(f.panel.getByLabel('Displayed cross-product scope')).toContainText('Products: Alpha · All responsible teams · Team: Platform · q: openssl')
   await expect(f.panel.getByLabel('Displayed cross-product scope')).not.toContainText('edited search')
   expect(f.writes).toHaveLength(0)
@@ -89,7 +85,7 @@ test('head conflicts retain old complete statistics until an explicit refresh an
   await expect(f.panel.getByRole('table', { name: 'Review workload across products', exact: true })).toContainText('Alpha')
   await f.panel.getByRole('button', { name: 'Refresh cross-product statistics', exact: true }).click()
   await expect(f.panel.getByLabel('Cross-product portfolio totals')).toContainText('Context findings25')
-  expect(f.reads[2]!.searchParams.has('expected_heads')).toBe(false)
+  expect(f.reads.at(-1)!.searchParams.has('expected_heads')).toBe(false)
   expect((await f.panel.boundingBox())!.width).toBeLessThanOrEqual(390)
   expect(await page.locator('body').evaluate(item => item.scrollWidth)).toBeLessThanOrEqual(390)
 })
@@ -102,7 +98,7 @@ test('an oversized all-products selection remains an error and can be narrowed e
   await page.getByRole('option', { name: 'Alpha', exact: true }).click()
   await f.panel.getByRole('button', { name: 'Load cross-product statistics', exact: true }).click()
   await expect(f.panel.getByLabel('Cross-product portfolio totals')).toContainText('Context findings79')
-  expect(f.reads[1]!.searchParams.getAll('project')).toEqual(['alpha'])
+  expect(f.reads.at(-1)!.searchParams.getAll('project')).toEqual(['alpha'])
 })
 test('actor remount invalidates a late portfolio response through an actor roundtrip', async ({ page }) => {
   const f = await fixture(page, true); f.hold(); await open(page)
@@ -115,5 +111,20 @@ test('actor remount invalidates a late portfolio response through an actor round
   f.release(); await response
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   await expect(page.getByLabel('Cross-product portfolio totals')).toHaveCount(0)
-  expect(f.reads).toHaveLength(1)
+})
+
+
+test('a selected product overview excludes cross-product statistics and global reads', async ({ page }) => {
+  const f = await fixture(page)
+  const reads = f.reads.length
+  const navigation = page.getByRole('navigation', { name: 'Main navigation' })
+  await navigation.getByRole('button', { name: 'Products', exact: true }).click()
+  await page.getByRole('button', { name: 'Product scope', exact: false }).click()
+  await page.getByRole('option', { name: 'Alpha', exact: true }).click()
+  await openProductView(page, 'Overview')
+  await expect(page.getByRole('region', { name: 'Product overview', exact: true })).toBeVisible()
+  await expect(f.panel).toBeHidden()
+  expect(f.reads).toHaveLength(reads)
+  await navigation.getByRole('button', { name: 'My work', exact: true }).click()
+  await expect(page.locator('.organization-portfolio > summary')).toBeVisible()
 })

@@ -500,6 +500,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
     </form>
     <p v-if="workScope === 'my_teams' && !myTeams.length" class="hint">No assessment or review team is assigned to your account. Choose an authorized broader scope to inspect product knowledge.</p>
     <KnowledgeMyWork :key="me.id" :active="view === 'my-work'" :work-scope="workScope" :q="query" :lifecycle="lifecycle" :filters="{ ...filters, ...(team ? { team_id: team } : {}) }" @open="openWorkQueue" />
+    <KnowledgeOrganizationPortfolio v-show="view === 'my-work'" :key="me.id" :work-scope="workScope" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
     <details class="knowledge-advanced"><summary>More filters<span v-if="activeFilterCount"> · {{ activeFilterCount }} applied</span></summary>
       <form @submit.prevent="applyFilters"><fieldset :disabled="busy"><div class="knowledge-filter-grid">
         <label>SSVC status<select v-model="filterDraft.ssvc_status"><option value="">Any SSVC status</option><option v-for="value in ['missing', 'draft', 'submitted', 'approved', 'pending', 'stale']" :key="value" :value="value">{{ label(value) }}</option></select></label><label>SSVC action<select v-model="filterDraft.ssvc_action"><option value="">Any SSVC action</option><option v-for="value in ['DEFER', 'SCHEDULED', 'OUT_OF_CYCLE', 'IMMEDIATE']" :key="value" :value="value">{{ label(value) }}</option></select></label>
@@ -610,9 +611,6 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
       <p class="hint">Workload below follows the current queue filters. Source coverage is producer-declared; zero findings do not establish complete discovery.</p>
       <div v-if="workspace" class="page-section">
       <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :work-scope="workScope" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
-      </div>
-      <div class="page-section">
-      <KnowledgeOrganizationPortfolio :key="me.id" :work-scope="workScope" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
       </div>
       </section>
       <section v-show="view === 'products' && productView === 'Components' && !!project" data-product-page="Components" class="product-page" tabindex="-1" aria-label="Components and dependencies">
