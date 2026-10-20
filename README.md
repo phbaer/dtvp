@@ -288,6 +288,35 @@ use `--offset`/`--limit` to page them. Discovery commands support `--json` for s
 Teams list accessible workspaces/team IDs; component ownership remains separately
 configured. Results follow the authenticated user's permissions.
 
+SBOM uploads accept a product ID or exact name. Missing products and versions are
+created implicitly; later uploads replace that version's source baseline, preserving
+historical imports and assessments:
+
+```sh
+uv run dtvp knowledge --persona analyst import-file \
+  --project "Device Platform" --version 7.2.0 --file bom.json --metadata import.json
+```
+
+For example, `import.json`:
+
+```json
+{
+  "request_id": "nightly-42",
+  "source": "pipeline:device",
+  "build_number": 42,
+  "occurred_at": "2026-10-20T01:00:00Z",
+  "completeness": "complete"
+}
+```
+
+Omitting `expected` selects the current head on the server. An explicit state SHA
+requires that exact head; explicit `null` remains create-only. A new build needs a
+new request ID and increasing build number. Retry uncertain uploads with unchanged
+metadata and bytes; even after later imports, retries return the original receipt.
+Use `--workspace WORKSPACE_ID` to select the owner when creating among multiple
+writable teams or disambiguating duplicate names. IDs always select that exact
+product. Resolution and import enforce workspace, sharing and credential permissions.
+
 Use an explicit playground `--persona` for local demo sessions, or
 `DTVP_API_TOKEN` for scoped machine access. Request files retain exact IDs,
 version/policy pins, targets and rationale; the CLI does not infer approval.

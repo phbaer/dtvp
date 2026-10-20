@@ -101,6 +101,12 @@ def test_pipeline_cli_uploads_original_bytes_and_explicit_retry_metadata(
         argv.extend(["--part", part])
     monkeypatch.setattr(sys, "argv", argv)
     monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    respx.post("http://dtvp.test/api/v1/projects/resolve").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "project", "name": "project", "workspace_id": "team", "created": False},
+        )
+    )
     path = "http://dtvp.test/api/v1/projects/project/versions/7.1.1"
     if part:
         path += "/parts/supplier%20part"

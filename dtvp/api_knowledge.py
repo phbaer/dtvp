@@ -46,7 +46,7 @@ def retained_artifact(
 
 class InventoryMetadata(RequestModel):
     request_id: Name
-    expected: Sha | None
+    expected: Sha | Literal["current"] | None = "current"
     source: Name
     build_number: int = Field(ge=0, strict=True)
     occurred_at: str

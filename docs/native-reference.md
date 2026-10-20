@@ -11,7 +11,8 @@ No retired SQL Review, finding, release-ingestion or snapshot-writer API remains
 ## Inventory import and assembly
 
 `POST /api/v1/projects/{id}/versions/{version}/imports` requires an idempotency
-request ID, expected head (null to create), source, monotonic source build number,
+request ID, optional expected head (null for create-only; omitted or `"current"`
+for server-selected current head), source, monotonic source build number,
 timezone-aware observation time, `completeness: complete` and an SBOM object.
 Optional `predecessor` branches a new version from an existing product state.
 The API rejects authority changes and stale builds rather than guessing ordering
@@ -28,12 +29,17 @@ The HTTP CLI preserves file bytes too:
 
 ```bash
 uv run dtvp knowledge --url http://127.0.0.1:8900 import-file \
-  --project PROJECT_ID --version 7.1.2 --file bom.json --metadata import.json
+  --project "Product name or ID" --version 7.1.2 --file bom.json --metadata import.json
 ```
 
-`import.json` contains the same explicit import metadata, request ID and expected
-head. Reuse it unchanged after uncertain responses; the CLI never invents retry
-identities or replaces concurrency pins. Add `--part PART_ID` for constituent
+`import.json` contains import metadata and a request ID; `expected` is optional.
+The backend resolves or creates the product, then the import creates or updates
+the version. Add `--workspace WORKSPACE_ID` for ambiguous product names or creation
+among multiple writable workspaces. Omit `expected` to update the current baseline;
+explicit SHA/null pins remain strict. Reuse metadata and bytes unchanged after
+uncertain responses; the CLI never invents retry identities or replaces explicit
+concurrency pins. Receipt replay precedes automatic head selection. New imports
+still require increasing build numbers within their source binding. Add `--part PART_ID` for constituent
 intake; product assembly remains a separate explicit publication.
 
 Optional import `context` records subject kind/digest, target, platform,

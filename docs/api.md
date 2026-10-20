@@ -20,6 +20,9 @@ heads. Stale pins return 409. Preserve the exact request after uncertain respons
 replay returns the original receipt instead of silently replacing scope or pins.
 Publication can succeed while projection remains pending; responses report that
 condition explicitly. Preview operations never publish decisions.
+Inventory imports also accept `expected: "current"` (the default when omitted):
+the server captures the current head and still checks it at publication. Receipt
+replay occurs first, so retries never silently retarget an already committed import.
 
 All paths below are relative to `API_PREFIX` unless stated otherwise.
 
@@ -29,6 +32,7 @@ All paths below are relative to `API_PREFIX` unless stated otherwise.
 | :--- | :--- |
 | `/me`, `/workspaces`, `/workspaces/{id}/members` | Current identity and explicit issuer/subject/role mappings |
 | `/projects`, `/catalog/projects`, `/projects/{id}/sharing` | Searchable authorized products and capability grants |
+| `POST /projects/resolve` | Resolve an exact product ID/name, creating a missing name in an authorized owner workspace |
 | `/projects/{id}/versions`, `/versions/{version}/workspace` | Independent version heads, contextual work queue and scoped statistics |
 | `/projects/{id}/states/{state}/dependency-tree` | Pinned, bounded dependency traversal; `root_ref`, `max_depth`, `offset`, `limit`, explicit cycle/shared/missing markers |
 | `/projects/{id}/versions/{version}/workspace/{context}/{vulnerability}` | Scoped detail plus shared `contributions`: vulnerability sources, analyses and CPE declarations/mappings/candidates; `expected` guards the selected head |
@@ -73,8 +77,10 @@ Submit JSON to `/projects/{id}/versions/{version}/imports`:
 }
 ```
 
-`expected: null` creates a new branch; subsequent imports require its current
-state SHA. `source` authority and monotonic build ordering prevent an unrelated
+Omitted `expected`, or `expected: "current"`, creates a missing version or updates
+its current baseline. Explicit `expected: null` is create-only; an explicit SHA
+requires that exact state. Receipt identity retains the selector while publication
+uses the captured actual head. `source` authority and monotonic build ordering prevent an unrelated
 pipeline or older build from silently replacing the baseline. Optional
 `predecessor` branches a new version from an existing product state.
 Optional collection context records source revision, target/platform, subject
@@ -87,6 +93,14 @@ metadata contains the import fields without `sbom`. Supported semantic formats
 include CycloneDX JSON/XML and SPDX 2.3 JSON. Parser losses and relationship kinds
 remain visible; containment does not silently become a dependency edge.
 Constituent intake does not advance the product until explicit assembly.
+
+`POST /projects/resolve` accepts `{"project": "ID or exact name", "workspace_id": "optional owner ID"}`.
+Existing IDs take precedence; ambiguous names require an ID or owner workspace.
+Missing names are created in the specified writable workspace, or the sole writable
+workspace if unambiguous. Project-restricted credentials cannot create products.
+The response includes `id`, `name`, `workspace_id` and `created`. The CLI resolves
+before uploading, then uses the returned ID. Resolution is a separate committed
+operation: rejected uploads may leave an empty product but publish no invalid version.
 
 ## Assessment, review and scoring
 

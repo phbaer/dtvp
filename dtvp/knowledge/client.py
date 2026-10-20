@@ -348,14 +348,17 @@ def configure(parser):
     request.add_argument("path", help=f"Absolute {API_PREFIX}/ path; query parameters supported")
     request.add_argument("--body", help="JSON filename, or - for standard input")
     upload = add_command("import-file", help="Import original SBOM bytes with explicit metadata")
-    upload.add_argument("--project", required=True)
+    upload.add_argument("--project", required=True, help="Product ID or exact product name")
+    upload.add_argument("--workspace", help="Workspace ID for product selection or creation")
     upload.add_argument("--version", required=True)
     upload.add_argument(
         "--part", help="Import a constituent without advancing the product baseline"
     )
     upload.add_argument("--file", required=True)
     upload.add_argument(
-        "--metadata", required=True, help="JSON metadata file with request ID and expected head"
+        "--metadata",
+        required=True,
+        help="JSON metadata file with request ID and optional expected head",
     )
 
 
@@ -1088,25 +1091,45 @@ def run(args):
         if args.knowledge_command in {"import-file", "document-register", "evidence-import"}:
             from urllib.parse import quote
 
-            metadata = json.loads(Path(args.metadata).read_text())
+            metadata_text = Path(args.metadata).read_text()
+            metadata = json.loads(metadata_text)
             if not isinstance(metadata, dict):
                 raise ValueError("Upload metadata must be a JSON object")
-            path = f"{API_PREFIX}/projects/{quote(args.project, safe='')}"
-            if args.knowledge_command == "evidence-import":
-                path += "/evidence/files" + ("/preview" if args.preview else "")
-            else:
-                path += f"/versions/{quote(args.version, safe='')}"
-                if args.knowledge_command == "document-register":
-                    path += "/documents/" + ("submit" if args.submit else "draft")
-                else:
-                    if args.part:
-                        path += f"/parts/{quote(args.part, safe='')}"
-                    path += "/files"
             with Path(args.file).open("rb") as source:
+                project_id = args.project
+                if args.knowledge_command == "import-file":
+                    from stat import S_ISREG
+
+                    if not S_ISREG(os.fstat(source.fileno()).st_mode):
+                        raise ValueError("SBOM upload requires a regular file")
+                    selection = {"project": args.project}
+                    if args.workspace is not None:
+                        selection["workspace_id"] = args.workspace
+                    project = read_response(
+                        client.post(f"{API_PREFIX}/projects/resolve", json=selection)
+                    )
+                    project_id = project["id"]
+                    if project["created"]:
+                        print(f"Created product {project['name']} ({project_id})", file=sys.stderr)
+                path = f"{API_PREFIX}/projects/{quote(project_id, safe='')}"
+                if args.knowledge_command == "evidence-import":
+                    path += "/evidence/files" + ("/preview" if args.preview else "")
+                else:
+                    path += f"/versions/{quote(args.version, safe='')}"
+                    if args.knowledge_command == "document-register":
+                        path += "/documents/" + ("submit" if args.submit else "draft")
+                    else:
+                        if args.part:
+                            path += f"/parts/{quote(args.part, safe='')}"
+                        path += "/files"
                 result = read_response(
                     client.post(
                         path,
-                        data={"metadata": json.dumps(metadata)},
+                        data={
+                            "metadata": metadata_text
+                            if args.knowledge_command == "import-file"
+                            else json.dumps(metadata)
+                        },
                         files={"file": (Path(args.file).name, source, "application/octet-stream")},
                     )
                 )

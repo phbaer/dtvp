@@ -75,7 +75,7 @@ def import_inventory(
     version,
     actor_id,
     request_id,
-    expected,
+    expected="current",
     source,
     build_number,
     occurred_at,
@@ -158,7 +158,12 @@ def import_inventory(
         if part_id
         else Ref(project_id=project_id, name=version)
     )
-    if journal.resolve(ref) != expected:
+    current = journal.resolve(ref)
+    # Keep the caller's selector in the fingerprint, resolving it only after
+    # receipt replay. Publication still compares against this captured head.
+    if expected == "current":
+        expected = current
+    if current != expected:
         raise Conflict("Branch changed; reload before importing")
     parent = expected or predecessor
     if expected and predecessor:

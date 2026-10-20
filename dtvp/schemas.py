@@ -35,6 +35,9 @@ class ProjectInput(RequestModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class ProjectResolveInput(RequestModel):
+    project: str = Field(min_length=1, max_length=200)
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class ShareInput(RequestModel):
@@ -78,8 +81,19 @@ class TokenInput(RequestModel):
     ]
     hours: int = Field(default=24, ge=1, le=24 * 90)
 
-Justification = Literal[
-    "code_not_present", "code_not_reachable", "requires_configuration",
-    "requires_dependency", "requires_environment", "protected_by_compiler",
-    "protected_at_runtime", "protected_at_perimeter", "protected_by_mitigating_control", "other",
-] | None
+
+Justification = (
+    Literal[
+        "code_not_present",
+        "code_not_reachable",
+        "requires_configuration",
+        "requires_dependency",
+        "requires_environment",
+        "protected_by_compiler",
+        "protected_at_runtime",
+        "protected_at_perimeter",
+        "protected_by_mitigating_control",
+        "other",
+    ]
+    | None
+)

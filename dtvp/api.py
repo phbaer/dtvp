@@ -23,6 +23,7 @@ from dtvp.models import Audit, Credential, Grant, Job, Membership, Project, User
 from dtvp.schemas import (
     MemberInput,
     ProjectInput,
+    ProjectResolveInput,
     ShareInput,
     TokenInput,
     WorkspaceInput,
@@ -66,11 +67,11 @@ def snapshot_for(db, actor, snapshot_id):
     return snapshot
 
 
-def visible_project_query(actor):
-    workspace_ids = [key for key in actor.memberships if actor.workspace(key, "read")]
+def visible_project_query(actor, capability="read"):
+    workspace_ids = [key for key in actor.memberships if actor.workspace(key, capability)]
     granted = select(Grant.project_id).where(
         Grant.workspace_id.in_(workspace_ids),
-        cast(Grant.capabilities, String).contains('"read"'),
+        cast(Grant.capabilities, String).contains(f'"{capability}"'),
     )
     query = select(Project).where(
         or_(Project.workspace_id.in_(workspace_ids), Project.id.in_(granted))
@@ -337,6 +338,69 @@ def projects(db: DB, actor: Auth):
         }
         for p in visible_projects(db, actor)
     ]
+
+
+@router.post("/projects/resolve")
+def resolve_project(data: ProjectResolveInput, db: DB, actor: Auth):
+    """Resolve one exact upload target; create only in an authorized owner workspace."""
+
+    def result(project, created=False):
+        actor.require(db, project, "write")
+        return {
+            "id": project.id,
+            "name": project.name,
+            "workspace_id": project.workspace_id,
+            "created": created,
+        }
+
+    project = db.get(Project, data.project)
+    if project is not None:
+        actor.require(db, project, "write")
+        if data.workspace_id is not None and project.workspace_id != data.workspace_id:
+            raise HTTPException(409, "Product belongs to a different workspace")
+        return result(project)
+
+    visible_ids = (
+        visible_project_query(actor)
+        .with_only_columns(Project.id)
+        .union(visible_project_query(actor, "write").with_only_columns(Project.id))
+    )
+    query = select(Project).where(Project.id.in_(visible_ids), Project.name == data.project)
+    if data.workspace_id is not None:
+        query = query.where(Project.workspace_id == data.workspace_id)
+    matches = list(db.scalars(query.limit(2)))
+    if len(matches) > 1:
+        raise HTTPException(409, "Product name is ambiguous; specify its ID or workspace")
+    if matches:
+        return result(matches[0])
+
+    # A project-limited credential must never create a target outside its allowlist.
+    if actor.credential.kind == "api" and actor.credential.projects:
+        raise HTTPException(403, "Project-restricted credentials cannot create products")
+    workspace_id = data.workspace_id
+    if workspace_id is None:
+        writable = [key for key in actor.memberships if actor.workspace(key, "write")]
+        if not writable:
+            raise HTTPException(403, "Product creation requires workspace write permission")
+        if len(writable) != 1:
+            raise HTTPException(422, "Specify a workspace when creating a product")
+        workspace_id = writable[0]
+    if not actor.workspace(workspace_id, "write"):
+        raise HTTPException(403, "Product creation requires workspace write permission")
+    # Serialize name creation in PostgreSQL; the unique constraint remains a final guard.
+    workspace = db.scalar(select(Workspace).where(Workspace.id == workspace_id).with_for_update())
+    if workspace is None:
+        raise HTTPException(404, "Workspace unavailable")
+    project = db.scalar(
+        select(Project).where(Project.workspace_id == workspace_id, Project.name == data.project)
+    )
+    if project is not None:
+        return result(project)
+    project = Project(workspace_id=workspace_id, name=data.project)
+    db.add(project)
+    db.flush()
+    audit(db, actor.user.id, "project.create", project.id, project.id)
+    return result(project, created=True)
 
 
 @router.get("/projects/{project_id}")
