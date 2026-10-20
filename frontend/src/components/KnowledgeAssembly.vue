@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 type Part = { part_id: string; state: string | null; required: boolean; role: 'delivery'; availability?: string }
@@ -91,7 +92,7 @@ watch(() => [props.project, props.version], () => { if (!frozen.value) { invalid
 onBeforeUnmount(() => { sequence++; emit('locked', false) })
 </script>
 <template>
-  <details v-if="project" class="knowledge-assembly"><summary>Assemble product version</summary>
+  <TaskSurface v-if="project" class="knowledge-assembly" title="Assemble product version">
     <section aria-label="Product assembly editor">
       <p class="hint">Select immutable delivery parts. No components are merged and no cross-part dependency edges are invented. Importing a part alone never changes the assembled product.</p>
       <fieldset :disabled="busy || !!frozen || disabled"><form class="assembly-line" @submit.prevent="inspect">
@@ -116,7 +117,7 @@ onBeforeUnmount(() => { sequence++; emit('locked', false) })
       </template>
       <section v-if="frozen" aria-label="Frozen assembly selection"><p>Selection and request ID are frozen. Source head changes never replace these pins.</p><template v-if="frozen.preview"><p><strong>{{ frozen.preview.readiness.replaceAll('_', ' ') }}</strong> · {{ frozen.preview.selected_part_count }} selected inputs · discovery coverage not verified</p><p v-if="frozen.preview.missing_required_parts.length">Missing required parts: {{ frozen.preview.missing_required_parts.join(', ') }}</p><dl><template v-for="(value, key) in frozen.preview.counts" :key="key"><dt>{{ String(key).replaceAll('_', ' ') }}</dt><dd>{{ value }}</dd></template></dl><ul><li v-for="limitation in frozen.preview.limitations" :key="limitation">{{ limitation }}</li></ul><details><summary>Exact selection and structural changes</summary><pre>{{ JSON.stringify({ input: frozen.input, changes: frozen.preview.changes, relationship_diagnostics: frozen.preview.relationship_diagnostics }, null, 2) }}</pre></details><button class="primary" :disabled="busy" @click="apply">Publish selected assembly</button></template><button v-else :disabled="busy" @click="preview">Retry exact preview</button><button :disabled="busy" @click="reset">Discard plan and inspect again</button></section>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-assembly{margin-block:1rem;border:1px solid var(--border);border-radius:8px;padding:.7rem}.knowledge-assembly summary{cursor:pointer;font-weight:600}.knowledge-assembly section{min-width:0;padding-block:.5rem}.knowledge-assembly fieldset{border:0;padding:0;margin:0;min-width:0}.assembly-line{display:flex;gap:.7rem;align-items:end;flex-wrap:wrap;margin-block:.7rem}.assembly-line label{flex:1;min-width:160px}.assembly-choices,.assembly-rows{max-height:26rem;overflow:auto;list-style:none;padding:0}.assembly-choices li,.assembly-rows article{display:flex;gap:.7rem;flex-wrap:wrap;align-items:center;padding:.6rem;border-bottom:1px solid var(--border)}.assembly-rows article>label{min-width:120px}.knowledge-assembly pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:18rem;overflow:auto}.knowledge-assembly input,.knowledge-assembly select,.knowledge-assembly textarea{max-width:100%;box-sizing:border-box}.knowledge-assembly dl{display:grid;grid-template-columns:auto 1fr;gap:.3rem 1rem}.knowledge-assembly dd{margin:0}.knowledge-assembly button{margin:.2rem}

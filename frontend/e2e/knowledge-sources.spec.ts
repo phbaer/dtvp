@@ -42,7 +42,7 @@ async function fixture(page: Page, options: { readonly?: boolean; configured?: b
   return { reads, writes, panel: page.getByRole('region', { name: 'Dependency-Track source imports', exact: true }), rebind: () => { external = externalB }, advance: () => { state = updatedState } }
 }
 
-async function open(page: Page) { await openProductView(page, 'Settings', 'Source connections'); await openDisclosure(page.locator('.knowledge-sources > summary')) }
+async function open(page: Page) { await openProductView(page, 'Settings', 'Source connections'); await openDisclosure(page.locator('.knowledge-sources > h2')) }
 async function inputImport(page: Page) {
   const form = page.getByRole('form', { name: 'Request DT source import', exact: true })
   await form.getByLabel('Source build number', { exact: true }).fill('42')

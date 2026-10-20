@@ -1,4 +1,4 @@
-import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
+import { openNativeTools, openProductTask } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 async function fixture(page: Page, readonly = false) {
@@ -15,6 +15,7 @@ async function fixture(page: Page, readonly = false) {
     let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
+    else if (path === '/api/v1/projects/product') result = { id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: 'old-head' }] }
     else if (path.endsWith('/workspace')) result = { state: 'old-head', project_id: 'product', version: '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/advisory-refresh')) result = { expected_versions: { '7.1.1': changed ? 'new-head' : 'old-head', '7.1.2': 'parallel-head' }, expected_evidence: changed ? 'new-evidence' : 'old-evidence', providers: [{ id: 'circl', publisher: 'CVE Project mirror', enabled: true, next_revision: changed ? 4 : 3 }, { id: 'nvd', publisher: 'NVD', enabled: false, next_revision: 0 }, { id: 'jvn', publisher: 'MyJVN API', enabled: true, next_revision: 0, identifier_formats: ['JVNDB'] }], unsupported_total: url.searchParams.get('provider') === 'jvn' ? 21 : 0, identifiers: url.searchParams.get('provider') === 'jvn' ? ['JVNDB-2099-000001'] : url.searchParams.get('offset') === '20' ? ['CVE-2099-0021'] : Array.from({ length: 20 }, (_, i) => `CVE-2099-${String(i + 1).padStart(4, '0')}`), total: 21, next_offset: url.searchParams.get('offset') === '20' ? null : 20, capabilities: readonly ? [] : ['refresh'], limitations: ['Publisher identity is unverified; no automatic approval.'] }
@@ -26,8 +27,7 @@ async function fixture(page: Page, readonly = false) {
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
   expect(queries.some(url => url.pathname.endsWith('/advisory-refresh'))).toBeFalsy()
-  await openProductView(page, 'Vulnerabilities'); await page.getByRole('button', { name: 'Discover and enrich', exact: true }).click()
-  await openDisclosure(page.getByText('Advisory intelligence refresh', { exact: true }))
+  await openProductTask(page, 'Vulnerabilities', 'Enrichment')
   const panel = page.getByLabel('Advisory intelligence refresh', { exact: true })
   await expect(panel).toContainText('21 matching baseline IDs')
   await expect(panel.getByLabel('Advisory job existing')).toBeVisible()
@@ -140,25 +140,36 @@ test('source workflow hands refreshed findings back to review without creating d
   await expect.poll(() => queries.filter(url => url.pathname.endsWith('/workspace')).length).toBeGreaterThan(before)
   await expect(panel).toBeHidden()
   await expect(page.getByRole('combobox', { name: 'Review status', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Discover and enrich', exact: true })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('[data-task-link="Findings"]')).toHaveAttribute('aria-current', 'page')
   expect(writes).toHaveLength(0)
 })
 
-test('collapsed source workflow can be reopened and uncertain captures remain reachable', async ({ page }) => {
+test('uncertain enrichment stays on its page and blocks sidebar navigation', async ({ page }) => {
   const { panel, fail } = await fixture(page)
-  const summary = page.locator('.knowledge-advisories > summary')
-  const entry = page.getByRole('button', { name: 'Discover and enrich', exact: true })
-  await summary.click()
-  await expect(entry).toHaveAttribute('aria-expanded', 'false')
-  await entry.click()
-  await expect(panel).toBeVisible()
+  await expect(page.locator('.knowledge-advisories > summary')).toHaveCount(0)
   await panel.getByLabel('Advisory provider').selectOption('circl')
   await panel.getByRole('checkbox', { name: 'CVE-2099-0001', exact: true }).check()
   fail(503)
   await panel.getByRole('button', { name: 'Queue advisory refresh', exact: true }).click()
   await expect(panel.getByRole('alert')).toBeVisible()
-  await summary.click()
-  await expect(entry).toBeDisabled()
-  await summary.click()
+  await expect(page.locator('[data-task-link="Discovery"]')).toBeDisabled()
   await expect(panel.getByRole('button', { name: 'Resend identical advisory request', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Enrich vulnerabilities', exact: true })).toBeVisible()
+})
+
+test('sidebar sub-pages retain product/version and support reload and browser back', async ({ page }) => {
+  await fixture(page)
+  await expect(page.locator('.product-navigation')).toHaveCount(0)
+  await expect(page.locator('[data-task-link="Enrichment"]')).toHaveAttribute('aria-current', 'page')
+  await expect(page).toHaveURL(/k_task=Enrichment/)
+  await page.locator('[data-task-link="Evidence"]').click()
+  await expect(page.getByRole('heading', { name: 'Compare retained inventory with advisory evidence', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Advisory intelligence refresh', exact: true })).toBeHidden()
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Enrich vulnerabilities', exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/k_task=Enrichment/)
+  await page.reload()
+  await expect(page.locator('[data-task-link="Enrichment"]')).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('heading', { name: 'Enrich vulnerabilities', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Version 7.1.1', exact: true })).toBeVisible()
 })

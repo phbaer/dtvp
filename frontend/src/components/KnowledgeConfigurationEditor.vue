@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 const props = defineProps<{ project: string; actor: string; kind: 'pipeline' | 'synchronization'; disabled?: boolean }>()
@@ -27,7 +28,7 @@ async function load() {
   } catch (err) { if (sequence === generation) error.value = err instanceof Error ? err.message : 'Configuration unavailable' }
   finally { if (sequence === generation) busy.value = false }
 }
-function toggle(event: Event) { if ((event.target as HTMLDetailsElement).open && !loaded.value) void load() }
+function toggle(open: boolean) { if (open && !loaded.value) void load() }
 function capture() {
   if (blocked.value || !canConfigure.value || !current.value || captured.value) return
   error.value = ''; notice.value = ''
@@ -58,8 +59,7 @@ async function publish() {
 onBeforeUnmount(() => { ++generation; emit('locked', false) })
 </script>
 <template>
-  <details class="knowledge-configuration" @toggle="toggle">
-    <summary>{{ title }}</summary>
+  <TaskSurface class="knowledge-configuration" @active="toggle" :title="title">
     <section :aria-label="title">
       <p class="hint">{{ kind === 'pipeline' ? 'CI/user declarations bind source roles and model entities. DTVP validates consistency; model authenticity is not inferred.' : 'Prepare proposals on explicit version relationships. Target inventory and independent approvals remain unchanged.' }}</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
@@ -79,7 +79,7 @@ onBeforeUnmount(() => { ++generation; emit('locked', false) })
       <button v-if="captured || dirty" :disabled="busy" @click="discard">Discard configuration changes</button>
       <p v-for="item in (current?.limitations as string[] || [])" :key="item" class="hint">{{ item }}</p>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-configuration{margin-block:1rem}.knowledge-configuration label{display:grid;gap:.35rem;margin-block:.65rem}.knowledge-configuration label:has([type=checkbox]){display:flex;align-items:center}.knowledge-configuration textarea{width:100%;box-sizing:border-box;font-family:monospace;resize:vertical}.knowledge-configuration pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto}.knowledge-configuration code{overflow-wrap:anywhere}.knowledge-configuration button{margin:.4rem .5rem .4rem 0}.hint{font-size:.875rem;opacity:.8}summary{cursor:pointer}

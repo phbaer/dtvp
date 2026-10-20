@@ -36,7 +36,7 @@ async function fixture(page: Page, options: { statuses?: number[]; previewStatus
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
   await openProductView(page, 'Imports')
-  await openDisclosure(page.locator('.knowledge-intake > summary')); await page.getByText('Reviewed v1 archive', { exact: true }).click()
+  await openDisclosure(page.locator('.knowledge-intake > h2')); await page.getByText('Reviewed v1 archive', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Reviewed v1 archive intake' })
   await panel.getByLabel('Sanitized v1 ZIP', { exact: true }).setInputFiles({ name: 'reviewed.zip', mimeType: 'application/zip', buffer: raw })
   await panel.getByRole('button', { name: 'Inspect sanitized archive', exact: true }).click()

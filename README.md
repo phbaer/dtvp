@@ -68,10 +68,30 @@ ambiguous matches rather than silently merging distinct usage contexts.
 The left navigation separates **My work**, **Products**, **Activity** and authorized
 **Administration**. Products has a searchable catalog. Each selected product has
 Overview, Vulnerabilities, Components, Imports, Versions, Licenses, Documents and
-Settings destinations. Configuration lives under Settings: component ownership,
-source connections, pipeline, scoring policy, CPE identity policy, automation and
-product access. Administration manages team membership, consumer credentials and
-explicit maintenance. Mobile uses a collapsible menu and product-view selector.
+Settings destinations in the **left sidebar**. The selected destination exposes
+its sub-pages there; the main pane shows one task directly, rather than a stack
+of collapsed workflow sections or another horizontal menu:
+
+- Vulnerabilities: assess/review, discovery, enrichment and evidence comparison.
+- Components: component inventory and dependency tree.
+- Imports: SBOM upload, assembly, source observations, reconciliation, input
+  quality and VDR/VEX files.
+- Versions: comparison and retained assessments.
+- Settings: component ownership, source connections, pipeline, scoring policy,
+  CPE identity policy, synchronization automation, advisory schedules and access.
+
+Sub-pages retain their product/version scope, filters, drafts and exact captured
+requests. Inactive tasks remain mounted without loading their read models merely
+because they exist. Existing workflow/configuration locks also govern sidebar
+navigation; mounted task state retains drafts and exact captures. URLs include
+the selected sub-page (`k_task`); reload, shared links and browser back/forward
+restore it. Legacy `k_setting` links remain readable. Mobile
+uses the same sidebar destinations through Menu; choosing a page closes the menu
+and focuses its heading. Small disclosures remain for raw pins, original records
+and optional technical detail, rather than hiding whole tasks. The dependency
+tree still starts with collapsed nodes.
+
+Administration manages team membership, consumer credentials and explicit maintenance.
 
 My work defaults analysts/reviewers to their current assessment/review teams;
 coordinators/managers default to all accessible teams. Responsibility views do not
@@ -388,13 +408,15 @@ assessment or approval. `playground/sboms/log4j.cdx.json` is the inventory-only
 variant for discovery from zero findings. Live OSV commonly returns GHSA IDs; its
 CVE aliases remain attributed claims, not merged identities or automatically
 eligible NVD inputs. Use the explicit-CVE variant to test enrichment. In the UI,
-the product workflow offers **Import SBOM → Discover and enrich → Assess and review**.
-Open OSV package matching, select the Log4j PURL, queue and inspect its job until
-`succeeded` with a current projection. Then **Refresh advisory plan**, choose an
+use the sidebar: **Imports → Upload SBOM**, then **Vulnerabilities → Discover
+vulnerabilities**, **Enrich vulnerabilities**, and **Assess and review**. Select
+the Log4j PURL on the discovery page, queue and inspect its job until
+`succeeded` with a current projection. Open enrichment, **Refresh advisory plan**, choose an
 enabled provider and selected returned IDs, and queue enrichment. **Refresh findings
 and review** reloads the worklist. Set component ownership in Settings before
 team assessment; discovery never invents ownership. Sources settings retains
-connections and a shortcut to this workflow. Jobs currently capture **all current
+connections and a shortcut to discovery. Advisory schedules have their own Settings
+sub-page. Jobs currently capture **all current
 branches of the selected product**, explicitly shown in their pins.
 
 The CLI follows the same operations without raw API requests:

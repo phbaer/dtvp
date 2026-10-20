@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import KnowledgeLegacyArchiveIntake from './KnowledgeLegacyArchiveIntake.vue'
 import { knowledgeApi } from '../knowledgeApi'
@@ -89,13 +90,12 @@ async function publish() {
   finally { if (current === sequence) { stopProgress(); busy.value = false } }
 }
 function reset() { if (busy.value) return; stopProgress(); ++sequence; frozen.value = null; committed.value = false; target.value = null; file.value = null; ++inputKey.value; replace.value = false; error.value = ''; notice.value = ''; setNativeLock(false) }
-function toggle(event: Event) { opened.value = (event.currentTarget as HTMLDetailsElement).open; if (opened.value && !selectedVersion.value) selectedVersion.value = props.version; if (opened.value) void suggestions() }
+function toggle(open: boolean) { opened.value = open; if (opened.value && !selectedVersion.value) selectedVersion.value = props.version; if (opened.value) void suggestions() }
 watch(() => props.project, () => { ++sequence; busy.value = false; reset(); selectedVersion.value = props.version; versionOptions.value = []; partOptions.value = [] })
 onBeforeUnmount(() => { ++sequence; clearTimeout(timer); stopProgress(); setNativeLock(false) })
 </script>
 <template>
-  <details v-if="project" class="knowledge-intake" @toggle="toggle">
-    <summary>Import composition</summary>
+  <TaskSurface v-if="project" class="knowledge-intake" @active="toggle" title="Import composition">
     <section aria-label="Native composition intake"><fieldset class="native-intake-fields" :disabled="archiveLocked">
       <p class="hint">Import original CycloneDX or SPDX files into an existing or new product version. Complete source documents replace the selected baseline; missing components do not establish remediation.</p>
       <form aria-label="Select composition target" @submit.prevent="inspect"><fieldset :disabled="busy || !!frozen || disabled">
@@ -125,7 +125,7 @@ onBeforeUnmount(() => { ++sequence; clearTimeout(timer); stopProgress(); setNati
       </template>
       <section v-if="frozen" aria-label="Captured composition import"><h3>{{ committed ? 'Import recorded' : 'Review import' }}</h3><p>{{ frozen.version }}<span v-if="frozen.part"> · source part {{ frozen.part }}</span> · {{ frozen.filename }} · {{ frozen.raw.byteLength }} bytes</p><details><summary>Exact request and file digest</summary><code>SHA-256 {{ frozen.sha }}</code><pre>{{ JSON.stringify(frozen.metadata, null, 2) }}</pre></details><p v-if="!committed" class="hint">This captured request stays fixed across retries. A conflict requires explicit target review before starting a new import.</p><div v-if="importPhase" class="import-progress"><strong role="status">{{ importPhase === 'uploading' ? `Uploading SBOM${uploadPercent == null ? '…' : ` · ${uploadPercent}%`}` : 'Upload sent · waiting for server confirmation…' }}</strong><span>{{ elapsed }}s elapsed</span><progress aria-label="Import progress" max="100" :value="importPhase === 'uploading' ? uploadPercent ?? undefined : undefined"></progress><small v-if="importPhase === 'processing'">The server is validating and committing the import. Upload completion does not confirm publication.</small></div><button v-if="!committed" class="primary" :disabled="busy" :aria-busy="!!importPhase" @click="publish">{{ importPhase ? 'Committing import…' : 'Commit captured import' }}</button><button :disabled="busy" @click="reset">{{ committed ? 'Start another import' : 'Discard capture and start a new import' }}</button></section>
     </fieldset><KnowledgeLegacyArchiveIntake :key="project" :project="project" :disabled="disabled || busy || nativeLocked" @locked="setArchiveLock" @imported="emit('imported', $event)" /></section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-intake { border-block: 1px solid var(--border, #64748b33); padding: .8rem 0; min-width: 0; }

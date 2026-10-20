@@ -1,4 +1,4 @@
-import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
+import { openNativeTools, openProductTask } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), first = sha('a'), evidence = sha('b'), packages = Array.from({ length: 23 }, (_, n) => `pkg:pypi/library-${String(n).padStart(2, '0')}@1.0`)
 async function fixture(page: Page, readonly = false, personas = false) {
@@ -29,13 +29,12 @@ async function fixture(page: Page, readonly = false, personas = false) {
     return route.fulfill({ json: data })
   })
   await page.goto('/?page=Review'); await openNativeTools(page); await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await openProductView(page, 'Vulnerabilities'); await page.getByRole('button', { name: 'Discover and enrich', exact: true }).click()
-  await openDisclosure(page.getByText('Advisory intelligence refresh', { exact: true }))
+  await openProductTask(page, 'Vulnerabilities', 'Discovery')
   return { panel: page.getByRole('region', { name: 'OSV package matching', exact: true }), requests, plans, jobReads: () => jobReads, fail: (status: number) => { failure = status }, advance: () => { head = sha('9') }, hold: () => { hold = true }, mismatch: (mode: string) => { mismatch = mode }, release: () => release?.() }
 }
-async function open(page: Page) { await page.getByText('External OSV package matching', { exact: true }).click() }
+async function open(page: Page) { await expect(page.getByRole('heading', { name: 'External OSV package matching', exact: true })).toBeVisible() }
 test('explicit20package cap and pinned pages retain exact request across503/409 and workspace advance', async ({ page }) => {
-  const f = await fixture(page); expect(f.plans).toHaveLength(0); await open(page)
+  const f = await fixture(page); expect(f.plans).toHaveLength(1); await open(page)
   await expect(f.panel.getByRole('checkbox', { checked: true })).toHaveCount(0)
   for (const box of await f.panel.getByRole('checkbox').all()) await box.check()
   await f.panel.getByRole('button', { name: 'Next OSV packages', exact: true }).click()

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 import KnowledgeDependencyPaths from './KnowledgeDependencyPaths.vue'
@@ -75,7 +76,7 @@ async function loadChildren(parent: Row | null) {
   } catch (err) { if (current === generation) branch.error = err instanceof Error ? err.message : 'Dependencies unavailable' }
   finally { if (current === generation) branch.busy = false }
 }
-function toggle(event: Event) { if (event.target !== event.currentTarget) return; opened.value = (event.currentTarget as HTMLDetailsElement).open; if (opened.value && !data.value && !busy.value) void load() }
+function toggle(open: boolean) { opened.value = open; if (opened.value && !data.value && !busy.value) void load() }
 function collapse(row: Row) {
   const next = new Set(expanded.value), id = key(row)
   if (next.has(id)) next.delete(id)
@@ -95,8 +96,7 @@ watch(() => [props.project, props.state], () => { ++sequence; ++generation; busy
 onBeforeUnmount(() => { ++sequence; ++generation })
 </script>
 <template>
-  <details class="dependency-tree" aria-label="Dependency tree" @toggle="toggle">
-    <summary>Dependency tree</summary>
+  <TaskSurface class="dependency-tree" aria-label="Dependency tree" @active="toggle" title="Dependency tree">
     <section aria-label="Pinned dependency tree">
       <div class="tree-toolbar">
         <button v-if="trail.length" type="button" :disabled="busy" @click="browse(trail.at(-1)!, true)">Back</button>
@@ -135,7 +135,7 @@ onBeforeUnmount(() => { ++sequence; ++generation })
         <details class="tree-coverage"><summary>Coverage and traversal limits</summary><p>Imported dependencies are independent of queue filters. Vulnerability counts are unique imported IDs on each component, not descendant totals or approved applicability.</p><p>Children load on expansion. Load more siblings within their branch; existing branches stay in place. The browser retains at most 10,000 loaded entries and 100 dependency levels; browse a subtree to focus further.</p><ul><li v-for="limitation in data.limitations" :key="limitation">{{ limitation }}</li></ul><p>Cycle rows end their traversal path. Shared components can be expanded separately in each usage path. Missing references have no imported component metadata. Traversal counts do not establish completeness of deployed software.</p><code>{{ data.state }}</code></details>
       </template>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .dependency-tree{border:1px solid var(--line);border-radius:5px;padding:6px 9px;margin:8px 0;background:var(--surface);min-width:0}.dependency-tree>summary{font-size:.78rem;margin:0}.dependency-tree[open]>summary{margin-bottom:6px}.tree-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:.72rem}.tree-toolbar button,.tree-selection button,.branch-more button,.tree-back{padding:3px 7px;font-size:.72rem}.branch-more td{background:var(--bg)}.branch-more button{border:0;background:none;color:var(--accent);font-size:.7rem;padding:2px}.branch-more p{margin:3px 0;font-size:.7rem}.tree-hint{font-size:.7rem;color:var(--muted);margin:5px 0}.tree-summary{flex:1;color:var(--muted);overflow-wrap:anywhere}.tree-scroll{max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:4px}.tree-scroll table{table-layout:fixed;font-size:.76rem}.count-column{width:52px}.tree-scroll th{position:sticky;top:0;z-index:1;font-size:.68rem}.tree-scroll td,.tree-scroll th{padding:3px 7px}.tree-scroll td:not(:first-child),.tree-scroll th:not(:first-child){text-align:right}.tree-node{display:flex;align-items:center;gap:4px;min-width:0;min-height:23px}.tree-name{padding:0;border:0;background:none;text-align:start;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.76rem}.tree-name strong{font-weight:500}.tree-name:hover{text-decoration:underline}.tree-version{color:var(--muted);font-size:.7rem}.tree-expand,.tree-spacer{width:20px;min-width:20px;display:inline-block}.tree-expand{border:0;background:none;padding:1px 3px;font-size:.78rem;color:var(--accent)}.selected-node{background:var(--accent-soft)}.tree-selection{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 0;font-size:.73rem}.tree-selection>span{overflow-wrap:anywhere}.tree-selection details{margin:0;font-size:.7rem;min-width:0}.tree-selection summary{margin:0}.tree-selection code{display:block;overflow-wrap:anywhere}.tree-selection p{overflow-wrap:anywhere}.tree-coverage{margin:6px 0 0;font-size:.7rem}.tree-coverage>summary{margin:0}.tree-coverage p{font-size:.72rem}.badge{font-size:.62rem;padding:1px 3px;margin:0;max-width:90px;white-space:normal}.tree-cap{margin:6px 0;padding:5px 7px;background:var(--warning-bg);color:var(--warning);font-size:.72rem}.dependency-tree code{overflow-wrap:anywhere}.tree-back{margin:3px 0 6px}@media(max-width:600px){.count-column{width:42px}.tree-scroll td,.tree-scroll th{padding:3px 4px}.tree-node{gap:2px}.tree-name{font-size:.72rem}.tree-scroll{max-height:34vh}}

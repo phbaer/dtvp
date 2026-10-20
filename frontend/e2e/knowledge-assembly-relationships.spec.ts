@@ -28,7 +28,7 @@ async function fixture(page: Page, hold?: 'preview' | 'apply') {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Assembly product', exact: true }).click()
   await openProductView(page, 'Imports')
-  await openDisclosure(page.locator('.knowledge-assembly > summary'))
+  await openDisclosure(page.locator('.knowledge-assembly > h2'))
   const panel = page.getByRole('region', { name: 'Product assembly editor' })
   await panel.getByRole('button', { name: 'Inspect assembly target', exact: true }).click()
   return { panel, writes, release: () => release?.() }

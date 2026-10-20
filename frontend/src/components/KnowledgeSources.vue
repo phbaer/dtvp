@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -35,7 +36,7 @@ async function load(selectedOffset = offset.value, refreshBinding = true) {
     return false
   } finally { if (current === sequence) busy.value = false }
 }
-function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !loaded.value) void load() }
+function toggle(open: boolean) { expanded.value = open; if (expanded.value && !loaded.value) void load() }
 async function page(forward: boolean) {
   const target = forward ? nextOffset.value : previous.value.at(-1), old = offset.value
   if (target === null || target === undefined) return
@@ -92,8 +93,7 @@ onBeforeUnmount(() => { ++sequence })
 </script>
 
 <template>
-  <details class="knowledge-sources" @toggle="toggle">
-    <summary>Dependency-Track source imports</summary>
+  <TaskSurface class="knowledge-sources" @active="toggle" title="Dependency-Track source imports">
     <section aria-label="Dependency-Track source imports">
       <p class="hint">Import into the selected existing version: {{ version }}. Its accepted source authority cannot be switched here. New versions and assembly parts use CLI/API intake; a source change requires a separate explicit authority policy. DTVP reads DT without automatic writeback.</p>
       <button :disabled="busy" @click="load()">{{ busy ? 'Working…' : 'Refresh source configuration and jobs' }}</button>
@@ -114,7 +114,7 @@ onBeforeUnmount(() => { ++sequence })
       <article v-for="entry in visibleJobs" :key="entry.job.id" :aria-label="`DT import job ${entry.job.id}`"><small v-if="entry.recent">Requested import</small><strong>{{ label(entry.job.status) }} · build {{ entry.job.build_number }}</strong><small>{{ entry.job.created_at }} · {{ entry.job.attempts }} attempts</small><p v-if="entry.job.error">{{ entry.job.error }}</p><p v-if="entry.job.result.capture_sha256">Captured responses retained; no remote snapshot consistency is established.</p><div class="source-actions"><button :disabled="busy" @click="inspect(entry.job)">Refresh import status</button><button v-if="entry.job.capabilities.includes('retry')" :disabled="busy" @click="inspect(entry.job, 'retry')">Retry DT import</button><button v-if="entry.job.capabilities.includes('cancel')" :disabled="busy" @click="inspect(entry.job, 'cancel')">Cancel DTVP import job</button></div><details><summary>Source job pins and capture receipts</summary><dl><dt>External project</dt><dd><code>{{ entry.job.external_project_id }}</code></dd><dt>Expected state</dt><dd><code>{{ entry.job.expected }}</code></dd><dt>Job</dt><dd><code>{{ entry.job.id }}</code></dd></dl><pre>{{ JSON.stringify(entry.job.result, null, 2) }}</pre></details></article>
       <nav v-if="loaded" class="source-actions" aria-label="DT import job pages"><button :disabled="busy || !previous.length" @click="page(false)">Previous source jobs</button><button :disabled="busy || nextOffset === null" @click="page(true)">Next source jobs</button></nav>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 
 <style scoped>

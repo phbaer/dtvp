@@ -28,7 +28,7 @@ async function fixture(page: Page) {
   return { reads, mutations, advance: () => { state = updatedState }, fail: (value: boolean) => { fail = value } }
 }
 
-test('absent assessments remain collapsed and show recorded reasons without implying current approval', async ({ page }) => {
+test('absent assessments stay inactive until selected and show recorded reasons without implying current approval', async ({ page }) => {
   const state = await fixture(page)
   const heading = page.getByText('Retained assessments for absent findings', { exact: true })
   await expect(heading).not.toBeVisible()
@@ -63,6 +63,7 @@ test('retained pagination stays pinned and team or state changes restart the ser
   await openProductView(page, 'Vulnerabilities')
   await page.getByRole('combobox', { name: 'Component owner team', exact: true }).selectOption('team-a')
   await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Retained assessments for absent findings', { exact: true }))
   await expect(retained.getByLabel('Retained assessment total')).toHaveText('1 retained assessments in this scope')
   expect(state.reads.at(-1)?.query.get('team_id')).toBe('team-a')
   expect(state.reads.at(-1)?.query.get('offset')).toBe('0')

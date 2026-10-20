@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import TaskSurface from './TaskSurface.vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import { taskActive } from '../lib/productNavigation'
 import { knowledgeApi } from '../knowledgeApi'
 import KnowledgeConfigurationEditor from './KnowledgeConfigurationEditor.vue'
 type Job = { id: string; kind: string; status: string; stale: boolean; inputs: { source: string; target: string; relationship: { relationship_id: string } }; capabilities: string[]; error: string; result: Record<string, unknown> }
@@ -27,7 +29,11 @@ async function load(offset = 0) {
   } catch (err) { if (current === generation) error.value = err instanceof Error ? err.message : 'Jobs unavailable' }
   finally { if (current === generation) busy.value = false }
 }
-function toggle(event: Event) { if ((event.target as HTMLDetailsElement).open && !loaded.value) void load() }
+function toggle(open: boolean) { if (open && !loaded.value) void load() }
+const active = inject(taskActive, computed(() => false))
+watch([active, configurationLocked, () => props.disabled], () => {
+  if (active.value && !blocked.value && !pending.value && !loaded.value) void load()
+})
 async function inspect(job: Job, offset = 0) {
   if (blocked.value || pending.value) return
   const current = ++generation; busy.value = true; error.value = ''
@@ -60,7 +66,7 @@ onBeforeUnmount(() => { ++generation; emit('locked', false) })
 <template>
   <section aria-label="Automatic synchronization">
     <KnowledgeConfigurationEditor :project="project" :actor="actor" kind="synchronization" :disabled="busy || !!pending || disabled" @locked="configurationLocked = $event" @refresh="emit('refresh')" />
-    <details @toggle="toggle"><summary>Automatic synchronization proposals</summary>
+    <TaskSurface @active="toggle" title="Automatic synchronization proposals">
       <p class="hint">Read-only proposals retain exact inputs. New target coverage always needs explicit adoption and independent review.</p>
       <p v-if="error" role="alert">{{ error }}</p>
       <button :disabled="blocked || !!pending" @click="load()">Refresh synchronization jobs</button>
@@ -79,7 +85,7 @@ onBeforeUnmount(() => { ++generation; emit('locked', false) })
         <ul><li v-for="item in proposal.items" :key="item.id">{{ item.vulnerability_id || 'Unknown scope' }} · {{ item.category }}<p>{{ item.reasons.join('; ') }}</p></li></ul>
         <button v-if="proposal.next_offset !== null" :disabled="blocked || !!pending" @click="inspect(selected, proposal.next_offset)">Next automatic proposal items</button>
       </section>
-    </details>
+    </TaskSurface>
   </section>
 </template>
 <style scoped>

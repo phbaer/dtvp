@@ -1,23 +1,22 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
-import KnowledgeOsvMatching from './KnowledgeOsvMatching.vue'
+import { taskActive } from '../lib/productNavigation'
 import KnowledgeAdvisorySchedule from './KnowledgeAdvisorySchedule.vue'
-import KnowledgeIntelligenceComparison from './KnowledgeIntelligenceComparison.vue'
 type Provider = { id: string; publisher: string; enabled: boolean; next_revision: number; identifier_formats?: string[] }
 type Plan = { expected_versions: Record<string, string>; expected_evidence: string | null; providers: Provider[]; identifiers: string[]; total: number; unsupported_total?: number; selected_provider?: string | null; next_offset: number | null; capabilities: string[]; limitations: string[] }
 type Job = { id: string; status: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number; attempts: number; error: string; result: Record<string, unknown>; capabilities: string[] }
 type Page = { items: Job[]; next_offset: number | null }
 type Input = { request_id: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number }
-const emit = defineEmits<{ locked: [boolean]; review: []; expanded: [boolean] }>()
-const childLocked = ref(false), scheduleLocked = ref(false)
-const props = defineProps<{ project: string; state: string; open?: boolean }>()
+const emit = defineEmits<{ locked: [boolean]; review: [] }>()
+const scheduleLocked = ref(false)
+const props = defineProps<{ project: string; state: string; page?: 'enrichment' | 'schedule' }>()
 const expanded = ref(false), busy = ref(false), plan = ref<Plan | null>(null), provider = ref(''), query = ref(''), identifiers = ref<string[]>([])
 const error = ref(''), notice = ref(''), stale = ref(false), recorded = ref(false), pending = ref<Input | null>(null)
 const offset = ref(0), previous = ref<number[]>([]), jobs = ref<Job[]>([]), recent = ref<Job | null>(null), jobOffset = ref(0), jobNext = ref<number | null>(null), jobPrevious = ref<number[]>([]), jobsLoaded = ref(false)
 const ownLocked = computed(() => busy.value || Boolean(pending.value && !recorded.value))
-watch(() => ownLocked.value || childLocked.value || scheduleLocked.value, value => emit('locked', value), { immediate: true, flush: 'sync' })
+watch(() => ownLocked.value || scheduleLocked.value, value => emit('locked', value), { immediate: true, flush: 'sync' })
 let sequence = 0
 const root = () => `/projects/${encodeURIComponent(props.project)}`
 const selectedProvider = computed(() => plan.value?.providers.find(item => item.id === provider.value))
@@ -48,7 +47,12 @@ async function loadJobs(page = jobOffset.value) {
   } catch (err) { if (current === sequence) fail(err); return false }
   finally { if (current === sequence) busy.value = false }
 }
-async function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; emit('expanded', expanded.value); if (expanded.value && !plan.value) { await loadPlan(); const planError = error.value; if (!jobsLoaded.value) await loadJobs(0); if (planError) error.value = planError } }
+const active = inject(taskActive, computed(() => false))
+watch(active, async value => {
+  expanded.value = value
+  if (value && !plan.value) { await loadPlan(); const planError = error.value; if (!jobsLoaded.value) await loadJobs(0); if (planError) error.value = planError }
+}, { immediate: true })
+
 async function pageIdentifiers(next: boolean) {
   const page = next ? plan.value?.next_offset : previous.value.at(-1); if (page == null) return
   const old = offset.value; if (await loadPlan(page)) { if (next) previous.value.push(old); else previous.value.pop() }
@@ -101,14 +105,11 @@ watch(() => props.project, () => {
 onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
-  <details class="knowledge-advisories" :open="open" @toggle="toggle">
-    <summary>Advisory intelligence refresh</summary>
+  <section class="knowledge-advisories">
+    <h2 tabindex="-1">{{ page === 'schedule' ? 'Advisory schedules' : 'Enrich vulnerabilities' }}</h2>
     <section aria-label="Advisory intelligence refresh">
-      <h3>Discover → enrich → review</h3>
       <p class="hint">Inputs cover the current branches of this product, not only the selected version. Each job captures those exact states.</p>
-      <KnowledgeOsvMatching :project="project" :state="state" :disabled="ownLocked || scheduleLocked" @locked="childLocked = $event" />
-      <fieldset class="advisory-controls" :disabled="childLocked || scheduleLocked">
-      <h3>Enrich known vulnerabilities</h3>
+      <fieldset v-show="page !== 'schedule'" class="advisory-controls" :disabled="scheduleLocked">
       <p class="hint">After OSV discovery succeeds, refresh this plan to include supported IDs. Or enrich IDs already imported with your SBOM. Select a provider and up to 20 IDs.</p>
       <p class="hint">Provider and advisory publisher differ: mirrors are not independent corroboration. A provider not-found response never proves remediation. Cancel stops DTVP work; an in-flight remote lookup may finish.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
@@ -128,12 +129,11 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <article v-for="job in shownJobs" :key="job.id" :aria-label="`Advisory job ${job.id}`"><strong>{{ job.provider }} · {{ human(job.status) }}</strong><p>{{ job.identifiers.join(', ') }} · {{ job.attempts }} attempts</p><p v-if="job.error">{{ job.error }}</p><div class="actions"><button type="button" :disabled="busy" @click="inspect(job)">Refresh advisory status</button><button v-if="job.capabilities.includes('retry')" type="button" :disabled="busy" @click="inspect(job, 'retry')">Retry advisory job</button><button v-if="job.capabilities.includes('cancel')" type="button" :disabled="busy" @click="inspect(job, 'cancel')">Cancel DTVP advisory job</button></div><details><summary>Advisory job pins and capture result</summary><pre>{{ JSON.stringify({ provider: job.provider, identifiers: job.identifiers, revision: job.revision, expected_versions: job.expected_versions, expected_evidence: job.expected_evidence, result: job.result }, null, 2) }}</pre></details></article>
       <nav v-if="jobsLoaded" class="actions" aria-label="Advisory job pages"><button type="button" :disabled="busy || !jobPrevious.length" @click="pageJobs(false)">Previous advisory jobs</button><button type="button" :disabled="busy || jobNext == null" @click="pageJobs(true)">Next advisory jobs</button></nav>
       </fieldset>
-      <button type="button" :disabled="ownLocked || childLocked || scheduleLocked" @click="emit('review')">Refresh findings and review</button>
-      <p class="hint">Wait for jobs to succeed and their projection to be current. Findings and evidence need human assessment and independent review; scores remain a coordinator task.</p>
-      <KnowledgeIntelligenceComparison :project="project" :state="state" />
-      <KnowledgeAdvisorySchedule v-if="plan" :project="project" :providers="plan.providers" :disabled="ownLocked || childLocked" @locked="scheduleLocked = $event" />
+      <button v-show="page !== 'schedule'" type="button" :disabled="ownLocked || scheduleLocked" @click="emit('review')">Refresh findings and review</button>
+      <p v-show="page !== 'schedule'" class="hint">Wait for jobs to succeed and their projection to be current. Findings and evidence need human assessment and independent review; scores remain a coordinator task.</p>
+      <KnowledgeAdvisorySchedule v-if="plan" v-show="page === 'schedule'" :active="active && page === 'schedule'" :project="project" :providers="plan.providers" :disabled="ownLocked" @locked="scheduleLocked = $event" />
     </section>
-  </details>
+  </section>
 </template>
 <style scoped>
 .knowledge-advisories { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; } .advisory-controls { min-width:0; margin:0; padding:0; border:0 } summary { cursor: pointer; font-weight: 600; } section, article, form { min-width: 0; overflow-wrap: anywhere; }.hint { font-size: .85rem; color: var(--muted); }.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-block: .6rem; } label { display: grid; gap: .3rem; margin-block: .6rem; } input, select { width: 100%; min-width: 0; box-sizing: border-box; }.identifiers { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }.identifiers label { display: flex; align-items: center; }.identifiers input { width: auto; } article { border-top: 1px solid var(--line); padding-block: .7rem; } pre { overflow-wrap: anywhere; white-space: pre-wrap; max-height: 18rem; overflow: auto; font-size: .75rem; }

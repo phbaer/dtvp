@@ -2,10 +2,14 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api, ApiError, send } from './api'
 import KnowledgeAccessTokens from './components/KnowledgeAccessTokens.vue'
+import ProductSidebar from './components/ProductSidebar.vue'
+import type { ProductNavigation } from './lib/productNavigation'
 import type { Me, Project, Job } from './types'
 import { pageFromLocation, type AppPage } from './lib/navigation'
 const Review = defineAsyncComponent(() => import('./components/KnowledgeWorkspace.vue'))
 const credentialBusy = ref(false)
+const productNavigation = ref<ProductNavigation | null>(null)
+const reviewWorkspace = ref<{ navigateProduct: (view: string, task?: string) => Promise<void> } | null>(null)
 const me = ref<Me | null>(null), busy = ref(false), locked = ref(false), error = ref(''), notice = ref('')
 const personas = ref<{ id: string; name: string }[]>([]), jobs = ref<Job[]>([])
 const jobProjectNames = ref<Record<string, string>>({})
@@ -55,6 +59,11 @@ async function login(persona: string) {
 }
 async function logout() { await action(async () => { await api('/auth/logout', send({})); me.value = null; personas.value = []; jobs.value = []; jobProjectNames.value = {}; locked.value = false; busy.value = false }) }
 function navigate(value: AppPage) { if (!locked.value && !busy.value && !credentialBusy.value) { page.value = value; menuOpen.value = false } }
+async function navigateProduct(view: string, task?: string) {
+  if (locked.value || busy.value || credentialBusy.value || productNavigation.value?.locked) return
+  await reviewWorkspace.value?.navigateProduct(view, task)
+  menuOpen.value = false
+}
 function closeMenu() { menuOpen.value = false; menuButton.value?.focus() }
 function writeLocation() { const params = new URLSearchParams(location.search); params.set('page', page.value); history.replaceState(null, '', `${location.pathname}?${params}${location.hash}`) }
 function locationChanged() { if (locked.value || busy.value || credentialBusy.value) { writeLocation(); return }; const value = pageFromLocation(location.search); page.value = value === 'Administration' && !canAdminister.value ? 'Products' : value }
@@ -70,6 +79,7 @@ onUnmounted(() => { ++generation; window.removeEventListener('popstate', locatio
       <a class="brand" href="?page=Products" @click.prevent="navigate('Products')">DTVP <span>Security review</span></a>
       <button ref="menuButton" class="mobile-menu-toggle" aria-controls="application-navigation" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">{{ menuOpen ? 'Close menu' : 'Menu' }}</button>
       <nav id="application-navigation" aria-label="Main navigation" :class="{ expanded: menuOpen }"><button v-for="item in pages" :key="item" :class="{ current: page === item }" :aria-current="page === item ? 'page' : undefined" :disabled="busy || credentialBusy || locked" @click="navigate(item)">{{ item }}</button></nav>
+      <ProductSidebar v-if="page === 'Products' && productNavigation" :key="me.id" :navigation="productNavigation" :disabled="busy || credentialBusy || locked" :class="{ expanded: menuOpen }" @navigate="navigateProduct" />
       <p class="sidebar-caption">One shared workspace.<br>Actions follow permissions.</p>
     </aside>
     <div class="app-body" :class="{ authenticated: me }">
@@ -78,7 +88,7 @@ onUnmounted(() => { ++generation; window.removeEventListener('popstate', locatio
     <main v-if="!me" id="app-main" tabindex="-1" class="login"><h1>Security review</h1><p>Sign in to review product composition and security evidence.</p><a class="button primary" href="/auth/login">Sign in</a><label v-if="personas.length">Playground persona<select aria-label="Playground persona" @change="login(($event.target as HTMLSelectElement).value)"><option value="" selected disabled>Choose a synthetic persona</option><option v-for="person in personas" :key="person.id" :value="person.id">{{ person.name }}</option></select></label></main>
     <main v-else id="app-main" tabindex="-1">
       <div v-if="page === 'Administration'" class="administration-heading"><div class="page-title"><div><p class="eyebrow">Organization and product configuration</p><h1>Administration</h1></div></div><nav aria-label="Administration"><button :class="{current: adminTab === 'access'}" :aria-current="adminTab === 'access' ? 'page' : undefined" :disabled="busy || credentialBusy || locked" @click="adminTab = 'access'">Access and integrations</button><button :class="{current: adminTab === 'maintenance'}" :aria-current="adminTab === 'maintenance' ? 'page' : undefined" :disabled="busy || credentialBusy || locked" @click="adminTab = 'maintenance'">Product maintenance</button></nav></div>
-      <Review v-show="workspaceVisible" :key="me.id" :me="me" :view="workspaceView" @locked="locked = $event" />
+      <Review ref="reviewWorkspace" v-show="workspaceVisible" :key="me.id" :me="me" :view="workspaceView" @locked="locked = $event" @navigation="productNavigation = $event" />
       <section v-if="page === 'Activity'" aria-label="Operational activity"><div class="page-title"><h1>Activity</h1><button :disabled="busy || credentialBusy" @click="action(loadJobs)">Refresh activity</button></div><p v-if="!jobs.length" class="empty">No background operations.</p><article v-for="job in jobs" :key="job.id" class="job"><div><h2>{{ label(job.kind) }}</h2><span class="badge">{{ label(job.status) }}</span><small v-if="job.project_id">{{ jobProjectNames[job.project_id] || `Product ID: ${job.project_id}` }}<template v-if="job.version"> · {{ job.version }}</template></small><p v-if="job.error" class="warning">{{ job.error }}</p><details v-if="Object.keys(job.result || {}).length"><summary>Results</summary><pre>{{ JSON.stringify(job.result, null, 2) }}</pre></details></div></article></section>
       <template v-if="page === 'Administration' && adminTab === 'access'">
         <div class="page-title"><div><p class="eyebrow">Explicit team access</p><h2>Access and integrations</h2><p>Ownership describes responsibility. Team memberships and sharing control access.</p></div></div>
@@ -96,14 +106,14 @@ onUnmounted(() => { ++generation; window.removeEventListener('popstate', locatio
 
 <style scoped>
 .app-shell { min-height:100vh; }
-.app-sidebar { position:fixed; inset:0 auto 0 0; width:190px; padding:24px 14px; background:var(--surface); border-right:1px solid var(--line); display:flex; flex-direction:column; gap:26px; z-index:8; }
+.app-sidebar { position:fixed; inset:0 auto 0 0; width:224px; padding:20px 12px; background:var(--surface); border-right:1px solid var(--line); display:flex; flex-direction:column; gap:16px; z-index:8; overflow-y:auto; }
 .app-sidebar .brand { padding:0 10px; font-size:1.5rem; }
 .app-sidebar .brand span { display:block; margin:5px 0 0; font-size:.78rem; letter-spacing:0; }
 .app-sidebar nav { display:flex; flex-direction:column; gap:5px; width:100%; }
 .app-sidebar nav button { justify-content:flex-start; padding:10px 12px; border-radius:5px; }
 .app-sidebar nav button.current { background:var(--accent-soft); color:var(--accent); font-weight:650; }
 .sidebar-caption { margin:auto 10px 0; color:var(--muted); font-size:.78rem; }
-.app-body.authenticated { margin-left:190px; min-width:0; }
+.app-body.authenticated { margin-left:224px; min-width:0; }
 .app-header { min-height:52px; padding:8px 24px; gap:12px; }
 .app-location { color:var(--muted); font-size:.85rem; }
 .preferences { flex-wrap:wrap; justify-content:flex-end; gap:12px; }
@@ -116,12 +126,12 @@ onUnmounted(() => { ++generation; window.removeEventListener('popstate', locatio
 .skip-link { position:fixed; left:12px; top:-80px; z-index:30; padding:10px; background:var(--surface); }
 .skip-link:focus { top:10px; }
 @media(max-width:900px) {
- .app-sidebar { position:sticky; top:0; width:100%; padding:10px 14px; display:flex; flex-direction:row; align-items:center; flex-wrap:wrap; gap:10px; border-right:0; border-bottom:1px solid var(--line); }
+ .app-sidebar { position:sticky; top:0; width:100%; max-height:85dvh; padding:10px 14px; display:flex; flex-direction:row; align-items:center; flex-wrap:wrap; gap:10px; border-right:0; border-bottom:1px solid var(--line); }
  .app-sidebar .brand { font-size:1.15rem; padding:0; }
  .app-sidebar .brand span,.sidebar-caption { display:none; }
  .mobile-menu-toggle { display:inline-flex; margin-left:auto; }
- .app-sidebar nav { display:none; flex-basis:100%; order:3; }
- .app-sidebar nav.expanded { display:flex; }
+ .app-sidebar > nav { display:none; flex-basis:100%; order:3; }
+ .app-sidebar > nav.expanded { display:flex; }
  .app-body.authenticated { margin-left:0; }
  .app-header { padding:8px 12px; }
  .app-location,.playground-indicator { display:none; }

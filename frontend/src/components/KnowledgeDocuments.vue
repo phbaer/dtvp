@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
@@ -39,7 +40,7 @@ async function load(page = 0) {
   } catch (err) { if (current === sequence) error.value = err instanceof Error ? err.message : 'Document registry unavailable'; return false }
   finally { if (current === sequence) busy.value = false }
 }
-function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !result.value && !busy.value) void load() }
+function toggle(open: boolean) { expanded.value = open; if (expanded.value && !result.value && !busy.value) void load() }
 async function paginate(next: boolean) {
   const page = next ? result.value?.next_offset : previous.value.at(-1); if (page == null) return
   const prior = offset.value
@@ -99,8 +100,7 @@ watch(() => [props.project, props.version, props.state], (value, prior) => {
 onBeforeUnmount(() => { ++sequence })
 </script>
 <template>
-  <details class="knowledge-documents" @toggle="toggle">
-    <summary>Controlled documents</summary>
+  <TaskSurface class="knowledge-documents" @active="toggle" title="Controlled documents">
     <section aria-label="Controlled document registry" :aria-busy="busy">
       <p class="hint">Register externally rendered architecture, SOUP or license documents against an exact issued input bundle. Approval covers these bytes and inputs; it does not certify correctness, compliance or the release.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
@@ -139,7 +139,7 @@ onBeforeUnmount(() => { ++sequence })
       <button v-if="error && !result" type="button" :disabled="busy" @click="load()">Retry document registry</button>
       <button v-if="error" type="button" :disabled="busy" @click="emit('changed')">Refresh document baseline, retain input</button>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-documents { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; }

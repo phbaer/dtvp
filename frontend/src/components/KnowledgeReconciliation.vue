@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -50,7 +51,7 @@ async function loadRegistry(page = 0) {
   const data = await read<NonNullable<typeof registry.value>>(`${root()}/states/${encodeURIComponent(selectedTarget)}/reconciliations?offset=${page}&limit=20`)
   if (data && selectedTarget === target.value) { registry.value = data; registryOffset.value = page; return true }; return false
 }
-async function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !registry.value) { await loadRegistry(); await loadRefs() } }
+async function toggle(open: boolean) { expanded.value = open; if (expanded.value && !registry.value) { await loadRegistry(); await loadRefs() } }
 async function loadHistory(page = 0) {
   const params = new URLSearchParams({ offset: String(page), limit: '20' }); if (historyVersion.value.trim()) params.set('version', historyVersion.value.trim())
   const data = await read<{ items: History[]; next_offset: number | null }>(`${root()}/history?${params}`)
@@ -125,7 +126,7 @@ watch(() => [props.project, props.version], () => { ++sequence; busy.value = fal
 onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
-  <details class="knowledge-reconciliation" @toggle="toggle"><summary>Occurrence correspondence across imports</summary>
+  <TaskSurface class="knowledge-reconciliation" @active="toggle" title="Occurrence correspondence across imports">
     <section aria-label="Occurrence correspondence">
       <KnowledgeCorrespondenceDraft :project="project" :version="version" :state="state" :source="source" :disabled="busy || !!pending" @locked="draftLocked = $event; emit('locked', $event)" @changed="emit('changed')" />
       <fieldset :disabled="draftLocked" class="correspondence-controls">
@@ -149,7 +150,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <KnowledgeIdentityMatches :project="project" :source="source" :target="target" :disabled="busy || !!pending || draftLocked" />
       <KnowledgeIntegrationEvents :project="project" :state="state" :disabled="busy || !!pending || draftLocked" />
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .correspondence-controls { border: 0; padding: 0; min-width: 0; } .knowledge-reconciliation { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; } summary { cursor: pointer; font-weight: 600; } section, article, form, li { min-width: 0; overflow-wrap: anywhere; }.hint, small { font-size: .85rem; color: var(--muted); }.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .6rem; } label { display: grid; gap: .3rem; margin-block: .6rem; } input, select, textarea { width: 100%; min-width: 0; box-sizing: border-box; } textarea { min-height: 4rem; }.selectors { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(250px,100%),1fr)); gap: 1rem; }.choice { display: flex; align-items: flex-start; }.choice input { width: auto; margin-top: .2rem; }.choice small { display: block; font-size: .7rem; }article { border-top: 1px solid var(--line); padding-block: .8rem; }pre { overflow-wrap: anywhere; white-space: pre-wrap; max-height: 18rem; overflow: auto; font-size: .75rem; }code { font-size: .75rem; overflow-wrap: anywhere; }.pairs { padding-left: 1.2rem; }

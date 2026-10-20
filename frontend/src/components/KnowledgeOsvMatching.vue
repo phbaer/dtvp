@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
@@ -44,7 +45,7 @@ async function loadJobs(offset = jobOffset.value) {
   } catch (value) { if (current === generation) error.value = message(value); return false }
   finally { if (current === generation) busy.value = false }
 }
-async function toggle(event: Event) { opened.value = (event.currentTarget as HTMLDetailsElement).open; if (opened.value && !plan.value) { await loadPlan(); const prior = error.value; if (!jobsLoaded.value) await loadJobs(0); if (prior) error.value = prior } }
+async function toggle(open: boolean) { opened.value = open; if (opened.value && !plan.value) { await loadPlan(); const prior = error.value; if (!jobsLoaded.value) await loadJobs(0); if (prior) error.value = prior } }
 async function planPage(next: boolean) { const offset = next ? plan.value?.next_offset : planPrevious.value.at(-1); if (offset == null) return; const before = planOffset.value; if (await loadPlan(offset)) { if (next) planPrevious.value.push(before); else planPrevious.value.pop() } }
 async function jobPage(next: boolean) { const offset = next ? jobNext.value : jobPrevious.value.at(-1); if (offset == null) return; const before = jobOffset.value; if (await loadJobs(offset)) { if (next) jobPrevious.value.push(before); else jobPrevious.value.pop() } }
 function choose(purl: string) { if (pending.value || busy.value || props.disabled || !canQuery.value) return; if (selected.value.includes(purl)) selected.value = selected.value.filter(value => value !== purl); else if (selected.value.length < 20) selected.value.push(purl) }
@@ -93,7 +94,7 @@ watch(() => props.project, () => { ++generation; busy.value = false; plan.value 
 onBeforeUnmount(() => { ++generation; emit('locked', false) })
 </script>
 <template>
-  <details class="osv-matching" @toggle="toggle"><summary>External OSV package matching</summary><section aria-label="OSV package matching">
+  <TaskSurface class="osv-matching" @active="toggle" title="External OSV package matching"><section aria-label="OSV package matching">
     <h3>Discover vulnerabilities</h3>
     <p class="hint">Explicit package/version queries to OSV. Results are provider claims, not applicability assessments or approvals. A no-match response does not prove absence or remediation.</p>
     <div><button :disabled="busy || disabled || !!pending" @click="loadPlan(0, true)">Refresh OSV package plan</button><button :disabled="busy || disabled" @click="loadJobs()">Refresh OSV jobs</button></div><p v-if="busy" role="status">Working…</p><p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
@@ -103,7 +104,7 @@ onBeforeUnmount(() => { ++generation; emit('locked', false) })
     </template>
     <p v-if="jobsLoaded && !shownJobs.length">No recorded OSV jobs for this product.</p><section v-if="action" aria-label="Captured OSV job action"><p>{{ action.kind }} · job {{ action.job }} · unchanged across retries</p><button :disabled="busy || disabled" @click="mutate()">Resend captured OSV job action</button><button :disabled="busy || disabled" @click="action = null">Discard captured OSV job action</button></section>
     <article v-for="job in shownJobs" :key="job.id" :aria-label="`OSV job ${job.id}`"><strong>OSV · {{ human(job.status) }}</strong><p>{{ job.purls.join(' · ') }} · {{ job.attempts }} attempts</p><p v-if="job.error">{{ job.error }}</p><p v-if="job.result.completed_queries !== undefined">Completed query captures: {{ job.result.completed_queries }}/{{ job.result.selected_queries }}. Unqueried coverage remains unknown.</p><button :disabled="busy || disabled" @click="inspect(job)">Refresh OSV job status</button><button v-if="job.capabilities.includes('retry')" :disabled="busy || disabled || !!action || (!!pending && !recorded)" @click="mutate(job, 'retry')">Retry OSV job</button><button v-if="job.capabilities.includes('cancel')" :disabled="busy || disabled || !!action || (!!pending && !recorded)" @click="mutate(job, 'cancel')">Cancel OSV job</button><details><summary>OSV job pins, capture and source bytes</summary><pre>{{ JSON.stringify(job, null, 2) }}</pre><p v-for="sha in artifactLinks(job)" :key="sha"><a :href="download(job, sha)" download>Download captured OSV artifact {{ sha }}</a></p></details></article><nav v-if="jobsLoaded"><button :disabled="busy || disabled || !jobPrevious.length" @click="jobPage(false)">Previous OSV jobs</button><button :disabled="busy || disabled || jobNext === null" @click="jobPage(true)">Next OSV jobs</button></nav>
-  </section></details>
+  </section></TaskSurface>
 </template>
 <style scoped>
 .osv-matching { border-top:1px solid var(--line); margin-top:1rem; padding-top:.8rem; min-width:0 } section,article,fieldset { min-width:0; overflow-wrap:anywhere } fieldset { border:0; padding:0 } label { display:flex; align-items:flex-start; gap:.4rem; margin-block:.5rem } input[type=checkbox] { width:auto; margin-top:.2rem } button { margin:.3rem .5rem .3rem 0 } summary { cursor:pointer } pre { white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; max-height:18rem; overflow:auto } article { border-top:1px solid var(--line); padding-block:.5rem }.hint { font-size:.85rem; color:var(--muted) }

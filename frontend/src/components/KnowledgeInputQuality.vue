@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 type Source = { id: string; part_id: string | null; state: string | null; availability: string; required?: boolean; collection: Record<string, unknown>; dependency_graph: string; coverage_verification: string; source: Record<string, unknown> }
@@ -24,7 +25,7 @@ async function load(selectedOffset = 0, reset = false) {
   } catch (err) { if (current === sequence) error.value = err instanceof Error ? err.message : 'Input report unavailable'; return false }
   finally { if (current === sequence) busy.value = false }
 }
-function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !report.value) void load() }
+function toggle(open: boolean) { expanded.value = open; if (expanded.value && !report.value) void load() }
 async function filter() { if (await load(0)) previous.value = [] }
 async function page(forward: boolean) {
   if (busy.value) return
@@ -40,8 +41,7 @@ watch(() => [props.project, props.state], () => { ++sequence; busy.value = false
 onBeforeUnmount(() => { ++sequence })
 </script>
 <template>
-  <details class="knowledge-input-quality" aria-label="Composition input observations" @toggle="toggle">
-    <summary>Composition input observations</summary>
+  <TaskSurface class="knowledge-input-quality" aria-label="Composition input observations" @active="toggle" title="Composition input observations">
     <p class="hint">Read-only observations of the selected imported model. Producer coverage is not verified; missing inventory cannot be discovered from these counts. No quality score, license conclusion or automatic release gate is applied.</p>
     <p v-if="!state">Select a product inventory to inspect its input evidence.</p>
     <button :disabled="busy || !state" @click="load(0, true)">Reload pinned input report</button>
@@ -57,7 +57,7 @@ onBeforeUnmount(() => { ++sequence })
       <nav aria-label="Input observation pages"><button :disabled="busy || !previous.length" @click="page(false)">Previous input observations</button><button :disabled="busy || report.next_offset == null" @click="page(true)">Next input observations</button></nav>
       <details><summary>Input report pins and limitations</summary><dl><dt>Inventory state</dt><dd><code>{{ report.state }}</code></dd><dt>Full report digest</dt><dd><code>{{ report.report_digest }}</code></dd></dl><ul><li v-for="limit in report.limitations" :key="limit">{{ limit }}</li></ul></details>
     </template>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-input-quality{margin-block:.75rem;padding:.7rem .9rem;border:1px solid var(--line);border-radius:.65rem;min-width:0}.knowledge-input-quality summary{cursor:pointer;overflow-wrap:anywhere}.knowledge-input-quality p,.knowledge-input-quality li{overflow-wrap:anywhere}.knowledge-input-quality dl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.3rem .8rem}.knowledge-input-quality dd{margin:0;overflow-wrap:anywhere}.knowledge-input-quality fieldset{display:flex;gap:.7rem;align-items:end;flex-wrap:wrap;border:0;padding:0;margin:1rem 0;min-width:0}.knowledge-input-quality label{display:grid;gap:.3rem;flex:1;min-width:160px}.knowledge-input-quality input,.knowledge-input-quality select{box-sizing:border-box;max-width:100%;min-width:0;width:100%}.knowledge-input-quality pre,.knowledge-input-quality code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.75rem}.knowledge-input-quality pre{max-height:230px;overflow:auto}.knowledge-input-quality article{padding:.7rem 0;border-bottom:1px solid var(--line)}.knowledge-input-quality nav{display:flex;gap:.7rem;flex-wrap:wrap}.input-observations{list-style:none;margin:0;padding:0;max-height:400px;overflow:auto}.input-observations li{padding:.7rem 0;border-bottom:1px solid var(--line)}.input-observations code,.input-observations span,.input-observations small{display:block}.hint,.input-observations small{color:var(--muted);font-size:.8rem}@media(max-width:550px){.knowledge-input-quality dl{grid-template-columns:minmax(0,1fr)}.knowledge-input-quality label{min-width:0;flex-basis:100%}}

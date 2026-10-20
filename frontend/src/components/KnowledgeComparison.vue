@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 import { send } from '../api'
@@ -46,8 +47,8 @@ async function loadReferences(append = false) {
   } catch (err) { if (scope === projectSequence) failure(err) }
   finally { if (scope === projectSequence) refsBusy.value = false }
 }
-function toggle(event: Event) {
-  expanded.value = (event.currentTarget as HTMLDetailsElement).open
+function toggle(open: boolean) {
+  expanded.value = open
   if (expanded.value && references.value.length === 0) void loadReferences()
 }
 async function loadHistory(append = false) {
@@ -142,8 +143,7 @@ onBeforeUnmount(() => { ++syncSequence; ++projectSequence; ++comparisonSequence;
 </script>
 
 <template>
-  <details v-if="project" class="knowledge-comparison" @toggle="toggle">
-    <summary>Compare versions and history</summary>
+  <TaskSurface v-if="project" class="knowledge-comparison" @active="toggle" title="Compare versions and history">
     <section aria-label="Historical state comparison" :aria-busy="compareBusy">
       <div class="comparison-controls">
         <label>Before state<select v-model="before" :disabled="refsBusy || compareBusy || draftBusy" @change="changed"><option value="" disabled>Select a state</option><option v-for="choice in choices" :key="choice.id" :value="choice.id">{{ choice.label }}</option></select></label>
@@ -207,7 +207,7 @@ onBeforeUnmount(() => { ++syncSequence; ++projectSequence; ++comparisonSequence;
         <details class="comparison-scope"><summary>Pinned states, classifications and retained assessments</summary><p class="comparison-pins">Before: {{ result.before_version }} · <code>{{ result.before }}</code><br />After: {{ result.after_version }} · <code>{{ result.after }}</code></p><p>Retained assessments: {{ result.retention.before.retained_assessments }} before → {{ result.retention.after.retained_assessments }} after. Absent targets: {{ result.retention.before.retained_absent_assessments }} before → {{ result.retention.after.retained_absent_assessments }} after.</p><p>Server classifications may overlap: <span v-for="(count, kind) in result.summary.by_classification" :key="kind">{{ human(String(kind)) }} {{ count }}; </span></p><ul><li v-for="limitation in result.limitations" :key="limitation">{{ limitation }}</li></ul></details>
       </template>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 
 <style scoped>

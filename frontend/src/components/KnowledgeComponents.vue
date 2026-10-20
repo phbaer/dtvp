@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 import KnowledgeComponentMetadata from './KnowledgeComponentMetadata.vue'
@@ -53,12 +54,12 @@ async function choose(row: Row, append = false) {
 function setLocked(value: boolean) { locked.value = value; emit('locked', value) }
 function changed() { emit('changed') }
 function useCurrent() { if (props.disabled || locked.value || busy.value) return; selectedState.value = props.state; pinnedState.value = props.state; applyFilters() }
-function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !data.value) void load() }
+function toggle(open: boolean) { expanded.value = open; if (expanded.value && !data.value) void load() }
 watch(() => [props.project, props.state], () => { if (locked.value) return; ++sequence; ++contextSequence; busy.value = false; contextBusy.value = false; data.value = null; selected.value = null; contexts.value = []; selectedState.value = props.state; pinnedState.value = props.state; previous.value = []; offset.value = 0; error.value = ''; if (expanded.value) void load() })
 onBeforeUnmount(() => { ++sequence; ++contextSequence })
 </script>
 <template>
-  <details class="component-inventory" @toggle="toggle"><summary>Component inventory</summary>
+  <TaskSurface class="component-inventory" @active="toggle" title="Component inventory">
     <p class="hint">All imported component occurrences, including packages without vulnerability observations. No finding does not mean cleared.</p>
     <form aria-label="Search component inventory" @submit.prevent="applyFilters"><fieldset :disabled="busy || locked || disabled"><div class="inventory-filters"><label>Find component<input v-model="query" type="search" maxlength="500" placeholder="Name, namespace, version, PURL or reference"></label><label>Component team<select v-model="team"><option value="">All component teams</option><option v-for="item in data?.teams || []" :key="item.id" :value="item.id">{{ item.name }}</option></select></label><label>Ownership evidence<select v-model="ownership"><option value="">All ownership states</option><option v-for="value in ['resolved', 'delegated', 'unassigned', 'conflict', 'topology_unknown', 'no_context']" :key="value" :value="value">{{ human(value) }}</option></select></label></div><button>Search components</button></fieldset></form>
     <details><summary>Pinned inventory state</summary><label>Inventory state SHA<input v-model="selectedState" maxlength="64" pattern="[a-f0-9]{64}" :disabled="busy || locked || disabled"></label><button :disabled="busy || locked || disabled" @click="loadPinned">Load pinned inventory state</button><button :disabled="busy || locked || disabled" @click="useCurrent">Use workspace state</button><p class="hint">Paste a committed product state from version history to browse an earlier inventory. Loading never changes a source or branch.</p></details>
@@ -70,7 +71,7 @@ onBeforeUnmount(() => { ++sequence; ++contextSequence })
         <KnowledgeComponentMetadata :key="`${data.state}:${selected.component_ref}:${contextId}`" :project="project" :state="data.state" :version="data.version" :component-ref="selected.component_ref" :context-id="contextId || undefined" :disabled="disabled" @locked="setLocked" @changed="changed" @refresh="changed" />
       </section><details><summary>Inventory coverage limits</summary><ul><li v-for="value in data.limitations" :key="value">{{ value }}</li></ul></details>
     </template>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .component-inventory summary{cursor:pointer;font-weight:600}.component-inventory fieldset{border:0;padding:0;min-width:0}.inventory-filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:.7rem}.component-inventory label{display:grid;gap:.3rem}.component-inventory input,.component-inventory select{max-width:100%;box-sizing:border-box}.component-inventory button{margin-block:.3rem}.inventory-table{overflow:auto}.inventory-table table{width:100%;border-collapse:collapse}.inventory-table th,.inventory-table td{text-align:left;vertical-align:top;padding:.5rem;border-bottom:1px solid var(--line)}.inventory-table small{display:block;overflow-wrap:anywhere}.component-inventory code{overflow-wrap:anywhere}.component-inventory section{border-top:1px solid var(--line);margin-top:.8rem;padding-top:.6rem}.component-inventory nav{display:flex;gap:.5rem}@media(max-width:650px){.inventory-filters{grid-template-columns:1fr}}

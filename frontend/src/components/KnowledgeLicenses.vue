@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
@@ -68,7 +69,7 @@ async function load(nextOffset = 0) {
   } catch (err) { if (request === sequence) error.value = err instanceof Error ? err.message : 'License evidence unavailable'; return false }
   finally { if (request === sequence) busy.value = false }
 }
-function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !result.value && !busy.value) void load() }
+function toggle(open: boolean) { expanded.value = open; if (expanded.value && !result.value && !busy.value) void load() }
 async function paginate(forward: boolean) {
   if (locked.value) return
   const next = forward ? result.value?.next_offset : previous.value.at(-1)
@@ -129,8 +130,7 @@ onBeforeUnmount(() => { alive = false; ++sequence; emit('locked', false) })
 </script>
 
 <template>
-  <details class="knowledge-licenses" @toggle="toggle">
-    <summary>License evidence and review</summary>
+  <TaskSurface class="knowledge-licenses" @active="toggle" title="License evidence and review">
     <section aria-label="License evidence and review" :aria-busy="busy">
       <p class="hint">Source evidence and human dispositions are separate. No automatic license compatibility or permission to distribute is inferred.</p>
       <p v-if="scopeChanged" role="status">The workspace moved to another state. This retained input stays bound to its original source.</p><p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p><p v-if="busy" role="status">Loading license evidence…</p>
@@ -189,7 +189,7 @@ onBeforeUnmount(() => { alive = false; ++sequence; emit('locked', false) })
         </article>
       <button v-if="error && !result" :disabled="busy" @click="load()">Retry license evidence</button>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 
 <style scoped>

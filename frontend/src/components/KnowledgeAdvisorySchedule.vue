@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 type Provider = { id: string; publisher: string; enabled: boolean }
@@ -6,7 +7,7 @@ type Schedule = { provider: string; versions: string[]; interval_seconds: number
 type Policy = { state: string | null; providers: Schedule[]; capabilities: string[]; limitations: string[]; provider_minimum_seconds: Record<string, number> }
 type Row = Omit<Schedule, 'versions'> & { versions: string }
 type Input = { request_id: string; expected_policy: string | null; providers: Schedule[] }
-const props = defineProps<{ project: string; providers: Provider[]; disabled?: boolean }>()
+const props = defineProps<{ project: string; providers: Provider[]; disabled?: boolean; active?: boolean }>()
 const emit = defineEmits<{ locked: [boolean] }>()
 const policy = ref<Policy | null>(null), rows = ref<Row[]>([]), initial = ref('[]'), busy = ref(false), error = ref(''), notice = ref(''), provider = ref('')
 const pending = ref<{ endpoint: string; input: Input } | null>(null), confirmed = ref(false), attempted = ref(false), committed = ref(false)
@@ -27,7 +28,7 @@ async function load() {
   catch (err) { if (current === sequence) error.value = err instanceof Error ? err.message : 'Schedule unavailable' }
   finally { if (current === sequence) busy.value = false }
 }
-function toggle(event: Event) { if ((event.currentTarget as HTMLDetailsElement).open && !policy.value) void load() }
+function toggle(open: boolean) { if (open && !policy.value) void load() }
 function add() { if (blocked.value || !can.value || pending.value || !available.value.some(item => item.id === provider.value)) return; rows.value.push({ provider: provider.value, versions: '', interval_seconds: 86400, batch_size: 20 }); provider.value = '' }
 function review() {
   if (blocked.value || !can.value || pending.value || !policy.value) return
@@ -50,8 +51,7 @@ async function publish() {
 onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
-  <details class="advisory-schedule" aria-label="Automatic advisory refresh schedule" @toggle="toggle">
-    <summary>Optional automatic refresh schedule</summary>
+  <TaskSurface :active="active" class="advisory-schedule" aria-label="Automatic advisory refresh schedule" @active="toggle" title="Optional automatic refresh schedule">
     <p class="hint">Only known IDs from selected versions. Batches rotate; each interval does not guarantee every ID. Empty configuration stops new scheduling.</p>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <button :disabled="busy" @click="load">Refresh schedule configuration</button>
@@ -76,7 +76,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <button v-if="dirty || pending" :disabled="busy" @click="discard">Discard schedule draft</button>
       <details><summary>Schedule pins and limitations</summary><code>{{ policy.state || 'No schedule configured' }}</code><p v-for="(seconds, id) in policy.provider_minimum_seconds" :key="id">{{ id }}: minimum {{ seconds }} seconds between provider requests</p><ul><li v-for="item in policy.limitations" :key="item">{{ item }}</li></ul></details>
     </template>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .advisory-schedule{margin-top:12px;min-width:0}.advisory-schedule fieldset{border:0;padding:0;min-width:0}.advisory-schedule label{display:grid;gap:4px;margin:8px 0}.advisory-schedule input:not([type=checkbox]),.advisory-schedule textarea,.advisory-schedule select{width:100%;max-width:100%;box-sizing:border-box}.advisory-schedule label:has(input[type=checkbox]){display:block}.advisory-schedule section{min-width:0;padding:8px 0}.advisory-schedule pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:250px;overflow:auto;font-size:.75rem}.advisory-schedule code,.advisory-schedule li{overflow-wrap:anywhere}.advisory-schedule button{margin:4px 8px 4px 0}.hint{color:var(--muted);font-size:.85rem}

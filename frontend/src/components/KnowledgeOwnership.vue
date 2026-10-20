@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -78,13 +79,13 @@ async function apply() {
   } catch (err) { if (request === sequence) error.value = err instanceof ApiError && err.status === 409 ? 'Policy or version heads changed. Your draft is retained. Reload current pins explicitly, then review a new preview.' : err instanceof ApiError && err.status === 503 ? 'Publication may be uncertain. Retry this exact prepared policy and request ID.' : err instanceof Error ? err.message : 'Ownership update failed' }
   finally { if (request === sequence) busy.value = false }
 }
-function toggle(event: Event) { opened.value = (event.currentTarget as HTMLDetailsElement).open; if (opened.value && !data.value && !busy.value) void load() }
+function toggle(open: boolean) { opened.value = open; if (opened.value && !data.value && !busy.value) void load() }
 watch(() => fields.value.mode, value => { if (value === 'fallback') fields.value.case_sensitive = false })
 watch(() => props.project, () => { ++sequence; data.value = null; query.value = ''; rules.value = []; selectors.value = []; prepared.value = null; busy.value = false; notice.value = ''; error.value = ''; closeRule(); if (opened.value) void load() })
 onBeforeUnmount(() => { ++sequence })
 </script>
 <template>
-  <details class="knowledge-ownership" @toggle="toggle"><summary>Component ownership</summary><section aria-label="Component ownership editor" :aria-busy="busy">
+  <TaskSurface class="knowledge-ownership" @active="toggle" title="Component ownership"><section aria-label="Component ownership editor" :aria-busy="busy">
     <p class="hint">Teams own matched components and their dependencies recursively. An explicit child owner takes responsibility for that subtree. Ownership never grants access or additional approval.</p>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p><p v-if="busy" role="status">Loading ownership…</p>
     <template v-if="data">
@@ -106,7 +107,7 @@ onBeforeUnmount(() => { ++sequence })
       <div v-if="canManage" class="ownership-toolbar"><button v-if="!prepared" :disabled="busy || selected !== null" @click="preview">Preview complete ownership policy</button><button :disabled="busy" @click="load(true)">Reload current pins, keep draft</button></div>
       <section v-if="prepared" aria-label="Prepared ownership policy"><h3>Review changes across all current versions</h3><div class="ownership-table"><table><thead><tr><th>Version</th><th>Contexts before / after</th><th>Changed</th><th>Added / removed</th></tr></thead><tbody><tr v-for="(row, version) in prepared.preview.versions" :key="version"><th>{{ version }}</th><td>{{ row.before.contexts }} / {{ row.after.contexts }}</td><td>{{ row.changed_contexts }}</td><td>{{ row.added_contexts }} / {{ row.removed_contexts }}</td></tr></tbody></table></div><p v-for="limit in prepared.preview.limitations" :key="limit" class="hint">{{ limit }}</p><details><summary>Exact prepared policy and pins</summary><pre>{{ JSON.stringify(prepared.body, null, 2) }}</pre><code>{{ prepared.preview.preview_digest }}</code></details><button :disabled="busy" @click="apply">Apply reviewed ownership policy</button></section>
     </template>
-  </section></details>
+  </section></TaskSurface>
 </template>
 <style scoped>
 .knowledge-ownership { margin:12px 0; padding:12px 0; border-block:1px solid var(--line); min-width:0 }summary { cursor:pointer }.ownership-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin:12px 0 }.ownership-toolbar label { flex:1; min-width:180px; margin:0 }.ownership-list { max-height:320px; overflow:auto }.ownership-list article { display:flex; gap:8px; align-items:center; border-bottom:1px solid var(--line); padding:10px 0 }.ownership-list article > div { flex:1; min-width:0 }.ownership-list small { display:block; color:var(--muted); margin-top:4px }.ownership-list code { overflow-wrap:anywhere }fieldset { border:0; padding:0; min-width:0 }form { padding:16px 0 }label { display:block; margin:10px 0 }input[type=checkbox] { width:auto }pre,code { white-space:pre-wrap; overflow-wrap:anywhere; font-size:.75rem }pre { max-height:300px; overflow:auto }.hint { font-size:.8rem; line-height:1.5 }.ownership-table { overflow:auto; max-width:100% }button { margin-right:6px }@media(max-width:600px) { .ownership-list article { flex-wrap:wrap }.ownership-list article > div { flex-basis:100% } }

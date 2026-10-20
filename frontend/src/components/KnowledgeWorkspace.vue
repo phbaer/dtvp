@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { productPages, productTask, taskReady, type ProductView, type ProductNavigation } from '../lib/productNavigation'
+import WorkflowTask from './WorkflowTask.vue'
+import KnowledgeOsvMatching from './KnowledgeOsvMatching.vue'
+import KnowledgeIntelligenceComparison from './KnowledgeIntelligenceComparison.vue'
+import { computed, provide, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api, ApiError, send } from '../api'
 import { justifications, justificationLabel } from '../assessmentReasons'
 import { knowledgeApi, type SsvcSelection, type KnowledgeFinding, type KnowledgeProposal, type KnowledgeWorkspace, type KnowledgeScoreInput, type KnowledgeScorePreview } from '../knowledgeApi'
@@ -43,12 +47,13 @@ import KnowledgePipelineConfiguration from './KnowledgePipelineConfiguration.vue
 import KnowledgeSyncAutomation from './KnowledgeSyncAutomation.vue'
 import KnowledgeObservations from './KnowledgeObservations.vue'
 const props = withDefaults(defineProps<{ me: Me; view?: 'products' | 'my-work' | 'maintenance' }>(), { view: 'products' })
-const emit = defineEmits<{ locked: [boolean] }>()
+const emit = defineEmits<{ locked: [boolean]; navigation: [ProductNavigation | null] }>()
 const productCreationLocked = ref(false), sharedAccessLocked = ref(false)
 const scoringPolicyLocked = ref(false)
 const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false), cpeLocked = ref(false), advisoryLocked = ref(false)
+const discoveryLocked = ref(false)
 const pipelineConfigurationLocked = ref(false), syncAutomationLocked = ref(false), observationsLocked = ref(false)
-const otherIntakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value || advisoryLocked.value || scoringPolicyLocked.value || sharedAccessLocked.value)
+const otherIntakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value || advisoryLocked.value || discoveryLocked.value || scoringPolicyLocked.value || sharedAccessLocked.value)
 const baseIntakeLocked = computed(() => productCreationLocked.value || otherIntakeLocked.value)
 const intakeLocked = computed(() => baseIntakeLocked.value || pipelineConfigurationLocked.value || syncAutomationLocked.value || observationsLocked.value)
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
@@ -75,57 +80,48 @@ const receivedEvidenceOptions = [{ value: 'missing', label: 'No received evidenc
 const severityBands = ['critical', 'high', 'medium', 'low', 'none', 'unknown']
 const savedViews = ref<{ name: string; query: string }[]>([]), viewName = ref('')
 const initialView = new URLSearchParams(location.search)
-const productViews = ['Overview', 'Vulnerabilities', 'Components', 'Imports', 'Versions', 'Licenses', 'Documents', 'Settings'] as const
-type ProductView = typeof productViews[number]
+const productViews = productPages.map(group => group.id)
 const productView = ref<ProductView>(productViews.includes(initialView.get('k_view') as ProductView) ? initialView.get('k_view') as ProductView : 'Vulnerabilities')
-const sourceWorkflow = ref(false), sourceExpanded = ref(false)
-watch(project, () => { sourceWorkflow.value = false; sourceExpanded.value = false })
-async function openSourceWorkflow() {
-  if (navigationLocked.value) return
-  await navigateProduct('Vulnerabilities')
-  sourceWorkflow.value = true
-  sourceExpanded.value = true
-  await nextTick()
-  document.getElementById('vulnerability-source-workflow')?.scrollIntoView({ block: 'start' })
-}
+const productSubpage = ref(productTask(productView.value, initialView.get('k_task') || initialView.get('k_setting')))
+const taskIs = (view: ProductView, task: string) => props.view === 'products' && Boolean(project.value) && productView.value === view && productSubpage.value === task
+async function openSourceWorkflow() { await navigateProduct('Vulnerabilities', 'Discovery') }
 async function reviewSourceResults() {
   if (navigationLocked.value) return
-  sourceWorkflow.value = false
+  await navigateProduct('Vulnerabilities', 'Findings')
   await load(true, true)
   await nextTick()
   queueElement.value?.scrollIntoView({ block: 'start' })
 }
-const settingsViews = ['Ownership', 'Sources', 'Pipeline', 'Scoring', 'Identity', 'Automation', 'Sharing'] as const
+const settingsViews = ['Ownership', 'Sources', 'Pipeline', 'Scoring', 'Identity', 'Automation', 'Advisories', 'Sharing'] as const
 type SettingsView = typeof settingsViews[number]
 const settingsView = ref<SettingsView>(settingsViews.includes(initialView.get('k_setting') as SettingsView) ? initialView.get('k_setting') as SettingsView : 'Ownership')
-const settingsLabels: Record<SettingsView, string> = { Ownership: 'Component ownership', Sources: 'Source connections', Pipeline: 'Pipeline & threat models', Scoring: 'Scoring policy', Identity: 'CPE identity policy', Automation: 'Automation schedules', Sharing: 'Product access' }
 const defaultWorkScope = () => props.me.workspaces.some(team => team.capabilities.some(cap => ['rescore', 'manage'].includes(cap))) ? 'all' : 'my_teams'
 const workScope = ref(initialView.get('k_work_scope') || (props.view === 'my-work' ? defaultWorkScope() : 'all'))
 const myTeams = computed(() => props.me.workspaces.filter(team => team.capabilities.some(cap => ['assess', 'approve'].includes(cap))))
-const reviewVisible = computed(() => props.view === 'my-work' || (props.view === 'products' && Boolean(project.value) && productView.value === 'Vulnerabilities'))
+const reviewVisible = computed(() => props.view === 'my-work' || (props.view === 'products' && Boolean(project.value) && taskIs('Vulnerabilities', 'Findings')))
 const navigationLocked = computed(() => busy.value || intakeLocked.value || bulkLocked.value || !!pendingRequest.value || !!pendingScore.value)
-const pageContainer = ref<HTMLElement | null>(null)
-async function navigateProduct(value: ProductView, setting?: SettingsView) {
-  if (navigationLocked.value) return
-  productView.value = value
-  if (setting) settingsView.value = setting
-  syncViewUrl()
+async function navigateProduct(value: string, task?: string) {
+  if (navigationLocked.value || !productViews.includes(value as ProductView)) return
+  productView.value = value as ProductView
+  productSubpage.value = productTask(productView.value, task)
+  if (productView.value === 'Settings') settingsView.value = productSubpage.value as SettingsView
+  syncViewUrl(true)
   await nextTick()
   activatePage()
-  const active = [...(pageContainer.value?.querySelectorAll<HTMLElement>('[data-product-page]') || [])].find(item => item.getClientRects().length > 0)
-  active?.querySelector<HTMLElement>('h2')?.focus()
 }
 function activatePage() {
-  const active = [...(pageContainer.value?.querySelectorAll<HTMLElement>('[data-product-page]') || [])].find(item => item.getClientRects().length > 0)
-  active?.querySelectorAll<HTMLDetailsElement>(':scope > .page-section > details').forEach(item => { item.open = true })
+  const active = [...document.querySelectorAll<HTMLElement>('.knowledge-workspace [data-task]')].find(item => item.getClientRects().length > 0)
+  const heading = active?.querySelector<HTMLElement>('h2') || (reviewVisible.value ? document.querySelector<HTMLElement>('[data-review-heading]') : null)
+  heading?.focus()
 }
+defineExpose({ navigateProduct })
 function openCatalogProject(option: { id: string; name?: string; capabilities?: string[] }) {
   if (navigationLocked.value) return
-  project.value = option.id; productView.value = 'Overview'; void chooseProject(option)
+  project.value = option.id; productView.value = 'Overview'; productSubpage.value = 'Statistics'; void chooseProject(option)
 }
 async function openWorkQueue(value: { project: { id: string; name: string }; version: string }) {
   if (navigationLocked.value) return
-  explicitAllTeams.value = true; team.value = ''; project.value = value.project.id; productView.value = 'Vulnerabilities'; await chooseProject(value.project, value.version)
+  explicitAllTeams.value = true; team.value = ''; project.value = value.project.id; productView.value = 'Vulnerabilities'; productSubpage.value = 'Findings'; await chooseProject(value.project, value.version)
   await nextTick(); queueElement.value?.scrollIntoView({ block: 'start' })
 }
 function browseProducts() {
@@ -270,7 +266,7 @@ async function chooseProject(option: { id: string; name?: string; capabilities?:
   finally { if (current === sequence) busy.value = false }
 }
 async function onProductCreated(value: { id: string; name: string; workspace_id: string }) {
-  productCreationLocked.value = false; productView.value = 'Imports'; project.value = value.id; await chooseProject(value); await nextTick(); activatePage()
+  productCreationLocked.value = false; productView.value = 'Imports'; productSubpage.value = 'Upload'; project.value = value.id; await chooseProject(value); await nextTick(); activatePage()
 }
 async function metadataChanged() {
   const row = selected.value
@@ -435,16 +431,29 @@ watch(detailTask, task => { if (task !== 'workflow') assessmentScope.value = nul
 watch([scoreBase, scoreVector, scoreRationale, scoreMode], () => { ++scoreSequence; scorePreview.value = null }, { flush: 'sync' })
 function viewParams() {
   const params = new URLSearchParams()
-  const values = { view: productView.value, setting: settingsView.value, work_scope: workScope.value, project: project.value, version: version.value, team: team.value, lifecycle: lifecycle.value, q: query.value, ...filters.value }
+  const values = { view: productView.value, task: productSubpage.value, setting: settingsView.value, work_scope: workScope.value, project: project.value, version: version.value, team: team.value, lifecycle: lifecycle.value, q: query.value, ...filters.value }
   for (const [key, value] of Object.entries(values)) if (value || key === 'team') params.set(`k_${key}`, value)
   return params
 }
-function syncViewUrl() {
+function syncViewUrl(push = false) {
   const params = new URLSearchParams(location.search)
   for (const key of [...params.keys()]) if (key.startsWith('k_')) params.delete(key)
   for (const [key, value] of viewParams()) params.set(key, value)
   params.set('page', props.view === 'my-work' ? 'My work' : props.view === 'maintenance' ? 'Administration' : 'Products')
-  history.replaceState(null, '', `${location.pathname}?${params}`)
+  const target = `${location.pathname}?${params}`
+  if (push && target !== `${location.pathname}${location.search}`) history.pushState(null, '', target)
+  else history.replaceState(null, '', target)
+}
+function restoreLocation() {
+  if (navigationLocked.value) { syncViewUrl(); return }
+  const params = new URLSearchParams(location.search)
+  if (params.get('page') !== 'Products') return
+  if (params.get('k_project') !== project.value || params.get('k_version') !== version.value) { void restoreView(params.toString()); return }
+  const value = params.get('k_view') as ProductView
+  productView.value = productViews.includes(value) ? value : 'Vulnerabilities'
+  productSubpage.value = productTask(productView.value, params.get('k_task') || params.get('k_setting'))
+  if (productView.value === 'Settings') settingsView.value = productSubpage.value as SettingsView
+  void nextTick(activatePage)
 }
 async function applyFilters() { filters.value = { ...filterDraft.value }; await load() }
 async function resetFilters() { filterDraft.value = emptyFilters(); filters.value = emptyFilters(); await load() }
@@ -464,6 +473,8 @@ async function restoreView(value: string) {
   try {
     explicitAllTeams.value = params.has('k_team') && !params.get('k_team')
     productView.value = productViews.includes(params.get('k_view') as ProductView) ? params.get('k_view') as ProductView : 'Vulnerabilities'
+    productSubpage.value = productTask(productView.value, params.get('k_task') || params.get('k_setting'))
+    if (productView.value === 'Settings') settingsView.value = productSubpage.value as SettingsView
     workScope.value = params.get('k_work_scope') || (props.view === 'my-work' ? defaultWorkScope() : 'all')
     team.value = params.has('k_team') ? params.get('k_team') || '' : defaultTeam(); lifecycle.value = params.get('k_lifecycle') || ''; query.value = params.get('k_q') || ''
     filters.value = Object.fromEntries(Object.keys(filterLabels).map(key => [key, params.get(`k_${key}`) || ''])); filterDraft.value = { ...filters.value }
@@ -486,15 +497,20 @@ watch(workScope, () => { if (!restoring && !busy.value && project.value) void lo
 watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
 watch(() => props.me.id, () => { localDrafts.clear(); draftKey.value = ''; productCreationLocked.value = false; analysisFollowUpLocked.value = false; pipelineConfigurationLocked.value = false; syncAutomationLocked.value = false; ++actorGeneration; ++scoreSequence; pendingRequest.value = null; pendingScore.value = null; scorePreview.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
-watch([productView, settingsView], () => { if (project.value) syncViewUrl() })
+watch([productView, productSubpage, settingsView], () => { if (project.value) syncViewUrl() })
 watch(() => Boolean(busy.value || intakeLocked.value || bulkLocked.value || pendingRequest.value || pendingScore.value), value => emit('locked', value), { immediate: true })
+provide(taskReady, computed(() => !busy.value))
+watch(() => [project.value, projectName.value, productView.value, productSubpage.value, navigationLocked.value, props.view] as const, () => {
+  emit('navigation', project.value ? { product: project.value, name: projectName.value, view: productView.value, task: productSubpage.value, locked: navigationLocked.value } : null)
+}, { immediate: true })
 onMounted(() => {
   window.addEventListener('beforeunload', beforeLeave)
+  window.addEventListener('popstate', restoreLocation)
   try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
   if (initialView.has('k_project')) void restoreView(initialView.toString())
   else void nextTick(activatePage)
 })
-onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave); ++actorGeneration; ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer); emit('locked', false) })
+onBeforeUnmount(() => { emit('navigation', null); window.removeEventListener('beforeunload', beforeLeave); window.removeEventListener('popstate', restoreLocation); ++actorGeneration; ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer); emit('locked', false) })
 </script>
 <template>
   <section class="knowledge-workspace" :class="{ 'finding-open': selected }" aria-label="Review workspace">
@@ -504,17 +520,20 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
       <SearchSelect v-model="project" label="Product scope" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy || intakeLocked" @select="chooseProject" />
       <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || intakeLocked || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>
     </div>
-    <nav v-show="view === 'products' && project" class="product-navigation" aria-label="Product"><button v-for="item in productViews" :key="item" :data-product-view="item" :aria-current="productView === item ? 'page' : undefined" :disabled="navigationLocked" @click="navigateProduct(item)">{{ item }}</button></nav>
-    <label v-show="view === 'products' && project" class="mobile-product-navigation">Product view<select :value="productView" :disabled="navigationLocked" @change="navigateProduct(($event.target as HTMLSelectElement).value as ProductView)"><option v-for="item in productViews" :key="item">{{ item }}</option></select></label>
-    <nav v-if="view === 'products' && project && ['Overview', 'Imports', 'Vulnerabilities'].includes(productView)" class="source-workflow" aria-label="SBOM to review workflow">
-      <button :disabled="navigationLocked" @click="navigateProduct('Imports')"><span aria-hidden="true">1</span> Import SBOM</button><span aria-hidden="true">→</span>
-      <button :disabled="navigationLocked || !workspace" :aria-expanded="sourceWorkflow && sourceExpanded" @click="openSourceWorkflow"><span aria-hidden="true">2</span> Discover and enrich</button><span aria-hidden="true">→</span>
-      <button :disabled="navigationLocked || !workspace" @click="navigateProduct('Vulnerabilities'); sourceWorkflow = false"><span aria-hidden="true">3</span> Assess and review</button>
-    </nav>
-    <div v-if="workspace" id="vulnerability-source-workflow" v-show="view === 'products' && productView === 'Vulnerabilities' && sourceWorkflow">
-      <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :open="sourceWorkflow && sourceExpanded" @expanded="sourceExpanded = $event" @locked="advisoryLocked = $event" @review="reviewSourceResults" />
-    </div>
+    <section v-if="view === 'products' && project && !workspace && !busy && !error && ['Overview', 'Vulnerabilities', 'Components', 'Licenses', 'Documents'].includes(productView)" class="empty" aria-label="Composition required">
+      <h2>No imported composition</h2><p>Upload an SBOM for this product version to start this task.</p><button :disabled="navigationLocked" @click="navigateProduct('Imports', 'Upload')">Upload SBOM</button>
+    </section>
+    <WorkflowTask v-if="workspace" id="Discovery" view="Vulnerabilities" :active="taskIs('Vulnerabilities', 'Discovery')">
+      <KnowledgeOsvMatching :key="`${me.id}:${project}`" :project="project" :state="workspace.state" @locked="discoveryLocked = $event" />
+    </WorkflowTask>
+    <WorkflowTask v-if="workspace" :id="productSubpage === 'Advisories' ? 'Advisories' : 'Enrichment'" :view="productView" :active="taskIs('Vulnerabilities', 'Enrichment') || taskIs('Settings', 'Advisories')">
+      <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :page="taskIs('Settings', 'Advisories') ? 'schedule' : 'enrichment'" @locked="advisoryLocked = $event" @review="reviewSourceResults" />
+    </WorkflowTask>
+    <WorkflowTask v-if="workspace" id="Evidence" view="Vulnerabilities" :active="taskIs('Vulnerabilities', 'Evidence')">
+      <KnowledgeIntelligenceComparison :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
+    </WorkflowTask>
     <div v-show="reviewVisible" class="review-content">
+    <h2 v-if="view === 'products'" data-review-heading tabindex="-1">Assess and review</h2>
     <div v-if="view === 'my-work'" class="work-queues" aria-label="Work queues"><button :disabled="navigationLocked" @click="selectWorkQueue('unassessed')">Needs assessment</button><button :disabled="navigationLocked" @click="selectWorkQueue('submitted')">Awaiting review</button><button :disabled="navigationLocked" @click="selectWorkQueue('changes')">Changes requested</button><button :disabled="navigationLocked" @click="selectWorkQueue('reassessment_needed')">Revalidation needed</button><button v-if="me.workspaces.some(item => item.capabilities.includes('rescore'))" :disabled="navigationLocked" @click="selectWorkQueue('scoring')">Approved contexts awaiting scoring</button></div>
     <form class="knowledge-filters" @submit.prevent="load()">
       <label>Work scope<select v-model="workScope" :disabled="navigationLocked"><option value="my_teams">My teams</option><option value="all">All accessible teams</option><option value="unassigned">Unassigned ownership</option><option value="conflicts">Conflicting ownership</option></select></label>
@@ -623,7 +642,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
       </div><details v-show="reviewVisible" class="knowledge-state"><summary>State reference</summary><code>{{ workspace.state }}</code></details>
     </template>
 
-    <div ref="pageContainer" class="product-pages">
+    <div class="product-pages">
     <section v-show="view === 'products' && !project" class="product-creation" aria-label="Create a product">
       <div class="page-section">
       <KnowledgeCreateProduct :key="me.id" :actor="me.id" :teams="me.workspaces" :disabled="busy || otherIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="productCreationLocked = $event" @created="onProductCreated" />
@@ -632,118 +651,61 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
 
 
 <section v-show="view === 'products' && productView === 'Overview' && !!project" data-product-page="Overview" class="product-page" tabindex="-1" aria-label="Product overview">
-      <h2 tabindex="-1">Product overview</h2>
-      <p class="hint">Workload below follows the current queue filters. Source coverage is producer-declared; zero findings do not establish complete discovery.</p>
-      <div v-if="workspace" class="page-section">
-      <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :work-scope="workScope" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
-      </div>
+      <WorkflowTask v-if="workspace" id="Statistics" view="Overview" :active="taskIs('Overview', 'Statistics')"><KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :work-scope="workScope" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" /></WorkflowTask>
       </section>
       <section v-show="view === 'products' && productView === 'Components' && !!project" data-product-page="Components" class="product-page" tabindex="-1" aria-label="Components and dependencies">
-      <h2>Components and dependencies</h2>
-      <p class="hint">Browse declared identities, responsibility and consuming paths. Dependency edges do not prove runtime reachability.</p>
-      <div v-if="workspace" class="page-section">
-      <KnowledgeComponents :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" />
-      </div>
+      <WorkflowTask v-if="workspace" id="Inventory" view="Components" :active="taskIs('Components', 'Inventory')"><KnowledgeComponents :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" /></WorkflowTask>
       </section>
-      <div v-if="workspace" v-show="view === 'products' && productView === 'Components'" class="page-section">
-      <KnowledgeDependencyTree :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
-      </div>
+      <WorkflowTask v-if="workspace" id="Tree" view="Components" :active="taskIs('Components', 'Tree')"><KnowledgeDependencyTree :key="`${me.id}:${project}`" :project="project" :state="workspace.state" /></WorkflowTask>
       <section v-show="view === 'products' && productView === 'Imports' && !!project" data-product-page="Imports" class="product-page" tabindex="-1" aria-label="Imports and source evidence">
-      <h2>Imports and source evidence</h2>
-      <p class="hint">Upload complete SBOMs or separate delivery parts; select assemblies explicitly. Inspect provenance, input limitations and reconciliation.</p>
-      <div class="page-section">
-      <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
-      </div>
-      <div class="page-section">
-      <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || intakeBusy || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
-      </div>
-      <div class="page-section">
-      <KnowledgeObservations v-if="project && version && workspace?.state" :key="`${me.id}:${project}:${version}`" :project="project" :version="version" :state="workspace.state" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="observationsLocked = $event" @refresh="load(true, true)" />
-      </div>
-      <div v-if="workspace" class="page-section">
-      <KnowledgeReconciliation :key="`${me.id}:${project}`" :project="project" :version="version" :state="workspace.state" @locked="correspondenceLocked = $event" @changed="load(true, true)" />
-      </div>
-      <div v-if="workspace" class="page-section">
-      <KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
-      </div>
-      <div class="page-section">
-      <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
-      </div>
+      <WorkflowTask id="Upload" view="Imports" :active="taskIs('Imports', 'Upload')"><KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" /></WorkflowTask>
+      <WorkflowTask id="Assembly" view="Imports" :active="taskIs('Imports', 'Assembly')"><KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || intakeBusy || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" /></WorkflowTask>
+      <WorkflowTask id="Observations" view="Imports" :active="taskIs('Imports', 'Observations')"><KnowledgeObservations v-if="project && version && workspace?.state" :key="`${me.id}:${project}:${version}`" :project="project" :version="version" :state="workspace.state" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="observationsLocked = $event" @refresh="load(true, true)" /></WorkflowTask>
+      <WorkflowTask v-if="workspace" id="Reconciliation" view="Imports" :active="taskIs('Imports', 'Reconciliation')"><KnowledgeReconciliation :key="`${me.id}:${project}`" :project="project" :version="version" :state="workspace.state" @locked="correspondenceLocked = $event" @changed="load(true, true)" /></WorkflowTask>
+      <WorkflowTask v-if="workspace" id="Quality" view="Imports" :active="taskIs('Imports', 'Quality')"><KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" /></WorkflowTask>
+      <WorkflowTask id="Evidence files" view="Imports" :active="taskIs('Imports', 'Evidence files')"><KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" /></WorkflowTask>
       </section>
       <section v-show="view === 'products' && productView === 'Versions' && !!project" data-product-page="Versions" class="product-page" tabindex="-1" aria-label="Versions and history">
-      <h2>Versions and history</h2>
-      <p class="hint">Compare pinned states, browse release tags and retained decisions, and propose synchronization explicitly.</p>
-      <div class="page-section">
-      <KnowledgeComparison :project="project" />
-      </div>
-      <div v-if="workspace" class="page-section">
-      <KnowledgeRetained v-if="workspace.statistics.retained_absent_assessments" :project="project" :state="workspace.state" :team="team" />
-      </div>
+      <WorkflowTask id="Comparison" view="Versions" :active="taskIs('Versions', 'Comparison')"><KnowledgeComparison :project="project" /></WorkflowTask>
+      <WorkflowTask v-if="workspace" id="Retained" view="Versions" :active="taskIs('Versions', 'Retained')"><KnowledgeRetained  :project="project" :state="workspace.state" :team="team" /></WorkflowTask>
       </section>
       <section v-show="view === 'products' && productView === 'Licenses' && !!project" data-product-page="Licenses" class="product-page" tabindex="-1" aria-label="License review">
-      <h2>License review</h2>
-      <p class="hint">Source license claims and reviewed clearance decisions remain distinct.</p>
-      <div v-if="workspace" class="page-section">
-      <KnowledgeLicenses :key="me.id" :project="project" :version="version" :state="workspace.state" @locked="licenseLocked = $event" @changed="load(true, true)" />
-      </div>
+      <WorkflowTask v-if="workspace" id="Review" view="Licenses" :active="taskIs('Licenses', 'Review')"><KnowledgeLicenses :key="me.id" :project="project" :version="version" :state="workspace.state" @locked="licenseLocked = $event" @changed="load(true, true)" /></WorkflowTask>
       </section>
       <section v-show="view === 'products' && productView === 'Documents' && !!project" data-product-page="Documents" class="product-page" tabindex="-1" aria-label="Documents and approvals">
-      <h2>Documents and approvals</h2>
-      <p class="hint">Issued inputs, generated architecture documents, provenance and controlled approvals.</p>
-      <div v-if="workspace" class="page-section">
-      <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
-      </div>
+      <WorkflowTask v-if="workspace" id="Documents" view="Documents" :active="taskIs('Documents', 'Documents')"><KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" /></WorkflowTask>
       </section>
       <section v-show="view === 'products' && productView === 'Settings' && !!project" class="product-page" tabindex="-1" aria-label="Product settings">
-      <h2 tabindex="-1">Product settings</h2>
-      <p class="hint">Responsibility, source authority and access are separate. Available edits follow current permissions.</p>
       <div class="product-settings-layout">
-      <nav aria-label="Product settings">
-      <button v-for="item in settingsViews" :key="item" :data-setting-view="item" :aria-current="settingsView === item ? 'page' : undefined" :disabled="navigationLocked" @click="navigateProduct('Settings', item)">{{ settingsLabels[item] }}</button>
-      </nav>
       <div>
-      <section v-show="settingsView === 'Ownership'" data-product-page="Settings-Ownership" aria-label="Ownership settings">
-      <div class="page-section">
-      <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
-      </div>
+      <section v-show="productSubpage === 'Ownership'" data-product-page="Settings-Ownership" aria-label="Ownership settings">
+      <WorkflowTask id="Ownership" view="Settings" :active="taskIs('Settings', 'Ownership')"><KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" /></WorkflowTask>
       </section>
-      <section v-show="settingsView === 'Sources'" data-product-page="Settings-Sources" aria-label="Sources settings">
-      <div v-if="workspace" class="page-section">
-      <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
-      </div>
+      <section v-show="productSubpage === 'Sources'" data-product-page="Settings-Sources" aria-label="Sources settings">
+      <WorkflowTask v-if="workspace" id="Sources" view="Settings" :active="taskIs('Settings', 'Sources')"><KnowledgeSources :project="project" :version="version" :state="workspace.state" /></WorkflowTask>
       <p>For package discovery, advisory enrichment and job results, open the vulnerability workflow.</p>
       <button :disabled="navigationLocked || !workspace" @click="openSourceWorkflow">Discover and enrich vulnerabilities</button>
       </section>
-      <section v-show="settingsView === 'Pipeline'" data-product-page="Settings-Pipeline" aria-label="Pipeline settings">
-      <div class="page-section">
-      <KnowledgePipelineConfiguration v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :state="workspace?.state || ''" :disabled="busy || baseIntakeLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="pipelineConfigurationLocked = $event" @refresh="load(true, true)" />
-      </div>
+      <section v-show="productSubpage === 'Pipeline'" data-product-page="Settings-Pipeline" aria-label="Pipeline settings">
+      <WorkflowTask id="Pipeline" view="Settings" :active="taskIs('Settings', 'Pipeline')"><KnowledgePipelineConfiguration v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :state="workspace?.state || ''" :disabled="busy || baseIntakeLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="pipelineConfigurationLocked = $event" @refresh="load(true, true)" /></WorkflowTask>
       </section>
-      <section v-show="settingsView === 'Scoring'" data-product-page="Settings-Scoring" aria-label="Scoring settings">
-      <div class="page-section">
-      <KnowledgeScoringPolicy v-if="project" :editable="projectCapabilities.includes('manage')" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked || archiveLocked || correspondenceLocked || analysisFollowUpLocked || cpeLocked || advisoryLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingScore || !!pendingRequest" @locked="scoringPolicyLocked = $event" />
-      </div>
+      <section v-show="productSubpage === 'Scoring'" data-product-page="Settings-Scoring" aria-label="Scoring settings">
+      <WorkflowTask id="Scoring" view="Settings" :active="taskIs('Settings', 'Scoring')"><KnowledgeScoringPolicy v-if="project" :editable="projectCapabilities.includes('manage')" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked || archiveLocked || correspondenceLocked || analysisFollowUpLocked || cpeLocked || advisoryLocked || discoveryLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingScore || !!pendingRequest" @locked="scoringPolicyLocked = $event" /></WorkflowTask>
       </section>
-      <section v-show="settingsView === 'Identity'" data-product-page="Settings-Identity" aria-label="Identity settings">
-      <div class="page-section">
-      <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" @locked="cpeLocked = $event" />
-      </div>
+      <section v-show="productSubpage === 'Identity'" data-product-page="Settings-Identity" aria-label="Identity settings">
+      <WorkflowTask id="Identity" view="Settings" :active="taskIs('Settings', 'Identity')"><KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" @locked="cpeLocked = $event" /></WorkflowTask>
       </section>
-      <section v-show="settingsView === 'Automation'" data-product-page="Settings-Automation" aria-label="Automation settings">
-      <div class="page-section">
-      <KnowledgeSyncAutomation v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="syncAutomationLocked = $event" @refresh="load(true, true)" />
-      </div>
+      <section v-show="productSubpage === 'Automation'" data-product-page="Settings-Automation" aria-label="Automation settings">
+      <WorkflowTask id="Automation" view="Settings" :active="taskIs('Settings', 'Automation')"><KnowledgeSyncAutomation v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="syncAutomationLocked = $event" @refresh="load(true, true)" /></WorkflowTask>
       </section>
-      <section v-show="settingsView === 'Sharing'" data-product-page="Settings-Sharing" aria-label="Product access settings">
-      <h3 tabindex="-1">Product access</h3>
-      <KnowledgeProductAccess :me="me" :project="project" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore || (intakeLocked && !sharedAccessLocked)" @locked="sharedAccessLocked = $event" />
+      <section v-show="productSubpage === 'Sharing'" data-product-page="Settings-Sharing" aria-label="Product access settings">
+
+      <WorkflowTask id="Sharing" view="Settings" :active="taskIs('Settings', 'Sharing')"><KnowledgeProductAccess :me="me" :project="project" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore || (intakeLocked && !sharedAccessLocked)" @locked="sharedAccessLocked = $event" /></WorkflowTask>
       </section>
       </div>
       </div>
       </section>
 <section v-show="view === 'maintenance'" data-product-page="Maintenance" class="product-page" tabindex="-1" aria-label="Assessment maintenance">
-      <h2>Assessment maintenance</h2>
-      <p class="hint">Inspect retained history and preview unused-assessment retirement. Publication remains explicit and permission controlled.</p>
       <SearchSelect v-model="project" label="Maintenance product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="navigationLocked" @select="chooseProject" />
       <div class="page-section">
       <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
@@ -753,7 +715,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
   </section>
 </template>
 <style scoped>
-.source-workflow{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}.source-workflow button{display:flex;align-items:center;gap:8px;font-size:.85rem}.source-workflow button>span{color:var(--accent);font-weight:700}.source-workflow>span{color:var(--muted)}
+
 /* Native task components stay mounted across product destinations. */
 
 .knowledge-advanced,.knowledge-views { margin:12px 0; font-size:.85rem }.knowledge-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px 14px; margin-top:12px }.knowledge-advanced fieldset { border:0; margin:0; padding:0; min-width:0 }.knowledge-views ul { list-style:none; padding:0; display:flex; gap:8px; flex-wrap:wrap }.knowledge-views li { display:flex; gap:4px }.knowledge-views .knowledge-actions { justify-content:flex-start }.knowledge-views label { margin:8px 0 0; min-width:160px }
@@ -779,7 +741,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
 </style>
 
 <style scoped>
-.product-context{display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,220px);gap:12px;margin:14px 0;max-width:650px}.product-context>*{min-width:0}.product-navigation{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:18px 0;flex-wrap:wrap}.product-navigation button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 12px;color:var(--muted)}.product-navigation button[aria-current=page]{border-bottom-color:var(--accent);color:var(--accent);background:var(--accent-soft)}.mobile-product-navigation{display:none}.product-breadcrumb{font-size:.8rem;color:var(--muted);margin:0 0 6px}.product-breadcrumb button{font-size:inherit}.product-page{min-width:0;margin:20px 0}.product-page>h2{font-size:1.2rem;margin-bottom:6px}.page-section{min-width:0;margin:14px 0}.page-section>:deep(details){border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--surface);margin:0}.page-section>:deep(details>summary){font-size:1rem}.page-section>:deep(details[open]>summary){margin-bottom:14px}.product-settings-layout{display:grid;grid-template-columns:200px minmax(0,1fr);gap:24px;margin-top:20px}.product-settings-layout>nav{display:grid;gap:4px;align-content:start}.product-settings-layout>nav button{justify-content:flex-start;text-align:left;border:0}.product-settings-layout>nav button[aria-current=page]{background:var(--accent-soft);color:var(--accent)}.product-settings-layout>div{min-width:0}.work-queues{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.team-scope-label{font-size:.87rem;margin:0;align-self:center;color:var(--muted)}.team-scope-label strong{display:block;color:var(--ink);margin-top:6px}.my-work-summary{margin:20px 0}.product-creation{margin:20px 0}.product-creation .page-section{max-width:720px}.knowledge-views{padding:10px 0}.knowledge-views>summary{font-size:.85rem}.product-context .search-select{min-width:0}.knowledge-filters :deep(.search-select){min-width:0}
+.product-context{display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,220px);gap:12px;margin:14px 0;max-width:650px}.product-context>*{min-width:0}.product-breadcrumb{font-size:.8rem;color:var(--muted);margin:0 0 6px}.product-breadcrumb button{font-size:inherit}.product-page{min-width:0;margin:20px 0}.product-page>h2{font-size:1.2rem;margin-bottom:6px}.page-section{min-width:0;margin:14px 0}.page-section>:deep(details){border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--surface);margin:0}.page-section>:deep(details>summary){font-size:1rem}.page-section>:deep(details[open]>summary){margin-bottom:14px}.product-settings-layout{min-width:0}.product-settings-layout>div{min-width:0}.work-queues{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.team-scope-label{font-size:.87rem;margin:0;align-self:center;color:var(--muted)}.team-scope-label strong{display:block;color:var(--ink);margin-top:6px}.my-work-summary{margin:20px 0}.product-creation{margin:20px 0}.product-creation .page-section{max-width:720px}.knowledge-views{padding:10px 0}.knowledge-views>summary{font-size:.85rem}.product-context .search-select{min-width:0}.knowledge-filters :deep(.search-select){min-width:0}
 @container workspace (max-width:1100px){.knowledge-columns.has-detail{grid-template-columns:minmax(0,1fr)}.finding-open .knowledge-queue{display:none}.finding-open .finding-back{display:inline-flex}.knowledge-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.knowledge-search{grid-column:auto}}
-@media(max-width:760px){.product-context{grid-template-columns:minmax(0,1fr) minmax(100px,.6fr)}.product-navigation{display:none}.mobile-product-navigation{display:grid;max-width:420px;margin:14px 0}.product-settings-layout{grid-template-columns:minmax(0,1fr);gap:10px}.product-settings-layout>nav{display:flex;gap:6px;flex-wrap:wrap}.product-settings-layout>nav button{font-size:.85rem}.page-section>:deep(details){padding:12px}.knowledge-filters{grid-template-columns:minmax(0,1fr)}.team-scope-label{margin-bottom:10px}}
+@media(max-width:760px){.product-context{grid-template-columns:minmax(0,1fr) minmax(100px,.6fr)}.product-settings-layout{grid-template-columns:minmax(0,1fr);gap:10px}.page-section>:deep(details){padding:12px}.knowledge-filters{grid-template-columns:minmax(0,1fr)}.team-scope-label{margin-bottom:10px}}
 </style>

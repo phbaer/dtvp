@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -45,8 +46,8 @@ async function loadVersions() {
   } catch (err) { if (request === catalogSequence) catalogError.value = err instanceof Error ? err.message : 'Versions unavailable' }
   finally { if (request === catalogSequence) versionsBusy.value = false }
 }
-function toggle(event: Event) {
-  expanded.value = (event.currentTarget as HTMLDetailsElement).open
+function toggle(open: boolean) {
+  expanded.value = open
   if (expanded.value) { if (!result.value && !busy.value) void load(); if (!versions.value.length && !versionsBusy.value) void loadVersions() }
 }
 watch([mode, selected, selectedTeam], invalidate, { deep: true })
@@ -60,8 +61,7 @@ onBeforeUnmount(() => { ++sequence; ++catalogSequence })
 </script>
 
 <template>
-  <details class="knowledge-portfolio" @toggle="toggle">
-    <summary>Project statistics across versions</summary>
+  <TaskSurface class="knowledge-portfolio" @active="toggle" title="Project statistics across versions">
     <section aria-label="Project statistics across versions" :aria-busy="busy">
       <form class="portfolio-controls" @submit.prevent="load()">
         <label>Portfolio versions<select v-model="mode"><option value="all">All current versions</option><option value="selected">Selected versions</option></select></label>
@@ -89,7 +89,7 @@ onBeforeUnmount(() => { ++sequence; ++catalogSequence })
         <details><summary>Input coverage and pinned heads</summary><p class="hint">Coverage below describes the entire state before finding filters. Zero findings do not establish complete input coverage or absence of vulnerabilities.</p><dl v-for="(facts, version) in result.state_evidence" :key="version"><dt>{{ version }} · {{ facts.baseline_status }}</dt><dd>Declared coverage: {{ bands(facts.collection_coverage) }} · {{ human(facts.coverage_verification) }} · Uncontextualized source findings: {{ facts.uncontextualized_source_findings }}</dd><dd><code>{{ result.heads[version] }}</code></dd></dl><p>Selection digest: <code>{{ result.heads_digest }}</code></p><p v-for="limit in result.limitations" :key="limit" class="hint">{{ limit }}</p></details>
       </template>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 
 <style scoped>

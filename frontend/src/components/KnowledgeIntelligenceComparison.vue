@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -49,7 +50,7 @@ watch(() => props.project, () => { ++sequence; busy.value = false; inputs.value 
 onBeforeUnmount(() => { ++sequence })
 </script>
 <template>
-  <details class="intelligence-comparison"><summary>Compare retained inventory with advisory evidence</summary>
+  <TaskSurface class="intelligence-comparison" title="Compare retained inventory with advisory evidence">
     <section aria-label="Pinned advisory intelligence comparison" :aria-busy="busy">
       <p class="hint">Read-only comparison for vulnerability IDs already reported by this inventory. Source ratings and human approvals remain unchanged; provider differences do not establish independent corroboration or remediation.</p>
       <p v-if="error" role="alert">{{ error }}</p>
@@ -76,7 +77,7 @@ onBeforeUnmount(() => { ++sequence })
       </template>
       <p v-if="busy" role="status">Loading pinned intelligence comparison…</p>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .intelligence-comparison{margin-block:.7rem;padding-top:.6rem;border-top:1px solid var(--line);min-width:0}.intelligence-comparison summary{cursor:pointer}.intelligence-comparison label{display:grid;gap:.3rem;margin-block:.6rem}.intelligence-comparison input,.intelligence-comparison select{width:100%;min-width:0;box-sizing:border-box}.intelligence-comparison article{border-top:1px solid var(--line);padding-block:.6rem;overflow-wrap:anywhere}.intelligence-comparison nav{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.6rem}.intelligence-comparison pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:20rem;overflow:auto}.intelligence-comparison code{overflow-wrap:anywhere}.statistics{display:flex;flex-wrap:wrap;gap:.3rem}.statistics dd{margin:0 .6rem 0 0}.hint{font-size:.85rem;color:var(--muted)}

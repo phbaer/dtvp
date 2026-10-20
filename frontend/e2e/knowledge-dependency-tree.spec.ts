@@ -44,7 +44,7 @@ test('collapsed tree loads roots then immediate children with shared, cycle and 
   const f = await fixture(page)
   expect(f.reads).toHaveLength(0)
   await expect(f.panel).not.toHaveAttribute('open', '')
-  await openDisclosure(f.panel.locator(':scope > summary'))
+  await openDisclosure(f.panel.locator(':scope > h2'))
   await expect(f.panel.getByRole('button', { name: 'Expand application', exact: true })).toBeVisible()
   expect(f.reads).toHaveLength(1)
   await expect(f.panel.getByRole('button', { name: /^(Next|Previous) tree page$/ })).toHaveCount(0)
@@ -60,7 +60,7 @@ test('collapsed tree loads roots then immediate children with shared, cycle and 
   expect(f.writes).toHaveLength(0)
 })
 test('loading more siblings preserves expanded descendants and selected component', async ({ page }) => {
-  const f = await fixture(page, { paged: true }); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page, { paged: true }); await openDisclosure(f.panel.locator(':scope > h2'))
   await f.panel.getByRole('button', { name: 'Expand application', exact: true }).click()
   await f.panel.getByRole('button', { name: 'Expand parser', exact: true }).click()
   await expect(f.panel.getByRole('button', { name: 'Select leaf', exact: true })).toBeVisible()
@@ -79,7 +79,7 @@ test('loading more siblings preserves expanded descendants and selected componen
   expect(f.reads).toHaveLength(requests)
 })
 test('failed or mismatched branch reads retain ancestors and retry in place', async ({ page }) => {
-  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > h2'))
   f.fail(true); await f.panel.getByRole('button', { name: 'Expand application', exact: true }).click()
   await expect(f.panel.getByRole('alert')).toContainText('Dependencies unavailable')
   await expect(f.panel.getByRole('button', { name: 'Select application', exact: true })).toBeVisible()
@@ -93,7 +93,7 @@ test('failed or mismatched branch reads retain ancestors and retry in place', as
 })
 test('subtree back navigation and compact mobile rows stay within workspace', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > h2'))
   await f.panel.getByRole('button', { name: 'Expand application', exact: true }).click()
   await f.panel.getByRole('button', { name: 'Select parser', exact: true }).click()
   const row = f.panel.getByRole('table').locator('tbody tr').filter({ hasText: 'parser' }).first()
@@ -107,7 +107,7 @@ test('subtree back navigation and compact mobile rows stay within workspace', as
   expect(await page.locator('body').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
 })
 test('late old-state branch responses cannot restore previous version descendants', async ({ page }) => {
-  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > h2'))
   await f.panel.getByRole('button', { name: 'Expand application', exact: true }).click()
   f.hold(); await f.panel.getByRole('button', { name: 'Expand parser', exact: true }).click()
   await expect.poll(() => f.reads.length).toBe(3)
@@ -120,7 +120,7 @@ test('late old-state branch responses cannot restore previous version descendant
   await expect(f.panel.getByRole('button', { name: 'Select new-leaf', exact: true })).toBeVisible()
 })
 test('path-only mode preserves the expanded tree on return', async ({ page }) => {
-  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > h2'))
   await f.panel.getByRole('button', { name: 'Expand application', exact: true }).click()
   await f.panel.getByRole('button', { name: 'Select shared-lib', exact: true }).click()
   await f.panel.getByRole('button', { name: 'Show paths to shared-lib', exact: true }).click()
@@ -134,7 +134,7 @@ test('path-only mode preserves the expanded tree on return', async ({ page }) =>
   expect(f.reads).toHaveLength(2)
 })
 test('additional roots append without replacing expanded branches; collapse all uses cache', async ({ page }) => {
-  const f = await fixture(page, { roots: true }); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page, { roots: true }); await openDisclosure(f.panel.locator(':scope > h2'))
   await f.panel.getByRole('button', { name: 'Expand application', exact: true }).click()
   await f.panel.getByRole('button', { name: /Load more roots/ }).click()
   await expect(f.panel.getByRole('button', { name: 'Select island', exact: true })).toBeVisible()
@@ -146,7 +146,7 @@ test('additional roots append without replacing expanded branches; collapse all 
   expect(f.reads).toHaveLength(3)
 })
 test('closing a loading branch does not reopen it when its response arrives', async ({ page }) => {
-  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page); await openDisclosure(f.panel.locator(':scope > h2'))
   await f.panel.getByRole('button', { name: 'Expand application', exact: true }).click()
   f.hold(); await f.panel.getByRole('button', { name: 'Expand parser', exact: true }).click()
   await expect.poll(() => f.reads.length).toBe(3)
@@ -157,14 +157,14 @@ test('closing a loading branch does not reopen it when its response arrives', as
   expect(f.reads).toHaveLength(3)
 })
 test('unknown graph coverage does not imply isolated components have no dependencies', async ({ page }) => {
-  const f = await fixture(page, { graph: 'unknown' }); await openDisclosure(f.panel.locator(':scope > summary'))
+  const f = await fixture(page, { graph: 'unknown' }); await openDisclosure(f.panel.locator(':scope > h2'))
   await expect(f.panel.getByText(/Components shown as isolated roots do not prove they have no dependencies/)).toBeVisible()
   expect(f.writes).toHaveLength(0)
 })
 
 test('initial root loading can be retried without closing the tree', async ({ page }) => {
   const f = await fixture(page); f.fail(true)
-  await openDisclosure(f.panel.locator(':scope > summary'))
+  await openDisclosure(f.panel.locator(':scope > h2'))
   await expect(f.panel.getByRole('alert')).toContainText('Dependencies unavailable')
   f.fail(false); await f.panel.getByRole('button', { name: 'Refresh tree', exact: true }).click()
   await expect(f.panel.getByRole('button', { name: 'Expand application', exact: true })).toBeVisible()

@@ -1,4 +1,4 @@
-import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
+import { openNativeTools, openProductTask } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string) => value.repeat(64)
 async function fixture(page: Page, options: { readonly?: boolean; personas?: boolean; hold?: boolean } = {}) {
@@ -29,12 +29,8 @@ async function fixture(page: Page, options: { readonly?: boolean; personas?: boo
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await openProductView(page, 'Vulnerabilities'); await page.getByRole('button', { name: 'Discover and enrich', exact: true }).click()
-  await openDisclosure(page.locator('.knowledge-advisories > summary'))
-  await expect(page.getByText('0 matching baseline IDs', { exact: false })).toBeVisible()
-  expect(reads.some(path => path.endsWith('/advisory-schedule'))).toBe(false)
+  await openProductTask(page, 'Settings', 'Advisories')
   const panel = page.getByLabel('Automatic advisory refresh schedule', { exact: true })
-  await panel.getByText('Optional automatic refresh schedule', { exact: true }).click()
   await expect(panel).toContainText('configured providers')
   return { panel, writes, reads, fail: (status: number) => { failure = status }, advance: () => { pin = sha('c') }, pending: () => { projection = 'pending' }, current: () => { projection = 'current' }, release: () => release?.() }
 }
@@ -53,7 +49,7 @@ test('policy capture is local; publishing requires confirmation and exact retrie
   expect(writes).toHaveLength(0)
   await expect(panel.getByRole('button', { name: 'Publish advisory schedule', exact: true })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Refresh advisory plan', exact: true })).toBeDisabled()
+  await expect(page.locator('[data-product-view="Vulnerabilities"]')).toBeDisabled()
   await panel.getByRole('checkbox').check(); fail(503)
   await panel.getByRole('button', { name: 'Publish advisory schedule', exact: true }).click()
   await expect(panel.getByRole('alert')).toContainText('uncertain')

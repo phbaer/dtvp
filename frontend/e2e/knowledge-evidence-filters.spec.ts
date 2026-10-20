@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64)
 const counts = { context_findings: 0, unique_vulnerabilities: 0, unique_latest_logical_assessments: 0, unique_approved_logical_assessments: 0, reviewed_covered_targets: 0, pending_revision_targets: 0, by_status: {}, source_severity: {}, current_published_severity: {}, scoring_status: {}, required_context_review_workload: { required_targets: 0, approved_targets: 0, remaining_targets: 0, unresolved_targets: 0, not_assessable_targets: 0 } }
@@ -42,9 +42,11 @@ test('received evidence draft filters share applied scope with statistics and sa
   expect(f.reads).toHaveLength(before)
   await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
   await expect.poll(() => f.reads.at(-1)?.searchParams.get('agentyzer_evidence')).toBe('current')
-  await page.getByText('Project statistics across versions', { exact: true }).click()
+  await openProductView(page, 'Overview')
+  await expect(page.getByRole('heading', { name: 'Project statistics across versions', exact: true })).toBeVisible()
+  await page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('button', { name: 'My work', exact: true }).click()
   await page.getByText('Statistics across products', { exact: true }).click()
-  await expect.poll(() => f.reads.filter(url => url.pathname.endsWith('/portfolio')).length).toBe(2)
+  await expect.poll(() => [...new Set(f.reads.filter(url => url.pathname.endsWith('/portfolio')).map(url => url.pathname))].sort()).toEqual(['/api/v1/portfolio', '/api/v1/projects/p/portfolio'])
   for (const url of f.reads.slice(before)) expect(Object.fromEntries(url.searchParams)).toMatchObject({ agentyzer_evidence: 'current', vscorer_evidence: 'eligible', source_severity: 'high' })
   await page.getByText('Saved views and sharing', { exact: true }).click()
   await page.getByLabel('View name', { exact: true }).fill('Received analysis')

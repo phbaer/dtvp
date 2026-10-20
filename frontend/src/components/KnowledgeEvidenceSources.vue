@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { API_PREFIX } from '../apiContract'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
@@ -40,7 +41,7 @@ async function load(page = 0, refresh = false) {
   } catch (err) { if (current === sequence) fail(err); return false }
   finally { if (current === sequence) busy.value = false }
 }
-function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !registry.value) void load() }
+function toggle(open: boolean) { expanded.value = open; if (expanded.value && !registry.value) void load() }
 async function page(next: boolean) { const target = next ? registry.value?.next_offset : previous.value.at(-1); if (target == null) return; const prior = offset.value; if (await load(target)) { if (next) previous.value.push(prior); else previous.value.pop() } }
 function editUpload() { upload.value = null; candidate.value = null; importTried.value = false; imported.value = false; error.value = ''; notice.value = '' }
 async function previewFile() {
@@ -111,7 +112,7 @@ watch(() => props.project, () => { ++sequence; busy.value = false; registry.valu
 onBeforeUnmount(() => { ++sequence })
 </script>
 <template>
-  <details class="knowledge-evidence" @toggle="toggle"><summary>VDR, VEX and advisory evidence files</summary>
+  <TaskSurface class="knowledge-evidence" @active="toggle" title="VDR, VEX and advisory evidence files">
     <section aria-label="Evidence source files">
       <p class="hint">Supported JSON semantic subsets only: CycloneDX VDR/VEX, CSAF, OpenVEX and native advisory documents. Publisher/signature and context applicability remain unverified. Import never creates human approvals.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
@@ -139,7 +140,7 @@ onBeforeUnmount(() => { ++sequence })
         <nav class="actions" aria-label="Evidence document pages"><button type="button" :disabled="busy || validationBusy || !previous.length" @click="page(false)">Previous evidence documents</button><button type="button" :disabled="busy || validationBusy || registry.next_offset == null" @click="page(true)">Next evidence documents</button></nav>
       </template>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-evidence { margin-block: .75rem; padding: .8rem; border: 1px solid var(--line); border-radius: .65rem; min-width: 0; } summary { cursor: pointer; font-weight: 600; } section, article, form { min-width: 0; overflow-wrap: anywhere; }.hint { font-size: .85rem; color: var(--muted); }.actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-block: .6rem; } label { display: grid; gap: .3rem; margin-block: .7rem; } input, textarea, select { width: 100%; min-width: 0; box-sizing: border-box; }textarea { min-height: 4rem; } article { border-top: 1px solid var(--line); padding-block: .8rem; }pre { overflow-wrap: anywhere; white-space: pre-wrap; max-height: 19rem; overflow: auto; font-size: .75rem; }

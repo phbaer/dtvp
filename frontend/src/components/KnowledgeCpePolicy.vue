@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, send } from '../api'
 import { knowledgeApi } from '../knowledgeApi'
@@ -25,7 +26,7 @@ async function load() {
   catch (err) { if (current === sequence) error.value = err instanceof Error ? err.message : 'CPE policy unavailable' }
   finally { if (current === sequence) busy.value = false }
 }
-function toggle(event: Event) { opened.value = (event.target as HTMLDetailsElement).open; if (opened.value && !loaded.value) void load() }
+function toggle(open: boolean) { opened.value = open; if (opened.value && !loaded.value) void load() }
 function start() {
   if (busy.value || sourceLocked.value || !loaded.value || !canConfigure.value) return
   catalog.value = JSON.stringify(loaded.value.configuration.catalog, null, 2); rules.value = JSON.stringify(loaded.value.configuration.rules, null, 2)
@@ -66,8 +67,7 @@ function editCaptured() { if (busy.value) return; frozen.value = null; preview.v
 onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
-  <details class="knowledge-cpe-policy" aria-label="CPE discovery policy" @toggle="toggle">
-    <summary>CPE discovery policy and reviewed mappings</summary>
+  <TaskSurface class="knowledge-cpe-policy" aria-label="CPE discovery policy" @active="toggle" title="CPE discovery policy and reviewed mappings">
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <p class="hint">Offline supplied identities and attributed rules. Discovery candidates do not establish vulnerability applicability or approved component identities.</p>
     <button :disabled="busy || sourceLocked" @click="load">Refresh current CPE policy</button>
@@ -93,7 +93,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <KnowledgeCpeSources :project="project" :policy="loaded.policy_state" :sources="loaded.configuration.offline_sources" :can-configure="canConfigure" :disabled="busy || editing" @locked="sourceLocked = $event" @refresh="load" />
     </template>
     <p v-if="busy" role="status">CPE policy request in progress…</p>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-cpe-policy{margin:12px 0;border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}.knowledge-cpe-policy summary{cursor:pointer}.knowledge-cpe-policy label{display:block;margin:10px 0}.knowledge-cpe-policy fieldset{border:0;padding:0;min-width:0}.knowledge-cpe-policy textarea{width:100%;max-width:100%;box-sizing:border-box;font-family:monospace;font-size:.8rem}.knowledge-cpe-policy pre,.knowledge-cpe-policy code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.75rem}.knowledge-cpe-policy pre{max-height:250px;overflow:auto}.knowledge-cpe-policy button{margin:6px 8px 6px 0}.knowledge-cpe-policy input[type=checkbox]{width:auto}.hint{color:var(--muted);font-size:.8rem}.knowledge-cpe-policy dl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;max-width:400px}.knowledge-cpe-policy dd{margin:0}

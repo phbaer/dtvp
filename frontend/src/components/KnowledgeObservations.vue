@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
 type Source = { source: string; part_id: string | null; state: string; build_number?: number; subject_declaration?: unknown; baseline?: { build_number?: number; [key: string]: unknown } }
@@ -45,7 +46,7 @@ async function load(offset = 0) {
   } catch (err) { if (current === generation) error.value = err instanceof Error ? err.message : 'Observation sources unavailable' }
   finally { if (current === generation) busy.value = false }
 }
-function toggle(event: Event) { if ((event.target as HTMLDetailsElement).open && !loaded.value) void load() }
+function toggle(open: boolean) { if (open && !loaded.value) void load() }
 function choose(event: Event) { if (!blocked.value && !captured.value) file.value = (event.target as HTMLInputElement).files?.[0] || null }
 function select(source: Source) {
   if (blocked.value || captured.value || !writable.value || importDirty.value) return
@@ -119,8 +120,7 @@ function discard() { if (busy.value) return; ++generation; clearCapture(); file.
 onBeforeUnmount(() => { ++generation; emit('locked', false) })
 </script>
 <template>
-  <details class="knowledge-observations" @toggle="toggle">
-    <summary>SBOM observations and reconciliation</summary>
+  <TaskSurface class="knowledge-observations" @active="toggle" title="SBOM observations and reconciliation">
     <section aria-label="SBOM observations and reconciliation">
       <p class="hint">CI/user metadata binds observations to a delivery part/build. Inventory additions and relationships require explicit selection; source claims never become approvals.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
@@ -155,7 +155,7 @@ onBeforeUnmount(() => { ++generation; emit('locked', false) })
       </section>
       <button v-if="captured || dirty" :disabled="busy" @click="discard">Discard observation changes</button>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 <style scoped>
 .knowledge-observations{margin-block:1rem}summary{cursor:pointer}.hint{font-size:.875rem;opacity:.8}label{display:grid;gap:.35rem;margin-block:.65rem}.confirmation{display:flex;align-items:center}textarea{width:100%;box-sizing:border-box;font-family:monospace;resize:vertical}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto}button{margin:.4rem .5rem .4rem 0}li{overflow-wrap:anywhere}dl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.25rem 1rem;font-size:.875rem;max-width:36rem}dd{margin:0}

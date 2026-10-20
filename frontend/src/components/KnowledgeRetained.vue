@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSurface from './TaskSurface.vue'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { justificationLabel } from '../assessmentReasons'
 import { knowledgeApi } from '../knowledgeApi'
@@ -25,8 +26,8 @@ async function load(nextOffset = 0) {
   } catch (err) { if (request === sequence) error.value = err instanceof Error ? err.message : 'Retained assessment request failed'; return false }
   finally { if (request === sequence) busy.value = false }
 }
-function toggle(event: Event) {
-  expanded.value = (event.currentTarget as HTMLDetailsElement).open
+function toggle(open: boolean) {
+  expanded.value = open
   if (expanded.value && !result.value && !busy.value) void load()
 }
 async function paginate(forward: boolean) {
@@ -43,8 +44,7 @@ onBeforeUnmount(() => { ++sequence })
 </script>
 
 <template>
-  <details class="knowledge-retained" @toggle="toggle">
-    <summary>Retained assessments for absent findings</summary>
+  <TaskSurface class="knowledge-retained" @active="toggle" title="Retained assessments for absent findings">
     <section aria-label="Retained absent assessments" :aria-busy="busy">
       <p class="hint">Recorded history for targets absent from this selected state. These records do not establish a current approval.</p>
       <p v-if="error" role="alert">{{ error }}</p>
@@ -63,7 +63,7 @@ onBeforeUnmount(() => { ++sequence })
       </template>
       <button v-if="error && !result" :disabled="busy" @click="load()">Retry retained assessments</button>
     </section>
-  </details>
+  </TaskSurface>
 </template>
 
 <style scoped>

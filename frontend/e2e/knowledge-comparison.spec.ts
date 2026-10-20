@@ -62,7 +62,7 @@ async function fixture(page: Page, options: { draftAllowed?: boolean; draftRespo
   return { requests, historyRequests, mutations, drafts, fail: () => { fail = true } }
 }
 
-test('comparison stays collapsed and renders backend totals with pinned bounded pages', async ({ page }) => {
+test('comparison stays inactive until selected and renders backend totals with pinned bounded pages', async ({ page }) => {
   const state = await fixture(page)
   await expect(page.getByLabel('Historical state comparison')).not.toBeVisible()
   expect(state.requests).toHaveLength(0)

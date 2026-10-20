@@ -1,4 +1,4 @@
-import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
+import { openNativeTools, openProductTask } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), inventory = sha('a'), evidence = sha('b'), newerEvidence = sha('c'), digest = sha('d')
 async function fixture(page: Page, personas = false) {
@@ -31,8 +31,7 @@ async function fixture(page: Page, personas = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await openProductView(page, 'Vulnerabilities'); await page.getByRole('button', { name: 'Discover and enrich', exact: true }).click()
-  await openDisclosure(page.getByText('Advisory intelligence refresh', { exact: true }))
+  await openProductTask(page, 'Vulnerabilities', 'Evidence')
   await page.getByText('Compare retained inventory with advisory evidence', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Pinned advisory intelligence comparison', exact: true })
   return { panel, reports, reads, advanceEvidence: () => { live = newerEvidence }, advanceInventory: () => { head = sha('f') }, conflict: (value: boolean) => { conflict = value }, hold: () => { hold = true }, release: () => { release?.() } }
