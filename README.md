@@ -56,6 +56,13 @@ Selectors support namespace/name separation, case sensitivity, PURLs and optiona
 product-version limits. Identity reconciliation preserves provenance and exposes
 ambiguous matches rather than silently merging distinct usage contexts.
 
+Workspace and portfolio reads support server-filtered responsibility views:
+`all`, `my_teams`, `unassigned` and `conflicts`. My teams derives from current
+assessment/review memberships and credential restrictions, before statistics and
+pagination. CLI workspace/portfolio commands accept `--work-scope`. Sharing grants
+remain separate from responsibility. Authorized product readers can inspect the
+owner and current sharing grants; only managers can change them.
+
 ## Native workflow
 
 The application has one native **Review** workspace. Searchable product/version

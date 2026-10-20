@@ -196,6 +196,7 @@ def configure(parser):
     identity.add_argument("--limit", type=int, default=50)
     identity.add_argument("--json", action="store_true")
     workspace = add_command("workspace", help="Show contextual findings and review status")
+    workspace.add_argument("--work-scope", choices=("all", "my_teams", "unassigned", "conflicts"))
     workspace.add_argument("--project", required=True)
     workspace.add_argument("--version", required=True)
     for option in ("team", "q", "lifecycle", "expected"):
@@ -232,6 +233,7 @@ def configure(parser):
     tree.add_argument("--limit", type=int, default=100)
     tree.add_argument("--json", action="store_true")
     portfolio = add_command("portfolio", help="Show project statistics across current versions")
+    portfolio.add_argument("--work-scope", choices=("all", "my_teams", "unassigned", "conflicts"))
     portfolio.add_argument("--project", required=True)
     portfolio.add_argument(
         "--version", action="append", help="Select version; repeat for multiple versions"
@@ -963,6 +965,8 @@ def run(args):
             )
             if args.version:
                 params["version"] = args.version
+            if args.work_scope:
+                params["work_scope"] = args.work_scope
             if args.team:
                 params["team_id"] = args.team
             if args.expected_heads:
@@ -1217,6 +1221,8 @@ def run(args):
             params.update(
                 {name: getattr(args, name) for name in WORKSPACE_FILTERS if getattr(args, name)}
             )
+            if args.work_scope:
+                params["work_scope"] = args.work_scope
             if args.team:
                 params["team_id"] = args.team
             if args.expected:

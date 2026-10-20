@@ -113,6 +113,8 @@ def collect_portfolio(
     *,
     versions=None,
     team_id=None,
+    work_scope="all",
+    team_ids=None,
     q="",
     lifecycle="",
     filters=None,
@@ -145,6 +147,8 @@ def collect_portfolio(
             journal,
             state,
             team_id=team_id,
+            work_scope=work_scope,
+            team_ids=team_ids,
             q=q,
             lifecycle=lifecycle,
             filters=filters,
@@ -179,13 +183,24 @@ def collect_portfolio(
 
 
 def load_portfolio(
-    journal, project_id, *, versions=None, team_id=None, q="", lifecycle="", filters=None
+    journal,
+    project_id,
+    *,
+    versions=None,
+    team_id=None,
+    q="",
+    lifecycle="",
+    filters=None,
+    work_scope="all",
+    team_ids=None,
 ):
     result, _ = collect_portfolio(
         journal,
         project_id,
         versions=versions,
         team_id=team_id,
+        work_scope=work_scope,
+        team_ids=team_ids,
         q=q,
         lifecycle=lifecycle,
         filters=filters,

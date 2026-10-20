@@ -36,7 +36,17 @@ class Budget:
 
 
 def organization_portfolio(
-    journal, projects, *, team_id=None, q="", lifecycle="", filters=None, offset=0, limit=25
+    journal,
+    projects,
+    *,
+    team_id=None,
+    q="",
+    lifecycle="",
+    filters=None,
+    offset=0,
+    limit=25,
+    work_scope="all",
+    team_ids=None,
 ):
     """Callers must authorize every project; never accept scope from journal names."""
     if lifecycle and lifecycle not in LIFECYCLES:
@@ -99,6 +109,8 @@ def organization_portfolio(
             versions=list(heads[project["id"]]),
             references=refs,
             team_id=team_id,
+            work_scope=work_scope,
+            team_ids=team_ids,
             q=q,
             lifecycle=lifecycle,
             filters=filters,

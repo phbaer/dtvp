@@ -26,6 +26,18 @@ replay occurs first, so retries never silently retarget an already committed imp
 
 All paths below are relative to `API_PREFIX` unless stated otherwise.
 
+## Responsibility views
+
+Workspace, product portfolio and organization portfolio reads accept `work_scope`:
+`all` (default), `my_teams`, `unassigned`, or `conflicts`. The server derives My teams
+from current assessment/review memberships and credential restrictions, intersects
+any explicit `team_id`, and filters before counts and pagination. Sharing access
+does not establish responsibility. These views do not change review/scoring gates.
+
+`GET /projects/{id}/sharing` returns the authorized owner and current grants with
+management capability. `PUT` changes a grant only with management permission;
+reading grants never grants permission to modify them.
+
 ## Main resources
 
 | Resource | Contract |

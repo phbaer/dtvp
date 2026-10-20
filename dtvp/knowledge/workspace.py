@@ -117,6 +117,8 @@ def load_workspace(
     vulnerability_id=None,
     paginate=True,
     filters=None,
+    work_scope="all",
+    team_ids=None,
 ):
     """Synthesize attributed claims and contextual coverage; never query providers.
 
@@ -125,6 +127,7 @@ def load_workspace(
     """
     from dtvp.knowledge.assessments import coverage_status
     from dtvp.knowledge.scoring import published_score, review_gate, score_key
+    from dtvp.knowledge.work_scope import matches_scope
 
     if lifecycle and lifecycle not in LIFECYCLES:
         raise ValueError("Unknown assessment lifecycle")
@@ -182,6 +185,8 @@ def load_workspace(
                 and team_id not in context.get("team_scope", {})
                 and team_id != context.get("team_id")
             ):
+                continue
+            if not matches_scope(context, work_scope, team_ids):
                 continue
             coverage = coverage_status(
                 journal,

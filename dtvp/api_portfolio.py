@@ -11,6 +11,7 @@ from dtvp.knowledge.filters import EvidenceFilter, KnowledgeFilters
 from dtvp.knowledge.journal import Name, Sha
 from dtvp.knowledge.organization_portfolio import MAX_PROJECTS, organization_portfolio
 from dtvp.knowledge.portfolio import load_portfolio
+from dtvp.knowledge.work_scope import WorkScope, member_teams
 
 router = APIRouter(prefix=API_PREFIX)
 
@@ -23,6 +24,7 @@ def portfolio(
     actor: Auth,
     version: list[Name] | None = Query(None, max_length=200),
     team_id: Name | None = None,
+    work_scope: WorkScope = "all",
     q: str = Query("", max_length=500),
     lifecycle: str = Query("", max_length=100),
     expected_heads: Sha | None = None,
@@ -71,6 +73,8 @@ def portfolio(
         project_id,
         versions=version,
         team_id=team_id,
+        work_scope=work_scope,
+        team_ids=member_teams(actor),
         q=q,
         lifecycle=lifecycle,
         filters=filters,
@@ -89,6 +93,7 @@ def organization_statistics(
     filters: KnowledgeFilters = Depends(),
     project: list[Name] | None = Query(default=None, max_length=100),
     team_id: Name | None = None,
+    work_scope: WorkScope = "all",
     q: str = Query(default="", max_length=500),
     lifecycle: str = Query(default="", max_length=100),
     expected_heads: Sha | None = None,
@@ -109,6 +114,8 @@ def organization_statistics(
         request.app.state.knowledge,
         [{"id": item.id, "name": item.name} for item in selected],
         team_id=team_id,
+        work_scope=work_scope,
+        team_ids=member_teams(actor),
         q=q,
         lifecycle=lifecycle,
         filters=filters,

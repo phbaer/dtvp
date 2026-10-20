@@ -19,6 +19,7 @@ from dtvp.knowledge.scoring import (
     publish_score,
     published_score,
 )
+from dtvp.knowledge.work_scope import WorkScope, member_teams
 from dtvp.knowledge.workspace import load_sections, load_workspace
 from dtvp.models import Workspace
 
@@ -173,6 +174,7 @@ def workspace(
     db: DB,
     actor: Auth,
     team_id: Name | None = None,
+    work_scope: WorkScope = "all",
     q: str = Query("", max_length=500),
     lifecycle: str = Query("", max_length=100),
     offset: int = Query(0, ge=0),
@@ -226,6 +228,8 @@ def workspace(
         request.app.state.knowledge,
         state,
         team_id=team_id,
+        work_scope=work_scope,
+        team_ids=member_teams(actor),
         q=q,
         lifecycle=lifecycle,
         offset=offset,

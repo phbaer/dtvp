@@ -419,6 +419,30 @@ def create_project(data: ProjectInput, db: DB, actor: Auth):
     return {"id": project.id, "name": project.name, "workspace_id": project.workspace_id}
 
 
+@router.get("/projects/{project_id}/sharing")
+def project_sharing(project_id: str, db: DB, actor: Auth):
+    project = project_for(db, actor, project_id)
+    owner = db.get(Workspace, project.workspace_id)
+    grants = db.execute(
+        select(Grant, Workspace)
+        .join(Workspace, Workspace.id == Grant.workspace_id)
+        .where(Grant.project_id == project.id)
+        .order_by(Workspace.name, Workspace.id)
+    )
+    return {
+        "owner": {"id": owner.id, "name": owner.name},
+        "grants": [
+            {
+                "workspace_id": grant.workspace_id,
+                "workspace_name": workspace.name,
+                "capabilities": grant.capabilities,
+            }
+            for grant, workspace in grants
+        ],
+        "capabilities": ["manage"] if actor.allowed(db, project, "manage") else [],
+    }
+
+
 @router.put("/projects/{project_id}/sharing")
 def share_project(project_id: str, data: ShareInput, db: DB, actor: Auth):
     project = project_for(db, actor, project_id, "manage")
