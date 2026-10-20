@@ -79,7 +79,7 @@ class TokenInput(RequestModel):
             "documentary_approve",
         ]
     ]
-    hours: int = Field(default=24, ge=1, le=24 * 90)
+    hours: int = Field(default=24, ge=1, le=24 * 3650)
 
 
 Justification = (

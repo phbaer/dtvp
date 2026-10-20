@@ -44,6 +44,14 @@ sequence and current UTC time. UI/CLI resolve defaults before publication and re
 complete metadata across retries. Mutation metadata remains explicit, so defaults
 never change during receipt replay. Generated upload time is not producer evidence.
 
+`POST /credentials` requires team administration. `hours` remains optional with
+its existing default of 24; explicit values support 1–87,600 hours (ten 365-day
+years). CI UI profiles request 8,760 hours by default. `projects` restricts exact
+product IDs; `capabilities` remains bounded by current membership. Only issuance
+returns the secret. `GET /credentials` lists the caller's tokens without secrets;
+`DELETE /credentials/{id}` revokes one immediately. Long-lived tokens still lose
+removed permissions and cannot mint credentials without administration authority.
+
 ## Main resources
 
 | Resource | Contract |

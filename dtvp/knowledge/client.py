@@ -118,6 +118,12 @@ def configure(parser):
     versions.add_argument("--offset", type=int, default=0)
     versions.add_argument("--limit", type=int, default=50)
     versions.add_argument("--json", action="store_true")
+    tokens = add_command("tokens", help="List and revoke your CI/consumer access tokens")
+    token_commands = tokens.add_subparsers(dest="tokens_command", required=True)
+    token_list = token_commands.add_parser("list", help="List your tokens without exposing secrets")
+    token_list.add_argument("--json", action="store_true")
+    token_revoke = token_commands.add_parser("revoke", help="Revoke a token immediately")
+    token_revoke.add_argument("id", help="Token ID from tokens list")
     teams = add_command("teams", help="List accessible workspaces/teams and their IDs")
     teams.add_argument("--json", action="store_true")
     demo = add_command("demo", help="Load explicit synthetic playground scenario data")
@@ -364,6 +370,8 @@ def configure(parser):
 
 
 def read_response(response):
+    if response.status_code == 204:
+        return None
     if response.is_error:
         try:
             detail = response.json().get("detail", response.reason_phrase)
@@ -564,6 +572,24 @@ def run(args):
                 client.post(API_PREFIX + "/playground/login", json={"persona": args.persona})
             )
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "tokens":
+            if args.tokens_command == "revoke":
+                from urllib.parse import quote
+
+                read_response(client.delete(f"{API_PREFIX}/credentials/{quote(args.id, safe='')}"))
+                print("Token revoked.")
+            else:
+                result = read_response(client.get(f"{API_PREFIX}/credentials"))
+                if args.json:
+                    print(json.dumps(result, indent=2))
+                else:
+                    for credential in result:
+                        print(
+                            f"{credential['id']}  {credential['name']}  expires={credential['expires_at']}  revoked={credential['revoked']}  capabilities={','.join(credential['capabilities'])}  projects={','.join(credential['projects']) or 'all accessible team products'}"
+                        )
+                    if not result:
+                        print("No tokens.")
+            return
         if args.knowledge_command in {"projects", "versions", "teams"}:
             from urllib.parse import quote
 

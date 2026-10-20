@@ -180,6 +180,40 @@ build reads that same Python constant. There are no old runtime API aliases.
 Retired SQL Review, finding, release-ingestion, snapshot-writing and generic job
 retry paths have been deleted. Historical SQL records and migration readers remain.
 
+## CI access tokens
+
+In **Administration → Access and integrations → CI and consumer access tokens**,
+choose a team, token name, profile, lifetime and optional product restrictions.
+The UI defaults to **365 days** and supports 1–3,650 days. Profiles are CI SBOM
+import (`read`, `write`), CI import/evidence (`read`, `write`, `evidence`) and
+read-only consumption. CI profiles do not grant assessment, approval or rescoring.
+The secret is shown only in the creation response; stored credentials contain its
+hash. Listing never retrieves it. Expiry is displayed explicitly; browser-session
+lifetimes are unchanged. The API retains its existing 24-hour default for omitted
+`hours`, with explicit lifetimes up to 87,600 hours.
+
+Tokens remain tied to the issuing account, selected team, current memberships and
+sharing grants. They do not outlive permission removal. Optional product IDs narrow
+access further; a product-restricted token cannot create new products. Tokens for
+all accessible products in a team support implicit product creation when current
+permissions allow.
+Issuance requires team administration; an ordinary CI token cannot mint more tokens.
+
+Store the secret in CI and expose it as `DTVP_API_TOKEN`:
+
+```sh
+uv run dtvp knowledge --url "$DTVP_URL" import-file \
+  --project "Device Platform" --version 7.2.0 --file bom.json
+uv run dtvp knowledge --url "$DTVP_URL" advanced tokens list
+uv run dtvp knowledge --url "$DTVP_URL" advanced tokens revoke TOKEN_ID
+```
+
+List/revoke operate on your account's tokens. Rotation is explicit: create a
+replacement, update the CI secret, then revoke the old token in the UI or CLI.
+A lost creation response cannot reveal the secret again; inspect the token list
+and revoke an unconfirmed token before replacing it. No database migration is
+needed for longer lifetimes.
+
 ## Inputs and integrations
 
 | Input or consumer | Current boundary |

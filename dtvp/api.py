@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from dtvp import __version__
 from dtvp.api_contract import API_PREFIX, API_VERSION
-from dtvp.auth import Actor, authenticate, issue
+from dtvp.auth import Actor, authenticate, aware, issue
 from dtvp.domain import (
     audit,
 )
@@ -281,9 +281,18 @@ def create_credential(data: TokenInput, db: DB, actor: Auth):
         actor.user.id,
         "credential.issue",
         credential.id,
-        details={"workspace_id": data.workspace_id, "capabilities": data.capabilities},
+        details={
+            "workspace_id": data.workspace_id,
+            "capabilities": data.capabilities,
+            "projects": data.projects,
+            "expires_at": aware(credential.expires_at).isoformat(),
+        },
     )
-    return {"id": credential.id, "token": token, "expires_at": credential.expires_at.isoformat()}
+    return {
+        "id": credential.id,
+        "token": token,
+        "expires_at": aware(credential.expires_at).isoformat(),
+    }
 
 
 @router.get("/credentials")
@@ -295,7 +304,7 @@ def credentials(db: DB, actor: Auth):
             "workspace_id": c.workspace_id,
             "projects": c.projects,
             "capabilities": c.capabilities,
-            "expires_at": c.expires_at.isoformat(),
+            "expires_at": aware(c.expires_at).isoformat(),
             "revoked": c.revoked,
         }
         for c in db.scalars(
