@@ -208,6 +208,24 @@ uv run dtvp knowledge --url "$DTVP_URL" advanced tokens list
 uv run dtvp knowledge --url "$DTVP_URL" advanced tokens revoke TOKEN_ID
 ```
 
+CLI issuance uses the same administrator-session permission checks as the UI:
+
+```sh
+uv run dtvp knowledge --persona administrator advanced tokens create \
+  --workspace TEAM_ID --name nightly --profile ci-evidence --days 365
+# Production: set DTVP_SESSION_TOKEN and DTVP_CSRF_TOKEN from your current
+# authenticated browser's dtvp_session and dtvp_csrf cookies; never put secrets
+# in command arguments. Unset DTVP_API_TOKEN while using a session.
+uv run dtvp knowledge --url "$DTVP_URL" --session-env DTVP_SESSION_TOKEN \
+  advanced tokens create --workspace TEAM_ID --name nightly --days 365
+```
+
+Profiles are `ci-import` (default), `ci-evidence` and `read-only`; repeat
+`--project PRODUCT_ID` to restrict products. Output is JSON containing the secret
+once; send it directly to your secret store, not CI logs. CLI creation never retries
+automatically. Sessions expire normally; this does not create a new login method
+or allow existing CI tokens to delegate token issuance.
+
 List/revoke operate on your account's tokens. Rotation is explicit: create a
 replacement, update the CI secret, then revoke the old token in the UI or CLI.
 A lost creation response cannot reveal the secret again; inspect the token list

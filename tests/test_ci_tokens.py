@@ -151,3 +151,120 @@ def test_team_scoped_ci_token_can_create_new_product_implicitly(client):
     assert result.status_code == 200, result.text
     assert result.json()["created"] is True
     assert result.json()["workspace_id"] == team
+
+
+@pytest.mark.parametrize(
+    "profile,caps",
+    [
+        ("ci-import", ["read", "write"]),
+        ("ci-evidence", ["read", "write", "evidence"]),
+        ("read-only", ["read"]),
+    ],
+)
+@respx.mock
+def test_cli_creation_uses_admin_session_and_scoped_profile(monkeypatch, capsys, profile, caps):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    monkeypatch.setenv("TEST_ADMIN_SESSION", "session-secret")
+    monkeypatch.setenv("DTVP_CSRF_TOKEN", "csrf-secret")
+    route = respx.post("http://dtvp.test/api/v1/credentials").respond(
+        201, json={"id": "new", "token": "one-time-secret", "expires_at": "2027-10-20T00:00:00Z"}
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            "--session-env",
+            "TEST_ADMIN_SESSION",
+            "advanced",
+            "tokens",
+            "create",
+            "--workspace",
+            "team",
+            "--name",
+            "Nightly",
+            "--profile",
+            profile,
+            "--project",
+            "product",
+        ],
+    )
+    main()
+    request = route.calls[0].request
+    assert json.loads(request.content) == {
+        "workspace_id": "team",
+        "name": "Nightly",
+        "capabilities": caps,
+        "projects": ["product"],
+        "hours": 8760,
+    }
+    assert request.headers["cookie"] == "dtvp_session=session-secret"
+    assert request.headers["x-csrf-token"] == "csrf-secret"
+    assert "authorization" not in request.headers
+    output = capsys.readouterr()
+    assert json.loads(output.out)["token"] == "one-time-secret"
+    assert "one-time-secret" not in output.err and "session-secret" not in output.err
+
+
+@pytest.mark.parametrize(
+    "extra", [[], ["--session-env", "MISSING"], ["--persona", "administrator"]]
+)
+@respx.mock
+def test_cli_creation_rejects_missing_or_mixed_authentication(monkeypatch, extra):
+    monkeypatch.setenv("DTVP_API_TOKEN", "ci-token")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            *extra,
+            "advanced",
+            "tokens",
+            "create",
+            "--workspace",
+            "team",
+            "--name",
+            "Nightly",
+        ],
+    )
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 1 and not respx.calls
+
+
+@respx.mock
+def test_cli_creation_does_not_retry_uncertain_response(monkeypatch, capsys):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    monkeypatch.setenv("TEST_ADMIN_SESSION", "session-secret")
+    monkeypatch.setenv("DTVP_CSRF_TOKEN", "csrf-secret")
+    route = respx.post("http://dtvp.test/api/v1/credentials").respond(
+        503, json={"detail": "Unavailable"}
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            "--session-env",
+            "TEST_ADMIN_SESSION",
+            "advanced",
+            "tokens",
+            "create",
+            "--workspace",
+            "team",
+            "--name",
+            "Nightly",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        main()
+    assert route.call_count == 1 and "list and revoke" in capsys.readouterr().err

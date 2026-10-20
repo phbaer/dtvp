@@ -68,6 +68,13 @@ def configure(parser):
     command = parser.add_parser("knowledge", help="Use the journal-backed HTTP API")
     command.add_argument("--url", default=os.getenv("DTVP_URL", "http://127.0.0.1:8900"))
     command.add_argument("--token-env", default="DTVP_API_TOKEN")
+    command.add_argument(
+        "--session-env",
+        help="Environment variable holding an existing administrator session cookie (instead of a bearer token)",
+    )
+    command.add_argument(
+        "--csrf-env", default="DTVP_CSRF_TOKEN", help="CSRF environment variable for --session-env"
+    )
     command.add_argument("--persona", help="Synthetic playground login only")
     command.add_argument(
         "--timeout", type=float, default=60, help="HTTP timeout in seconds (default: 60)"
@@ -118,8 +125,23 @@ def configure(parser):
     versions.add_argument("--offset", type=int, default=0)
     versions.add_argument("--limit", type=int, default=50)
     versions.add_argument("--json", action="store_true")
-    tokens = add_command("tokens", help="List and revoke your CI/consumer access tokens")
+    tokens = add_command("tokens", help="Create, list and revoke your CI/consumer access tokens")
     token_commands = tokens.add_subparsers(dest="tokens_command", required=True)
+    token_create = token_commands.add_parser(
+        "create", help="Issue a scoped token using an administrator session"
+    )
+    token_create.add_argument("--workspace", required=True, help="Issuing team ID")
+    token_create.add_argument("--name", required=True)
+    token_create.add_argument(
+        "--profile", choices=["ci-import", "ci-evidence", "read-only"], default="ci-import"
+    )
+    token_create.add_argument("--days", type=int, default=365)
+    token_create.add_argument(
+        "--project",
+        action="append",
+        default=[],
+        help="Restrict to product ID; repeat for more products",
+    )
     token_list = token_commands.add_parser("list", help="List your tokens without exposing secrets")
     token_list.add_argument("--json", action="store_true")
     token_revoke = token_commands.add_parser("revoke", help="Revoke a token immediately")
@@ -560,10 +582,23 @@ def run(args):
         raise ValueError("HTTP timeout must be a positive finite number of seconds")
     headers = {}
     token = os.getenv(args.token_env)
+    session = os.getenv(args.session_env) if args.session_env else None
+    if args.session_env:
+        if args.persona or token:
+            raise ValueError(
+                "Use only one authentication method: session, bearer token or playground persona"
+            )
+        if not session or not os.getenv(args.csrf_env):
+            raise ValueError("Session and CSRF environment variables must both be populated")
+        headers["X-CSRF-Token"] = os.environ[args.csrf_env]
     if token:
         headers["Authorization"] = "Bearer " + token
     with httpx.Client(
-        base_url=args.url, headers=headers, timeout=args.timeout, follow_redirects=False
+        base_url=args.url,
+        headers=headers,
+        cookies={"dtvp_session": session} if session else None,
+        timeout=args.timeout,
+        follow_redirects=False,
     ) as client:
         if args.persona:
             if token:
@@ -573,7 +608,36 @@ def run(args):
             )
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
         if args.knowledge_command == "tokens":
-            if args.tokens_command == "revoke":
+            if args.tokens_command == "create":
+                if not (session or args.persona):
+                    raise ValueError(
+                        "Token creation requires an administrator session (--session-env), or a playground --persona; CI tokens cannot mint tokens"
+                    )
+                if not 1 <= args.days <= 3650:
+                    raise ValueError("Token lifetime must be between 1 and 3650 days")
+                profiles = {
+                    "ci-import": ["read", "write"],
+                    "ci-evidence": ["read", "write", "evidence"],
+                    "read-only": ["read"],
+                }
+                print(
+                    "Secret returned once on stdout. Do not log it. If the response is lost, list and revoke the unconfirmed token before creating another.",
+                    file=sys.stderr,
+                )
+                result = read_response(
+                    client.post(
+                        f"{API_PREFIX}/credentials",
+                        json={
+                            "workspace_id": args.workspace,
+                            "name": args.name,
+                            "capabilities": profiles[args.profile],
+                            "projects": args.project,
+                            "hours": args.days * 24,
+                        },
+                    )
+                )
+                print(json.dumps(result, indent=2))
+            elif args.tokens_command == "revoke":
                 from urllib.parse import quote
 
                 read_response(client.delete(f"{API_PREFIX}/credentials/{quote(args.id, safe='')}"))

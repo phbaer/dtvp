@@ -51,6 +51,10 @@ product IDs; `capabilities` remains bounded by current membership. Only issuance
 returns the secret. `GET /credentials` lists the caller's tokens without secrets;
 `DELETE /credentials/{id}` revokes one immediately. Long-lived tokens still lose
 removed permissions and cannot mint credentials without administration authority.
+The CLI's `advanced tokens create` uses this same endpoint with an existing
+administrator session (`--session-env` plus `DTVP_CSRF_TOKEN`) or a playground
+persona. It provides the UI's three profiles and 365-day default; no bearer-token
+delegation or authentication bypass is introduced.
 
 ## Main resources
 
