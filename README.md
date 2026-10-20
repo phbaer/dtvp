@@ -340,12 +340,89 @@ uv run python scripts/playground.py down
 isolated Compose stack. In WSL, use the URL from WSL/VS Code or its forwarded port;
 forwarding a port still requires the API process to be running and listening there.
 For corporate build trust, use `up --ca-cert /path/to/trusted-ca.pem` or
-`DTVP_BUILD_CA`; runtime provider/OIDC trust remains deployment configuration.
+`DTVP_BUILD_CA`. Provider runtime trust can be configured separately below.
 
 For separate development processes, configure `DTVP_PLAYGROUND=true`, a development
 PostgreSQL URL and `DTVP_PUBLIC_URL` matching the browser origin. Run
 `uv run dtvp serve`, `uv run dtvp worker`, and `npm run dev` from `frontend/`.
 Vite proxies backend requests to port 8000.
+
+### Live vulnerability sources in the playground
+
+Enable selected public providers explicitly, preserving existing playground data:
+
+```sh
+uv run python scripts/playground.py up --external-sources osv,nvd,circl,euvd,jvn
+# Corporate TLS proxy: supply a complete PEM bundle with corporate/public roots.
+uv run python scripts/playground.py up --skip-build \
+  --external-sources osv,nvd,circl,euvd,jvn --runtime-ca-cert /path/to/trust-bundle.pem
+```
+
+`DTVP_PLAYGROUND_SOURCES` and `DTVP_PLAYGROUND_RUNTIME_CA` provide the same options
+for repeated starts. Configuration reaches **both API and worker**. Production
+`.env` remains isolated; the public adapters currently use unauthenticated endpoints
+and normal provider pacing. API keys are not required or configured by these flags.
+TLS verification remains enabled. `--ca-cert` affects builds; `--runtime-ca-cert`
+mounts provider trust read-only. Restart without source opt-in to disable new live
+lookups; existing evidence remains. The automatic `test` stack always uses offline
+providers, even when live sources are configured for the interactive playground.
+
+Enablement alone sends no requests. Explicit OSV queries transmit selected PURLs
+and versions; enrichment sends selected vulnerability IDs. These are real network
+lookups with upstream availability/rate limits, not synthetic fixtures. EUVD accepts
+CVE/EUVD IDs; JVN requires JVNDB IDs and does not translate arbitrary CVEs.
+Synthetic `CVE-2099-*` records are intentionally unsuitable for live results.
+
+For a small real-coordinate discovery/enrichment test, import
+`playground/sboms/log4j-with-cve.cdx.json`:
+
+```sh
+uv run dtvp knowledge --persona administrator import-file \
+  --project "Live source demo" --version 1.0 --workspace TEAM_ID \
+  --file playground/sboms/log4j-with-cve.cdx.json
+uv run dtvp knowledge --persona administrator projects --q "Live source demo"
+```
+
+This fixture declares one producer-supplied CVE claim for enrichment, without
+assessment or approval. `playground/sboms/log4j.cdx.json` is the inventory-only
+variant for discovery from zero findings. Live OSV commonly returns GHSA IDs; its
+CVE aliases remain attributed claims, not merged identities or automatically
+eligible NVD inputs. Use the explicit-CVE variant to test enrichment. In the UI,
+the product workflow offers **Import SBOM → Discover and enrich → Assess and review**.
+Open OSV package matching, select the Log4j PURL, queue and inspect its job until
+`succeeded` with a current projection. Then **Refresh advisory plan**, choose an
+enabled provider and selected returned IDs, and queue enrichment. **Refresh findings
+and review** reloads the worklist. Set component ownership in Settings before
+team assessment; discovery never invents ownership. Sources settings retains
+connections and a shortcut to this workflow. Jobs currently capture **all current
+branches of the selected product**, explicitly shown in their pins.
+
+The CLI follows the same operations without raw API requests:
+
+```sh
+uv run dtvp knowledge --persona administrator discover plan --project PRODUCT_ID
+uv run dtvp knowledge --persona administrator discover plan --project PRODUCT_ID \
+  --purl 'pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1' --output discover.json
+uv run dtvp knowledge --persona administrator discover queue --project PRODUCT_ID --file discover.json
+uv run dtvp knowledge --persona administrator discover jobs --project PRODUCT_ID --job JOB_ID
+# Once discovery succeeded/current, inspect IDs and capture a separate enrichment:
+uv run dtvp knowledge --persona administrator enrich plan --project PRODUCT_ID --provider nvd
+uv run dtvp knowledge --persona administrator enrich plan --project PRODUCT_ID \
+  --provider nvd --id CVE-2021-44228 --output enrich.json
+uv run dtvp knowledge --persona administrator enrich queue --project PRODUCT_ID --file enrich.json
+uv run dtvp knowledge --persona administrator enrich jobs --project PRODUCT_ID --job JOB_ID
+uv run dtvp knowledge --persona administrator workspace --project PRODUCT_ID --version 1.0 --show-context
+```
+
+Plans are read-only; `--output` creates a new captured request for 1–20 explicit
+selections. Repeat `--purl`/`--id` for more; `--offset` pages plans/jobs and `--json`
+prints full read results. The backend validates actual eligibility on submission.
+Queueing preserves the file's product, operation, request ID, version/evidence pins
+and provider revision. Replay the **same file** after uncertainty; existing files
+are never overwritten. Changed heads require an explicitly prepared new request.
+Import, discovery, enrichment, applicability assessment, independent review and
+coordinator scoring remain separate. No match/not-found does not prove absence or
+remediation; there is no local NVD/CPE affected-version matcher or automatic approval.
 
 ## CLI and API
 

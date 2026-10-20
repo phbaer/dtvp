@@ -104,6 +104,8 @@ def configure(parser):
         "compare",
         "licenses",
         "demo",
+        "discover",
+        "enrich",
     }
 
     def add_command(name, **kwargs):
@@ -113,6 +115,10 @@ def configure(parser):
             # Keep existing scripts working without listing legacy spellings in help.
             commands.choices[name] = result
         return result
+
+    from dtvp.knowledge.intelligence_client import configure_intelligence
+
+    configure_intelligence(add_command)
 
     projects = add_command("projects", help="List accessible projects and their IDs")
     projects.add_argument("--q", default="", help="Search project names")
@@ -607,6 +613,11 @@ def run(args):
                 client.post(API_PREFIX + "/playground/login", json={"persona": args.persona})
             )
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command in {"discover", "enrich"}:
+            from dtvp.knowledge.intelligence_client import run_intelligence
+
+            run_intelligence(client, args)
+            return
         if args.knowledge_command == "tokens":
             if args.tokens_command == "create":
                 if not (session or args.persona):

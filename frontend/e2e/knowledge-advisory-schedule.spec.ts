@@ -29,7 +29,7 @@ async function fixture(page: Page, options: { readonly?: boolean; personas?: boo
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await openProductView(page, 'Settings', 'Source connections')
+  await openProductView(page, 'Vulnerabilities'); await page.getByRole('button', { name: 'Discover and enrich', exact: true }).click()
   await openDisclosure(page.locator('.knowledge-advisories > summary'))
   await expect(page.getByText('0 matching baseline IDs', { exact: false })).toBeVisible()
   expect(reads.some(path => path.endsWith('/advisory-schedule'))).toBe(false)

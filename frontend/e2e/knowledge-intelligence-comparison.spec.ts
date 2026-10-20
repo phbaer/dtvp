@@ -31,7 +31,7 @@ async function fixture(page: Page, personas = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await openProductView(page, 'Settings', 'Source connections')
+  await openProductView(page, 'Vulnerabilities'); await page.getByRole('button', { name: 'Discover and enrich', exact: true }).click()
   await openDisclosure(page.getByText('Advisory intelligence refresh', { exact: true }))
   await page.getByText('Compare retained inventory with advisory evidence', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Pinned advisory intelligence comparison', exact: true })

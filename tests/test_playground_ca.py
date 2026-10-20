@@ -11,8 +11,11 @@ from scripts import playground
 
 CA = Path(__file__).parent / "fixtures/playground-build-ca.pem"
 VARIABLES = (
-    "DTVP_BUILD_CA", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
-    "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    "DTVP_BUILD_CA",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
 )
 
 
@@ -58,7 +61,8 @@ def test_cli_propagates_bundle_to_compose_and_test_stack(monkeypatch, command):
     calls = []
     monkeypatch.setattr(playground.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
     monkeypatch.setattr(
-        playground, "test_stack",
+        playground,
+        "test_stack",
         lambda compose, skip, env: calls.append((compose, {"env": env})),
     )
     playground.main()
@@ -98,3 +102,75 @@ def test_host_test_downloads_keep_the_selected_ca(monkeypatch, tmp_path):
     assert any(args[:3] == ["npx", "playwright", "install"] for args, _ in downloads)
     for _, options in downloads:
         assert options["env"]["NODE_EXTRA_CA_CERTS"] == str(CA.resolve())
+
+
+def test_external_sources_are_explicit_validated_and_keep_demo_adapters():
+    import json
+
+    assert json.loads(playground.source_environment({})["DTVP_PLAYGROUND_PROVIDERS"]) == [
+        "demo",
+        "demo-failure",
+    ]
+    enabled = playground.source_environment({}, "osv,nvd,circl,euvd,jvn,osv")
+    assert set(json.loads(enabled["DTVP_PLAYGROUND_PROVIDERS"])) == {
+        "demo",
+        "demo-failure",
+        "osv",
+        "nvd",
+        "circl",
+        "euvd",
+        "jvn",
+    }
+    with pytest.raises(ValueError, match="Unknown external sources"):
+        playground.source_environment({}, "dt")
+
+
+def test_runtime_trust_and_live_sources_reach_compose_without_reading_production_env(monkeypatch):
+    import json
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "playground.py",
+            "up",
+            "--skip-build",
+            "--external-sources",
+            "osv,nvd",
+            "--runtime-ca-cert",
+            str(CA),
+        ],
+    )
+    calls = []
+    monkeypatch.setattr(playground.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
+    playground.main()
+    args, options = calls[0]
+    assert args[args.index("--env-file") + 1] == "/dev/null"
+    assert str(playground.ROOT / "playground/compose.runtime-ca.yml") in args
+    assert set(json.loads(options["env"]["DTVP_PLAYGROUND_PROVIDERS"])) == {
+        "demo",
+        "demo-failure",
+        "osv",
+        "nvd",
+    }
+    assert options["env"]["DTVP_PLAYGROUND_RUNTIME_CA"] == str(CA.resolve())
+
+
+def test_automatic_test_stack_ignores_live_provider_opt_in(monkeypatch):
+    import json
+
+    monkeypatch.setattr(sys, "argv", ["playground.py", "test", "--external-sources", "osv,nvd"])
+    observed = []
+    monkeypatch.setattr(playground, "test_stack", lambda compose, skip, env: observed.append(env))
+    playground.main()
+    assert json.loads(observed[0]["DTVP_PLAYGROUND_PROVIDERS"]) == ["demo", "demo-failure"]
+
+
+def test_invalid_runtime_trust_fails_before_docker(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["playground.py", "up", "--runtime-ca-cert", "/missing.pem"])
+    monkeypatch.setattr(
+        playground.subprocess, "run", lambda *a, **kw: pytest.fail("Docker invoked")
+    )
+    with pytest.raises(SystemExit) as error:
+        playground.main()
+    assert error.value.code == 2

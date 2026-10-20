@@ -10,9 +10,9 @@ type Plan = { expected_versions: Record<string, string>; expected_evidence: stri
 type Job = { id: string; status: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number; attempts: number; error: string; result: Record<string, unknown>; capabilities: string[] }
 type Page = { items: Job[]; next_offset: number | null }
 type Input = { request_id: string; provider: string; identifiers: string[]; expected_versions: Record<string, string>; expected_evidence: string | null; revision: number }
-const emit = defineEmits<{ locked: [boolean] }>()
+const emit = defineEmits<{ locked: [boolean]; review: []; expanded: [boolean] }>()
 const childLocked = ref(false), scheduleLocked = ref(false)
-const props = defineProps<{ project: string; state: string }>()
+const props = defineProps<{ project: string; state: string; open?: boolean }>()
 const expanded = ref(false), busy = ref(false), plan = ref<Plan | null>(null), provider = ref(''), query = ref(''), identifiers = ref<string[]>([])
 const error = ref(''), notice = ref(''), stale = ref(false), recorded = ref(false), pending = ref<Input | null>(null)
 const offset = ref(0), previous = ref<number[]>([]), jobs = ref<Job[]>([]), recent = ref<Job | null>(null), jobOffset = ref(0), jobNext = ref<number | null>(null), jobPrevious = ref<number[]>([]), jobsLoaded = ref(false)
@@ -48,7 +48,7 @@ async function loadJobs(page = jobOffset.value) {
   } catch (err) { if (current === sequence) fail(err); return false }
   finally { if (current === sequence) busy.value = false }
 }
-async function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; if (expanded.value && !plan.value) { await loadPlan(); const planError = error.value; if (!jobsLoaded.value) await loadJobs(0); if (planError) error.value = planError } }
+async function toggle(event: Event) { expanded.value = (event.currentTarget as HTMLDetailsElement).open; emit('expanded', expanded.value); if (expanded.value && !plan.value) { await loadPlan(); const planError = error.value; if (!jobsLoaded.value) await loadJobs(0); if (planError) error.value = planError } }
 async function pageIdentifiers(next: boolean) {
   const page = next ? plan.value?.next_offset : previous.value.at(-1); if (page == null) return
   const old = offset.value; if (await loadPlan(page)) { if (next) previous.value.push(old); else previous.value.pop() }
@@ -101,16 +101,22 @@ watch(() => props.project, () => {
 onBeforeUnmount(() => { ++sequence; emit('locked', false) })
 </script>
 <template>
-  <details class="knowledge-advisories" @toggle="toggle">
+  <details class="knowledge-advisories" :open="open" @toggle="toggle">
     <summary>Advisory intelligence refresh</summary>
-    <section aria-label="Advisory intelligence refresh"><fieldset class="advisory-controls" :disabled="childLocked || scheduleLocked">
-      <KnowledgeIntelligenceComparison :project="project" :state="state" />
-      <p class="hint">Enrich exact vulnerability IDs already reported by product baselines. No package matching, new vulnerability discovery or assessment approval is implied.</p>
+    <section aria-label="Advisory intelligence refresh">
+      <h3>Discover → enrich → review</h3>
+      <p class="hint">Inputs cover the current branches of this product, not only the selected version. Each job captures those exact states.</p>
+      <KnowledgeOsvMatching :project="project" :state="state" :disabled="ownLocked || scheduleLocked" @locked="childLocked = $event" />
+      <fieldset class="advisory-controls" :disabled="childLocked || scheduleLocked">
+      <h3>Enrich known vulnerabilities</h3>
+      <p class="hint">After OSV discovery succeeds, refresh this plan to include supported IDs. Or enrich IDs already imported with your SBOM. Select a provider and up to 20 IDs.</p>
       <p class="hint">Provider and advisory publisher differ: mirrors are not independent corroboration. A provider not-found response never proves remediation. Cancel stops DTVP work; an in-flight remote lookup may finish.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
       <p v-if="stale" class="hint">The workspace or request changed. Refresh the plan explicitly before starting a new request; pending requests keep their original pins.</p>
       <div class="actions"><button type="button" :disabled="busy" @click="loadPlan(0, true)">Refresh advisory plan</button><button type="button" :disabled="busy" @click="loadJobs()">Refresh advisory jobs</button></div>
       <template v-if="plan">
+        <p v-if="!plan.total && !query" class="hint">No supported advisory IDs. OSV may report GHSA IDs; CVE aliases stay separate and are not automatically queried. Enrichment requires provider-supported source IDs.</p>
+        <p v-if="!plan.providers.some(item => item.enabled)" role="status">External advisory sources are disabled. In the playground, restart with <code>--external-sources osv,nvd,circl,euvd,jvn</code>. Enablement allows lookups; it does not run them automatically.</p>
         <details><summary>Provider availability and plan pins</summary><p v-for="item in plan.providers" :key="item.id">{{ item.id }} · publisher {{ item.publisher }} · {{ item.enabled ? 'Configured' : 'Disabled' }} · next revision {{ item.next_revision }}</p><pre>{{ JSON.stringify({ expected_versions: plan.expected_versions, expected_evidence: plan.expected_evidence }, null, 2) }}</pre><p v-for="text in plan.limitations" :key="text" class="hint">{{ text }}</p></details>
         <form @submit.prevent="loadPlan(0)"><label>Search baseline vulnerability IDs<input v-model="query" maxlength="200" :disabled="busy"></label><button :disabled="busy">Search advisory identifiers</button></form>
         <p>{{ plan.total }} matching baseline IDs · {{ identifiers.length }}/20 explicitly selected</p><p v-if="provider && plan.unsupported_total" class="hint">{{ plan.unsupported_total }} baseline IDs unsupported by {{ provider }}; these have not been looked up.</p>
@@ -121,7 +127,10 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
       <p v-if="jobsLoaded && !shownJobs.length">No advisory jobs for this product.</p>
       <article v-for="job in shownJobs" :key="job.id" :aria-label="`Advisory job ${job.id}`"><strong>{{ job.provider }} · {{ human(job.status) }}</strong><p>{{ job.identifiers.join(', ') }} · {{ job.attempts }} attempts</p><p v-if="job.error">{{ job.error }}</p><div class="actions"><button type="button" :disabled="busy" @click="inspect(job)">Refresh advisory status</button><button v-if="job.capabilities.includes('retry')" type="button" :disabled="busy" @click="inspect(job, 'retry')">Retry advisory job</button><button v-if="job.capabilities.includes('cancel')" type="button" :disabled="busy" @click="inspect(job, 'cancel')">Cancel DTVP advisory job</button></div><details><summary>Advisory job pins and capture result</summary><pre>{{ JSON.stringify({ provider: job.provider, identifiers: job.identifiers, revision: job.revision, expected_versions: job.expected_versions, expected_evidence: job.expected_evidence, result: job.result }, null, 2) }}</pre></details></article>
       <nav v-if="jobsLoaded" class="actions" aria-label="Advisory job pages"><button type="button" :disabled="busy || !jobPrevious.length" @click="pageJobs(false)">Previous advisory jobs</button><button type="button" :disabled="busy || jobNext == null" @click="pageJobs(true)">Next advisory jobs</button></nav>
-      </fieldset><KnowledgeOsvMatching :project="project" :state="state" :disabled="ownLocked || scheduleLocked" @locked="childLocked = $event" />
+      </fieldset>
+      <button type="button" :disabled="ownLocked || childLocked || scheduleLocked" @click="emit('review')">Refresh findings and review</button>
+      <p class="hint">Wait for jobs to succeed and their projection to be current. Findings and evidence need human assessment and independent review; scores remain a coordinator task.</p>
+      <KnowledgeIntelligenceComparison :project="project" :state="state" />
       <KnowledgeAdvisorySchedule v-if="plan" :project="project" :providers="plan.providers" :disabled="ownLocked || childLocked" @locked="scheduleLocked = $event" />
     </section>
   </details>

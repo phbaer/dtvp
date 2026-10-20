@@ -1,6 +1,7 @@
 """Isolated real PostgreSQL playground; never reads the production .env."""
 
 import argparse
+import json
 import os
 import socket
 import ssl
@@ -9,18 +10,48 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+EXTERNAL_SOURCES = {"osv", "nvd", "circl", "euvd", "jvn"}
+
+
+def source_environment(env, sources="", runtime_ca=None):
+    """Explicit public-provider opt-in; never reads the production .env."""
+    env = dict(env)
+    selected = sorted({value.strip() for value in sources.split(",") if value.strip()})
+    unknown = set(selected) - EXTERNAL_SOURCES
+    if unknown:
+        raise ValueError("Unknown external sources: " + ", ".join(sorted(unknown)))
+    env["DTVP_PLAYGROUND_PROVIDERS"] = json.dumps(["demo", "demo-failure", *selected])
+    if runtime_ca:
+        bundle = Path(runtime_ca).expanduser().resolve()
+        try:
+            ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cafile=str(bundle))
+        except (OSError, ssl.SSLError) as error:
+            raise ValueError(f"Cannot load runtime CA bundle {bundle}: {error}") from None
+        env["DTVP_PLAYGROUND_RUNTIME_CA"] = str(bundle)
+    return env
 
 
 def build_environment(ca_cert=None):
     """Forward host trust to BuildKit and host-side npm/Playwright downloads."""
     env = dict(os.environ)
-    selected = ca_cert or next(
-        (env[name] for name in (
-            "DTVP_BUILD_CA", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
-            "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
-        ) if env.get(name)),
-        None,
-    ) or ssl.get_default_verify_paths().cafile
+    selected = (
+        ca_cert
+        or next(
+            (
+                env[name]
+                for name in (
+                    "DTVP_BUILD_CA",
+                    "NODE_EXTRA_CA_CERTS",
+                    "SSL_CERT_FILE",
+                    "REQUESTS_CA_BUNDLE",
+                    "CURL_CA_BUNDLE",
+                )
+                if env.get(name)
+            ),
+            None,
+        )
+        or ssl.get_default_verify_paths().cafile
+    )
     if selected:
         bundle = Path(selected).expanduser().resolve()
         try:
@@ -41,6 +72,7 @@ def test_stack(compose, skip_build, env=None):
         **(env if env is not None else os.environ),
         "DTVP_PLAYGROUND_PORT": str(port),
         "DTVP_UI_URL": f"http://127.0.0.1:{port}",
+        "DTVP_PLAYGROUND_PROVIDERS": '["demo","demo-failure"]',
     }
     test_compose = compose + ["--project-name", f"dtvp-ui-tests-{os.getpid()}"]
     try:
@@ -124,11 +156,24 @@ def main():
     parser.add_argument("command", choices=["up", "down", "reset", "logs", "test"])
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--ca-cert", help="PEM CA bundle; defaults to configured/host trust")
+    parser.add_argument(
+        "--external-sources",
+        default=os.getenv("DTVP_PLAYGROUND_SOURCES", ""),
+        help="Opt in to live providers: osv,nvd,circl,euvd,jvn (comma-separated)",
+    )
+    parser.add_argument(
+        "--runtime-ca-cert",
+        default=os.getenv("DTVP_PLAYGROUND_RUNTIME_CA"),
+        help="PEM trust bundle for API/worker provider HTTPS (separate from build trust)",
+    )
     args = parser.parse_args()
     env = dict(os.environ)
     if args.command in {"up", "reset", "test"}:
         try:
             env = build_environment(args.ca_cert)
+            env = source_environment(
+                env, "" if args.command == "test" else args.external_sources, args.runtime_ca_cert
+            )
         except ValueError as error:
             parser.error(str(error))
     compose = [
@@ -141,6 +186,8 @@ def main():
     ]
     if args.command in {"up", "reset", "test"} and env.get("DTVP_BUILD_CA"):
         compose += ["-f", str(ROOT / "playground/compose.ca.yml")]
+    if args.command in {"up", "reset", "test"} and env.get("DTVP_PLAYGROUND_RUNTIME_CA"):
+        compose += ["-f", str(ROOT / "playground/compose.runtime-ca.yml")]
     if args.command == "up":
         command = compose + ["up", "-d", "--wait"]
         if not args.skip_build:
@@ -158,7 +205,7 @@ def main():
     subprocess.run(command, check=True, cwd=ROOT, env=env)
     if args.command in {"up", "reset"}:
         print(
-            f"Playground ready: http://127.0.0.1:{os.getenv('DTVP_PLAYGROUND_PORT', '8900')} — synthetic data, no external accounts"
+            f"Playground ready: http://127.0.0.1:{os.getenv('DTVP_PLAYGROUND_PORT', '8900')} — synthetic identities; live sources: {args.external_sources or 'disabled'}"
         )
 
 

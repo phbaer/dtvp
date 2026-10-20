@@ -78,6 +78,23 @@ const initialView = new URLSearchParams(location.search)
 const productViews = ['Overview', 'Vulnerabilities', 'Components', 'Imports', 'Versions', 'Licenses', 'Documents', 'Settings'] as const
 type ProductView = typeof productViews[number]
 const productView = ref<ProductView>(productViews.includes(initialView.get('k_view') as ProductView) ? initialView.get('k_view') as ProductView : 'Vulnerabilities')
+const sourceWorkflow = ref(false), sourceExpanded = ref(false)
+watch(project, () => { sourceWorkflow.value = false; sourceExpanded.value = false })
+async function openSourceWorkflow() {
+  if (navigationLocked.value) return
+  await navigateProduct('Vulnerabilities')
+  sourceWorkflow.value = true
+  sourceExpanded.value = true
+  await nextTick()
+  document.getElementById('vulnerability-source-workflow')?.scrollIntoView({ block: 'start' })
+}
+async function reviewSourceResults() {
+  if (navigationLocked.value) return
+  sourceWorkflow.value = false
+  await load(true, true)
+  await nextTick()
+  queueElement.value?.scrollIntoView({ block: 'start' })
+}
 const settingsViews = ['Ownership', 'Sources', 'Pipeline', 'Scoring', 'Identity', 'Automation', 'Sharing'] as const
 type SettingsView = typeof settingsViews[number]
 const settingsView = ref<SettingsView>(settingsViews.includes(initialView.get('k_setting') as SettingsView) ? initialView.get('k_setting') as SettingsView : 'Ownership')
@@ -489,6 +506,14 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
     </div>
     <nav v-show="view === 'products' && project" class="product-navigation" aria-label="Product"><button v-for="item in productViews" :key="item" :data-product-view="item" :aria-current="productView === item ? 'page' : undefined" :disabled="navigationLocked" @click="navigateProduct(item)">{{ item }}</button></nav>
     <label v-show="view === 'products' && project" class="mobile-product-navigation">Product view<select :value="productView" :disabled="navigationLocked" @change="navigateProduct(($event.target as HTMLSelectElement).value as ProductView)"><option v-for="item in productViews" :key="item">{{ item }}</option></select></label>
+    <nav v-if="view === 'products' && project && ['Overview', 'Imports', 'Vulnerabilities'].includes(productView)" class="source-workflow" aria-label="SBOM to review workflow">
+      <button :disabled="navigationLocked" @click="navigateProduct('Imports')"><span aria-hidden="true">1</span> Import SBOM</button><span aria-hidden="true">→</span>
+      <button :disabled="navigationLocked || !workspace" :aria-expanded="sourceWorkflow && sourceExpanded" @click="openSourceWorkflow"><span aria-hidden="true">2</span> Discover and enrich</button><span aria-hidden="true">→</span>
+      <button :disabled="navigationLocked || !workspace" @click="navigateProduct('Vulnerabilities'); sourceWorkflow = false"><span aria-hidden="true">3</span> Assess and review</button>
+    </nav>
+    <div v-if="workspace" id="vulnerability-source-workflow" v-show="view === 'products' && productView === 'Vulnerabilities' && sourceWorkflow">
+      <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :open="sourceWorkflow && sourceExpanded" @expanded="sourceExpanded = $event" @locked="advisoryLocked = $event" @review="reviewSourceResults" />
+    </div>
     <div v-show="reviewVisible" class="review-content">
     <div v-if="view === 'my-work'" class="work-queues" aria-label="Work queues"><button :disabled="navigationLocked" @click="selectWorkQueue('unassessed')">Needs assessment</button><button :disabled="navigationLocked" @click="selectWorkQueue('submitted')">Awaiting review</button><button :disabled="navigationLocked" @click="selectWorkQueue('changes')">Changes requested</button><button :disabled="navigationLocked" @click="selectWorkQueue('reassessment_needed')">Revalidation needed</button><button v-if="me.workspaces.some(item => item.capabilities.includes('rescore'))" :disabled="navigationLocked" @click="selectWorkQueue('scoring')">Approved contexts awaiting scoring</button></div>
     <form class="knowledge-filters" @submit.prevent="load()">
@@ -686,9 +711,8 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
       <div v-if="workspace" class="page-section">
       <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
       </div>
-      <div v-if="workspace" class="page-section">
-      <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" @locked="advisoryLocked = $event" />
-      </div>
+      <p>For package discovery, advisory enrichment and job results, open the vulnerability workflow.</p>
+      <button :disabled="navigationLocked || !workspace" @click="openSourceWorkflow">Discover and enrich vulnerabilities</button>
       </section>
       <section v-show="settingsView === 'Pipeline'" data-product-page="Settings-Pipeline" aria-label="Pipeline settings">
       <div class="page-section">
@@ -729,6 +753,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
   </section>
 </template>
 <style scoped>
+.source-workflow{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}.source-workflow button{display:flex;align-items:center;gap:8px;font-size:.85rem}.source-workflow button>span{color:var(--accent);font-weight:700}.source-workflow>span{color:var(--muted)}
 /* Native task components stay mounted across product destinations. */
 
 .knowledge-advanced,.knowledge-views { margin:12px 0; font-size:.85rem }.knowledge-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px 14px; margin-top:12px }.knowledge-advanced fieldset { border:0; margin:0; padding:0; min-width:0 }.knowledge-views ul { list-style:none; padding:0; display:flex; gap:8px; flex-wrap:wrap }.knowledge-views li { display:flex; gap:4px }.knowledge-views .knowledge-actions { justify-content:flex-start }.knowledge-views label { margin:8px 0 0; min-width:160px }

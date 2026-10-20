@@ -14,6 +14,7 @@ services:
     image: dtvp:rewrite
     environment:
       DTVP_PLAYGROUND: "true"
+      DTVP_PROVIDERS_ENABLED: '${DTVP_PLAYGROUND_PROVIDERS:-["demo","demo-failure"]}'
       DTVP_DATABASE_URL: postgresql+psycopg://dtvp:playground-only@db:5432/dtvp_playground
       DTVP_PUBLIC_URL: http://127.0.0.1:${DTVP_PLAYGROUND_PORT:-8900}
     ports: ["127.0.0.1:${DTVP_PLAYGROUND_PORT:-8900}:8000"]
@@ -33,6 +34,7 @@ services:
     image: dtvp:rewrite
     environment:
       DTVP_PLAYGROUND: "true"
+      DTVP_PROVIDERS_ENABLED: '${DTVP_PLAYGROUND_PROVIDERS:-["demo","demo-failure"]}'
       DTVP_DATABASE_URL: postgresql+psycopg://dtvp:playground-only@db:5432/dtvp_playground
     command: ["uv", "run", "--no-sync", "python", "-m", "dtvp.cli", "worker"]
     volumes: ["artifacts:/data"]

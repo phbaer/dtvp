@@ -1,0 +1,18 @@
+# Explicit provider HTTPS trust, shared by API and worker. Verification stays enabled.
+services:
+  api:
+    environment:
+      SSL_CERT_FILE: /etc/dtvp/provider-ca.pem
+    volumes:
+      - type: bind
+        source: ${DTVP_PLAYGROUND_RUNTIME_CA:?Select a readable PEM CA bundle}
+        target: /etc/dtvp/provider-ca.pem
+        read_only: true
+  worker:
+    environment:
+      SSL_CERT_FILE: /etc/dtvp/provider-ca.pem
+    volumes:
+      - type: bind
+        source: ${DTVP_PLAYGROUND_RUNTIME_CA:?Select a readable PEM CA bundle}
+        target: /etc/dtvp/provider-ca.pem
+        read_only: true

@@ -91,3 +91,65 @@ def test_stale_heads_and_outside_inventory_queries_do_not_enqueue(analyst, app, 
     assert analyst.post(url(project, "/osv-jobs"), json=forged).status_code == 422
     imported(analyst, project, "parallel", body(bom, request_id="parallel-version"))
     assert analyst.post(url(project, "/osv-jobs"), json=data).status_code == 409
+
+
+def test_inventory_only_discovery_then_enrichment_produces_unassessed_findings(
+    analyst, app, bom, monkeypatch
+):
+    import respx
+
+    bom["vulnerabilities"] = []
+    project, discovery = prepare(analyst, app, bom)
+    app.state.settings.providers_enabled = ["osv", "nvd"]
+    before = analyst.get(url(project, "/versions/matching/workspace")).json()
+    assert before["statistics"]["totals"]["context_findings"] == 0
+    install_transport(monkeypatch, lambda _: httpx.Response(200, json={"vulns": [upstream()]}))
+    queued = analyst.post(url(project, "/osv-jobs"), json=discovery)
+    assert queued.status_code == 202, queued.text
+    assert work_once(app.state.sessions, app.state.artifacts, app.state.settings)
+    matched = analyst.get(url(project, "/osv-jobs/" + queued.json()["id"])).json()
+    assert matched["status"] == "succeeded" and matched["result"]["projection"] == "current"
+    fresh = analyst.get(url(project, "/advisory-refresh"), params={"provider": "nvd"}).json()
+    assert NOVEL in fresh["identifiers"]
+    payload = {
+        "request_id": "enrich-after-discover",
+        "provider": "nvd",
+        "identifiers": [NOVEL],
+        "expected_versions": fresh["expected_versions"],
+        "expected_evidence": fresh["expected_evidence"],
+        "revision": next(
+            item["next_revision"] for item in fresh["providers"] if item["id"] == "nvd"
+        ),
+    }
+    with respx.mock:
+        route = respx.get("https://services.nvd.nist.gov/rest/json/cves/2.0").respond(
+            200,
+            json={
+                "vulnerabilities": [
+                    {
+                        "cve": {
+                            "id": NOVEL,
+                            "descriptions": [
+                                {
+                                    "lang": "en",
+                                    "value": "Fresh NVD enrichment after package discovery",
+                                }
+                            ],
+                            "metrics": {},
+                            "references": [],
+                        }
+                    }
+                ]
+            },
+        )
+        queued = analyst.post(url(project, "/advisory-jobs"), json=payload)
+        assert queued.status_code == 202, queued.text
+        assert work_once(app.state.sessions, app.state.artifacts, app.state.settings)
+        enriched = analyst.get(url(project, "/advisory-jobs/" + queued.json()["id"])).json()
+        assert enriched["status"] == "succeeded" and enriched["result"]["projection"] == "current"
+        assert route.call_count == 1
+    findings = analyst.get(url(project, "/versions/matching/workspace")).json()
+    assert NOVEL in str(findings) and "Fresh NVD enrichment after package discovery" in str(
+        findings
+    )
+    assert all(not row["coverage"].get("approved") for row in findings["items"])

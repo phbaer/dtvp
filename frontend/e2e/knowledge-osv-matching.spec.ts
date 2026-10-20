@@ -29,7 +29,7 @@ async function fixture(page: Page, readonly = false, personas = false) {
     return route.fulfill({ json: data })
   })
   await page.goto('/?page=Review'); await openNativeTools(page); await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await openProductView(page, 'Settings', 'Source connections')
+  await openProductView(page, 'Vulnerabilities'); await page.getByRole('button', { name: 'Discover and enrich', exact: true }).click()
   await openDisclosure(page.getByText('Advisory intelligence refresh', { exact: true }))
   return { panel: page.getByRole('region', { name: 'OSV package matching', exact: true }), requests, plans, jobReads: () => jobReads, fail: (status: number) => { failure = status }, advance: () => { head = sha('9') }, hold: () => { hold = true }, mismatch: (mode: string) => { mismatch = mode }, release: () => release?.() }
 }
