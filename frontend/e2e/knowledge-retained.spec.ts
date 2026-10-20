@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const firstState = 'a'.repeat(64), updatedState = 'b'.repeat(64)
@@ -9,7 +9,7 @@ async function fixture(page: Page) {
   await page.route('**/api/**', async route => {
     const target = new URL(route.request().url()), path = target.pathname
     if (route.request().method() !== 'GET') { mutations.push(path); return route.fulfill({ json: {} }) }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team-a', name: 'Platform', capabilities: ['read'] }] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'retained-project', name: 'Retained product', workspace_id: 'team-a', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state }], next_offset: null }
@@ -31,9 +31,10 @@ async function fixture(page: Page) {
 test('absent assessments remain collapsed and show recorded reasons without implying current approval', async ({ page }) => {
   const state = await fixture(page)
   const heading = page.getByText('Retained assessments for absent findings', { exact: true })
-  await expect(heading).toBeVisible()
+  await expect(heading).not.toBeVisible()
   expect(state.reads).toHaveLength(0)
-  await heading.click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(heading)
   const retained = page.getByLabel('Retained absent assessments')
   await expect(retained.getByLabel('Retained assessment total')).toHaveText('41 retained assessments in this scope')
   await expect(retained).toContainText('CVE-2099-20001')
@@ -52,13 +53,16 @@ test('absent assessments remain collapsed and show recorded reasons without impl
 
 test('retained pagination stays pinned and team or state changes restart the server scope', async ({ page }) => {
   const state = await fixture(page)
-  await page.getByText('Retained assessments for absent findings', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Retained assessments for absent findings', { exact: true }))
   const retained = page.getByLabel('Retained absent assessments')
   await retained.getByRole('button', { name: 'Next retained assessments', exact: true }).click()
   await expect(retained).toContainText('CVE-2099-20002')
   await expect(retained.getByLabel('Retained assessment total')).toContainText('41')
   expect(state.reads.map(read => [read.path.includes(firstState), read.query.get('offset')])).toEqual([[true, '0'], [true, '20']])
+  await openProductView(page, 'Vulnerabilities')
   await page.getByRole('combobox', { name: 'Responsible team', exact: true }).selectOption('team-a')
+  await openProductView(page, 'Versions')
   await expect(retained.getByLabel('Retained assessment total')).toHaveText('1 retained assessments in this scope')
   expect(state.reads.at(-1)?.query.get('team_id')).toBe('team-a')
   expect(state.reads.at(-1)?.query.get('offset')).toBe('0')
@@ -73,7 +77,8 @@ test('unavailable retained evidence reports an error and supports a bounded retr
   await page.setViewportSize({ width: 390, height: 844 })
   const state = await fixture(page)
   state.fail(true)
-  await page.getByText('Retained assessments for absent findings', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Retained assessments for absent findings', { exact: true }))
   const retained = page.getByLabel('Retained absent assessments')
   await expect(retained.getByRole('alert')).toHaveText('Historical source temporarily unavailable')
   await expect(retained.getByLabel('Retained assessment total')).not.toBeVisible()

@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64), revision = 'b'.repeat(64)
 async function fixture(page: Page, manage = true) {
@@ -9,7 +9,7 @@ async function fixture(page: Page, manage = true) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname
     if (route.request().method() !== 'GET') posts.push({ path, body: route.request().postDataJSON() as Record<string, unknown> })
-    let data: unknown = { items: [], next_cursor: null }
+    let data: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') data = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Ownership product', capabilities: manage ? ['read', 'manage'] : ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) data = { items: [{ version: '7.1.1', state: pin }], next_offset: null }
@@ -23,7 +23,8 @@ async function fixture(page: Page, manage = true) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Ownership product' }).click()
-  await page.getByText('Component ownership', { exact: true }).click()
+  await openProductView(page, 'Settings', 'Component ownership')
+  await openDisclosure(page.getByText('Component ownership', { exact: true }))
   const panel = page.getByRole('region', { name: 'Component ownership editor' })
   await expect(panel).toContainText('legacy::literal')
   return { panel, posts, fail: (value: number) => { fail = value } }

@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 // Isolated transport/UI contract checks; backend workflow tests cover authority.
@@ -237,7 +237,7 @@ test('curated context remains attributed and available during assessment', async
 test('DT legacy documentation stays readable without manufacturing current approval', async ({ page }) => {
   const { writes } = await fixture(page)
   await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
-  await page.getByRole('button', { name: 'Technical provenance', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Assessment workflow', exact: true }).getByRole('button', { name: 'History', exact: true }).click()
   await page.getByText('Imported DT assessment history', { exact: true }).click()
   const detail = page.getByLabel('Context finding detail')
   await expect(detail).toContainText('Legacy deployment excludes the path.')
@@ -293,7 +293,8 @@ test('project scoring policy retains CAS and exact request after an uncertain sa
     if (first) { first = false; return route.fulfill({ status: 503, json: { detail: 'Uncertain publication' } }) }
     await route.fulfill({ json: { committed: true, projection: 'current' } })
   })
-  await page.getByText('Contextual scoring rules', { exact: true }).click()
+  await openProductView(page, 'Settings', 'Scoring policy')
+  await openDisclosure(page.getByText('Contextual scoring rules', { exact: true }))
   const policy = page.getByRole('region', { name: 'Project scoring policy', exact: true })
   await policy.getByLabel('Scoring policy JSON', { exact: true }).fill('{"metric_rules":{},"transitions":[],"comment":"reviewed policy"}')
   await policy.getByRole('button', { name: 'Save scoring rules (manage required)', exact: true }).click()

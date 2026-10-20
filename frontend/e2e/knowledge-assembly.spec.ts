@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64), newer = 'b'.repeat(64), head = 'c'.repeat(64)
 async function fixture(page: Page, existing = false) {
@@ -22,7 +22,8 @@ async function fixture(page: Page, existing = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Assembly product', exact: true }).click()
-  await page.locator('.knowledge-assembly > summary').click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.locator('.knowledge-assembly > summary'))
   const panel = page.getByRole('region', { name: 'Product assembly editor' })
   await panel.getByLabel('Assembly version (existing or new)', { exact: true }).fill('7.2')
   await panel.getByRole('button', { name: 'Inspect assembly target', exact: true }).click()

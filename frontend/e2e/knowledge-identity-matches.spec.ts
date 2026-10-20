@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), source = sha('a'), target = sha('b'), digest = sha('c')
 async function fixture(page: Page, personas = false) {
@@ -8,7 +8,7 @@ async function fixture(page: Page, personas = false) {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     if (path.endsWith('/playground/login')) { actor = request.postDataJSON().persona; return route.fulfill({ json: {} }) }
     if (request.method() !== 'GET') { mutations.push(path); return route.fulfill({ status: 400, json: { detail: 'Unexpected mutation' } }) }
-    let data: unknown = { items: [], next_cursor: null, next_offset: null }
+    let data: unknown = { items: [], capabilities: [], next_cursor: null, next_offset: null }
     if (path === '/api/v1/me') data = { id: actor, name: actor, playground: personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
@@ -28,7 +28,8 @@ async function fixture(page: Page, personas = false) {
   })
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.getByText('Occurrence correspondence across imports', { exact: true }).click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.getByText('Occurrence correspondence across imports', { exact: true }))
   await page.getByText('Component identity continuity', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Component identity comparison', exact: true })
   return { panel, reads, mutations, select: () => page.getByRole('combobox', { name: 'Source branch or tag', exact: true }).selectOption(source), digest: (value: string) => { responseDigest = value }, fail: (value: number) => { failure = value }, hold: () => { hold = true }, release: () => release?.() }

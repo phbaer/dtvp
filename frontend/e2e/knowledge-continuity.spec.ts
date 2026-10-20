@@ -45,6 +45,7 @@ test('submit and next preserves pinned queue filters, pagination and scroll with
   expect(writes).toHaveLength(1)
   expect(writes[0]).toMatchObject({ expected_versions: { '7.1.1': 'head-before' }, targets: [{ version: '7.1.1', context_id: 'context-30', vulnerability_id: 'CVE-2099-30' }] })
   expect(reads.at(-1)!.get('offset')).toBe('30'); expect(reads.at(-1)!.get('lifecycle')).toBe('unassessed'); expect(reads.at(-1)!.has('expected')).toBe(false)
+  await detail.getByRole('button', { name: 'Back to results', exact: false }).click()
   await expect(page.getByRole('button', { name: 'Previous page', exact: true })).toBeEnabled()
 })
 for (const action of ['Approve', 'Request changes']) test(`${action} and next reviews only the exact current assessment`, async ({ page }) => {

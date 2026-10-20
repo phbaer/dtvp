@@ -18,9 +18,14 @@ assessment citations and in-session draft retention use the existing pinned back
 contracts. Submitted assessments require a new decision before editing. Independent
 review and per-vulnerability coordinator publication remain separate operations.
 
-The wider application navigation and automatic multi-team work scope described
-below remain proposals. The findings record the original inspection, before these
-assessment changes; the README describes current runtime behavior.
+Left navigation, the searchable product catalog, product destinations and automatic
+server-filtered multi-team work scope are now implemented. My work surfaces actual
+product/version queues; product configuration is separated from vulnerability
+review. Product access is read from the API and changes require management
+permission and explicit confirmation. Mobile navigation collapses without hiding
+the selected record. History separates assessment history from technical evidence.
+The findings below record the original inspection; the README describes current
+runtime behavior. Durable all-version assessment scope remains separate backend work.
 
 ## Screenshot review: hierarchy before additional panels
 
@@ -53,13 +58,16 @@ summaries. On narrow panes stack them in that order. Overview, Assessment, Revie
 and Scoring retain the same outer width and queue/filter visibility. Do not fix
 crowding by shrinking text, increasing full-width prose or adding more accordions.
 
-Purposeful accents on warm charcoal surfaces:
+The implemented dark palette uses neutral charcoal surfaces and blue navigation
+accents, complementary to light mode. Reference: [VS Code theme colour roles](https://code.visualstudio.com/api/references/theme-color).
+Hover changes control backgrounds without widening borders; keyboard focus retains
+an outline. Purposeful accents (updated from the initial warm palette):
 
 | Treatment | Meaning |
 | :--- | :--- |
-| Mauve | Primary actions, keyboard focus and active navigation |
+| Blue | Primary actions, keyboard focus and active navigation |
 | Teal section accent | Advisory evidence, with provider and received-via provenance |
-| Peach section accent | Analysis proposals, including withheld/outdated qualification |
+| Amber section accent | Analysis proposals, including withheld/outdated qualification |
 | Rose/red plus severity label | Critical source severity, never a claim of confirmed applicability |
 | Amber plus status label | A required next step, disagreement or revalidation |
 | Muted neutral | Missing/unknown information, no published score, unavailable results |
@@ -67,7 +75,7 @@ Purposeful accents on warm charcoal surfaces:
 
 Do not fill every card with colour or use colour as the only status cue. Use
 subtle section accents, compact badges and text. Avoid bright outlines around
-all content; reserve strong boundaries for controls/focus and actionable states.
+all content; keep control borders thin and stable on hover; reserve outlines for keyboard focus.
 Provider ratings received in the same SBOM are separate attributed claims, not
 independent retrievals. Source count, provider-claim count and input-file count
 must not be conflated. A proposal citation is not adoption or publication.

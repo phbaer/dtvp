@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), state = sha('a'), policy = sha('b')
 async function fixture(page: Page, writable = true) {
@@ -14,7 +14,7 @@ async function fixture(page: Page, writable = true) {
       if (fail) return route.fulfill({ status: 503, json: { detail: 'Uncertain operation' } })
       return route.fulfill({ json: request.method() === 'PUT' ? { committed: true } : job('queued') })
     }
-    let data: unknown = { items: [], next_offset: null }
+    let data: unknown = { items: [], capabilities: [], next_offset: null }
     if (path === '/api/v1/me') data = { id: actor, name: actor, playground: true, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }]
     else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
@@ -30,9 +30,10 @@ async function fixture(page: Page, writable = true) {
   })
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await openProductView(page, 'Settings', 'Pipeline & threat models')
   return { writes, wrongContext: () => { wrongContext = true }, fail: (value: boolean) => { fail = value }, hold: () => { held = true }, release: () => release?.() }
 }
-async function pipeline(page: Page) { await page.getByText('Pipeline source roles and threat-model mappings', { exact: true }).click(); return page.getByRole('region', { name: 'Pipeline source roles and threat-model mappings', exact: true }) }
+async function pipeline(page: Page) { await openDisclosure(page.getByText('Pipeline source roles and threat-model mappings', { exact: true })); return page.getByRole('region', { name: 'Pipeline source roles and threat-model mappings', exact: true }) }
 test('readonly pipeline configuration exposes declarations without a write control', async ({ page }) => {
   const f = await fixture(page, false), panel = await pipeline(page)
   await expect(panel).toContainText('dtvp.pipeline-configuration/1')
@@ -57,7 +58,8 @@ test('configuration publication retains exact failed request and pins until expl
 })
 test('automatic proposals are read-only and job actions require explicit captured retries', async ({ page }) => {
   const f = await fixture(page)
-  await page.getByText('Automatic synchronization proposals', { exact: true }).click()
+  await openProductView(page, 'Settings', 'Automation schedules')
+  await openDisclosure(page.getByText('Automatic synchronization proposals', { exact: true }))
   const panel = page.getByRole('region', { name: 'Automatic synchronization', exact: true })
   await panel.getByRole('button', { name: 'Inspect proposal job-one', exact: true }).click()
   await expect(panel.getByRole('region', { name: 'Frozen automatic proposal' })).toContainText('CVE-2099-10')

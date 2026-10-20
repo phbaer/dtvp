@@ -1,6 +1,6 @@
+import { openProductView } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const pin = 'a'.repeat(64)
-const cards = (toolbar: ReturnType<Page['getByRole']>) => toolbar.locator(':scope > details, :scope > .knowledge-tool-group > details, :scope > .knowledge-composition-tools > details')
 async function fixture(page: Page, inventory = true) {
   const reads: string[] = [], writes: string[] = []
   await page.route('**/api/**', async route => {
@@ -24,28 +24,30 @@ async function fixture(page: Page, inventory = true) {
   expect(reads.filter(path => path.startsWith('/api/v1/projects//'))).toEqual([])
   return { product, state, reads, writes }
 }
-test('review queue precedes three collapsed tool groups and drafts survive closing', async ({ page }) => {
+test('configuration has its own destinations and pending policy edits remain reachable', async ({ page }) => {
   const { writes } = await fixture(page)
-  const groups = page.locator('details[data-tool-group]')
-  await expect(groups).toHaveCount(3)
-  for (const item of await groups.all()) await expect(item).not.toHaveAttribute('open', '')
-  const intelligence = page.locator('[data-tool-group=intelligence]')
-  await intelligence.locator(':scope > summary').click()
-  await intelligence.getByText('CPE discovery policy and reviewed mappings', { exact: true }).click()
-  const policy = intelligence.getByLabel('CPE discovery policy', { exact: true })
+  await expect(page.getByRole('navigation', { name: 'Product', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Context finding queue', exact: true })).toBeVisible()
+  await expect(page.getByText('CPE discovery policy and reviewed mappings', { exact: true })).not.toBeVisible()
+  await expect(page.locator('details[data-tool-group]')).toHaveCount(0)
+  await openProductView(page, 'Settings', 'CPE identity policy')
+  const policy = page.getByLabel('CPE discovery policy', { exact: true })
   await policy.getByRole('button', { name: 'Prepare complete policy replacement', exact: true }).click()
   await policy.getByLabel('Reviewed mapping rules JSON', { exact: true }).fill('{"draft":"preserved"}')
-  await intelligence.locator(':scope > summary').click()
-  await intelligence.locator(':scope > summary').click()
+  await expect(page.getByRole('navigation', { name: 'Product', exact: true }).getByRole('button', { name: 'Vulnerabilities', exact: true })).toBeDisabled()
   await expect(policy.getByLabel('Reviewed mapping rules JSON', { exact: true })).toHaveValue('{"draft":"preserved"}')
+  await policy.getByRole('button', { name: 'Discard CPE policy edits', exact: true }).click()
+  await openProductView(page, 'Vulnerabilities')
+  await expect(page.getByRole('region', { name: 'Context finding queue', exact: true })).toBeVisible()
   expect(writes).toHaveLength(0)
 })
-test('tool menus fit mobile width and composition remains available without a baseline', async ({ page }) => {
+test('product destinations fit mobile and imports work before the first baseline', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const { product, writes } = await fixture(page, false)
-  await product.locator(':scope > summary').click()
-  await product.getByText('Component ownership', { exact: true }).click()
-  await expect(product.getByRole('region', { name: 'Component ownership editor' })).toBeVisible()
+  const { writes } = await fixture(page, false)
+  await openProductView(page, 'Settings', 'Component ownership')
+  await expect(page.getByRole('region', { name: 'Component ownership editor', exact: true })).toBeVisible()
+  await openProductView(page, 'Imports')
+  await expect(page.getByRole('region', { name: 'Native composition intake', exact: true })).toBeVisible()
   expect(await page.locator('body').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
   expect(writes).toHaveLength(0)
 })

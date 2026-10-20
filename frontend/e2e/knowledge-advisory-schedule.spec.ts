@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string) => value.repeat(64)
 async function fixture(page: Page, options: { readonly?: boolean; personas?: boolean; hold?: boolean } = {}) {
@@ -16,7 +16,7 @@ async function fixture(page: Page, options: { readonly?: boolean; personas?: boo
       return route.fulfill({ json: { committed: true, projection } })
     }
     reads.push(path)
-    let result: unknown = { items: [], next_cursor: null, next_offset: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null, next_offset: null }
     if (path === '/api/v1/me') result = { id: actor, name: actor, playground: !!options.personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) result = options.personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
@@ -29,7 +29,8 @@ async function fixture(page: Page, options: { readonly?: boolean; personas?: boo
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.locator('.knowledge-advisories > summary').click()
+  await openProductView(page, 'Settings', 'Source connections')
+  await openDisclosure(page.locator('.knowledge-advisories > summary'))
   await expect(page.getByText('0 matching baseline IDs', { exact: false })).toBeVisible()
   expect(reads.some(path => path.endsWith('/advisory-schedule'))).toBe(false)
   const panel = page.getByLabel('Automatic advisory refresh schedule', { exact: true })

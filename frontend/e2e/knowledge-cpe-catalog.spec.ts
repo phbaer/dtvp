@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
@@ -32,7 +32,8 @@ async function fixture(page: Page, available = true) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Catalog product', exact: true }).click()
-  await page.getByText('CPE discovery policy and reviewed mappings', { exact: true }).click()
+  await openProductView(page, 'Settings', 'CPE identity policy')
+  await openDisclosure(page.getByText('CPE discovery policy and reviewed mappings', { exact: true }))
   await page.getByText('Offline curated sources', { exact: true }).click()
   expect(requests).toHaveLength(0)
   await page.getByText('Local catalog (optional)', { exact: true }).click()

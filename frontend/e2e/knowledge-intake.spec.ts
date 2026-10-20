@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const first = 'a'.repeat(64), next = 'b'.repeat(64)
@@ -18,7 +18,7 @@ async function fixture(page: Page, options: { existing?: boolean; connector?: bo
       return route.fulfill({ status, json: { committed: true, projection: 'current', updates: [{ target: next }] } })
     }
     reads.push(url.pathname + url.search)
-    let result: unknown = { items: [], next_cursor: null, next_offset: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null, next_offset: null }
     if (path === '/api/v1/me') result = { id: 'author', name: 'Author', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Empty native product', workspace_id: 'team', capabilities: ['read', 'write'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: options.existing || imported ? [{ version: imported ? 'new-version' : '7.1.1', state: imported ? next : first }] : [], next_offset: null }
@@ -30,7 +30,8 @@ async function fixture(page: Page, options: { existing?: boolean; connector?: bo
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Empty native product', exact: true }).click()
-  await page.locator('.knowledge-intake > summary').click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.locator('.knowledge-intake > summary'))
   return { writes, reads, panel: page.getByRole('region', { name: 'Native composition intake' }) }
 }
 async function target(page: Page, version = 'new-version', part = false) {
@@ -56,7 +57,7 @@ test('empty project bootstraps original bytes with identical frozen UUID and met
   await target(page)
   await prepare(page)
   await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeDisabled()
+  await expect(page.getByRole('combobox', { name: 'Product view', exact: true })).toBeDisabled()
   const commit = state.panel.getByRole('button', { name: 'Commit captured import', exact: true })
   await commit.click()
   await expect(state.panel.getByRole('alert')).toContainText('Captured bytes, metadata and request ID are retained')
@@ -68,7 +69,7 @@ test('empty project bootstraps original bytes with identical frozen UUID and met
   expect(state.writes[0]!.metadata).toMatchObject({ expected: null, source: 'CI:files', build_number: 2, occurred_at: '2026-10-16T12:00:00+02:00', completeness: 'complete' })
   expect(state.writes[0]!.metadata.request_id).toMatch(/^[0-9a-f-]{36}$/)
   await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeEnabled()
+  await expect(page.getByRole('combobox', { name: 'Product view', exact: true })).toBeEnabled()
   expect(await state.panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
 })
 

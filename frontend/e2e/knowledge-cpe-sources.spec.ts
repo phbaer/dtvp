@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 const sha = (value: string) => value.repeat(64)
@@ -31,7 +31,7 @@ async function fixture(page: Page, readonly = false) {
       const state = path.split('/').at(-2)
       return route.fulfill({ json: { policy_state: state, source: { source: 'Historical source', revision: 'rev-previous' }, items: [{ trust: 'historical_unverified' }], total: 26, next_offset: new URL(route.request().url()).searchParams.get('offset') === '0' ? 25 : null, limitations: [] } })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'CPE product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [] }
@@ -41,7 +41,8 @@ async function fixture(page: Page, readonly = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'CPE product', exact: true }).click()
-  await page.getByText('CPE discovery policy and reviewed mappings', { exact: true }).click()
+  await openProductView(page, 'Settings', 'CPE identity policy')
+  await openDisclosure(page.getByText('CPE discovery policy and reviewed mappings', { exact: true }))
   const parent = page.getByLabel('CPE discovery policy', { exact: true })
   await expect(parent).toContainText('0 catalog entries')
   await parent.getByText('Offline curated sources', { exact: true }).click()

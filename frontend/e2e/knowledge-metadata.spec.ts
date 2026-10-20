@@ -77,6 +77,7 @@ test('stale annotations require explicit review and conflicts keep capture until
 
 
 test('changing consuming context during a pending read reloads without stale data or a stuck busy state', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
   const { panel, releaseRead } = await fixture(page, { delayedRead: true })
   await expect(panel).toContainText('Loading pinned component context')
   await page.getByRole('button', { name: 'CVE-2026-2345', exact: true }).click()

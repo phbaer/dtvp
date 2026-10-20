@@ -412,7 +412,7 @@ team assessments and approvals retain their original scope when ownership change
 
 `GET /api/v1/projects/{id}/versions` lists current product branches.
 `GET .../versions/{version}/workspace` returns contextual findings and full filtered
-statistics; basic filters are `team_id`, `q` and `lifecycle`, with bounded `offset`/`limit`
+statistics; basic filters are `team_id`, `work_scope`, `q` and `lifecycle`, with bounded `offset`/`limit`
 and an optional pinned `expected` state. Detail is available at
 `.../workspace/{context_id}/{vulnerability_id}`; its optional `expected` state pin
 rejects a changed queue baseline before opening detail. Source assertions, original ratings,
@@ -468,8 +468,9 @@ Production CLI calls read a bearer credential from `DTVP_API_TOKEN` (or the name
 Workspace flags mirror advanced server filters with hyphens, for example
 `--source-severity critical --team-review approved --dependency transitive`.
 Displayed totals always come from the server's complete filtered selection.
-Analysts and reviewers with exactly one responsible team start in that team’s
-scope. Multiple teams require an explicit selection. An explicitly chosen all-team
+My work defaults analysts and reviewers to all their current assessment/review
+teams through server-derived `work_scope=my_teams`; managers/coordinators default
+to `all`. Product browsing retains explicit team selection. An explicitly chosen all-team
 view is retained in shared URLs and saved views, including after reload. Filtering
 a workspace never grants team permissions.
 Team labels come from that authorized selection, including teams outside the
@@ -479,14 +480,16 @@ forward the explicit JSON payload; no approval or scoring logic lives in the CLI
 
 ### Workspace tools
 
-native workspace utilities use two compact responsive toolbars: product-level
-intake, assembly, ownership, CPE policy, evidence and comparison; pinned-state
-license, portfolio, documentation, source/advisory, correspondence and retained
-assessment views. Existing disclosure summaries remain directly accessible.
-Opening a panel expands it to full toolbar width. Other component instances,
-captured requests and draft inputs remain mounted; no additional disclosure layer
-or permission shortcut is introduced. Narrow screens use one readable column.
-Empty products finish loading and retain product tools before a first baseline.
+The left navigation separates My work, Products, Activity and authorized
+Administration. Product navigation separates Overview, Vulnerabilities, Components,
+Imports, Versions, Licenses, Documents and Settings. Ownership, source connections,
+pipeline configuration, scoring policy, CPE identity policy, automation and product
+sharing live in Settings; maintenance lives in Administration. Each destination opens
+its primary native panel. Other component instances, captured requests and draft
+inputs remain mounted. Pending captured changes lock navigation. Narrow screens use
+a collapsible menu and product-view selector. Empty products retain Imports and
+Settings before a first baseline. Hover changes background without widening control
+borders; keyboard focus remains visible.
 
 ### Coordinator score publication
 
@@ -689,8 +692,8 @@ renamed display label cannot reorder a pinned selection. CLI consumers can use
 `knowledge request GET /api/v1/portfolio` with the same query parameters. This
 read-only report creates no assessments, approvals or completeness claims.
 
-The native workspace offers collapsed **Statistics across products** before a
-product is selected. Opening it requests complete server-derived statistics for
+My work shows scoped product/version queues and workload; product Overview also
+offers **Statistics across products**. Opening it requests complete server-derived statistics for
 all currently accessible products (up to 100), or use the bounded searchable
 catalog to select products explicitly. Team and current workspace finding filters
 apply on explicit load/refresh. Findings, unique vulnerability IDs, project-scoped

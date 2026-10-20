@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string) => value.repeat(64)
 const catalog = [{ purl: 'pkg:npm/parser', cpe: 'cpe:2.3:a:example:parser:*:*:*:*:*:*:*:*', source: 'supplied-dictionary', identification_basis: 'community_mapping', reason: 'Supplied explicit identity' }]
@@ -17,7 +17,7 @@ async function fixture(page: Page, readonly = false) {
       if (failure) return route.fulfill({ status: failure, json: { detail: 'Unavailable or conflicting policy' } })
       pin = sha('b'); return route.fulfill({ status: 201, json: { committed: true, projection: 'current' } })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'CPE product', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [] }
@@ -27,7 +27,8 @@ async function fixture(page: Page, readonly = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'CPE product', exact: true }).click()
-  await page.getByText('CPE discovery policy and reviewed mappings', { exact: true }).click()
+  await openProductView(page, 'Settings', 'CPE identity policy')
+  await openDisclosure(page.getByText('CPE discovery policy and reviewed mappings', { exact: true }))
   const panel = page.getByLabel('CPE discovery policy', { exact: true })
   await expect(panel).toContainText('1 catalog entries · 1 mapping rules')
   return { panel, writes, previews, fail: (code: number) => { failure = code }, advance: () => { pin = sha('c') } }

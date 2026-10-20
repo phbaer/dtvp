@@ -6,7 +6,7 @@ import SearchSelect from './SearchSelect.vue'
 type Counts = { context_findings: number; unique_vulnerabilities: number; unique_latest_logical_assessments: number; unique_approved_logical_assessments: number; reviewed_covered_targets: number; pending_revision_targets: number; by_status: Record<string, number>; source_severity: Record<string, number>; current_published_severity: Record<string, number>; scoring_status: Record<string, number>; required_context_review_workload: { required_targets: number; approved_targets: number; remaining_targets: number; unresolved_targets: number; not_assessable_targets: number } }
 type Project = { project_id: string; name: string; heads: Record<string, string>; statistics: Counts; by_version: Record<string, Counts>; state_evidence: Record<string, unknown> }
 type Portfolio = { heads: Record<string, Record<string, string>>; heads_digest: string; statistics: Counts; by_team: Record<string, Counts>; team_labels: Record<string, string>; team_counts_overlap: boolean; project_count: number; version_count: number; items: Project[]; total: number; next_offset: number | null; limitations: string[] }
-const props = defineProps<{ filters?: Record<string, string>; q?: string; lifecycle?: string; team?: string }>()
+const props = defineProps<{ filters?: Record<string, string>; q?: string; lifecycle?: string; team?: string; workScope?: string }>()
 const expanded = ref(false), busy = ref(false), error = ref(''), stale = ref(false), result = ref<Portfolio | null>(null)
 const mode = ref('all'), projects = ref<{ id: string; name: string }[]>([]), picker = ref(''), selectedTeam = ref(props.team || ''), labels = ref<Record<string, string>>({})
 const appliedScope = ref('')
@@ -14,10 +14,12 @@ const applied = ref<string | null>(null), previous = ref<number[]>([]), offset =
 let sequence = 0
 const human = (value: string) => value.replaceAll('_', ' ')
 const bands = (counts: Record<string, number>) => Object.entries(counts).map(([band, count]) => `${human(band)} ${count}`).join(' · ') || 'No reported targets'
+const workScopeLabel = computed(() => (({ my_teams: 'My teams', unassigned: 'Unassigned', conflicts: 'Ownership conflicts' } as Record<string, string>)[props.workScope || ''] || 'All responsible teams'))
 const filterDescription = computed(() => [props.q ? `Search: ${props.q}` : '', props.lifecycle ? `Workflow: ${human(props.lifecycle)}` : '', ...Object.entries(props.filters || {}).filter(([, value]) => value).map(([key, value]) => `${human(key)}: ${human(value)}`)].filter(Boolean).join(' · '))
 function addProject(item: { id: string; name?: string }) { if (!projects.value.some(row => row.id === item.id) && projects.value.length < 100) projects.value.push({ id: item.id, name: item.name || item.id }); picker.value = '' }
 function draftQuery() {
   const query = new URLSearchParams({ q: props.q || '', lifecycle: props.lifecycle || '' })
+  if (props.workScope) query.set('work_scope', props.workScope)
   if (selectedTeam.value) query.set('team_id', selectedTeam.value)
   for (const [key, value] of Object.entries(props.filters || {})) if (value) query.set(key, value)
   if (mode.value === 'selected') for (const project of projects.value) query.append('project', project.id)
@@ -27,7 +29,7 @@ async function load(page = 0, fresh = true) {
   if (busy.value || (fresh && mode.value === 'selected' && !projects.value.length) || (!fresh && (!applied.value || !result.value))) return false
   const token = ++sequence, query = fresh ? draftQuery() : new URLSearchParams(applied.value!)
   const selection = query.toString()
-  const scope = [query.has('project') ? `Products: ${projects.value.map(item => item.name).join(', ')}` : 'All accessible products at capture', query.get('team_id') ? `Team: ${labels.value[query.get('team_id')!] || query.get('team_id')}` : 'All responsible teams', ...[...query.entries()].filter(([key, value]) => value && key !== 'project' && key !== 'team_id').map(([key, value]) => `${human(key)}: ${human(value)}`)].join(' · ')
+  const scope = [query.has('project') ? `Products: ${projects.value.map(item => item.name).join(', ')}` : 'All accessible products at capture', [(({ my_teams: 'My teams', unassigned: 'Unassigned', conflicts: 'Ownership conflicts' } as Record<string, string>)[query.get('work_scope') || ''] || 'All responsible teams'), query.get('team_id') ? `Team: ${labels.value[query.get('team_id')!] || query.get('team_id')}` : ''].filter(Boolean).join(' · '), ...[...query.entries()].filter(([key, value]) => value && key !== 'project' && key !== 'team_id' && key !== 'work_scope').map(([key, value]) => `${human(key)}: ${human(value)}`)].join(' · ')
   query.set('offset', String(page)); query.set('limit', '20')
   if (!fresh && result.value) query.set('expected_heads', result.value.heads_digest)
   busy.value = true; error.value = ''
@@ -56,11 +58,11 @@ onBeforeUnmount(() => { ++sequence })
       <form class="portfolio-controls" @submit.prevent="load()">
         <label>Portfolio products<select v-model="mode" :disabled="busy"><option value="all">All accessible products (maximum 100)</option><option value="selected">Explicit product selection</option></select></label>
         <SearchSelect v-if="mode === 'selected'" v-model="picker" label="Add portfolio product" selected-label="Search products…" endpoint="/catalog/projects" :disabled="busy || projects.length >= 100" @select="addProject" />
-        <label>Cross-product team<select v-model="selectedTeam" :disabled="busy"><option value="">All responsible teams</option><option v-for="(name, id) in labels" :key="id" :value="id">{{ name }}</option><option v-if="selectedTeam && !labels[selectedTeam]" :value="selectedTeam">{{ selectedTeam }}</option></select></label>
+        <label>Cross-product team<select v-model="selectedTeam" :disabled="busy"><option value="">{{ workScopeLabel }}</option><option v-for="(name, id) in labels" :key="id" :value="id">{{ name }}</option><option v-if="selectedTeam && !labels[selectedTeam]" :value="selectedTeam">{{ selectedTeam }}</option></select></label>
         <button :disabled="busy || (mode === 'selected' && !projects.length)">{{ result ? 'Refresh cross-product statistics' : 'Load cross-product statistics' }}</button>
       </form>
       <ul v-if="mode === 'selected'" aria-label="Explicit portfolio products"><li v-for="project in projects" :key="project.id">{{ project.name }} <button type="button" :disabled="busy" :aria-label="`Remove portfolio product ${project.name}`" @click="projects = projects.filter(item => item.id !== project.id)">Remove</button></li></ul>
-      <p class="hint">Next load: {{ filterDescription || 'All findings under the selected team and products.' }} Workspace finding filters apply when loading or refreshing; draft selection edits do not change displayed pages.</p>
+      <p class="hint">Next load: {{ workScopeLabel }} · {{ filterDescription || 'All findings under the selected team and products.' }} Workspace finding filters apply when loading or refreshing; draft selection edits do not change displayed pages.</p>
       <p v-if="error" role="alert">{{ error }}</p><p v-if="busy" role="status">Loading cross-product statistics…</p>
       <template v-if="result">
         <p v-if="stale" role="status">Previous captured selection retained.</p>

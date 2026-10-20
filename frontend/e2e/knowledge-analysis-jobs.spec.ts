@@ -161,7 +161,8 @@ test('loaded analysis jobs remain mounted across workflow and component task vie
   await load(page)
   await expect(f.jobs.getByRole('article')).toContainText('unknown-job')
   const reads = f.reads.length
-  for (const task of ['Overview', 'Assessment', 'Component & CPE details']) await page.getByRole('button', { name: task, exact: true }).click()
+  for (const task of ['Overview', 'Assessment']) await page.getByRole('navigation', { name: 'Assessment workflow', exact: true }).getByRole('button', { name: task, exact: true }).click()
+  await page.getByRole('button', { name: 'Component & CPE details', exact: true }).click()
   await page.getByRole('button', { name: 'Analysis tools', exact: true }).click()
   await expect(f.jobs.getByRole('article')).toContainText('unknown-job')
   expect(f.reads).toHaveLength(reads)

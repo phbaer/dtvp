@@ -5,12 +5,13 @@ import { knowledgeApi } from '../knowledgeApi'
 
 type Counts = { context_findings: number; unique_vulnerabilities: number; unique_latest_logical_assessments: number; unique_approved_logical_assessments: number; reviewed_covered_targets: number; pending_revision_targets: number; by_status: Record<string, number>; source_severity: Record<string, number>; current_published_severity: Record<string, number>; scoring_status: Record<string, number>; required_context_review_workload: { required_targets: number; approved_targets: number; remaining_targets: number; unresolved_targets: number; not_assessable_targets: number } }
 type Portfolio = { heads: Record<string, string>; heads_digest: string; statistics: Counts; by_version: Record<string, Counts>; by_team: Record<string, Counts>; team_labels: Record<string, string>; team_counts_overlap: boolean; state_evidence: Record<string, { baseline_status: string; collection_coverage: Record<string, string>; coverage_verification: string; uncontextualized_source_findings: number }>; limitations: string[] }
-const props = defineProps<{ project: string; version: string; state: string; filters?: Record<string, string>; q?: string; lifecycle?: string; team?: string }>()
+const props = defineProps<{ project: string; version: string; state: string; filters?: Record<string, string>; q?: string; lifecycle?: string; team?: string; workScope?: string }>()
 const expanded = ref(false), busy = ref(false), error = ref(''), stale = ref(false), result = ref<Portfolio | null>(null)
 const mode = ref('all'), selected = ref<string[]>([]), selectedTeam = ref(props.team || '')
 const versions = ref<{ version: string; state: string }[]>([]), nextOffset = ref<number | null>(0), versionsBusy = ref(false), catalogError = ref('')
 const labels = ref<Record<string, string>>({})
 let sequence = 0, catalogSequence = 0
+const workScopeLabel = computed(() => (({ my_teams: 'My teams', unassigned: 'Unassigned', conflicts: 'Ownership conflicts' } as Record<string, string>)[props.workScope || ''] || 'All responsible teams'))
 const filterDescription = computed(() => [props.q ? `Search: ${props.q}` : '', props.lifecycle ? `Workflow: ${props.lifecycle}` : '', ...Object.entries(props.filters || {}).filter(([, value]) => value).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${value}`)].filter(Boolean).join(' · '))
 const human = (value: string) => value.replaceAll('_', ' ')
 const bands = (counts: Record<string, number | string>) => Object.entries(counts).map(([band, count]) => `${human(band)} ${count}`).join(' · ') || 'No reported targets'
@@ -19,6 +20,7 @@ async function load(checkHeads = false) {
   if (!props.project || (mode.value === 'selected' && !selected.value.length)) return
   const request = ++sequence; busy.value = true; error.value = ''
   const query = new URLSearchParams({ q: props.q || '', lifecycle: props.lifecycle || '' })
+  if (props.workScope) query.set('work_scope', props.workScope)
   for (const [key, value] of Object.entries(props.filters || {})) if (value) query.set(key, value)
   if (selectedTeam.value) query.set('team_id', selectedTeam.value)
   if (mode.value === 'selected') for (const version of selected.value) query.append('version', version)
@@ -48,7 +50,7 @@ function toggle(event: Event) {
   if (expanded.value) { if (!result.value && !busy.value) void load(); if (!versions.value.length && !versionsBusy.value) void loadVersions() }
 }
 watch([mode, selected, selectedTeam], invalidate, { deep: true })
-watch(() => [props.project, props.version, props.state, props.q, props.lifecycle, JSON.stringify(props.filters || {}), props.team], (current, previous) => {
+watch(() => [props.project, props.version, props.state, props.q, props.lifecycle, JSON.stringify(props.filters || {}), props.team, props.workScope], (current, previous) => {
   invalidate()
   if (current[0] !== previous[0]) { ++catalogSequence; versionsBusy.value = false; versions.value = []; nextOffset.value = 0; labels.value = {}; selected.value = []; mode.value = 'all' }
   if (current[0] !== previous[0] || current[6] !== previous[6]) selectedTeam.value = props.team || ''
@@ -65,11 +67,11 @@ onBeforeUnmount(() => { ++sequence; ++catalogSequence })
         <label>Portfolio versions<select v-model="mode"><option value="all">All current versions</option><option value="selected">Selected versions</option></select></label>
         <label v-if="mode === 'selected'">Selected portfolio versions<select v-model="selected" multiple size="4"><option v-for="item in versions" :key="item.version" :value="item.version">{{ item.version }}</option></select></label>
         <button v-if="mode === 'selected' && nextOffset !== null" type="button" :disabled="versionsBusy" @click="loadVersions">More portfolio versions</button>
-        <label>Portfolio team<select v-model="selectedTeam"><option value="">All responsible teams</option><option v-for="(label, id) in labels" :key="id" :value="id">{{ label }}</option><option v-if="selectedTeam && !labels[selectedTeam]" :value="selectedTeam">{{ selectedTeam }}</option></select></label>
+        <label>Portfolio team<select v-model="selectedTeam"><option value="">{{ workScopeLabel }}</option><option v-for="(label, id) in labels" :key="id" :value="id">{{ label }}</option><option v-if="selectedTeam && !labels[selectedTeam]" :value="selectedTeam">{{ selectedTeam }}</option></select></label>
         <button type="submit" :disabled="busy || (mode === 'selected' && !selected.length)">{{ result ? 'Refresh statistics' : 'Load statistics' }}</button>
         <button v-if="result" type="button" :disabled="busy" @click="load(true)">Check selected heads</button>
       </form>
-      <p class="hint">{{ filterDescription || 'All findings in the selected versions.' }} Team and workflow filters describe the displayed review workload.</p>
+      <p class="hint">{{ workScopeLabel }} · {{ filterDescription || 'All findings in the selected versions.' }} Team and workflow filters describe the displayed review workload.</p>
       <p v-if="catalogError" role="alert">{{ catalogError }}</p><p v-if="error" role="alert">{{ error }}</p><p v-if="busy" role="status">Loading project statistics…</p>
       <template v-if="result">
         <p v-if="stale" class="hint">Previous snapshot — current heads have changed.</p>

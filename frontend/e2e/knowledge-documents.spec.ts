@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const sha = (char: string) => char.repeat(64)
@@ -21,7 +21,7 @@ async function fixture(page: Page, role: 'author' | 'reviewer' | 'viewer' = 'aut
       head = sha('7')
       return route.fulfill({ status: 201, json: {} })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: role, name: role, org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state: head }] }
@@ -32,7 +32,8 @@ async function fixture(page: Page, role: 'author' | 'reviewer' | 'viewer' = 'aut
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.getByText('Controlled documents', { exact: true }).click()
+  await openProductView(page, 'Documents')
+  await openDisclosure(page.getByText('Controlled documents', { exact: true }))
   const panel = page.getByLabel('Controlled document registry', { exact: true })
   await expect(panel).toContainText('21 documents in this pinned version state')
   return { panel, writes, issued, reads, fail: (status: number) => { failed = status } }

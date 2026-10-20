@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), first = sha('a'), evidence = sha('b'), packages = Array.from({ length: 23 }, (_, n) => `pkg:pypi/library-${String(n).padStart(2, '0')}@1.0`)
 async function fixture(page: Page, readonly = false, personas = false) {
@@ -15,7 +15,7 @@ async function fixture(page: Page, readonly = false, personas = false) {
       if (path.endsWith('/osv-jobs')) return route.fulfill({ status: 202, json: { ...saved, id: 'queued-job', status: 'queued', purls: body.purls, expected_versions: body.expected_versions, expected_evidence: body.expected_evidence, revision: body.revision, capabilities: ['cancel'] } })
       return route.fulfill({ json: { ...saved, status: 'queued', capabilities: ['cancel'] } })
     }
-    let data: unknown = { items: [], next_cursor: null, next_offset: null }
+    let data: unknown = { items: [], capabilities: [], next_cursor: null, next_offset: null }
     if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
@@ -29,7 +29,8 @@ async function fixture(page: Page, readonly = false, personas = false) {
     return route.fulfill({ json: data })
   })
   await page.goto('/?page=Review'); await openNativeTools(page); await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.getByText('Advisory intelligence refresh', { exact: true }).click()
+  await openProductView(page, 'Settings', 'Source connections')
+  await openDisclosure(page.getByText('Advisory intelligence refresh', { exact: true }))
   return { panel: page.getByRole('region', { name: 'OSV package matching', exact: true }), requests, plans, jobReads: () => jobReads, fail: (status: number) => { failure = status }, advance: () => { head = sha('9') }, hold: () => { hold = true }, mismatch: (mode: string) => { mismatch = mode }, release: () => release?.() }
 }
 async function open(page: Page) { await page.getByText('External OSV package matching', { exact: true }).click() }
@@ -88,20 +89,20 @@ test('selected draft blocks first enqueue after workspace head advances until an
 })
 
 
-test('uncertain enqueue and job actions block product and Review navigation until explicit discard', async ({ page }) => {
+test('uncertain enqueue and job actions block product and application navigation until explicit discard', async ({ page }) => {
   const f = await fixture(page); await open(page); await f.panel.getByRole('checkbox').first().check(); f.fail(503)
   await f.panel.getByRole('button', { name: 'Queue selected OSV queries', exact: true }).click()
   await expect(f.panel.getByRole('alert')).toContainText('Recording uncertain')
   const product = page.getByRole('button', { name: 'Product scope', exact: false })
-  const review = page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('button', { name: 'Review', exact: true })
-  await expect(product).toBeDisabled(); await expect(review).toBeDisabled()
+  const applicationNav = page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('button', { name: 'Products', exact: true })
+  await expect(product).toBeDisabled(); await expect(applicationNav).toBeDisabled()
   await f.panel.getByRole('button', { name: 'Discard OSV request capture', exact: true }).click()
-  await expect(product).toBeEnabled(); await expect(review).toBeEnabled()
+  await expect(product).toBeEnabled(); await expect(applicationNav).toBeEnabled()
   await f.panel.getByRole('button', { name: 'Retry OSV job', exact: true }).click()
   await expect(f.panel.getByRole('alert')).toContainText('Captured job action is retained')
-  await expect(product).toBeDisabled(); await expect(review).toBeDisabled()
+  await expect(product).toBeDisabled(); await expect(applicationNav).toBeDisabled()
   await f.panel.getByRole('button', { name: 'Discard captured OSV job action', exact: true }).click()
-  await expect(product).toBeEnabled(); await expect(review).toBeEnabled()
+  await expect(product).toBeEnabled(); await expect(applicationNav).toBeEnabled()
 })
 
 test('status refresh rejects a different job id, kind or frozen scope without replacing the requested job', async ({ page }) => {

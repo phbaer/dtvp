@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const current = 'a'.repeat(64), old = 'b'.repeat(64), ctx = 'c'.repeat(64)
 const defaults = { cybersecurity: { criticality: 'unknown', exposure: 'unknown', mitigations: [], testing_evidence: [] }, deployment: { environment: '', usage: '', configuration: '' }, support: { status: 'unknown', supplier: '', support_until: null, end_of_life: null, references: [] }, notes: '', properties: {} }
@@ -20,7 +20,8 @@ async function fixture(page: Page, manage = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Composition product', exact: true }).click()
-  await page.getByText('Component inventory', { exact: true }).click()
+  await openProductView(page, 'Components')
+  await openDisclosure(page.getByText('Component inventory', { exact: true }))
   const panel = page.locator('.component-inventory')
   await expect(panel).toContainText('37 component occurrences')
   return { panel, reads, writes }

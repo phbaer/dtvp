@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const stateSha = 'a'.repeat(64), updatedState = 'b'.repeat(64)
@@ -26,7 +26,7 @@ async function fixture(page: Page, options: { readonly?: boolean; configured?: b
       if (path.endsWith('/cancel')) return route.fulfill({ json: sourceJob('source-job', 'cancelled', []) })
       return route.fulfill({ status: 403, json: { detail: 'Unexpected mutation' } })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path.endsWith('/connectors/dependency-track')) { reads.push({ path, query: new URLSearchParams(url.search) }); result = { project_id: external, configured: options.configured !== false, capabilities: options.readonly ? [] : ['bind', 'import'] } }
     else if (path.endsWith('/source-jobs')) { reads.push({ path, query: new URLSearchParams(url.search) }); const later = url.searchParams.get('offset') === '20'; result = { items: [sourceJob(later ? 'older-source' : 'source-job', 'failed', options.readonly ? [] : ['retry'])], next_offset: later ? null : 20 } }
     else if (path.includes('/source-jobs/')) { reads.push({ path, query: new URLSearchParams(url.search) }); result = sourceJob(path.split('/').at(-1)!, 'failed', options.readonly ? [] : ['retry']) }
@@ -42,7 +42,7 @@ async function fixture(page: Page, options: { readonly?: boolean; configured?: b
   return { reads, writes, panel: page.getByRole('region', { name: 'Dependency-Track source imports', exact: true }), rebind: () => { external = externalB }, advance: () => { state = updatedState } }
 }
 
-async function open(page: Page) { await page.locator('.knowledge-sources > summary').click() }
+async function open(page: Page) { await openProductView(page, 'Settings', 'Source connections'); await openDisclosure(page.locator('.knowledge-sources > summary')) }
 async function inputImport(page: Page) {
   const form = page.getByRole('form', { name: 'Request DT source import', exact: true })
   await form.getByLabel('Source build number', { exact: true }).fill('42')

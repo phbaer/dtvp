@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64)
 const source = sha('a'), target = sha('b'), revision = sha('c'), policy = sha('d'), oldContext = sha('1'), newContext = sha('2')
@@ -18,7 +18,7 @@ async function fixture(page: Page, allowed = true, personas = false) {
       if (failure) return route.fulfill({ status: failure, json: { detail: failure === 409 ? 'Target product version changed' : 'Publication uncertain' } })
       head = sha('f'); return route.fulfill({ json: { committed: true, projection } })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: actor, name: actor, org_admin: false, playground: personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path === '/api/v1/playground/personas') result = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', capabilities: ['read'] }], next_cursor: null }
@@ -35,7 +35,8 @@ async function fixture(page: Page, allowed = true, personas = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.getByText('Occurrence correspondence across imports', { exact: true }).click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.getByText('Occurrence correspondence across imports', { exact: true }))
   await page.getByRole('combobox', { name: 'Source branch or tag', exact: true }).selectOption(source)
   await page.getByText('Reuse approved assessment through correspondence', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Linked target assessment draft', exact: true })

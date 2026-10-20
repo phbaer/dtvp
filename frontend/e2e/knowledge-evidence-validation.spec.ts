@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { createHash } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
@@ -26,7 +26,7 @@ async function fixture(page: Page, playground = false) {
       checks.push({ path, body: route.request().postDataBuffer() })
       return route.fulfill({ json: { format: 'dtvp.artifact-signature-verification/1', committed: false, project_id: 'product', artifact_sha256: wrong ? 'f'.repeat(64) : sha(source), expected_artifact_sha256: sha(source), compact_jws_sha256: sha(signature), trust_policy_sha256: policy, verified: true, configured_signer_subject: 'Supplier A', report_digest: 'c'.repeat(64), diagnostic: 'signature_verified', limitations: ['Configured key policy only; no applicability or approval.'] } })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: actor, name: actor === 'actor' ? 'Analyst' : 'Reviewer', org_admin: false, playground, agentyzer: { enabled: false }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state }] }
@@ -37,7 +37,8 @@ async function fixture(page: Page, playground = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.getByText('VDR, VEX and advisory evidence files', { exact: true }).click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.getByText('VDR, VEX and advisory evidence files', { exact: true }))
   const tool = page.getByLabel('Read-only evidence validation', { exact: true })
   return { tool, checks, mismatch: () => { wrong = true }, delay: () => { delay = true }, release: () => released() }
 }

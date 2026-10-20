@@ -5,6 +5,9 @@ import { justifications, justificationLabel } from '../assessmentReasons'
 import { knowledgeApi, type SsvcSelection, type KnowledgeFinding, type KnowledgeProposal, type KnowledgeWorkspace, type KnowledgeScoreInput, type KnowledgeScorePreview } from '../knowledgeApi'
 import type { Me } from '../types'
 import SearchSelect from './SearchSelect.vue'
+import KnowledgeProductCatalog from './KnowledgeProductCatalog.vue'
+import KnowledgeMyWork from './KnowledgeMyWork.vue'
+import KnowledgeProductAccess from './KnowledgeProductAccess.vue'
 import KnowledgeDependencyTree from './KnowledgeDependencyTree.vue'
 import KnowledgeDependencyPaths from './KnowledgeDependencyPaths.vue'
 import SsvcAssessment from './SsvcAssessment.vue'
@@ -39,19 +42,15 @@ import KnowledgeEvidenceSources from './KnowledgeEvidenceSources.vue'
 import KnowledgePipelineConfiguration from './KnowledgePipelineConfiguration.vue'
 import KnowledgeSyncAutomation from './KnowledgeSyncAutomation.vue'
 import KnowledgeObservations from './KnowledgeObservations.vue'
-const props = defineProps<{ me: Me }>()
+const props = withDefaults(defineProps<{ me: Me; view?: 'products' | 'my-work' | 'maintenance' }>(), { view: 'products' })
 const emit = defineEmits<{ locked: [boolean] }>()
-const compositionTools = ref<HTMLDetailsElement | null>(null), intelligenceTools = ref<HTMLDetailsElement | null>(null), reportTools = ref<HTMLDetailsElement | null>(null)
-const productCreationLocked = ref(false)
+const productCreationLocked = ref(false), sharedAccessLocked = ref(false)
 const scoringPolicyLocked = ref(false)
 const intakeBusy = ref(false), assemblyLocked = ref(false), metadataLocked = ref(false), licenseLocked = ref(false), archiveLocked = ref(false), correspondenceLocked = ref(false), analysisFollowUpLocked = ref(false), cpeLocked = ref(false), advisoryLocked = ref(false)
 const pipelineConfigurationLocked = ref(false), syncAutomationLocked = ref(false), observationsLocked = ref(false)
-const otherIntakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value || advisoryLocked.value || scoringPolicyLocked.value)
+const otherIntakeLocked = computed(() => intakeBusy.value || assemblyLocked.value || metadataLocked.value || licenseLocked.value || archiveLocked.value || correspondenceLocked.value || analysisFollowUpLocked.value || cpeLocked.value || advisoryLocked.value || scoringPolicyLocked.value || sharedAccessLocked.value)
 const baseIntakeLocked = computed(() => productCreationLocked.value || otherIntakeLocked.value)
 const intakeLocked = computed(() => baseIntakeLocked.value || pipelineConfigurationLocked.value || syncAutomationLocked.value || observationsLocked.value)
-watch(() => productCreationLocked.value || intakeBusy.value || assemblyLocked.value || pipelineConfigurationLocked.value || observationsLocked.value || correspondenceLocked.value, value => { if (value && compositionTools.value) compositionTools.value.open = true }, { flush: 'post' })
-watch(() => cpeLocked.value || advisoryLocked.value || syncAutomationLocked.value || scoringPolicyLocked.value, value => { if (value && intelligenceTools.value) intelligenceTools.value.open = true }, { flush: 'post' })
-watch(() => metadataLocked.value || licenseLocked.value || archiveLocked.value, value => { if (value && reportTools.value) reportTools.value.open = true }, { flush: 'post' })
 const bulkLocked = ref(false), bulkSelection = ref<Record<string, KnowledgeFinding>>({})
 const bulkRows = computed(() => Object.values(bulkSelection.value))
 function bulkEligible(row: KnowledgeFinding) {
@@ -76,6 +75,53 @@ const receivedEvidenceOptions = [{ value: 'missing', label: 'No received evidenc
 const severityBands = ['critical', 'high', 'medium', 'low', 'none', 'unknown']
 const savedViews = ref<{ name: string; query: string }[]>([]), viewName = ref('')
 const initialView = new URLSearchParams(location.search)
+const productViews = ['Overview', 'Vulnerabilities', 'Components', 'Imports', 'Versions', 'Licenses', 'Documents', 'Settings'] as const
+type ProductView = typeof productViews[number]
+const productView = ref<ProductView>(productViews.includes(initialView.get('k_view') as ProductView) ? initialView.get('k_view') as ProductView : 'Vulnerabilities')
+const settingsViews = ['Ownership', 'Sources', 'Pipeline', 'Scoring', 'Identity', 'Automation', 'Sharing'] as const
+type SettingsView = typeof settingsViews[number]
+const settingsView = ref<SettingsView>(settingsViews.includes(initialView.get('k_setting') as SettingsView) ? initialView.get('k_setting') as SettingsView : 'Ownership')
+const settingsLabels: Record<SettingsView, string> = { Ownership: 'Component ownership', Sources: 'Source connections', Pipeline: 'Pipeline & threat models', Scoring: 'Scoring policy', Identity: 'CPE identity policy', Automation: 'Automation schedules', Sharing: 'Product access' }
+const defaultWorkScope = () => props.me.workspaces.some(team => team.capabilities.some(cap => ['rescore', 'manage'].includes(cap))) ? 'all' : 'my_teams'
+const workScope = ref(initialView.get('k_work_scope') || (props.view === 'my-work' ? defaultWorkScope() : 'all'))
+const myTeams = computed(() => props.me.workspaces.filter(team => team.capabilities.some(cap => ['assess', 'approve'].includes(cap))))
+const reviewVisible = computed(() => props.view === 'my-work' || (props.view === 'products' && Boolean(project.value) && productView.value === 'Vulnerabilities'))
+const navigationLocked = computed(() => busy.value || intakeLocked.value || bulkLocked.value || !!pendingRequest.value || !!pendingScore.value)
+const pageContainer = ref<HTMLElement | null>(null)
+async function navigateProduct(value: ProductView, setting?: SettingsView) {
+  if (navigationLocked.value) return
+  productView.value = value
+  if (setting) settingsView.value = setting
+  syncViewUrl()
+  await nextTick()
+  activatePage()
+  const active = [...(pageContainer.value?.querySelectorAll<HTMLElement>('[data-product-page]') || [])].find(item => item.getClientRects().length > 0)
+  active?.querySelector<HTMLElement>('h2')?.focus()
+}
+function activatePage() {
+  const active = [...(pageContainer.value?.querySelectorAll<HTMLElement>('[data-product-page]') || [])].find(item => item.getClientRects().length > 0)
+  active?.querySelectorAll<HTMLDetailsElement>(':scope > .page-section > details').forEach(item => { item.open = true })
+}
+function openCatalogProject(option: { id: string; name?: string; capabilities?: string[] }) {
+  if (navigationLocked.value) return
+  project.value = option.id; productView.value = 'Overview'; void chooseProject(option)
+}
+async function openWorkQueue(value: { project: { id: string; name: string }; version: string }) {
+  if (navigationLocked.value) return
+  explicitAllTeams.value = true; team.value = ''; project.value = value.project.id; productView.value = 'Vulnerabilities'; await chooseProject(value.project, value.version)
+  await nextTick(); queueElement.value?.scrollIntoView({ block: 'start' })
+}
+function browseProducts() {
+  if (navigationLocked.value) return
+  close(); project.value = ''; projectName.value = ''; version.value = ''; workspace.value = null; versions.value = []; syncViewUrl()
+}
+function selectWorkQueue(kind: string) {
+  if (navigationLocked.value) return
+  lifecycle.value = kind === 'changes' || kind === 'scoring' ? '' : kind
+  filters.value = { ...emptyFilters(), ...(kind === 'changes' ? { team_review: 'changes_requested' } : kind === 'scoring' ? { team_review: 'approved', scoring_status: 'not_published' } : {}) }
+  filterDraft.value = { ...filters.value }; void load()
+}
+
 const explicitAllTeams = ref(initialView.has('k_team') && !initialView.get('k_team'))
 function defaultTeam() {
   const teams = props.me.workspaces.filter(item => item.capabilities.some(cap => cap === 'assess' || cap === 'approve'))
@@ -94,7 +140,7 @@ const teamOptions = computed(() => {
   return Object.entries({ ...labels, ...knownTeamLabels.value }).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
 })
 const offset = ref(0), previous = ref<number[]>([]), busy = ref(false), error = ref(''), notice = ref('')
-const tab = ref<'evidence' | 'assessment' | 'review' | 'scoring'>('evidence')
+const tab = ref<'evidence' | 'assessment' | 'review' | 'scoring' | 'history'>('evidence')
 const applicability = ref('under_investigation'), justification = ref(''), rationale = ref(''), conditions = ref('')
 const ssvc = ref<SsvcSelection | null>(null)
 const scoreBase = ref(''), scoreVector = ref(''), scoreRationale = ref(''), scoreMode = ref<'manual' | 'applicability' | 'false_positive'>('manual')
@@ -105,7 +151,7 @@ type ScoreCapture = { generation: number; view: string; scope: string; project: 
 const pendingScore = ref<ScoreCapture | null>(null)
 let scoreSequence = 0
 const sourceVectors = computed(() => [...new Set((selected.value?.original_base_vectors || selected.value?.source_ratings || []).map(item => item.vector).filter((value): value is string => Boolean(value)) || [])])
-const workflowTabs = computed(() => can('rescore') ? ['evidence', 'assessment', 'review', 'scoring'] as const : ['evidence', 'assessment', 'review'] as const)
+const workflowTabs = computed(() => can('rescore') ? ['evidence', 'assessment', 'review', 'scoring', 'history'] as const : ['evidence', 'assessment', 'review', 'history'] as const)
 const assessmentScope = ref<{ expected_versions: Record<string, string>; targets: { version: string; context_id: string; vulnerability_id: string }[] } | null>(null)
 const assessmentEvidence = ref<unknown[]>([])
 const citedInputs = computed(() => [...(selected.value?.contributions?.vulnerability_sources || []), ...(selected.value?.contributions?.vulnerability_analyses || [])])
@@ -117,7 +163,7 @@ const vectorEntries = computed(() => {
 })
 const findingElement = ref<HTMLElement | null>(null)
 const detailTask = ref<'workflow' | 'tools' | 'component' | 'technical'>('workflow')
-const focused = computed(() => !!selected.value && detailTask.value === 'workflow' && tab.value !== 'evidence')
+const focused = computed(() => !!selected.value && detailTask.value === 'workflow' && tab.value !== 'evidence' && tab.value !== 'history')
 async function showDetailTask(task: typeof detailTask.value) {
   if (busy.value || metadataLocked.value || analysisFollowUpLocked.value) return
   detailTask.value = task
@@ -126,7 +172,7 @@ async function showDetailTask(task: typeof detailTask.value) {
 }
 watch(analysisFollowUpLocked, locked => { if (locked) detailTask.value = 'tools' })
 watch(metadataLocked, locked => { if (locked) detailTask.value = 'component' })
-const workflowTitle = (step: string) => ({ evidence: 'Overview', assessment: 'Assessment', review: 'Independent review', scoring: 'Coordinator scoring' })[step] || step
+const workflowTitle = (step: string) => ({ evidence: 'Overview', assessment: 'Assessment', review: 'Independent review', scoring: 'Coordinator scoring', history: 'History' })[step] || step
 function isCited(id: string) { return assessmentEvidence.value.some(e => e && typeof e === 'object' && (e as Record<string, unknown>).proposal_id === id) }
 function citeInput(id: string, checked: boolean) {
   if (!canEditAssessment.value || busy.value || pendingRequest.value || pendingScore.value) return
@@ -139,7 +185,7 @@ let actorGeneration = 0
 type WorkflowRequest = { scope: string; generation: number; view: string; actor: string; endpoint: string; body: Record<string, unknown>; kind: WorkflowKind; next: boolean; project: string; version: string; row: KnowledgeFinding; following: string[]; scrollX: number; scrollY: number; queueX: number; queueY: number }
 const pendingRequest = ref<WorkflowRequest | null>(null)
 const queueElement = ref<HTMLElement | null>(null)
-const workflowScope = () => JSON.stringify([project.value, version.value, team.value, lifecycle.value, query.value, filters.value, offset.value])
+const workflowScope = () => JSON.stringify([project.value, version.value, workScope.value, team.value, lifecycle.value, query.value, filters.value, offset.value])
 const workflowView = () => JSON.stringify([workflowScope(), selected.value?.id])
 const scoreSignature = () => JSON.stringify([workflowView(), workspace.value?.state, selected.value?.state, scoreBase.value, scoreVector.value, scoreRationale.value, scoreMode.value])
 let sequence = 0, timer: ReturnType<typeof setTimeout> | undefined
@@ -185,10 +231,10 @@ async function load(reset = true, keep = false, refreshHead = false) {
   if (reset) { offset.value = 0; previous.value = [] }
   if (!keep) close()
   try {
-    const params = new URLSearchParams({ offset: String(offset.value), limit: '30', q: query.value, ...(team.value ? { team_id: team.value } : {}), lifecycle: lifecycle.value, ...Object.fromEntries(Object.entries(filters.value).filter(([, value]) => value !== '')) })
+    const params = new URLSearchParams({ offset: String(offset.value), limit: '30', work_scope: workScope.value, q: query.value, ...(team.value ? { team_id: team.value } : {}), lifecycle: lifecycle.value, ...Object.fromEntries(Object.entries(filters.value).filter(([, value]) => value !== '')) })
     if (!reset && workspace.value?.state && !refreshHead) params.set('expected', workspace.value.state)
     const result = await knowledgeApi<KnowledgeWorkspace>(`${scope.value}/workspace?${params}`)
-    if (current === sequence) { workspace.value = result; knownTeamLabels.value = { ...knownTeamLabels.value, ...result.team_labels }; syncViewUrl() }
+    if (current === sequence) { workspace.value = result; void nextTick(activatePage); knownTeamLabels.value = { ...knownTeamLabels.value, ...result.team_labels }; syncViewUrl() }
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
 }
@@ -199,8 +245,9 @@ async function chooseProject(option: { id: string; name?: string; capabilities?:
   const current = ++sequence; ++versionSequence; projectName.value = option.name || option.id; versions.value = []; version.value = ''; versionQuery.value = ''; versionMenu.value = false; workspace.value = null; close()
   busy.value = true; error.value = ''; notice.value = ''
   try {
-    const result = await knowledgeApi<{ items: { version: string; state: string }[]; next_offset: number | null }>(`/projects/${encodeURIComponent(option.id)}/versions?limit=25`)
+    const [result, detail] = await Promise.all([knowledgeApi<{ items: { version: string; state: string }[]; next_offset: number | null }>(`/projects/${encodeURIComponent(option.id)}/versions?limit=25`), option.capabilities ? Promise.resolve(option) : knowledgeApi<{ capabilities?: string[] }>(`/projects/${encodeURIComponent(option.id)}`)])
     if (current !== sequence) return
+    projectCapabilities.value = detail.capabilities || []
     versions.value = result.items; versionNext.value = result.next_offset; version.value = preferredVersion || result.items[0]?.version || ''; await load()
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
@@ -371,7 +418,7 @@ watch(detailTask, task => { if (task !== 'workflow') assessmentScope.value = nul
 watch([scoreBase, scoreVector, scoreRationale, scoreMode], () => { ++scoreSequence; scorePreview.value = null }, { flush: 'sync' })
 function viewParams() {
   const params = new URLSearchParams()
-  const values = { project: project.value, version: version.value, team: team.value, lifecycle: lifecycle.value, q: query.value, ...filters.value }
+  const values = { view: productView.value, setting: settingsView.value, work_scope: workScope.value, project: project.value, version: version.value, team: team.value, lifecycle: lifecycle.value, q: query.value, ...filters.value }
   for (const [key, value] of Object.entries(values)) if (value || key === 'team') params.set(`k_${key}`, value)
   return params
 }
@@ -379,7 +426,7 @@ function syncViewUrl() {
   const params = new URLSearchParams(location.search)
   for (const key of [...params.keys()]) if (key.startsWith('k_')) params.delete(key)
   for (const [key, value] of viewParams()) params.set(key, value)
-  params.set('page', 'Review')
+  params.set('page', props.view === 'my-work' ? 'My work' : props.view === 'maintenance' ? 'Administration' : 'Products')
   history.replaceState(null, '', `${location.pathname}?${params}`)
 }
 async function applyFilters() { filters.value = { ...filterDraft.value }; await load() }
@@ -399,6 +446,8 @@ async function restoreView(value: string) {
   restoring = true; busy.value = true; error.value = ''
   try {
     explicitAllTeams.value = params.has('k_team') && !params.get('k_team')
+    productView.value = productViews.includes(params.get('k_view') as ProductView) ? params.get('k_view') as ProductView : 'Vulnerabilities'
+    workScope.value = params.get('k_work_scope') || (props.view === 'my-work' ? defaultWorkScope() : 'all')
     team.value = params.has('k_team') ? params.get('k_team') || '' : defaultTeam(); lifecycle.value = params.get('k_lifecycle') || ''; query.value = params.get('k_q') || ''
     filters.value = Object.fromEntries(Object.keys(filterLabels).map(key => [key, params.get(`k_${key}`) || ''])); filterDraft.value = { ...filters.value }
     if (id) { const result = await api<{ id: string; name: string; capabilities?: string[] }>(`/projects/${encodeURIComponent(id)}`); project.value = result.id; await chooseProject(result, params.get('k_version') || '') }
@@ -410,30 +459,47 @@ async function copyView() {
   syncViewUrl()
   try { await navigator.clipboard.writeText(location.href); notice.value = 'View link copied.' } catch { error.value = 'Clipboard unavailable. Copy this page address instead.' }
 }
-watch(() => [project.value, version.value, workspace.value?.state, team.value, lifecycle.value, query.value, JSON.stringify(filters.value), props.me.id], () => { bulkSelection.value = {} })
+watch(() => [project.value, version.value, workspace.value?.state, workScope.value, team.value, lifecycle.value, query.value, JSON.stringify(filters.value), props.me.id], () => { bulkSelection.value = {} })
+watch(() => props.view, value => {
+  if (value === 'my-work') { workScope.value = defaultWorkScope(); team.value = ''; explicitAllTeams.value = true; if (project.value) void load() }
+  else if (value === 'products') { workScope.value = 'all'; if (project.value) void load() }
+  void nextTick(activatePage)
+})
+watch(workScope, () => { if (!restoring && !busy.value && project.value) void load() })
 watch([team, lifecycle], () => { if (!restoring && !busy.value) void load() })
 watch(() => props.me.id, () => { localDrafts.clear(); draftKey.value = ''; productCreationLocked.value = false; analysisFollowUpLocked.value = false; pipelineConfigurationLocked.value = false; syncAutomationLocked.value = false; ++actorGeneration; ++scoreSequence; pendingRequest.value = null; pendingScore.value = null; scorePreview.value = null; knownTeamLabels.value = {}; explicitAllTeams.value = false; team.value = defaultTeam(); workspace.value = null; close(); void load() }, { flush: 'sync' })
 watch(query, () => { if (restoring) return; clearTimeout(timer); timer = setTimeout(() => { void load() }, 250) })
+watch([productView, settingsView], () => { if (project.value) syncViewUrl() })
 watch(() => Boolean(busy.value || intakeLocked.value || bulkLocked.value || pendingRequest.value || pendingScore.value), value => emit('locked', value), { immediate: true })
 onMounted(() => {
   window.addEventListener('beforeunload', beforeLeave)
   try { const stored: unknown = JSON.parse(localStorage.getItem(`dtvp.knowledge.views:${props.me.id}`) || '[]'); if (Array.isArray(stored)) savedViews.value = stored.filter(item => item && typeof item.name === 'string' && typeof item.query === 'string').slice(-20) } catch { /* Browser storage is optional. */ }
   if (initialView.has('k_project')) void restoreView(initialView.toString())
+  else void nextTick(activatePage)
 })
 onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave); ++actorGeneration; ++sequence; ++versionSequence; clearTimeout(timer); clearTimeout(versionTimer); emit('locked', false) })
 </script>
 <template>
   <section class="knowledge-workspace" :class="{ 'finding-open': selected }" aria-label="Review workspace">
-    <header class="knowledge-heading"><div><h1>Vulnerability review</h1><p class="hint">Product · version · responsible team</p></div><div class="knowledge-actions"><button :disabled="busy || metadataLocked || !version" @click="load()">Refresh workspace</button></div></header>
-
-
-    <form class="knowledge-filters" @submit.prevent="load()">
+    <header v-show="view !== 'maintenance'" class="knowledge-heading"><div><p v-if="project && view === 'products'" class="product-breadcrumb"><button class="text-link" :disabled="navigationLocked" @click="browseProducts">Products</button><span aria-hidden="true"> / </span>{{ projectName }}</p><h1>{{ view === 'my-work' ? 'My work' : project ? projectName : 'Products' }}</h1><p class="hint">{{ view === 'my-work' ? 'Team assessments, independent reviews and coordinator handoffs' : project ? `${version || 'No imported version'} · current product knowledge` : 'Software composition, review progress and source evidence' }}</p></div><button v-if="project" :disabled="busy || metadataLocked || !version" @click="load()">Refresh workspace</button></header>
+    <KnowledgeProductCatalog v-show="view === 'products' && !project" :me="me" :disabled="navigationLocked" @open="openCatalogProject" />
+    <div v-show="view !== 'maintenance'" class="product-context">
       <SearchSelect v-model="project" label="Product scope" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy || intakeLocked" @select="chooseProject" />
       <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || intakeLocked || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>
-      <label>Responsible team<select v-model="team" :disabled="busy" @change="explicitAllTeams = !team"><option value="">All accessible teams</option><option v-for="item in teamOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+    </div>
+    <nav v-show="view === 'products' && project" class="product-navigation" aria-label="Product"><button v-for="item in productViews" :key="item" :data-product-view="item" :aria-current="productView === item ? 'page' : undefined" :disabled="navigationLocked" @click="navigateProduct(item)">{{ item }}</button></nav>
+    <label v-show="view === 'products' && project" class="mobile-product-navigation">Product view<select :value="productView" :disabled="navigationLocked" @change="navigateProduct(($event.target as HTMLSelectElement).value as ProductView)"><option v-for="item in productViews" :key="item">{{ item }}</option></select></label>
+    <div v-show="reviewVisible" class="review-content">
+    <div v-if="view === 'my-work'" class="work-queues" aria-label="Work queues"><button :disabled="navigationLocked" @click="selectWorkQueue('unassessed')">Needs assessment</button><button :disabled="navigationLocked" @click="selectWorkQueue('submitted')">Awaiting review</button><button :disabled="navigationLocked" @click="selectWorkQueue('changes')">Changes requested</button><button :disabled="navigationLocked" @click="selectWorkQueue('reassessment_needed')">Revalidation needed</button><button v-if="me.workspaces.some(item => item.capabilities.includes('rescore'))" :disabled="navigationLocked" @click="selectWorkQueue('scoring')">Approved contexts awaiting scoring</button></div>
+    <form class="knowledge-filters" @submit.prevent="load()">
+      <label>Work scope<select v-model="workScope" :disabled="navigationLocked"><option value="my_teams">My teams</option><option value="all">All accessible teams</option><option value="unassigned">Unassigned ownership</option><option value="conflicts">Conflicting ownership</option></select></label>
+      <p v-if="workScope === 'my_teams' && myTeams.length === 1" class="team-scope-label">Team <strong>{{ myTeams[0]!.name }}</strong></p>
+      <label v-show="workScope !== 'my_teams' || myTeams.length !== 1">Responsible team<select v-model="team" :disabled="busy" @change="explicitAllTeams = !team"><option value="">All accessible teams</option><option v-for="item in teamOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
       <label>Review status<select v-model="lifecycle" :disabled="busy"><option value="">All statuses</option><option v-for="status in ['unassessed', 'draft', 'submitted', 'approved', 'reassessment_needed', 'historically_absent']" :key="status" :value="status">{{ label(status) }}</option></select></label>
       <label class="knowledge-search">Search<input v-model="query" :disabled="busy" type="search" placeholder="Vulnerability, component or description"></label>
     </form>
+    <p v-if="workScope === 'my_teams' && !myTeams.length" class="hint">No assessment or review team is assigned to your account. Choose an authorized broader scope to inspect product knowledge.</p>
+    <KnowledgeMyWork :key="me.id" :active="view === 'my-work'" :work-scope="workScope" :q="query" :lifecycle="lifecycle" :filters="{ ...filters, ...(team ? { team_id: team } : {}) }" @open="openWorkQueue" />
     <details class="knowledge-advanced"><summary>More filters<span v-if="activeFilterCount"> · {{ activeFilterCount }} applied</span></summary>
       <form @submit.prevent="applyFilters"><fieldset :disabled="busy"><div class="knowledge-filter-grid">
         <label>SSVC status<select v-model="filterDraft.ssvc_status"><option value="">Any SSVC status</option><option v-for="value in ['missing', 'draft', 'submitted', 'approved', 'pending', 'stale']" :key="value" :value="value">{{ label(value) }}</option></select></label><label>SSVC action<select v-model="filterDraft.ssvc_action"><option value="">Any SSVC action</option><option v-for="value in ['DEFER', 'SCHEDULED', 'OUT_OF_CYCLE', 'IMMEDIATE']" :key="value" :value="value">{{ label(value) }}</option></select></label>
@@ -457,18 +523,19 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
     </details>
 
 
+    <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy || intakeLocked" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
+    </div>
     <details v-if="retainedDrafts.length" class="knowledge-pane retained-drafts"><summary>Unsaved drafts from other contexts or earlier input states ({{ retainedDrafts.length }})</summary><p class="hint">These drafts have not been saved to DTVP. They are not applied automatically to a changed baseline or assessment revision. Inspect the original text and citations before explicitly authoring a current assessment.</p><article v-for="entry in retainedDrafts" :key="entry.key"><h3>{{ entry.binding[5] }} · {{ entry.binding[2] }}</h3><p class="hint">Context {{ entry.binding[4] }} · product {{ entry.binding[1] }}</p><details><summary>Original draft and input binding</summary><pre>{{ JSON.stringify({ source_state: entry.binding[3], assessment_revision: entry.binding[6], ...entry.draft }, null, 2) }}</pre></details><button :disabled="busy || !!pendingRequest || !!pendingScore" @click="localDrafts.delete(entry.key)">Discard this unsaved draft</button></article></details>
     <section v-if="pendingScore" class="knowledge-pane" aria-label="Pending coordinator score publication"><p role="status">Captured contextual score for {{ pendingScore.project }} / {{ pendingScore.version }} / {{ pendingScore.row.vulnerability_id }}. Preview, expected source head, source Base, vector, rationale and request ID remain fixed.</p><button :disabled="busy || metadataLocked" @click="publishScore(true)">Retry exact score publication</button><button :disabled="busy" @click="discardScorePublication">Discard captured score publication</button><details><summary>Captured score input and preview</summary><pre>{{ JSON.stringify(pendingScore.body, null, 2) }}</pre></details></section>
     <section v-if="pendingRequest" class="knowledge-pane" aria-label="Pending assessment workflow request"><p role="status">Captured {{ label(pendingRequest.kind) }} for {{ pendingRequest.project }} / {{ pendingRequest.version }} / {{ pendingRequest.row.vulnerability_id }}. Exact source heads, evidence, target and request ID are retained.</p><button :disabled="busy || metadataLocked" @click="mutate(pendingRequest.kind, pendingRequest.next, true)">Retry exact assessment workflow request</button><button :disabled="busy" @click="discardWorkflowRequest">Discard captured workflow request</button><details><summary>Captured workflow input</summary><pre>{{ JSON.stringify(pendingRequest.body, null, 2) }}</pre></details></section>
-    <KnowledgeBulkReview :key="me.id" :project="project" :version="version" :state="workspace?.state || ''" :rows="bulkRows" @locked="bulkLocked = $event" @reset="bulkSelection = {}" @changed="bulkChanged" />
+    <KnowledgeBulkReview v-show="reviewVisible" :key="me.id" :project="project" :version="version" :state="workspace?.state || ''" :rows="bulkRows" @locked="bulkLocked = $event" @reset="bulkSelection = {}" @changed="bulkChanged" />
     <p v-if="error" role="alert" class="message">{{ error }}</p><p v-if="notice" role="status" class="message">{{ notice }}</p><p v-if="busy" role="status">Loading…</p>
-    <p v-if="project && !busy && !version && !versions.length" class="empty">No journal-backed versions. Import a baseline to start.</p><p v-else-if="!project" class="empty">Select a product to review its versioned knowledge.</p>
+    <p v-if="project && !busy && !version && !versions.length" class="empty">No journal-backed versions. Import a baseline to start.</p><p v-else-if="!project && view === 'my-work'" class="hint">Open a product/version queue above to assess its cases.</p>
     <template v-if="workspace">
       <p v-if="workspace.baseline_status === 'withdrawn'" role="status" class="message">The current inventory was withdrawn. Historical assessments and release tags remain retained.</p>
-      <div class="knowledge-statistics" aria-label="Filtered workspace statistics"><span><strong>{{ workspace.statistics.totals.context_findings }}</strong> context findings</span><span><strong>{{ workspace.statistics.totals.unique_vulnerabilities }}</strong> vulnerabilities</span><span><strong>{{ workspace.statistics.recorded }}</strong> recorded</span><span><strong>{{ workspace.statistics.submitted }}</strong> submitted</span><span><strong>{{ workspace.statistics.approved }}</strong> approved</span><details><summary>Breakdown</summary><dl><template v-for="(count, status) in workspace.statistics.by_status" :key="status"><dt>{{ label(String(status)) }}</dt><dd>{{ count }}</dd></template><template v-for="(count, id) in workspace.statistics.by_team" :key="id"><dt>{{ teamName(String(id)) }}</dt><dd>{{ typeof count === 'number' ? count : count.context_findings }} findings</dd></template><template v-for="(count, severity) in workspace.statistics.severity" :key="severity"><dt>{{ severity }}</dt><dd>{{ count }}</dd></template></dl></details></div>
+      <div v-show="reviewVisible" class="knowledge-statistics" aria-label="Filtered workspace statistics"><span><strong>{{ workspace.statistics.totals.context_findings }}</strong> context findings</span><span><strong>{{ workspace.statistics.totals.unique_vulnerabilities }}</strong> vulnerabilities</span><span><strong>{{ workspace.statistics.recorded }}</strong> recorded</span><span><strong>{{ workspace.statistics.submitted }}</strong> submitted</span><span><strong>{{ workspace.statistics.approved }}</strong> approved</span><details><summary>Breakdown</summary><dl><template v-for="(count, status) in workspace.statistics.by_status" :key="status"><dt>{{ label(String(status)) }}</dt><dd>{{ count }}</dd></template><template v-for="(count, id) in workspace.statistics.by_team" :key="id"><dt>{{ teamName(String(id)) }}</dt><dd>{{ typeof count === 'number' ? count : count.context_findings }} findings</dd></template><template v-for="(count, severity) in workspace.statistics.severity" :key="severity"><dt>{{ severity }}</dt><dd>{{ count }}</dd></template></dl></details></div>
 
-      <KnowledgeDependencyTree v-show="!selected" :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
-      <div class="knowledge-columns" :class="{ 'has-detail': selected }">
+      <div v-show="reviewVisible" class="knowledge-columns" :class="{ 'has-detail': selected }">
         <section class="knowledge-queue" aria-label="Context finding queue"><div ref="queueElement" class="table-wrap"><ul v-if="selected" class="compact-queue" aria-label="Finding results"><li v-for="row in workspace.items" :key="row.id" :class="{ selected: selected.id === row.id }"><input v-if="workspace.items.some(item => item.capabilities?.includes('approve')) || bulkRows.length || bulkLocked" type="checkbox" :aria-label="`Select ${row.vulnerability_id} in ${row.context.root_ref} for bulk review`" :checked="!!bulkSelection[row.id]" :disabled="busy || bulkLocked || !bulkEligible(row) || (!bulkSelection[row.id] && bulkRows.length >= 100)" @change="toggleBulk(row)"><button class="text-link" :aria-current="selected.id === row.id ? 'true' : undefined" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }} · used by {{ row.context.root_ref || 'Unknown context' }}</small><small>{{ teamName(row.context.team_id) }} · {{ label(row.coverage.status) }}</small><small v-if="row.ssvc?.current || row.ssvc?.approved">SSVC: {{ (row.ssvc?.approved || row.ssvc?.current)?.outcome_label || 'Incomplete' }} · {{ label(row.ssvc.status) }}</small><div class="queue-ratings"><span>Source <strong>{{ sourceScore(row) }}</strong></span><span>Published <strong>{{ row.published_score?.score.toFixed(1) ?? '—' }}</strong><template v-if="row.published_score?.current === false"> · Outdated</template></span></div></li></ul><table v-show="!selected" class="review-queue-table"><colgroup><col v-if="workspace.items.some(row => row.capabilities?.includes('approve')) || bulkRows.length || bulkLocked" class="queue-check"><col class="queue-component"><col class="queue-team"><col class="queue-score"><col class="queue-score"></colgroup><thead><tr><th v-if="workspace.items.some(row => row.capabilities?.includes('approve')) || bulkRows.length || bulkLocked" aria-label="Select for bulk review" title="Select for bulk review">✓</th><th>Vulnerability / component</th><th>Team / status</th><th>Source</th><th>Published</th></tr></thead><tbody><tr v-for="row in workspace.items" :key="row.id" :class="{ selected: selected?.id === row.id }"><td v-if="workspace.items.some(item => item.capabilities?.includes('approve')) || bulkRows.length || bulkLocked"><input type="checkbox" :aria-label="`Select ${row.vulnerability_id} in ${row.context.root_ref} for bulk review`" :checked="!!bulkSelection[row.id]" :disabled="busy || bulkLocked || !bulkEligible(row) || (!bulkSelection[row.id] && bulkRows.length >= 100)" @change="toggleBulk(row)"></td><td><button class="text-link" :disabled="busy" @click="open(row)">{{ row.vulnerability_id }}</button><small>{{ row.component.name }} {{ row.component.version }}</small><small>Used by {{ row.context.root_ref || 'Unknown context' }}</small></td><td>{{ teamName(row.context.team_id) }}<small>{{ label(row.coverage.status) }}</small><small v-if="row.ssvc?.current || row.ssvc?.approved">SSVC: {{ (row.ssvc?.approved || row.ssvc?.current)?.outcome_label || 'Incomplete' }} · {{ label(row.ssvc.status) }}</small></td><td>{{ sourceScore(row) }}<small>{{ sourceSeverity(row) }}</small></td><td>{{ row.published_score?.score.toFixed(1) ?? '—' }}<small v-if="row.published_score">{{ severity(row.published_score.score) }}</small><small v-if="row.published_score?.current === false">Outdated</small></td></tr></tbody></table><p v-if="!workspace.items.length && !busy" class="empty">No context findings match this scope.</p></div><div class="knowledge-pagination"><button :disabled="busy || !previous.length" @click="paginate(false)">Previous page</button><span>{{ offset + (workspace.items.length ? 1 : 0) }}–{{ offset + workspace.items.length }}</span><button :disabled="busy || workspace.next_offset == null" @click="paginate(true)">Next page</button></div></section>
         <section v-if="selected" ref="findingElement" class="knowledge-detail" aria-label="Context finding detail">
           <button class="finding-back" :disabled="busy || metadataLocked || analysisFollowUpLocked" @click="backToQueue">← Back to results</button>
@@ -512,7 +579,9 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
             <div class="knowledge-actions"><button :disabled="busy || !!pendingScore || !!pendingRequest || !scoreBase || !scoreVector || !scoreRationale.trim()">Preview contextual score</button><button type="button" class="primary" :disabled="busy || !!pendingScore || !!pendingRequest || !scorePreview?.result.eligible" @click="publishScore()">Publish contextual score</button></div>
           </form>
           </div></div>
-          <CvssVectorComparison v-show="detailTask === 'workflow'" :key="`${project}:${version}:${selected.id}`" :entries="vectorEntries" />
+          <section v-show="detailTask === 'workflow' && tab === 'history'" class="knowledge-pane" aria-label="Decision history"><h3>Recorded decisions and retained evidence</h3><p class="hint">These are the revisions captured in this input state. Full product-state history is available under Versions.</p><article v-if="assessment"><h4>Latest recorded assessment · {{ label(assessment.stage) }}</h4><p>{{ label(assessment.payload.state) }} · {{ assessment.payload.author_id || 'Unknown author' }}</p><p class="knowledge-rationale">{{ assessment.payload.rationale }}</p><p v-if="assessment.payload.justification">{{ justificationLabel(assessment.payload.justification) }}</p><details><summary>Exact assessment revision, scope and citations</summary><pre>{{ JSON.stringify(assessment, null, 2) }}</pre></details></article><p v-else>No assessment recorded in this input state.</p><article v-if="selected.coverage.approved_assessment"><h4>Retained approved revision</h4><p class="knowledge-rationale">{{ selected.coverage.approved_assessment.payload.rationale }}</p><details><summary>Approved revision and evidence</summary><pre>{{ JSON.stringify(selected.coverage.approved_assessment, null, 2) }}</pre></details></article>
+          <details v-if="selected.legacy_evidence?.length" class="knowledge-pane"><summary>Imported DT assessment history</summary><p class="hint">Historical team and author labels are source claims. These records do not establish current DTVP approval.</p><article v-for="claim in selected.legacy_evidence" :key="claim.id"><h3>{{ claim.source }} · {{ label(claim.status) }}</h3><p v-if="claim.conflicting" class="warning">Conflicting imported team conclusions require reconciliation.</p><div v-for="(record, index) in claim.current_records" :key="index"><strong>{{ record.team }} · {{ label(record.state || 'unknown') }}</strong><p>{{ record.rationale }}</p><p v-if="record.justification">{{ justificationLabel(record.justification) }}</p><small>Historical assessor: {{ record.assessor || 'Unknown' }} · reviewer: {{ record.reviewer || 'Unknown' }}</small></div><p v-if="!claim.current_records.length">{{ claim.raw_text || claim.raw_excerpt || 'No interpretable assessment text.' }}</p><ul v-if="claim.errors.length"><li v-for="issue in claim.errors" :key="issue">{{ issue }}</li></ul><details><summary>Complete imported history, comments and score claims</summary><pre>{{ JSON.stringify(claim, null, 2) }}</pre></details></article></details>          </section>
+          <CvssVectorComparison v-show="detailTask === 'workflow' && tab !== 'history'" :key="`${project}:${version}:${selected.id}`" :entries="vectorEntries" />
           <section v-show="detailTask === 'tools'" class="finding-task" data-finding-task="tools" aria-label="Analysis tools"><h3 tabindex="-1">Analysis tools</h3><p class="hint">Prepare inputs and manage analysis jobs. Their results appear under Vulnerability analyses.</p>
           <KnowledgeSpecialists :key="`${me.id}:${project}:${version}:${selected.context_id}:${selected.vulnerability_id}`" :project="project" :state="workspace.state" :version="version" :finding="selected" @locked="analysisFollowUpLocked = $event" />
           </section>
@@ -521,78 +590,173 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeLeave);
           <KnowledgeComponentMetadata :key="`${me.id}:${project}:${version}:${selected.context.component_ref}`" :project="project" :state="workspace.state" :version="version" :component-ref="String(selected.context.component_ref || '')" :context-id="selected.context_id" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" @refresh="metadataChanged" />
           </section>
           <section v-show="detailTask === 'technical'" class="finding-task" data-finding-task="technical" aria-label="Technical provenance"><h3 tabindex="-1">Technical provenance &amp; imported history</h3>
-          <details v-if="selected.legacy_evidence?.length" class="knowledge-pane"><summary>Imported DT assessment history</summary><p class="hint">Historical team and author labels are source claims. These records do not establish current DTVP approval.</p><article v-for="claim in selected.legacy_evidence" :key="claim.id"><h3>{{ claim.source }} · {{ label(claim.status) }}</h3><p v-if="claim.conflicting" class="warning">Conflicting imported team conclusions require reconciliation.</p><div v-for="(record, index) in claim.current_records" :key="index"><strong>{{ record.team }} · {{ label(record.state || 'unknown') }}</strong><p>{{ record.rationale }}</p><p v-if="record.justification">{{ justificationLabel(record.justification) }}</p><small>Historical assessor: {{ record.assessor || 'Unknown' }} · reviewer: {{ record.reviewer || 'Unknown' }}</small></div><p v-if="!claim.current_records.length">{{ claim.raw_text || claim.raw_excerpt || 'No interpretable assessment text.' }}</p><ul v-if="claim.errors.length"><li v-for="issue in claim.errors" :key="issue">{{ issue }}</li></ul><details><summary>Complete imported history, comments and score claims</summary><pre>{{ JSON.stringify(claim, null, 2) }}</pre></details></article></details>          <div class="knowledge-pane"><details><summary>Source ratings and vectors</summary><ul><li v-for="(rating, index) in selected.source_ratings" :key="index">{{ ratingSource(rating) }} · {{ rating.method || 'Unspecified method' }} · {{ rating.score ?? 'Unknown score' }}<code>{{ rating.vector }}</code></li></ul></details><details><summary>Dependency and ownership evidence</summary><pre>{{ JSON.stringify(selected.context, null, 2) }}</pre></details><details v-if="selected.supplemental_component_evidence?.length"><summary>Supplemental component evidence ({{ selected.supplemental_component_evidence.length }})</summary><pre>{{ JSON.stringify(selected.supplemental_component_evidence, null, 2) }}</pre></details><details><summary>Raw source and analysis records</summary><pre>{{ JSON.stringify({ sourcefacts: selected.sourcefacts || [], code_analysis: selected.code_analysis || [], scoring_proposals: selected.scoring_proposals || [] }, null, 2) }}</pre></details><details><summary>Additional evidence</summary><pre>{{ JSON.stringify(selected.evidence || [], null, 2) }}</pre></details></div>          </section>
+          <div class="knowledge-pane"><details><summary>Source ratings and vectors</summary><ul><li v-for="(rating, index) in selected.source_ratings" :key="index">{{ ratingSource(rating) }} · {{ rating.method || 'Unspecified method' }} · {{ rating.score ?? 'Unknown score' }}<code>{{ rating.vector }}</code></li></ul></details><details><summary>Dependency and ownership evidence</summary><pre>{{ JSON.stringify(selected.context, null, 2) }}</pre></details><details v-if="selected.supplemental_component_evidence?.length"><summary>Supplemental component evidence ({{ selected.supplemental_component_evidence.length }})</summary><pre>{{ JSON.stringify(selected.supplemental_component_evidence, null, 2) }}</pre></details><details><summary>Raw source and analysis records</summary><pre>{{ JSON.stringify({ sourcefacts: selected.sourcefacts || [], code_analysis: selected.code_analysis || [], scoring_proposals: selected.scoring_proposals || [] }, null, 2) }}</pre></details><details><summary>Additional evidence</summary><pre>{{ JSON.stringify(selected.evidence || [], null, 2) }}</pre></details></div>          </section>
           <nav class="record-utilities" aria-label="Finding details"><button :aria-pressed="detailTask === 'tools'" :disabled="busy || metadataLocked || analysisFollowUpLocked" @click="showDetailTask('tools')">Analysis tools</button><button :aria-pressed="detailTask === 'component'" :disabled="busy || metadataLocked || analysisFollowUpLocked" @click="showDetailTask('component')">Component &amp; CPE details</button><button :aria-pressed="detailTask === 'technical'" :disabled="busy || metadataLocked || analysisFollowUpLocked" @click="showDetailTask('technical')">Technical provenance</button></nav>
           <footer class="knowledge-pagination"><button :disabled="busy || selectedIndex <= 0" @click="open(workspace.items[selectedIndex - 1]!)">Previous finding</button><button :disabled="busy || selectedIndex < 0 || selectedIndex >= workspace.items.length - 1" @click="open(workspace.items[selectedIndex + 1]!)">Next finding</button></footer>
         </section>
-      </div><details class="knowledge-state"><summary>State reference</summary><code>{{ workspace.state }}</code></details>
+      </div><details v-show="reviewVisible" class="knowledge-state"><summary>State reference</summary><code>{{ workspace.state }}</code></details>
     </template>
 
-    <div class="workspace-tool-menu" aria-label="Workspace tools">
-      <details data-tool-group="composition" class="workspace-tool-group" ref="compositionTools"><summary>Sources & teams</summary><div class="knowledge-tools">
-        <KnowledgeCreateProduct :key="me.id" :actor="me.id" :teams="me.workspaces" :disabled="busy || otherIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="productCreationLocked = $event" @created="onProductCreated" />
-        <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || intakeBusy || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
-        <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
-        <template v-if="workspace"><KnowledgeReconciliation :key="`${me.id}:${project}`" :project="project" :version="version" :state="workspace.state" @locked="correspondenceLocked = $event" @changed="load(true, true)" /></template>
-        <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
-        <KnowledgePipelineConfiguration class="knowledge-tool-group" v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :state="workspace?.state || ''" :disabled="busy || baseIntakeLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="pipelineConfigurationLocked = $event" @refresh="load(true, true)" />
-        <KnowledgeObservations v-if="project && version && workspace?.state" :key="`${me.id}:${project}:${version}`" :project="project" :version="version" :state="workspace.state" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="observationsLocked = $event" @refresh="load(true, true)" />
-        <template v-if="workspace"><KnowledgeSources :project="project" :version="version" :state="workspace.state" /></template>
-        <template v-if="workspace"><KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" /></template>
-      </div></details>
-      <details v-if="project" data-tool-group="intelligence" class="workspace-tool-group" ref="intelligenceTools"><summary>Evidence & integrations</summary><div class="knowledge-tools">
-        <KnowledgeScoringPolicy v-if="project" :editable="projectCapabilities.includes('manage')" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked || archiveLocked || correspondenceLocked || analysisFollowUpLocked || cpeLocked || advisoryLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingScore || !!pendingRequest" @locked="scoringPolicyLocked = $event" />
-        <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" @locked="cpeLocked = $event" />
-        <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
-        <KnowledgeSyncAutomation class="knowledge-tool-group" v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="syncAutomationLocked = $event" @refresh="load(true, true)" />
-        <template v-if="workspace"><KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" @locked="advisoryLocked = $event" /></template>
-      </div></details>
-      <details data-tool-group="reports" class="workspace-tool-group" ref="reportTools"><summary>Reports, licensing & history</summary>
-    <details class="knowledge-views"><summary>Saved views and sharing</summary><div class="knowledge-actions"><label>View name<input v-model="viewName" maxlength="100" placeholder="Save the applied scope"></label><button :disabled="busy || !project || !viewName.trim()" @click="saveView">Save view</button><button :disabled="busy || !project" @click="copyView">Copy view link</button></div><ul v-if="savedViews.length"><li v-for="view in savedViews" :key="view.name"><button :disabled="busy || intakeLocked" @click="restoreView(view.query)">{{ view.name }}</button><button :disabled="busy" :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></li></ul></details>
-<div class="knowledge-tools">
-        <KnowledgeComparison :project="project" />
-        <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
-        <template v-if="workspace"><KnowledgeComponents :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" /></template>
-        <template v-if="workspace"><KnowledgeRetained v-if="workspace.statistics.retained_absent_assessments" :project="project" :state="workspace.state" :team="team" /></template>
-        <template v-if="workspace"><KnowledgeLicenses :key="me.id" :project="project" :version="version" :state="workspace.state" @locked="licenseLocked = $event" @changed="load(true, true)" /></template>
-        <template v-if="workspace"><KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" /></template>
-        <template v-if="workspace"><KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" /></template>
-        <KnowledgeOrganizationPortfolio :key="me.id" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
-      </div></details>
+    <div ref="pageContainer" class="product-pages">
+    <section v-show="view === 'products' && !project" class="product-creation" aria-label="Create a product">
+      <div class="page-section">
+      <KnowledgeCreateProduct :key="me.id" :actor="me.id" :teams="me.workspaces" :disabled="busy || otherIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="productCreationLocked = $event" @created="onProductCreated" />
+      </div>
+      </section>
+
+
+<section v-show="view === 'products' && productView === 'Overview' && !!project" data-product-page="Overview" class="product-page" tabindex="-1" aria-label="Product overview">
+      <h2 tabindex="-1">Product overview</h2>
+      <p class="hint">Workload below follows the current queue filters. Source coverage is producer-declared; zero findings do not establish complete discovery.</p>
+      <div v-if="workspace" class="page-section">
+      <KnowledgePortfolio :project="project" :version="version" :state="workspace.state" :work-scope="workScope" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
+      </div>
+      <div class="page-section">
+      <KnowledgeOrganizationPortfolio :key="me.id" :work-scope="workScope" :filters="filters" :q="query" :lifecycle="lifecycle" :team="team" />
+      </div>
+      </section>
+      <section v-show="view === 'products' && productView === 'Components' && !!project" data-product-page="Components" class="product-page" tabindex="-1" aria-label="Components and dependencies">
+      <h2>Components and dependencies</h2>
+      <p class="hint">Browse declared identities, responsibility and consuming paths. Dependency edges do not prove runtime reachability.</p>
+      <div v-if="workspace" class="page-section">
+      <KnowledgeComponents :key="`${me.id}:${project}`" :project="project" :state="workspace.state" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore" @locked="metadataLocked = $event" @changed="metadataChanged" />
+      </div>
+      </section>
+      <div v-if="workspace" v-show="view === 'products' && productView === 'Components'" class="page-section">
+      <KnowledgeDependencyTree :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
+      </div>
+      <section v-show="view === 'products' && productView === 'Imports' && !!project" data-product-page="Imports" class="product-page" tabindex="-1" aria-label="Imports and source evidence">
+      <h2>Imports and source evidence</h2>
+      <p class="hint">Upload complete SBOMs or separate delivery parts; select assemblies explicitly. Inspect provenance, input limitations and reconciliation.</p>
+      <div class="page-section">
+      <KnowledgeIntake :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || assemblyLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="intakeBusy = $event" @imported="onCompositionImported" />
+      </div>
+      <div class="page-section">
+      <KnowledgeAssembly :key="`${me.id}:${project}`" :project="project" :version="version" :disabled="productCreationLocked || intakeBusy || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked" @locked="assemblyLocked = $event" @assembled="onCompositionImported" />
+      </div>
+      <div class="page-section">
+      <KnowledgeObservations v-if="project && version && workspace?.state" :key="`${me.id}:${project}:${version}`" :project="project" :version="version" :state="workspace.state" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || syncAutomationLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="observationsLocked = $event" @refresh="load(true, true)" />
+      </div>
+      <div v-if="workspace" class="page-section">
+      <KnowledgeReconciliation :key="`${me.id}:${project}`" :project="project" :version="version" :state="workspace.state" @locked="correspondenceLocked = $event" @changed="load(true, true)" />
+      </div>
+      <div v-if="workspace" class="page-section">
+      <KnowledgeInputQuality :key="`${me.id}:${project}`" :project="project" :state="workspace.state" />
+      </div>
+      <div class="page-section">
+      <KnowledgeEvidenceSources v-if="project" :key="`${me.id}:${project}`" :project="project" :state="workspace?.state || ''" @changed="load(true, true)" />
+      </div>
+      </section>
+      <section v-show="view === 'products' && productView === 'Versions' && !!project" data-product-page="Versions" class="product-page" tabindex="-1" aria-label="Versions and history">
+      <h2>Versions and history</h2>
+      <p class="hint">Compare pinned states, browse release tags and retained decisions, and propose synchronization explicitly.</p>
+      <div class="page-section">
+      <KnowledgeComparison :project="project" />
+      </div>
+      <div v-if="workspace" class="page-section">
+      <KnowledgeRetained v-if="workspace.statistics.retained_absent_assessments" :project="project" :state="workspace.state" :team="team" />
+      </div>
+      </section>
+      <section v-show="view === 'products' && productView === 'Licenses' && !!project" data-product-page="Licenses" class="product-page" tabindex="-1" aria-label="License review">
+      <h2>License review</h2>
+      <p class="hint">Source license claims and reviewed clearance decisions remain distinct.</p>
+      <div v-if="workspace" class="page-section">
+      <KnowledgeLicenses :key="me.id" :project="project" :version="version" :state="workspace.state" @locked="licenseLocked = $event" @changed="load(true, true)" />
+      </div>
+      </section>
+      <section v-show="view === 'products' && productView === 'Documents' && !!project" data-product-page="Documents" class="product-page" tabindex="-1" aria-label="Documents and approvals">
+      <h2>Documents and approvals</h2>
+      <p class="hint">Issued inputs, generated architecture documents, provenance and controlled approvals.</p>
+      <div v-if="workspace" class="page-section">
+      <KnowledgeDocuments :project="project" :version="version" :state="workspace.state" @changed="load(true, true)" />
+      </div>
+      </section>
+      <section v-show="view === 'products' && productView === 'Settings' && !!project" class="product-page" tabindex="-1" aria-label="Product settings">
+      <h2 tabindex="-1">Product settings</h2>
+      <p class="hint">Responsibility, source authority and access are separate. Available edits follow current permissions.</p>
+      <div class="product-settings-layout">
+      <nav aria-label="Product settings">
+      <button v-for="item in settingsViews" :key="item" :data-setting-view="item" :aria-current="settingsView === item ? 'page' : undefined" :disabled="navigationLocked" @click="navigateProduct('Settings', item)">{{ settingsLabels[item] }}</button>
+      </nav>
+      <div>
+      <section v-show="settingsView === 'Ownership'" data-product-page="Settings-Ownership" aria-label="Ownership settings">
+      <div class="page-section">
+      <KnowledgeOwnership v-if="project" :key="`${me.id}:${project}`" :project="project" @changed="load(true, true)" />
+      </div>
+      </section>
+      <section v-show="settingsView === 'Sources'" data-product-page="Settings-Sources" aria-label="Sources settings">
+      <div v-if="workspace" class="page-section">
+      <KnowledgeSources :project="project" :version="version" :state="workspace.state" />
+      </div>
+      <div v-if="workspace" class="page-section">
+      <KnowledgeAdvisories :key="`${me.id}:${project}`" :project="project" :state="workspace.state" @locked="advisoryLocked = $event" />
+      </div>
+      </section>
+      <section v-show="settingsView === 'Pipeline'" data-product-page="Settings-Pipeline" aria-label="Pipeline settings">
+      <div class="page-section">
+      <KnowledgePipelineConfiguration v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :state="workspace?.state || ''" :disabled="busy || baseIntakeLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="pipelineConfigurationLocked = $event" @refresh="load(true, true)" />
+      </div>
+      </section>
+      <section v-show="settingsView === 'Scoring'" data-product-page="Settings-Scoring" aria-label="Scoring settings">
+      <div class="page-section">
+      <KnowledgeScoringPolicy v-if="project" :editable="projectCapabilities.includes('manage')" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked || archiveLocked || correspondenceLocked || analysisFollowUpLocked || cpeLocked || advisoryLocked || pipelineConfigurationLocked || syncAutomationLocked || observationsLocked || bulkLocked || !!pendingScore || !!pendingRequest" @locked="scoringPolicyLocked = $event" />
+      </div>
+      </section>
+      <section v-show="settingsView === 'Identity'" data-product-page="Settings-Identity" aria-label="Identity settings">
+      <div class="page-section">
+      <KnowledgeCpePolicy v-if="project" :key="`${me.id}:${project}`" :project="project" @locked="cpeLocked = $event" />
+      </div>
+      </section>
+      <section v-show="settingsView === 'Automation'" data-product-page="Settings-Automation" aria-label="Automation settings">
+      <div class="page-section">
+      <KnowledgeSyncAutomation v-if="project" :key="`${me.id}:${project}`" :project="project" :actor="me.id" :disabled="busy || baseIntakeLocked || pipelineConfigurationLocked || observationsLocked || bulkLocked || !!pendingRequest || !!pendingScore" @locked="syncAutomationLocked = $event" @refresh="load(true, true)" />
+      </div>
+      </section>
+      <section v-show="settingsView === 'Sharing'" data-product-page="Settings-Sharing" aria-label="Product access settings">
+      <h3 tabindex="-1">Product access</h3>
+      <KnowledgeProductAccess :me="me" :project="project" :disabled="busy || bulkLocked || !!pendingRequest || !!pendingScore || (intakeLocked && !sharedAccessLocked)" @locked="sharedAccessLocked = $event" />
+      </section>
+      </div>
+      </div>
+      </section>
+<section v-show="view === 'maintenance'" data-product-page="Maintenance" class="product-page" tabindex="-1" aria-label="Assessment maintenance">
+      <h2>Assessment maintenance</h2>
+      <p class="hint">Inspect retained history and preview unused-assessment retirement. Publication remains explicit and permission controlled.</p>
+      <SearchSelect v-model="project" label="Maintenance product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="navigationLocked" @select="chooseProject" />
+      <div class="page-section">
+      <KnowledgeAssessmentArchive v-if="project" :key="`${me.id}:${project}`" :project="project" :disabled="busy || productCreationLocked || intakeBusy || assemblyLocked || metadataLocked || licenseLocked" @locked="archiveLocked = $event" @changed="load(true, true)" />
+      </div>
+      </section>
     </div>
   </section>
 </template>
 <style scoped>
-/* Existing panels stay mounted; only their direct disclosure roots join the toolbar. */
-.knowledge-tools { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr)); align-items:start; gap:8px; margin:12px 0; min-width:0 }
-.knowledge-tools:empty { display:none }
-.knowledge-tools > :deep(.knowledge-tool-group) { display:contents }
-.knowledge-composition-tools { display:grid; gap:8px; min-width:0 }
-.knowledge-composition-tools:has(> details[open]) { grid-column:1 / -1 }
-.knowledge-composition-tools > :deep(details) { margin:0; min-width:0; background:var(--surface) }
-.knowledge-workspace .knowledge-tools > :deep(details), .knowledge-workspace .knowledge-tools > :deep(.knowledge-tool-group > details) { margin:0; min-width:0; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface) }
-.knowledge-workspace .knowledge-tools > :deep(details[open]), .knowledge-workspace .knowledge-tools > :deep(.knowledge-tool-group > details[open]) { grid-column:1 / -1; padding:10px 12px }
-.knowledge-workspace .knowledge-tools > :deep(details > summary), .knowledge-workspace .knowledge-tools > :deep(.knowledge-tool-group > details > summary) { font-size:.82rem; line-height:1.4; overflow-wrap:anywhere; cursor:pointer }
-@media(max-width:550px) { .knowledge-tools { grid-template-columns:minmax(0,1fr) } }
+/* Native task components stay mounted across product destinations. */
 
 .knowledge-advanced,.knowledge-views { margin:12px 0; font-size:.85rem }.knowledge-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px 14px; margin-top:12px }.knowledge-advanced fieldset { border:0; margin:0; padding:0; min-width:0 }.knowledge-views ul { list-style:none; padding:0; display:flex; gap:8px; flex-wrap:wrap }.knowledge-views li { display:flex; gap:4px }.knowledge-views .knowledge-actions { justify-content:flex-start }.knowledge-views label { margin:8px 0 0; min-width:160px }
-.knowledge-heading,.knowledge-detail header,.knowledge-pagination,.knowledge-actions,.knowledge-score-pair,.knowledge-statistics { display:flex; align-items:center; gap:12px; flex-wrap:wrap }.knowledge-heading { justify-content:space-between; margin-bottom:16px }.knowledge-heading h1 { margin:0 }.knowledge-heading p { margin:4px 0 }.knowledge-filters { display:grid; grid-template-columns:minmax(160px,1.2fr) minmax(100px,.65fr) minmax(140px,1fr) minmax(140px,1fr) minmax(180px,1.5fr); gap:12px; align-items:end }.knowledge-filters label { margin:0 }.knowledge-statistics { margin:16px 0; font-size:.85rem; border-block:1px solid var(--line); padding:12px 0 }.knowledge-statistics details { margin-left:auto }.knowledge-statistics dl { position:absolute; z-index:2; background:var(--surface); padding:16px; border:1px solid var(--line); box-shadow:var(--shadow); right:24px; min-width:220px }.knowledge-columns { display:grid; gap:20px }.knowledge-queue,.knowledge-detail { min-width:0 }.knowledge-queue small { display:block; color:var(--muted); margin-top:4px }.knowledge-queue .selected { background:var(--accent-soft) }.knowledge-queue th { font-size:.8rem; white-space:nowrap }.knowledge-queue td { font-size:.85rem; vertical-align:top }.knowledge-detail { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:18px; align-self:start }.knowledge-detail header { justify-content:space-between; align-items:flex-start }.knowledge-detail h2 { margin:0; font-size:1.15rem }.knowledge-detail header p { margin:4px 0 }.knowledge-detail h3 { font-size:1rem }.knowledge-detail > .hint { margin:8px 0 }.knowledge-score-pair { font-size:.8rem; gap:22px; padding:10px 0 }.knowledge-tabs { display:flex; gap:6px; border-bottom:1px solid var(--line); padding-bottom:8px }.knowledge-tabs button { border:0; padding:5px 10px; text-transform:capitalize }.knowledge-tabs button[aria-pressed=true] { background:var(--accent-soft); color:var(--accent) }.knowledge-pane { padding-top:12px }.knowledge-pane fieldset { border:0; padding:0; margin:0; min-width:0 }.knowledge-pane details { margin:12px 0 }.knowledge-pane dl,.knowledge-statistics dl { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:.8rem }.knowledge-pane dd,.knowledge-statistics dd { margin:0; overflow-wrap:anywhere }.knowledge-pane dt { color:var(--muted) }.knowledge-overview h3{font-size:.84rem;margin:0 0 5px}.knowledge-overview .knowledge-description{margin-bottom:8px;max-height:26vh}.knowledge-description { white-space:pre-wrap; overflow-wrap:anywhere; max-height:38vh; overflow:auto; line-height:1.6; font-size:.9rem; margin-top:0 }.knowledge-rationale { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6 }.knowledge-pane pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto; font-size:.75rem; background:var(--bg); padding:10px }.knowledge-pane code { display:block; overflow-wrap:anywhere; font-size:.75rem }.knowledge-confirm { display:flex; align-items:flex-start; gap:8px; font-size:.85rem }.knowledge-confirm input { width:auto; margin-top:3px }.knowledge-actions { justify-content:flex-end; margin-top:12px }.knowledge-pagination { justify-content:space-between; margin-top:12px; font-size:.8rem }.knowledge-state { margin-top:16px; font-size:.75rem; color:var(--muted) }.knowledge-state code { overflow-wrap:anywhere }
+.knowledge-heading,.knowledge-detail header,.knowledge-pagination,.knowledge-actions,.knowledge-score-pair,.knowledge-statistics { display:flex; align-items:center; gap:12px; flex-wrap:wrap }.knowledge-heading { justify-content:space-between; margin-bottom:16px }.knowledge-heading h1 { margin:0 }.knowledge-heading p { margin:4px 0 }.knowledge-filters { display:grid; grid-template-columns:repeat(3,minmax(140px,1fr)) minmax(180px,1.5fr); gap:12px; align-items:end }.knowledge-filters label { margin:0 }.knowledge-statistics { margin:16px 0; font-size:.85rem; border-block:1px solid var(--line); padding:12px 0 }.knowledge-statistics details { margin-left:auto }.knowledge-statistics dl { position:absolute; z-index:2; background:var(--surface); padding:16px; border:1px solid var(--line); box-shadow:var(--shadow); right:24px; min-width:220px }.knowledge-columns { display:grid; gap:20px }.knowledge-queue,.knowledge-detail { min-width:0 }.knowledge-queue small { display:block; color:var(--muted); margin-top:4px }.knowledge-queue .selected { background:var(--accent-soft) }.knowledge-queue th { font-size:.8rem; white-space:nowrap }.knowledge-queue td { font-size:.85rem; vertical-align:top }.knowledge-detail { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:18px; align-self:start }.knowledge-detail header { justify-content:space-between; align-items:flex-start }.knowledge-detail h2 { margin:0; font-size:1.15rem }.knowledge-detail header p { margin:4px 0 }.knowledge-detail h3 { font-size:1rem }.knowledge-detail > .hint { margin:8px 0 }.knowledge-score-pair { font-size:.8rem; gap:22px; padding:10px 0 }.knowledge-tabs { display:flex; gap:6px; border-bottom:1px solid var(--line); padding-bottom:8px }.knowledge-tabs button { border:0; padding:5px 10px; text-transform:capitalize }.knowledge-tabs button[aria-pressed=true] { background:var(--accent-soft); color:var(--accent) }.knowledge-pane { padding-top:12px }.knowledge-pane fieldset { border:0; padding:0; margin:0; min-width:0 }.knowledge-pane details { margin:12px 0 }.knowledge-pane dl,.knowledge-statistics dl { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:.8rem }.knowledge-pane dd,.knowledge-statistics dd { margin:0; overflow-wrap:anywhere }.knowledge-pane dt { color:var(--muted) }.knowledge-overview h3{font-size:.84rem;margin:0 0 5px}.knowledge-overview .knowledge-description{margin-bottom:8px;max-height:26vh}.knowledge-description { white-space:pre-wrap; overflow-wrap:anywhere; max-height:38vh; overflow:auto; line-height:1.6; font-size:.9rem; margin-top:0 }.knowledge-rationale { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6 }.knowledge-pane pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto; font-size:.75rem; background:var(--bg); padding:10px }.knowledge-pane code { display:block; overflow-wrap:anywhere; font-size:.75rem }.knowledge-confirm { display:flex; align-items:flex-start; gap:8px; font-size:.85rem }.knowledge-confirm input { width:auto; margin-top:3px }.knowledge-actions { justify-content:flex-end; margin-top:12px }.knowledge-pagination { justify-content:space-between; margin-top:12px; font-size:.8rem }.knowledge-state { margin-top:16px; font-size:.75rem; color:var(--muted) }.knowledge-state code { overflow-wrap:anywhere }
 @media(max-width:1100px) { .knowledge-filters { grid-template-columns:repeat(2,minmax(0,1fr)) }.knowledge-search { grid-column:1/-1 }.knowledge-columns.has-detail { grid-template-columns:1fr } }@media(max-width:550px) { .knowledge-filters { grid-template-columns:1fr }.knowledge-statistics { gap:8px 16px }.knowledge-detail { padding:12px }.knowledge-queue th,.knowledge-queue td { padding:8px 5px } }
 
 
 .finding-back{display:inline-flex;margin-bottom:10px}.assessment-task-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}.assessment-task-layout>*{min-width:0}.assessment-task-evidence{border-right:1px solid var(--line);padding-right:20px}.assessment-task-evidence .knowledge-description{max-height:240px;font-size:.9rem}.assessment-task-evidence>h3,.assessment-editor>h3{font-size:1rem;margin:0 0 10px}.assessment-citations{margin:14px 0!important}.assessment-citations legend{font-size:.9rem;font-weight:600}.assessment-citations label{margin:7px 0;font-size:.85rem}.assessment-version,.draft-indicator{padding:8px;background:var(--accent-soft);border-radius:4px;font-size:.85rem}.assessment-editor .knowledge-actions{position:static;background:var(--surface);padding:10px 0;z-index:2;border-top:1px solid var(--line)}.knowledge-tabs{flex-wrap:wrap}.knowledge-tabs button{font-size:.9rem}.assessment-task-decision .knowledge-pane{padding-top:0}
 @media(max-width:1100px){.finding-open .knowledge-queue{display:none}.finding-open .finding-back{display:inline-flex}.finding-open>.knowledge-filters,.finding-open>.knowledge-advanced{display:none}}
-@container finding (max-width:820px){.assessment-task-layout{grid-template-columns:minmax(0,1fr)}.assessment-task-evidence{padding-right:0;border-right:0;padding-bottom:12px;border-bottom:1px solid var(--line)}}
+@container finding (max-width:760px){.assessment-task-layout{grid-template-columns:minmax(0,1fr)}.assessment-task-evidence{padding-right:0;border-right:0;padding-bottom:12px;border-bottom:1px solid var(--line)}}
 
-.knowledge-workspace{min-width:0}.knowledge-heading{margin-bottom:10px;gap:8px;padding:0;min-height:0;background:none;border:0}.knowledge-heading h1{font-size:1.3rem}.knowledge-heading p{font-size:.78rem}.knowledge-filters{gap:8px;padding:10px;border:1px solid var(--line);background:var(--surface);border-radius:6px}.knowledge-statistics{margin:10px 0;padding:8px 0;gap:8px 18px}.knowledge-queue .table-wrap{margin-bottom:6px}.knowledge-queue td,.knowledge-queue th{padding:8px 10px}.knowledge-queue small{margin-top:2px}.knowledge-pagination{margin-top:6px}.workspace-tool-menu{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;align-items:start}.workspace-tool-group{flex:1 1 210px;margin:0;border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:8px 10px;min-width:0}.workspace-tool-group>summary{font-size:.8rem;margin:0}.workspace-tool-group[open]{flex-basis:100%}.workspace-tool-group[open]>summary{margin-bottom:10px}.knowledge-advanced{margin:8px 0}.knowledge-advanced summary{font-size:.8rem}.knowledge-advanced-grid{gap:8px}.knowledge-detail{padding:12px}.knowledge-detail header{min-height:0;padding:0;border:0;background:none}.knowledge-columns{gap:12px}@media(max-width:550px){.knowledge-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.knowledge-search{grid-column:1/-1}.workspace-tool-menu{gap:6px}.workspace-tool-group{flex-basis:100%}}
+.knowledge-workspace{min-width:0;container-type:inline-size;container-name:workspace}.knowledge-heading{margin-bottom:10px;gap:8px;padding:0;min-height:0;background:none;border:0}.knowledge-heading h1{font-size:1.3rem}.knowledge-heading p{font-size:.78rem}.knowledge-filters{gap:8px;padding:10px;border:1px solid var(--line);background:var(--surface);border-radius:6px}.knowledge-statistics{margin:10px 0;padding:8px 0;gap:8px 18px}.knowledge-queue .table-wrap{margin-bottom:6px}.knowledge-queue td,.knowledge-queue th{padding:8px 10px}.knowledge-queue small{margin-top:2px}.knowledge-pagination{margin-top:6px}.knowledge-advanced{margin:8px 0}.knowledge-advanced summary{font-size:.8rem}.knowledge-advanced-grid{gap:8px}.knowledge-detail{padding:12px}.knowledge-detail header{min-height:0;padding:0;border:0;background:none}.knowledge-columns{gap:12px}@media(max-width:550px){.knowledge-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.knowledge-search{grid-column:1/-1}}
 
 /* Keep identifiers and comparison scores readable beside a wider reviewer workspace. */
-.knowledge-columns.has-detail{grid-template-columns:minmax(290px,340px) minmax(0,1fr)}.review-queue-table{table-layout:fixed;width:100%}.queue-check{width:36px}.queue-team{width:112px}.queue-score{width:78px}.review-queue-table td{overflow-wrap:anywhere;word-break:normal}.review-queue-table th{white-space:normal;overflow-wrap:normal;word-break:normal}.review-queue-table .text-link{max-width:100%;white-space:normal;text-align:left;overflow-wrap:anywhere}.review-queue-table small{white-space:normal;overflow-wrap:anywhere}.review-queue-table td:nth-last-child(-n+2){font-variant-numeric:tabular-nums}.knowledge-detail{min-width:0}.knowledge-detail header>div{min-width:0;flex:1}.knowledge-detail header h2,.knowledge-detail header p{overflow-wrap:anywhere;white-space:normal}.knowledge-detail .knowledge-pane{min-width:0}@media(max-width:1100px){.knowledge-columns.has-detail{grid-template-columns:1fr}}@media(max-width:550px){.queue-team{width:85px}.queue-score{width:64px}.queue-check{width:28px}.review-queue-table th,.review-queue-table td{padding:7px 5px;font-size:.75rem}}
+.knowledge-columns.has-detail{grid-template-columns:minmax(290px,320px) minmax(0,1fr)}.review-queue-table{table-layout:fixed;width:100%}.queue-check{width:36px}.queue-team{width:112px}.queue-score{width:78px}.review-queue-table td{overflow-wrap:anywhere;word-break:normal}.review-queue-table th{white-space:normal;overflow-wrap:normal;word-break:normal}.review-queue-table .text-link{max-width:100%;white-space:normal;text-align:left;overflow-wrap:anywhere}.review-queue-table small{white-space:normal;overflow-wrap:anywhere}.review-queue-table td:nth-last-child(-n+2){font-variant-numeric:tabular-nums}.knowledge-detail{min-width:0}.knowledge-detail header>div{min-width:0;flex:1}.knowledge-detail header h2,.knowledge-detail header p{overflow-wrap:anywhere;white-space:normal}.knowledge-detail .knowledge-pane{min-width:0}@media(max-width:1100px){.knowledge-columns.has-detail{grid-template-columns:1fr}}@media(max-width:550px){.queue-team{width:85px}.queue-score{width:64px}.queue-check{width:28px}.review-queue-table th,.review-queue-table td{padding:7px 5px;font-size:.75rem}}
 
 
 .knowledge-detail{container-type:inline-size;container-name:finding;padding:20px;overflow-wrap:anywhere}.finding-header{gap:12px;margin-bottom:16px}.finding-header h2{font-size:1.4rem}.finding-header-actions{display:flex;gap:8px;flex-wrap:wrap}.knowledge-detail header>.finding-header-actions{flex:0 1 auto}.finding-status{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px}.finding-status>div{border-left:3px solid var(--line);padding:4px 10px;min-width:0}.finding-status span{font-size:.8rem;color:var(--muted)}.finding-status strong{display:block;font-size:1rem;line-height:1.6;text-transform:capitalize}.finding-status small{font-size:.78rem}.finding-status .source-status{border-color:var(--source-accent)}.source-status.severity-critical strong{color:var(--danger)}.source-status.severity-high strong{color:var(--warning)}.finding-status .published-status{border-color:var(--accent)}.finding-status .status-approved{border-color:var(--positive)}.status-approved strong{color:var(--positive)}.finding-status .status-attention{border-color:var(--warning)}.status-attention strong{color:var(--warning)}.knowledge-tabs{padding-bottom:10px;margin-bottom:18px;gap:4px}.knowledge-tabs button{padding:7px 10px}.overview-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:24px}.overview-grid>*{min-width:0}.knowledge-overview{padding:0}.knowledge-overview h3,.usage-context h3{font-size:1rem;margin:0 0 10px}.knowledge-overview .knowledge-description{max-height:300px;font-size:1rem;line-height:1.65}.usage-context{padding-top:18px;border-top:1px solid var(--line);margin-top:18px}.usage-context h3 small{display:inline;font-weight:400}.usage-context dl{font-size:.9rem;line-height:1.5}.record-utilities{display:flex;flex-wrap:wrap;gap:8px;border-top:1px solid var(--line);padding-top:14px;margin-top:18px}.record-utilities button{color:var(--muted);font-size:.85rem}.record-utilities button[aria-pressed=true]{color:var(--accent);background:var(--accent-soft)}.finding-task{padding:4px 0 12px;min-width:0}.finding-task>h3{margin-top:0}.compact-queue{list-style:none;margin:0;padding:0}.compact-queue li{padding:12px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.compact-queue li:last-child{border:0}.compact-queue .text-link{text-align:left}.compact-queue input{float:right;width:auto;margin:3px}.compact-queue small{line-height:1.45;font-size:.85rem;margin:5px 0}.queue-ratings{display:flex;gap:12px;flex-wrap:wrap;font-size:.8rem;margin-top:8px;color:var(--muted)}.queue-ratings strong{color:var(--ink)}.knowledge-queue .knowledge-pagination{font-size:.8rem;gap:6px}.knowledge-queue .knowledge-pagination button{padding:5px 7px}.finding-task :deep(details){min-width:0}.finding-task :deep(input),.finding-task :deep(select){min-width:0;max-width:100%}
-@container finding (max-width:820px){.overview-grid{grid-template-columns:minmax(0,1fr);gap:20px}.overview-inputs{border-top:1px solid var(--line);padding-top:12px}}
+@container finding (max-width:760px){.overview-grid{grid-template-columns:minmax(0,1fr);gap:20px}.overview-inputs{border-top:1px solid var(--line);padding-top:12px}}
 @container finding (max-width:500px){.finding-status{grid-template-columns:minmax(0,1fr);gap:10px}.finding-status>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:8px}.finding-status small{grid-column:1/-1}.finding-status strong{font-size:.95rem}.knowledge-tabs button{font-size:.85rem}.assessment-task-evidence{padding-right:0}}
 @media(max-width:550px){.knowledge-detail{padding:14px}.finding-header-actions{width:100%}.finding-header-actions .primary{flex:1}}
 @media(min-width:1101px){.has-detail>.knowledge-queue{position:sticky;top:12px;align-self:start}.has-detail>.knowledge-queue .table-wrap{max-height:max(240px,calc(100dvh - 370px));overflow-y:auto;scrollbar-gutter:stable}}
+</style>
+
+<style scoped>
+.product-context{display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,220px);gap:12px;margin:14px 0;max-width:650px}.product-context>*{min-width:0}.product-navigation{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:18px 0;flex-wrap:wrap}.product-navigation button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 12px;color:var(--muted)}.product-navigation button[aria-current=page]{border-bottom-color:var(--accent);color:var(--accent);background:var(--accent-soft)}.mobile-product-navigation{display:none}.product-breadcrumb{font-size:.8rem;color:var(--muted);margin:0 0 6px}.product-breadcrumb button{font-size:inherit}.product-page{min-width:0;margin:20px 0}.product-page>h2{font-size:1.2rem;margin-bottom:6px}.page-section{min-width:0;margin:14px 0}.page-section>:deep(details){border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--surface);margin:0}.page-section>:deep(details>summary){font-size:1rem}.page-section>:deep(details[open]>summary){margin-bottom:14px}.product-settings-layout{display:grid;grid-template-columns:200px minmax(0,1fr);gap:24px;margin-top:20px}.product-settings-layout>nav{display:grid;gap:4px;align-content:start}.product-settings-layout>nav button{justify-content:flex-start;text-align:left;border:0}.product-settings-layout>nav button[aria-current=page]{background:var(--accent-soft);color:var(--accent)}.product-settings-layout>div{min-width:0}.work-queues{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.team-scope-label{font-size:.87rem;margin:0;align-self:center;color:var(--muted)}.team-scope-label strong{display:block;color:var(--ink);margin-top:6px}.my-work-summary{margin:20px 0}.product-creation{margin:20px 0}.product-creation .page-section{max-width:720px}.knowledge-views{padding:10px 0}.knowledge-views>summary{font-size:.85rem}.product-context .search-select{min-width:0}.knowledge-filters :deep(.search-select){min-width:0}
+@container workspace (max-width:1100px){.knowledge-columns.has-detail{grid-template-columns:minmax(0,1fr)}.finding-open .knowledge-queue{display:none}.finding-open .finding-back{display:inline-flex}.knowledge-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.knowledge-search{grid-column:auto}}
+@media(max-width:760px){.product-context{grid-template-columns:minmax(0,1fr) minmax(100px,.6fr)}.product-navigation{display:none}.mobile-product-navigation{display:grid;max-width:420px;margin:14px 0}.product-settings-layout{grid-template-columns:minmax(0,1fr);gap:10px}.product-settings-layout>nav{display:flex;gap:6px;flex-wrap:wrap}.product-settings-layout>nav button{font-size:.85rem}.page-section>:deep(details){padding:12px}.knowledge-filters{grid-template-columns:minmax(0,1fr)}.team-scope-label{margin-bottom:10px}}
 </style>

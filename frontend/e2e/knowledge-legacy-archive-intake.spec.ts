@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), raw = Buffer.from([80,75,3,4,0,255,10,13,42]), archive = sha('a'), entry = sha('b'), digest = sha('c'), policy = sha('d'), evidence = sha('e')
 async function fixture(page: Page, options: { statuses?: number[]; previewStatuses?: number[]; total?: number; pending?: boolean; personas?: boolean; hold?: boolean } = {}) {
@@ -22,7 +22,7 @@ async function fixture(page: Page, options: { statuses?: number[]; previewStatus
       if (item.header) return route.fulfill({ json: { preview_digest: digest, archive_sha256: archive, source_entry_id: entry, target: { project_id: 'product', version: 'migrated', source: 'Legacy reviewed', build_number: 1 }, statistics: { native_source_observations: 2, unresolved_source_records: 1, native_assessments: 0, native_reviews: 0, native_scoring_records: 0, inventory_components: 3 }, coverage: { findings: { exact_source_uuid_refs: 1, unresolved: 1, ambiguous: 0 } }, losses: ['source_authorship_team_and_approval_unverified'], disclosure: { audience: 'project_readers', retains_submitted_sanitized_zip: true, retained_member_count: 5 }, limitations: ['Historical evidence is not a native approval.'] } })
       return route.fulfill({ json: { archive_sha256: archive, preview_digest: sha('f'), items: [{ source_entry_id: entry, entry_index: 1, counts: { findings: 2, assessments: 1 }, normalization: { status: 'supported' }, losses: ['assessment_comments_may_have_been_stripped'], member_pins: { bom: { sha256: sha('9'), bytes: 100 } } }], total: options.total || 1, next_offset: null, limitations: [] } })
     }
-    let data: unknown = { items: [], next_cursor: null, next_offset: null }
+    let data: unknown = { items: [], capabilities: [], next_cursor: null, next_offset: null }
     if (path === '/api/v1/me') data = { id: actor, name: actor, org_admin: false, playground: !!options.personas, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = options.personas ? [{ id: 'author', name: 'author' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
@@ -35,7 +35,8 @@ async function fixture(page: Page, options: { statuses?: number[]; previewStatus
   })
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.locator('.knowledge-intake > summary').click(); await page.getByText('Reviewed v1 archive', { exact: true }).click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.locator('.knowledge-intake > summary')); await page.getByText('Reviewed v1 archive', { exact: true }).click()
   const panel = page.getByRole('region', { name: 'Reviewed v1 archive intake' })
   await panel.getByLabel('Sanitized v1 ZIP', { exact: true }).setInputFiles({ name: 'reviewed.zip', mimeType: 'application/zip', buffer: raw })
   await panel.getByRole('button', { name: 'Inspect sanitized archive', exact: true }).click()

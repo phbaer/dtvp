@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const before = 'a'.repeat(64), after = 'b'.repeat(64), historic = 'c'.repeat(64)
@@ -24,7 +24,7 @@ async function fixture(page: Page, options: { draftAllowed?: boolean; draftRespo
       return route.fulfill({ status, json: { updates: [{ target: updatedAfter }] } })
     }
     if (request.method() !== 'GET') { mutations.push(path); return route.fulfill({ json: {} }) }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'comparison-project', name: 'Comparison product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: after }], next_offset: null }
@@ -66,7 +66,8 @@ test('comparison stays collapsed and renders backend totals with pinned bounded 
   const state = await fixture(page)
   await expect(page.getByLabel('Historical state comparison')).not.toBeVisible()
   expect(state.requests).toHaveLength(0)
-  await page.getByText('Compare versions and history', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Compare versions and history', { exact: true }))
   const comparison = page.getByLabel('Historical state comparison')
   await expect(comparison.getByRole('combobox', { name: 'Before state', exact: true })).toHaveValue(`branch:7.1.1:${before}`)
   await comparison.getByRole('button', { name: 'Compare states', exact: true }).click()
@@ -91,7 +92,8 @@ test('comparison stays collapsed and renders backend totals with pinned bounded 
 
 test('release tags and historical imports stay explicit and a changed selection clears results', async ({ page }) => {
   const state = await fixture(page)
-  await page.getByText('Compare versions and history', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Compare versions and history', { exact: true }))
   const comparison = page.getByLabel('Historical state comparison')
   await comparison.getByRole('combobox', { name: 'Before state', exact: true }).selectOption(`tag:released-7.1.1:${historic}`)
   await comparison.getByRole('button', { name: 'Compare states', exact: true }).click()
@@ -113,7 +115,8 @@ test('release tags and historical imports stay explicit and a changed selection 
 test('comparison failures stay visible without inventing changes or overflowing a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const state = await fixture(page)
-  await page.getByText('Compare versions and history', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Compare versions and history', { exact: true }))
   const comparison = page.getByLabel('Historical state comparison')
   state.fail()
   await comparison.getByRole('button', { name: 'Compare states', exact: true }).click()
@@ -127,7 +130,8 @@ test('comparison failures stay visible without inventing changes or overflowing 
 
 test('assessment reuse is a pinned read-only preview with new target review required', async ({ page }) => {
   const state = await fixture(page)
-  await page.getByText('Compare versions and history', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Compare versions and history', { exact: true }))
   await page.getByText('Assessment reuse between selected states', { exact: true }).click()
   await page.getByRole('button', { name: 'Preview assessment reuse', exact: true }).click()
   const preview = page.getByRole('region', { name: 'Assessment reuse preview', exact: true })
@@ -142,7 +146,8 @@ test('assessment reuse is a pinned read-only preview with new target review requ
 })
 
 async function openDraft(page: Page) {
-  await page.getByText('Compare versions and history', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Compare versions and history', { exact: true }))
   await page.getByText('Assessment reuse between selected states', { exact: true }).click()
   await page.getByRole('button', { name: 'Preview assessment reuse', exact: true }).click()
   await page.getByText('CVE-2099-1234 · reusable content', { exact: true }).click()
@@ -207,7 +212,8 @@ test('changing draft content after an uncertain response uses a new request iden
 test('attributed license evidence changes show canonical occurrence and source without claiming composition or approval changes', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const state = await fixture(page, { observation: true })
-  await page.getByText('Compare versions and history', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Compare versions and history', { exact: true }))
   const comparison = page.getByLabel('Historical state comparison')
   await comparison.getByRole('button', { name: 'Compare states', exact: true }).click()
   await expect(comparison.getByLabel('Comparison totals')).toContainText('observation evidence: 1')
@@ -222,7 +228,8 @@ test('attributed license evidence changes show canonical occurrence and source w
 
 test('nightly source provenance changes do not inflate material evidence totals', async ({ page }) => {
   const state = await fixture(page, { provenanceOnly: true })
-  await page.getByText('Compare versions and history', { exact: true }).click()
+  await openProductView(page, 'Versions')
+  await openDisclosure(page.getByText('Compare versions and history', { exact: true }))
   const comparison = page.getByLabel('Historical state comparison')
   await comparison.getByRole('button', { name: 'Compare states', exact: true }).click()
   await expect(comparison.getByLabel('Comparison totals')).toContainText('0 changes')

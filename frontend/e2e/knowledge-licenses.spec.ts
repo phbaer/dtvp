@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 const initial = 'a'.repeat(64), advanced = 'b'.repeat(64), revision = 'c'.repeat(64)
@@ -15,7 +15,7 @@ async function fixture(page: Page, capabilities: string[], alreadySubmitted = fa
       submitted = path.endsWith('/submit') || submitted; state = advanced
       return route.fulfill({ status: 201, json: { state, committed: true, projection } })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Team', capabilities: ['read'] }] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'License product', capabilities: ['read', ...capabilities] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.1', state }], next_offset: null }
@@ -30,7 +30,8 @@ async function fixture(page: Page, capabilities: string[], alreadySubmitted = fa
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'License product' }).click()
-  await page.getByText('License evidence and review', { exact: true }).click()
+  await openProductView(page, 'Licenses')
+  await openDisclosure(page.getByText('License evidence and review', { exact: true }))
   const panel = page.getByRole('region', { name: 'License evidence and review' })
   await expect(panel.getByLabel('License component total')).toHaveText('21 components in this pinned state')
   await panel.getByRole('button', { name: /^Library / }).click()

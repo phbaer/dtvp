@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const a = 'a'.repeat(64), b = 'b'.repeat(64), head = 'c'.repeat(64)
 const declarations = [{ relationship_id: 'application-container', kind: 'DEPENDS_ON', from: { part_id: 'application', state: a, ref: 'root-a' }, to: { part_id: 'container', state: b, ref: 'root-b' }, rationale: 'Explicit integration relationship' }]
@@ -27,7 +27,8 @@ async function fixture(page: Page, hold?: 'preview' | 'apply') {
   })
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Assembly product', exact: true }).click()
-  await page.locator('.knowledge-assembly > summary').click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.locator('.knowledge-assembly > summary'))
   const panel = page.getByRole('region', { name: 'Product assembly editor' })
   await panel.getByRole('button', { name: 'Inspect assembly target', exact: true }).click()
   return { panel, writes, release: () => release?.() }

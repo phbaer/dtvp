@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (value: string) => value.repeat(64), state = sha('a'), configuration = sha('b'), observation = sha('c')
 async function fixture(page: Page, writable = true) {
@@ -16,7 +16,7 @@ async function fixture(page: Page, writable = true) {
       if (path.endsWith('/preview')) return route.fulfill({ json: { project_id: 'product', version: '7.1.2', expected: wrongPreview ? sha('9') : state, configuration, preview_digest: sha('e'), human_decisions_changed: false, reports: [{ source: 'scanner', part_id: null, bounded_sample: true, report: { summary: { matched_occurrences: 5, field_conflicts: 1, topology_proposals: 2 }, component_proposals: [{ ref: 'extra-library' }], topology_proposals: [] } }] } })
       return route.fulfill({ json: { committed: true, projection: 'current' } })
     }
-    let data: unknown = { items: [], next_offset: null }
+    let data: unknown = { items: [], capabilities: [], next_offset: null }
     if (path === '/api/v1/me') data = { id: actor, name: actor, playground: true, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }]
     else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
@@ -30,9 +30,10 @@ async function fixture(page: Page, writable = true) {
   })
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
+  await openProductView(page, 'Imports')
   return { writes, fail: (value: boolean) => { failed = value }, wrongPreview: () => { wrongPreview = true }, changeListing: () => { changedListing = true }, hold: () => { held = true }, release: () => release?.() }
 }
-async function panel(page: Page) { await page.getByText('SBOM observations and reconciliation', { exact: true }).click(); const result = page.getByRole('region', { name: 'SBOM observations and reconciliation', exact: true }); await expect(result).toContainText('21 source bindings'); return result }
+async function panel(page: Page) { await openDisclosure(page.getByText('SBOM observations and reconciliation', { exact: true })); const result = page.getByRole('region', { name: 'SBOM observations and reconciliation', exact: true }); await expect(result).toContainText('21 source bindings'); return result }
 test('read-only observations show retained source provenance and consistent paging', async ({ page }) => {
   const f = await fixture(page, false), view = await panel(page)
   await expect(view.getByLabel('Observation selection JSON')).toHaveCount(0)
@@ -61,10 +62,10 @@ test('uncertain selection publication retries exact captured request and preview
   await expect(view.getByRole('alert')).toContainText('Exact apply request and preview retained')
   await expect(view.getByLabel('Observation selection JSON')).toBeDisabled()
   await expect(view.getByRole('button', { name: 'Refresh observation sources' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeDisabled()
-  await page.getByText('Import composition', { exact: true }).click()
+  await expect(page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('button', { name: 'Products', exact: true })).toBeDisabled()
+  await openDisclosure(page.getByText('Import composition', { exact: true }))
   await expect(page.getByLabel('Product version (existing or new)', { exact: true })).toBeDisabled()
-  await page.getByText('Assemble product version', { exact: true }).click()
+  await openDisclosure(page.getByText('Assemble product version', { exact: true }))
   await expect(page.getByLabel('Assembly version (existing or new)', { exact: true })).toBeDisabled()
   f.fail(false); await view.getByRole('button', { name: 'Retry identical observation publication', exact: true }).click()
   expect(f.writes[2]!.body).toEqual(f.writes[1]!.body)

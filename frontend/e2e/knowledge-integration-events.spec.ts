@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 const sha = (char: string) => char.repeat(64), target = sha('b'), source = sha('a'), eventId = sha('c'), digest = sha('d')
 async function fixture(page: Page, personas = false) {
@@ -16,7 +16,7 @@ async function fixture(page: Page, personas = false) {
       const later = url.searchParams.get('offset') === '20'
       return route.fulfill({ json: { integration_event: event(), basis_selection: body.basis ? 'explicit' : 'none_no_inferred_common_basis', apply_supported: false, limitations: ['No automatic draft or approval transfer.'], proposals: { source, target: body.target, basis: body.basis, preview_digest: digest, total: 21, next_offset: later ? null : 20, summary: { by_category: { needs_review: 21 } }, items: [{ id: later ? 'second' : 'first', category: 'needs_review', vulnerability_id: later ? 'CVE-2099-43' : 'CVE-2099-42', source_context_id: sha('1'), target_context_id: sha('2'), reasons: ['material_context_or_source_evidence_differs'], requires_new_target_review: true }], limitations: ['New target review is required.'] } } })
     }
-    let data: unknown = { items: [], next_cursor: null, next_offset: null }
+    let data: unknown = { items: [], capabilities: [], next_cursor: null, next_offset: null }
     if (path === '/api/v1/me') data = { id: actor, name: actor, playground: personas, org_admin: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
     else if (path.endsWith('/playground/personas')) data = personas ? [{ id: 'person', name: 'person' }, { id: 'other', name: 'other' }] : []
     else if (path === '/api/v1/catalog/projects') data = { items: [{ id: 'product', name: 'Product' }], next_cursor: null }
@@ -29,7 +29,8 @@ async function fixture(page: Page, personas = false) {
   })
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click(); await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.getByText('Occurrence correspondence across imports', { exact: true }).click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.getByText('Occurrence correspondence across imports', { exact: true }))
   const panel = page.getByRole('region', { name: 'Pipeline integration evidence', exact: true })
   return { panel, reads, posts, fail: (code: number) => { failure = code }, advance: () => { head = sha('9') }, hold: () => { hold = true }, release: () => release?.() }
 }

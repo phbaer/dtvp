@@ -11,11 +11,12 @@ This README is the canonical project overview. See the
 [design decisions](docs/rewrite-plan.md) and
 [DevSecOps concept and critical review](docs/devsecops-evidence-concept.md).
 The [UI review and proposed structure](docs/ui-review.md) and
-[interactive wireframe](docs/ui-proposal.html) describe a proposed navigation and
-workflow redesign, including automatic My teams work scope and a focused
+[interactive wireframe](docs/ui-proposal.html) describe the navigation and
+workflow design, including automatic My teams work scope and a focused
 [assessment preview](docs/ui-proposal.html#assessment) with v1-style CVSS vector
 comparison. The assessment workspace and vector comparison are integrated into
-Review; the broader navigation and automatic My teams scope remain proposals.
+the product vulnerability workspace. Left navigation, product destinations and
+server-filtered My teams work scope are implemented.
 Prototype record links also work when the prototype is already open.
 The [screenshot-based usability review](docs/ui-review.md#screenshot-review-hierarchy-before-additional-panels)
 and [revised vulnerability mockup](docs/vulnerability-proposal.html) explain the
@@ -56,23 +57,38 @@ Selectors support namespace/name separation, case sensitivity, PURLs and optiona
 product-version limits. Identity reconciliation preserves provenance and exposes
 ambiguous matches rather than silently merging distinct usage contexts.
 
-Workspace and portfolio reads support server-filtered responsibility views:
-`all`, `my_teams`, `unassigned` and `conflicts`. My teams derives from current
-assessment/review memberships and credential restrictions, before statistics and
-pagination. CLI workspace/portfolio commands accept `--work-scope`. Sharing grants
-remain separate from responsibility. Authorized product readers can inspect the
-owner and current sharing grants; only managers can change them.
-
 ## Native workflow
 
-The application has one native **Review** workspace. Searchable product/version
-selectors, team and status filters, scope statistics and a compact work queue lead
+The left navigation separates **My work**, **Products**, **Activity** and authorized
+**Administration**. Products has a searchable catalog. Each selected product has
+Overview, Vulnerabilities, Components, Imports, Versions, Licenses, Documents and
+Settings destinations. Configuration lives under Settings: component ownership,
+source connections, pipeline, scoring policy, CPE identity policy, automation and
+product access. Administration manages team membership, consumer credentials and
+explicit maintenance. Mobile uses a collapsible menu and product-view selector.
+
+My work defaults analysts/reviewers to their current assessment/review teams;
+coordinators/managers default to all accessible teams. Responsibility views do not
+grant access or decision permission. My teams, all accessible teams, unassigned and
+conflicting ownership scopes filter server statistics before pagination. Counts
+separate context cases from unique vulnerabilities; overlapping team workloads are
+not additive. My work lists actual product/version queues and review workload.
+The CLI exposes the same scope through `knowledge workspace --work-scope my_teams`
+and `knowledge portfolio --work-scope my_teams`, with the required product/version
+arguments. Product browsing retains the existing explicit team filters.
+
+Searchable product/version selectors, status filters and a compact work queue lead
 to contextual assessment, independent review and coordinator scoring. Source and
-published severity remain visible together. Expandable evidence and advanced tools
-support detailed analysis without filling the ordinary review view.
-System, light and dark themes are available. Dark mode uses warm charcoal surfaces,
-cream text and Catppuccin-inspired mauve accents; System follows the same palette
-when the operating system prefers dark mode.
+published severity remain visible together. Product destinations retain mounted
+editors and session drafts; captured changes lock navigation until resolved.
+Activity navigation preserves the current workspace. Explicit actor changes discard
+old actor views and pending callbacks.
+
+System, light and dark themes are available. Dark mode uses neutral charcoal
+surfaces and restrained blue accents, complementary to the light scheme. System
+follows the same palette when the operating system prefers dark mode. Controls keep
+thin, stable borders on hover; hover uses a subtle background change. Keyboard
+focus retains a clear outline.
 
 All finding tabs retain the same wider pane and compact results rail on desktop.
 The rail distinguishes component, consuming root, team/status and labelled
@@ -85,7 +101,7 @@ and team assessment, with a role-appropriate action. Overview starts with descri
 and usage beside advisory/analysis evidence when pane width permits. **Assessment**,
 **Independent review** and **Coordinator scoring** retain evidence beside decisions
 on sufficiently wide panes and stack on narrower panes. Assessment actions stay in
-form flow. Teal identifies sources, peach analyses, rose critical source severity,
+form flow. Teal identifies sources, amber analyses, red critical source severity,
 amber revalidation and green actual approval; labels carry the same meaning.
 
 The v1-style **CVSS vectors** comparison aligns source ratings, external proposals,
@@ -123,7 +139,8 @@ and analysis results visible, followed by the compact vector comparison. Depende
 paths remain directly accessible in context. **Analysis tools** opens VScorer input
 files, Agentyzer repository input and jobs; **Component & CPE details** opens identity
 evidence, candidate discovery and annotation editing; **Technical provenance** holds
-raw records, supplementary evidence and imported DT assessment history. These named
+raw records and supplementary evidence. **History** shows retained assessment
+revisions and imported DT assessment history. These named
 task views share the record frame and remain mounted across workflow tabs. Opening
 them does not prepare inputs or submit jobs. Pending follow-ups and annotation edits
 keep navigation locked with their exact captured inputs reachable.
@@ -381,9 +398,10 @@ and `--json` for structured output. Depth is bounded at 20; pages contain at mos
 prints continuation offsets and state pins. Counts are distinct imported IDs on
 each component, not descendant totals or approvals.
 
-In **Review**, expand **Dependency tree** above the queue. It loads lazily for the
-selected immutable state, independently of queue filters; collapse branches,
-expand nodes, browse subtrees or load additional siblings in place. Shared dependencies, cycles,
+Open a product’s **Components** destination for the **Dependency tree**. It loads
+the selected immutable state independently of vulnerability queue filters; branches
+start collapsed. Expand nodes,
+browse subtrees or load additional siblings in place. Shared dependencies, cycles,
 missing component metadata and unavailable graph declarations remain explicit.
 API: `GET /api/v1/projects/{id}/states/{state}/dependency-tree`.
 

@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 const sha = (value: string) => value.repeat(64)
@@ -25,7 +25,7 @@ async function fixture(page: Page, readonly = false, empty = false) {
       evidence = sha('e'); head = sha('c'); if (path.endsWith('/withdrawals')) active = false
       return route.fulfill({ status: 201, json: {} })
     }
-    let result: unknown = { items: [], next_cursor: null }
+    let result: unknown = { items: [], capabilities: [], next_cursor: null }
     if (path === '/api/v1/me') result = { id: 'person', name: 'Person', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [{ id: 'team', name: 'Platform', capabilities: ['read'] }] }
     else if (path === '/api/v1/catalog/projects') result = { items: [{ id: 'product', name: 'Product', workspace_id: 'team', capabilities: ['read'] }], next_cursor: null }
     else if (path.endsWith('/versions')) result = { items: empty ? [] : [{ version: '7.1.1', state: head }] }
@@ -36,7 +36,8 @@ async function fixture(page: Page, readonly = false, empty = false) {
   await page.goto('/?page=Review'); await openNativeTools(page)
   await page.getByRole('button', { name: 'Product scope', exact: false }).click()
   await page.getByRole('option', { name: 'Product', exact: true }).click()
-  await page.getByText('VDR, VEX and advisory evidence files', { exact: true }).click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.getByText('VDR, VEX and advisory evidence files', { exact: true }))
   const panel = page.getByLabel('Evidence source files', { exact: true })
   await expect(panel).toContainText('22 retained evidence documents')
   return { panel, writes, previews, reads, fail: (code: number) => { failure = code }, mismatch: () => { wrongHash = true }, advance: () => { head = sha('9'); evidence = sha('8') } }
