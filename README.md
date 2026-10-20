@@ -48,8 +48,14 @@ There is no required object-storage service or separate search service.
   component removal, corrected imports or branch updates. Explicit retention
   maintenance previews reachability before any offline cleanup.
 
-A project belongs to a workspace; explicit sharing grants control access across
-teams in one organization. Component responsibility is separate from access.
+A product has a **product owner team** (`Project.workspace_id`): its administrative
+home and access-governance boundary. **Component owner teams** are assigned
+independently through versioned component-ownership rules; they assess and review
+their assigned consuming contexts. A component owner can differ from the product
+owner, and one product can involve several component owner teams. Product ownership
+does not implicitly assign unowned components or override their assessments.
+Memberships and explicit sharing grants provide the required cross-team access;
+component assignment alone grants no permissions.
 Teams own selected components and dependencies recursively; a more specific
 team-owned subtree delegates responsibility to that team. Shared dependencies used
 under distinct consuming roots retain separate assessment contexts.

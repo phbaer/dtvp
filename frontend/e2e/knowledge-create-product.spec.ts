@@ -1,4 +1,4 @@
-import { openNativeTools } from './nativeTools'
+import { openNativeTools, openProductView, openDisclosure } from './nativeTools'
 import { expect, test, type Page } from '@playwright/test'
 
 async function fixture(page: Page, options: { readonly?: boolean; failure?: boolean; hold?: boolean; personas?: boolean } = {}) {
@@ -36,8 +36,8 @@ test('native-only manager can create a product and proceed directly to compositi
   const { panel, writes, reads } = await fixture(page)
   await expect(panel).toBeVisible()
   await prepare(panel)
-  await expect(panel.getByLabel('Owning team').getByRole('option')).toHaveCount(1)
-  await expect(panel.getByLabel('Owning team')).toHaveValue('team')
+  await expect(panel.getByLabel('Product owner team').getByRole('option')).toHaveCount(1)
+  await expect(panel.getByLabel('Product owner team')).toHaveValue('team')
   await expect(page.getByRole('button', { name: 'Product scope', exact: false })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Activity', exact: true })).toBeDisabled()
   await panel.getByRole('button', { name: 'Create product', exact: true }).click()
@@ -47,7 +47,8 @@ test('native-only manager can create a product and proceed directly to compositi
   expect(reads.some(path => path.includes('/new-product/versions'))).toBe(true)
   expect(reads.some(path => path.includes('/releases') || path.includes('/findings'))).toBe(false)
   await expect(page.getByRole('button', { name: 'Activity', exact: true })).toBeEnabled()
-  await page.locator('.knowledge-intake > summary').click()
+  await openProductView(page, 'Imports')
+  await openDisclosure(page.locator('.knowledge-intake > summary'))
   await expect(page.getByRole('button', { name: 'Inspect target', exact: true })).toBeVisible()
 })
 

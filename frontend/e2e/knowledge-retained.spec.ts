@@ -61,7 +61,7 @@ test('retained pagination stays pinned and team or state changes restart the ser
   await expect(retained.getByLabel('Retained assessment total')).toContainText('41')
   expect(state.reads.map(read => [read.path.includes(firstState), read.query.get('offset')])).toEqual([[true, '0'], [true, '20']])
   await openProductView(page, 'Vulnerabilities')
-  await page.getByRole('combobox', { name: 'Responsible team', exact: true }).selectOption('team-a')
+  await page.getByRole('combobox', { name: 'Component owner team', exact: true }).selectOption('team-a')
   await openProductView(page, 'Versions')
   await expect(retained.getByLabel('Retained assessment total')).toHaveText('1 retained assessments in this scope')
   expect(state.reads.at(-1)?.query.get('team_id')).toBe('team-a')

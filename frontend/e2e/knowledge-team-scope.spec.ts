@@ -27,25 +27,25 @@ async function fixture(page: Page, teams: string[], query = '') {
 
 test('single analyst team is the initial scope and explicit all-team scope survives reload', async ({ page }) => {
   const queries = await fixture(page, ['Platform'])
-  await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('Platform')
+  await expect(page.getByRole('combobox', { name: /^Component owner team/ })).toHaveValue('Platform')
   expect(queries.at(-1)!.get('team_id')).toBe('Platform')
-  await page.getByRole('combobox', { name: /^Responsible team/ }).selectOption('')
-  await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('')
+  await page.getByRole('combobox', { name: /^Component owner team/ }).selectOption('')
+  await expect(page.getByRole('combobox', { name: /^Component owner team/ })).toHaveValue('')
   await expect.poll(() => new URL(page.url()).searchParams.get('k_team')).toBe('')
   await page.reload()
   await expect(page.getByLabel('Filtered workspace statistics')).toBeVisible()
-  await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('')
+  await expect(page.getByRole('combobox', { name: /^Component owner team/ })).toHaveValue('')
   expect(queries.at(-1)!.get('team_id')).toBeNull()
 })
 
 test('multiple analyst teams require explicit scope instead of guessing one', async ({ page }) => {
   const queries = await fixture(page, ['Platform', 'Operations'])
-  await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('')
+  await expect(page.getByRole('combobox', { name: /^Component owner team/ })).toHaveValue('')
   expect(queries.at(-1)!.get('team_id')).toBeNull()
 })
 
 test('an explicit shared view overrides the single-team default', async ({ page }) => {
   const queries = await fixture(page, ['Platform'], '&k_project=product&k_version=1&k_team=')
-  await expect(page.getByRole('combobox', { name: /^Responsible team/ })).toHaveValue('')
+  await expect(page.getByRole('combobox', { name: /^Component owner team/ })).toHaveValue('')
   expect(queries.at(-1)!.get('team_id')).toBeNull()
 })

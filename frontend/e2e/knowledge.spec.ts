@@ -85,7 +85,7 @@ test('server-scoped team labels display and filter without adding memberships an
   const statistics = page.getByLabel('Filtered workspace statistics', { exact: true })
   await statistics.getByText('Breakdown', { exact: true }).click()
   await expect(statistics).toContainText('Product cybersecurity')
-  const teams = page.getByRole('combobox', { name: 'Responsible team', exact: true })
+  const teams = page.getByRole('combobox', { name: 'Component owner team', exact: true })
   await teams.selectOption(team.id)
   await expect.poll(() => workspaceQueries.at(-1)?.get('team_id')).toBe(team.id)
   await page.getByRole('searchbox', { name: 'Search', exact: true }).fill('no matching findings')

@@ -108,7 +108,7 @@ test('Product access exposes grants to readers and reviews exact management retr
   })
   await page.goto('/?page=Products&k_project=p&k_view=Settings&k_setting=Sharing')
   const access = page.getByRole('region', { name: 'Product access and sharing' })
-  await expect(access.getByText('Owner workspace: Owner')).toBeVisible()
+  await expect(access.getByText('Product owner team: Owner')).toBeVisible()
   await access.getByLabel('Share with team').selectOption('team')
   await access.getByRole('button', { name: 'Review sharing update' }).click()
   expect(captured).toEqual([])

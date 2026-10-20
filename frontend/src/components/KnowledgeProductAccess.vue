@@ -50,10 +50,10 @@ onBeforeUnmount(() => { ++generation; emit('locked', false) })
 </script>
 <template>
   <section class="panel" aria-label="Product access and sharing">
-    <h2>Product access and sharing</h2><p class="hint">Team memberships and explicit grants control access. Component ownership describes responsibility.</p>
+    <h2>Product access and sharing</h2><p class="hint">The product owner team administers the product. Component owner teams assess their assigned component subtrees. Memberships and sharing grants control access separately.</p>
     <p v-if="busy" role="status">{{ captured ? 'Updating product sharing…' : 'Loading product access…' }}</p>
     <p v-if="error" role="alert" class="warning">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
-    <template v-if="access"><p>Owner workspace: <strong>{{ access.owner.name }}</strong></p>
+    <template v-if="access"><p>Product owner team: <strong>{{ access.owner.name }}</strong></p>
       <div v-if="access.grants.length" class="table-wrap"><table><thead><tr><th>Shared team workspace</th><th>Granted capabilities</th></tr></thead><tbody><tr v-for="grant in access.grants" :key="grant.workspace_id"><td>{{ grant.workspace_name }}</td><td>{{ grant.capabilities.length ? grant.capabilities.join(', ') : 'No granted access' }}</td></tr></tbody></table></div>
       <p v-else>No explicit sharing grants.</p>
       <p v-if="!canManage" class="hint">You can inspect sharing. Product management permission is required to change it.</p>

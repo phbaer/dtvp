@@ -15,7 +15,7 @@ describe('product access', () => {
   it('shows authorized ownership and grants without reader write controls', async () => {
     request.mockResolvedValue({ ...access, capabilities: [] })
     const { host } = mount()
-    await vi.waitFor(() => expect(host.textContent).toContain('Owner workspace: Owner'))
+    await vi.waitFor(() => expect(host.textContent).toContain('Product owner team: Owner'))
     expect(host.textContent).toContain('Other team'); expect(host.querySelector('select')).toBeNull()
     expect(host.textContent).toContain('management permission is required')
     expect(request).toHaveBeenCalledWith('/projects/product/sharing')

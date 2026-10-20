@@ -60,7 +60,7 @@ onBeforeUnmount(() => { ++sequence; emit('locked', false) })
     <summary>Add product</summary>
     <form aria-label="Create product" @submit.prevent="create">
       <fieldset :disabled="busy || disabled || !!attempted">
-        <label>Owning team<select v-model="team"><option v-for="item in eligible" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+        <label>Product owner team<select v-model="team"><option v-for="item in eligible" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
         <label>Product name<input v-model="name" required maxlength="200" autocomplete="off"></label>
         <button :disabled="!name.trim() || !team">Create product</button>
       </fieldset>
