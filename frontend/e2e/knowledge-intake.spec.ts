@@ -24,7 +24,7 @@ async function fixture(page: Page, options: { existing?: boolean; connector?: bo
     else if (path.endsWith('/versions')) result = { items: options.existing || imported ? [{ version: imported ? 'new-version' : '7.1.1', state: imported ? next : first }] : [], next_offset: null }
     else if (path.endsWith('/workspace')) result = { state: imported ? next : first, project_id: 'product', version: imported ? 'new-version' : '7.1.1', items: [], next_offset: null, statistics: { totals: { context_findings: 0, unique_vulnerabilities: 0 }, by_status: {}, by_team: {}, severity: {}, recorded: 0, submitted: 0, approved: 0 } }
     else if (path.endsWith('/intake-parts')) result = { items: [{ part_id: 'container', state: first }], total: 1, next_offset: null }
-    else if (path.endsWith('/intake-target')) result = { project_id: 'product', version: url.searchParams.get('version'), part_id: url.searchParams.get('part_id'), kind: url.searchParams.has('part_id') ? 'part' : 'product', state: options.existing ? first : null, scope_template: options.existing ? { subject_kind: 'build', target: 'delivery', platform: 'linux', configuration: 'prod' } : {}, source_authority: options.connector ? 'connector' : options.existing ? 'file' : 'unassigned', blocked_reasons: options.connector ? ['connector_owned_source_requires_explicit_authority_policy_to_replace_with_file'] : [], baseline: { source: options.existing ? 'CI:files' : null, build_number: options.existing ? 1 : null, occurred_at: null, collection: null }, capabilities: options.readonly || options.connector ? [] : ['import'], max_upload_bytes: 100000, formats: ['CycloneDX 1.5/1.6 JSON/XML', 'SPDX 2.3 JSON'] }
+    else if (path.endsWith('/intake-target')) result = { project_id: 'product', version: url.searchParams.get('version'), part_id: url.searchParams.get('part_id'), kind: url.searchParams.has('part_id') ? 'part' : 'product', state: options.existing ? first : null, scope_template: options.existing ? { subject_kind: 'build', target: 'delivery', platform: 'linux', configuration: 'prod' } : {}, defaults: { source: options.existing ? 'CI:files' : 'file:upload', build_number: options.existing ? 2 : 1, occurred_at: '2026-10-20T10:00:00Z', completeness: 'complete' }, source_authority: options.connector ? 'connector' : options.existing ? 'file' : 'unassigned', blocked_reasons: options.connector ? ['connector_owned_source_requires_explicit_authority_policy_to_replace_with_file'] : [], baseline: { source: options.existing ? 'CI:files' : null, build_number: options.existing ? 1 : null, occurred_at: null, collection: null }, capabilities: options.readonly || options.connector ? [] : ['import'], max_upload_bytes: 100000, formats: ['CycloneDX 1.5/1.6 JSON/XML', 'SPDX 2.3 JSON'] }
     await route.fulfill({ json: result })
   })
   await page.goto('/?page=Review'); await openNativeTools(page)
@@ -44,6 +44,7 @@ async function target(page: Page, version = 'new-version', part = false) {
 async function prepare(page: Page, existing = false) {
   const panel = page.getByRole('region', { name: 'Native composition intake' })
   await panel.getByLabel('Original SBOM file', { exact: true }).setInputFiles({ name: 'fixture.cdx.json', mimeType: 'application/json', buffer: Buffer.from(raw) })
+  await panel.getByText('Advanced import metadata', { exact: true }).click()
   if (!existing) await panel.getByLabel('Source identity', { exact: true }).fill('CI:files')
   await panel.getByLabel('Source sequence', { exact: true }).fill('2')
   await panel.getByLabel('Observed at (ISO 8601 with timezone)', { exact: true }).fill('2026-10-16T12:00:00+02:00')
@@ -104,4 +105,21 @@ test('connector ownership and read permissions withhold manual file mutation', a
   await expect(state.panel).toContainText('File replacement requires an explicit authority policy')
   await expect(state.panel.getByLabel('Original SBOM file', { exact: true })).toHaveCount(0)
   expect(state.writes).toHaveLength(0)
+})
+
+
+test('a new product imports with default metadata and retains it across an uncertain retry', async ({ page }) => {
+  const state = await fixture(page, { statuses: [503, 201] })
+  await target(page)
+  await state.panel.getByLabel('Original SBOM file', { exact: true }).setInputFiles({ name: 'default.cdx.json', mimeType: 'application/json', buffer: Buffer.from(raw) })
+  await state.panel.getByRole('checkbox', { name: 'Replace this exact source baseline with the complete document.' }).check()
+  await state.panel.getByRole('button', { name: 'Review captured import', exact: true }).click()
+  const commit = state.panel.getByRole('button', { name: 'Commit captured import', exact: true })
+  await commit.click()
+  await expect(state.panel.getByRole('alert')).toContainText('Captured bytes, metadata and request ID are retained')
+  await commit.click()
+  await expect(state.panel).toContainText('Product baseline imported')
+  expect(state.writes[0]!.metadata).toMatchObject({ expected: null, source: 'file:upload', build_number: 1, completeness: 'complete' })
+  expect(Number.isFinite(Date.parse(state.writes[0]!.metadata.occurred_at as string))).toBe(true)
+  expect(state.writes[1]).toEqual(state.writes[0])
 })

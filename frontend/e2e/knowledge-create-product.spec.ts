@@ -47,6 +47,7 @@ test('native-only manager can create a product and proceed directly to compositi
   expect(reads.some(path => path.includes('/new-product/versions'))).toBe(true)
   expect(reads.some(path => path.includes('/releases') || path.includes('/findings'))).toBe(false)
   await expect(page.getByRole('button', { name: 'Activity', exact: true })).toBeEnabled()
+  await expect(page.getByRole('navigation', { name: 'Product', exact: true }).getByRole('button', { name: 'Imports', exact: true })).toHaveAttribute('aria-current', 'page')
   await openProductView(page, 'Imports')
   await openDisclosure(page.locator('.knowledge-intake > summary'))
   await expect(page.getByRole('button', { name: 'Inspect target', exact: true })).toBeVisible()

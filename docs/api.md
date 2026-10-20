@@ -38,6 +38,12 @@ does not establish responsibility. These views do not change review/scoring gate
 management capability. `PUT` changes a grant only with management permission;
 reading grants never grants permission to modify them.
 
+File intake target inspection (`GET /projects/{id}/intake-target?version=...`,
+optionally `part_id`) includes `defaults`: current source or `file:upload`, next
+sequence and current UTC time. UI/CLI resolve defaults before publication and retain
+complete metadata across retries. Mutation metadata remains explicit, so defaults
+never change during receipt replay. Generated upload time is not producer evidence.
+
 ## Main resources
 
 | Resource | Contract |

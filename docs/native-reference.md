@@ -478,6 +478,18 @@ viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Routine file intake
+
+New UI products open Imports directly. Routine uploads need a product version,
+file and complete-baseline confirmation. Advanced metadata is optional: target
+inspection supplies the current file source or `file:upload`, next sequence (1 for
+a new source) and current UTC time. UI preparation and CLI upload freeze resolved
+metadata and state pins with exact bytes. Automatic sequence/time describe import
+ordering/preparation, not verified producer build evidence. `import-file --metadata`
+is optional; CLI diagnostics expose the resolved metadata for explicit exact retry.
+Connector and assembled-source authority restrictions still apply. UTF-8 XML BOMs
+are recognized without rewriting retained original bytes.
+
 ### Workspace tools
 
 The left navigation separates My work, Products, Activity and authorized

@@ -1,5 +1,7 @@
 """Read-only native file intake targets, including projects without a baseline."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Query, Request
 
 from dtvp.api import DB, Auth, project_for
@@ -56,6 +58,12 @@ def target(journal, project_id, version, part_id=None):
         "kind": "part" if part_id else "product",
         "state": state,
         "source_authority": owner,
+        "defaults": {
+            "source": source or "file:upload",
+            "build_number": (baseline.get("build_number") or 0) + 1,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "completeness": "complete",
+        },
         "blocked_reasons": reasons,
         "scope_template": CollectionContext.model_validate(
             baseline.get("collection") or {}

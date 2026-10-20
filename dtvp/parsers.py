@@ -62,7 +62,7 @@ def parse(raw: bytes) -> dict:
 
 
 def _parse(raw: bytes) -> dict:
-    if raw.lstrip().startswith(b"<"):
+    if raw.removeprefix(b"\xef\xbb\xbf").lstrip().startswith(b"<"):
         value = cdx_xml(raw)
         result = cdx(value)
         result["format"] = "cyclonedx-xml"

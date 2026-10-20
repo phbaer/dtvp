@@ -324,9 +324,22 @@ historical imports and assessments:
 
 ```sh
 uv run dtvp knowledge --persona analyst import-file \
-  --project "Device Platform" --version 7.2.0 --file bom.json --metadata import.json
+  --project "Device Platform" --version 7.2.0 --file bom.json
 ```
 
+No metadata file is needed for routine file imports. The backend's target inspection
+supplies the current file source (or `file:upload`), next sequence (starting at 1)
+and current time. UI and CLI capture those values once with a request ID and exact
+state pin. Generated times describe upload preparation, not verified CI observation;
+generated sequences are import ordering, not a claimed CI build number. In the UI,
+creating a product opens Imports; source, sequence and timestamp overrides live under
+**Advanced import metadata**. UTF-8 BOM-prefixed CycloneDX XML is recognized while
+original bytes remain retained.
+
+Use optional `--metadata import.json` for producer metadata or an exact retry.
+When defaults are filled, the CLI prints the complete captured metadata to stderr;
+reuse that JSON with the same file after an uncertain response. Concurrent baseline
+changes require fresh target inspection, rather than silently retargeting an upload.
 For example, `import.json`:
 
 ```json

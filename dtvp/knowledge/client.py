@@ -359,8 +359,7 @@ def configure(parser):
     upload.add_argument("--file", required=True)
     upload.add_argument(
         "--metadata",
-        required=True,
-        help="JSON metadata file with request ID and optional expected head",
+        help="Optional JSON overrides; defaults use the current source, next sequence and upload time",
     )
 
 
@@ -1095,7 +1094,7 @@ def run(args):
         if args.knowledge_command in {"import-file", "document-register", "evidence-import"}:
             from urllib.parse import quote
 
-            metadata_text = Path(args.metadata).read_text()
+            metadata_text = Path(args.metadata).read_text() if args.metadata else "{}"
             metadata = json.loads(metadata_text)
             if not isinstance(metadata, dict):
                 raise ValueError("Upload metadata must be a JSON object")
@@ -1115,6 +1114,35 @@ def run(args):
                     project_id = project["id"]
                     if project["created"]:
                         print(f"Created product {project['name']} ({project_id})", file=sys.stderr)
+                    if any(
+                        key not in metadata for key in ("source", "build_number", "occurred_at")
+                    ):
+                        params = {"version": args.version}
+                        if args.part:
+                            params["part_id"] = args.part
+                        target = read_response(
+                            client.get(
+                                f"{API_PREFIX}/projects/{quote(project_id, safe='')}/intake-target",
+                                params=params,
+                            )
+                        )
+                        if "import" not in target["capabilities"]:
+                            raise ValueError(
+                                "File import unavailable: " + ", ".join(target["blocked_reasons"])
+                            )
+                        metadata = {**target["defaults"], "expected": target["state"], **metadata}
+                    if "request_id" not in metadata:
+                        from uuid import uuid4
+
+                        metadata["request_id"] = str(uuid4())
+                    metadata.setdefault("completeness", "complete")
+                    if not args.metadata or metadata != json.loads(metadata_text):
+                        metadata_text = json.dumps(metadata)
+                        print(
+                            "Captured import metadata (reuse with --metadata for an exact retry): "
+                            + metadata_text,
+                            file=sys.stderr,
+                        )
                 path = f"{API_PREFIX}/projects/{quote(project_id, safe='')}"
                 if args.knowledge_command == "evidence-import":
                     path += "/evidence/files" + ("/preview" if args.preview else "")

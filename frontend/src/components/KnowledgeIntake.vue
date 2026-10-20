@@ -3,7 +3,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import KnowledgeLegacyArchiveIntake from './KnowledgeLegacyArchiveIntake.vue'
 import { knowledgeApi } from '../knowledgeApi'
 
-type Target = { project_id: string; version: string; part_id: string | null; kind: 'product' | 'part'; state: string | null; source_authority: string; scope_template?: Record<string, unknown>; blocked_reasons: string[]; baseline: { source: string | null; build_number: number | null; occurred_at: string | null; collection: unknown }; capabilities: string[]; max_upload_bytes: number; formats: string[] }
+type Target = { defaults: { source: string; build_number: number; occurred_at: string; completeness: 'complete' }; project_id: string; version: string; part_id: string | null; kind: 'product' | 'part'; state: string | null; source_authority: string; scope_template?: Record<string, unknown>; blocked_reasons: string[]; baseline: { source: string | null; build_number: number | null; occurred_at: string | null; collection: unknown }; capabilities: string[]; max_upload_bytes: number; formats: string[] }
 type Frozen = { project: string; version: string; part: string; metadata: Record<string, unknown>; raw: Uint8Array<ArrayBuffer>; filename: string; sha: string }
 const props = defineProps<{ project: string; version: string; disabled?: boolean }>()
 const emit = defineEmits<{ locked: [value: boolean]; imported: [value: { version: string; part_id: string | null }] }>()
@@ -40,7 +40,7 @@ async function inspect() {
     if (mode.value === 'part') query.set('part_id', part.value.trim())
     const result = await knowledgeApi<Target>(`${base()}/intake-target?${query}`)
     if (current !== sequence) return
-    target.value = result; source.value = result.baseline.source || ''; context.value = result.state && result.scope_template ? JSON.stringify(result.scope_template, null, 2) : ''; await suggestions()
+    target.value = result; source.value = result.defaults.source; build.value = String(result.defaults.build_number); observed.value = result.defaults.occurred_at; context.value = result.state && result.scope_template ? JSON.stringify(result.scope_template, null, 2) : ''; await suggestions()
   } catch (value) { if (current === sequence) error.value = message(value) }
   finally { if (current === sequence) busy.value = false }
 }
@@ -51,10 +51,11 @@ async function prepare() {
   busy.value = true; error.value = ''; setNativeLock(true)
   try {
     if (original.size > chosen.max_upload_bytes) throw new Error('File exceeds the server upload limit.')
-    const number = Number(build.value), time = observed.value.trim()
-    if (!/^\d+$/.test(build.value) || !Number.isSafeInteger(number)) throw new Error('Source sequence requires a nonnegative safe integer.')
+    const nextBuild = build.value.trim() || String(chosen.defaults.build_number)
+    const number = Number(nextBuild), time = observed.value.trim() || chosen.defaults.occurred_at
+    if (!/^\d+$/.test(nextBuild) || !Number.isSafeInteger(number)) throw new Error('Source sequence requires a nonnegative safe integer.')
     if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(time) || !Number.isFinite(Date.parse(time))) throw new Error('Observed time requires ISO 8601 with an explicit timezone.')
-    const fields: Record<string, unknown> = { request_id: crypto.randomUUID(), expected: chosen.state, source: chosen.baseline.source || source.value.trim(), build_number: number, occurred_at: time, completeness: 'complete' }
+    const fields: Record<string, unknown> = { request_id: crypto.randomUUID(), expected: chosen.state, source: chosen.baseline.source || source.value.trim() || chosen.defaults.source, build_number: number, occurred_at: time, completeness: 'complete' }
     if (context.value.trim()) { const value: unknown = JSON.parse(context.value); if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Collection scope must be a JSON object.'); fields.context = value }
     if (!chosen.state && predecessor.value.trim()) fields.predecessor = predecessor.value.trim()
     const raw = new Uint8Array(await original.arrayBuffer()), hash = await crypto.subtle.digest('SHA-256', raw)
@@ -100,15 +101,17 @@ onBeforeUnmount(() => { ++sequence; clearTimeout(timer); setNativeLock(false) })
       <p v-if="busy" role="status">Working…</p><p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
       <template v-if="target">
         <p>{{ target.state ? 'Existing source baseline' : 'New source baseline' }} · {{ target.version }}<span v-if="target.part_id"> · part {{ target.part_id }}</span> · authority: {{ target.source_authority }}</p>
-        <p v-if="target.baseline.build_number != null">Last accepted source sequence: {{ target.baseline.build_number }}. Enter the actual next source sequence; retries keep the original value.</p>
+        <p v-if="target.baseline.build_number != null">Last accepted source sequence: {{ target.baseline.build_number }}. The next import sequence is filled automatically.</p>
         <ul v-if="target.blocked_reasons.length"><li v-for="reason in target.blocked_reasons" :key="reason">{{ ({ assembled_product_requires_explicit_part_selection_not_baseline_replacement: 'This product is assembled. Import a source part, then select it explicitly when assembling.', connector_owned_source_requires_explicit_authority_policy_to_replace_with_file: 'This source is connector-owned. File replacement requires an explicit authority policy; it cannot be changed here.', reserved_product_version_name: 'Product version names beginning with @ are reserved.' } as Record<string, string>)[reason] || reason.replaceAll('_', ' ') }}</li></ul>
         <p v-else-if="!target.capabilities.includes('import')">Your current permissions allow viewing this target only.</p>
         <form v-if="target.capabilities.includes('import') && !frozen" aria-label="Prepare composition import" @submit.prevent="prepare"><fieldset :disabled="busy || disabled">
           <label>Original SBOM file<input :key="inputKey" type="file" required accept=".json,.xml,.cdx,.spdx" @change="selectedFile"></label>
           <p class="hint">{{ target.formats.join(' · ') }}. Upload limit: {{ target.max_upload_bytes }} bytes.</p>
-          <label>Source identity<input v-model="source" required maxlength="200" :readonly="!!target.baseline.source" placeholder="Stable pipeline or file-source name"></label>
-          <label>Source sequence<input v-model="build" required inputmode="numeric"></label>
-          <label>Observed at (ISO 8601 with timezone)<input v-model="observed" required placeholder="2026-10-16T10:00:00Z"></label>
+          <details><summary>Advanced import metadata</summary><p class="hint">Defaults use the current file source, the next import sequence and upload preparation time. This time is not a verified CI build timestamp. Override these when the producer supplies them.</p>
+          <label>Source identity<input v-model="source" maxlength="200" :readonly="!!target.baseline.source" placeholder="Stable pipeline or file-source name"></label>
+          <label>Source sequence<input v-model="build" inputmode="numeric"></label>
+          <label>Observed at (ISO 8601 with timezone)<input v-model="observed" placeholder="Defaults to upload preparation time"></label>
+          </details>
           <details><summary>Collection scope and branch predecessor</summary><p class="hint">Optional typed collection JSON records producer claims; it does not verify source, build or discovery completeness. Existing boundary fields are prefilled; previous commits, build digests, runs and coverage claims are not reused. Leave other fields unknown unless supported by this import.</p><label>Collection scope JSON<textarea v-model="context" rows="5" placeholder='{"subject_kind":"build","collector":"CI"}' /></label><label>Predecessor state (new versions only)<input v-model="predecessor" maxlength="64" :disabled="!!target.state"></label><details v-if="target.baseline.collection"><summary>Previously declared collection scope</summary><pre>{{ JSON.stringify(target.baseline.collection, null, 2) }}</pre></details></details>
           <label><input v-model="replace" type="checkbox" required> Replace this exact source baseline with the complete document.</label>
           <p v-if="mode === 'part'" class="hint">Importing this source part does not publish an assembled product.</p><button class="primary">Review captured import</button>

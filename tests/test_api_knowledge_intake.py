@@ -213,3 +213,40 @@ def test_existing_scope_template_preserves_boundary_without_stale_provenance(ana
         == collection["license_coverage"]
         == "unknown"
     )
+
+
+def test_new_product_default_file_import_handles_xml_bom_and_subsequent_updates(analyst, app):
+    project = analyst.post("/api/v1/projects/resolve", json={"project": "New XML product"}).json()[
+        "id"
+    ]
+    path = url(project, "/versions/1.0/files")
+    raw = b'\xef\xbb\xbf<?xml version="1.0" encoding="UTF-8"?>\r\n<bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1"><components><component type="library" bom-ref="lib"><name>Example</name><version>1</version></component></components></bom>'
+    for sequence in (1, 2):
+        target = analyst.get(url(project, "/intake-target"), params={"version": "1.0"}).json()
+        assert target["defaults"]["source"] == "file:upload"
+        assert target["defaults"]["build_number"] == sequence
+        fields = {
+            **target["defaults"],
+            "request_id": f"default-{sequence}",
+            "expected": target["state"],
+        }
+        response = analyst.post(
+            path,
+            data={"metadata": json.dumps(fields)},
+            files={"file": ("example.cdx", raw, "application/xml")},
+        )
+        assert response.status_code == 201, response.text
+        replay = analyst.post(
+            path,
+            data={"metadata": json.dumps(fields)},
+            files={"file": ("example.cdx", raw, "application/xml")},
+        )
+        assert (
+            replay.status_code == 201
+            and replay.json()["publication"] == response.json()["publication"]
+        )
+        state = response.json()["updates"][0]["target"]
+        journal = app.state.knowledge
+        baseline = journal.load(journal.records(state, "inventory")["baseline"])
+        assert journal.objects.read(baseline["artifact_sha"]) == raw
+        assert baseline["build_number"] == sequence

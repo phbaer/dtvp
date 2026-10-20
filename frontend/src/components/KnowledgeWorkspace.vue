@@ -253,7 +253,7 @@ async function chooseProject(option: { id: string; name?: string; capabilities?:
   finally { if (current === sequence) busy.value = false }
 }
 async function onProductCreated(value: { id: string; name: string; workspace_id: string }) {
-  productCreationLocked.value = false; project.value = value.id; await chooseProject(value)
+  productCreationLocked.value = false; productView.value = 'Imports'; project.value = value.id; await chooseProject(value); await nextTick(); activatePage()
 }
 async function metadataChanged() {
   const row = selected.value

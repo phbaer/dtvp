@@ -79,7 +79,14 @@ def test_pipeline_cli_uploads_original_bytes_and_explicit_retry_metadata(
     raw = b'\xef\xbb\xbf<?xml version="1.0"?>\r\n<bom>original bytes</bom>\r\n'
     source = tmp_path / "supplier.xml"
     source.write_bytes(raw)
-    metadata = {"request_id": "pipeline-run-42", "expected": None, "build_number": 42}
+    metadata = {
+        "request_id": "pipeline-run-42",
+        "expected": None,
+        "source": "pipeline:file",
+        "build_number": 42,
+        "occurred_at": "2026-10-20T10:00:00Z",
+        "completeness": "complete",
+    }
     metadata_file = tmp_path / "metadata.json"
     metadata_file.write_text(json.dumps(metadata))
     argv = [
@@ -604,3 +611,70 @@ def test_evidence_cli_preserves_original_bytes_and_explicit_collection_pins(
     }
     assert parts["file"] == raw
     assert json.loads(parts["metadata"]) == metadata
+
+
+@respx.mock
+def test_file_cli_uses_target_defaults_without_metadata_file(monkeypatch, tmp_path, capsys):
+    from email import policy
+    from email.parser import BytesParser
+
+    raw = b'{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}'
+    file = tmp_path / "bom.cdx.json"
+    file.write_bytes(raw)
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            "import-file",
+            "--project",
+            "New product",
+            "--version",
+            "1.0",
+            "--file",
+            str(file),
+        ],
+    )
+    respx.post("http://dtvp.test/api/v1/projects/resolve").respond(
+        200, json={"id": "p", "name": "New product", "created": True}
+    )
+    target = respx.get("http://dtvp.test/api/v1/projects/p/intake-target").respond(
+        200,
+        json={
+            "state": None,
+            "capabilities": ["import"],
+            "blocked_reasons": [],
+            "defaults": {
+                "source": "file:upload",
+                "build_number": 1,
+                "occurred_at": "2026-10-20T10:00:00Z",
+                "completeness": "complete",
+            },
+        },
+    )
+    route = respx.post("http://dtvp.test/api/v1/projects/p/versions/1.0/files").respond(
+        201, json={"committed": True}
+    )
+    main()
+    request = route.calls[0].request
+    message = BytesParser(policy=policy.default).parsebytes(
+        ("Content-Type: " + request.headers["content-type"] + "\r\n\r\n").encode() + request.content
+    )
+    parts = {
+        part.get_param("name", header="content-disposition"): part for part in message.iter_parts()
+    }
+    metadata = json.loads(parts["metadata"].get_payload(decode=True))
+    assert metadata == {
+        **target.calls[0].response.json()["defaults"],
+        "expected": None,
+        "request_id": metadata["request_id"],
+    }
+    assert parts["file"].get_payload(decode=True) == raw
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {"committed": True}
+    assert metadata["request_id"] in output.err
+    assert "exact retry" in output.err
