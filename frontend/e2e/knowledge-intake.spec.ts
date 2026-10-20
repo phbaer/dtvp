@@ -3,8 +3,9 @@ import { expect, test, type Page } from '@playwright/test'
 
 const first = 'a'.repeat(64), next = 'b'.repeat(64)
 const raw = '{\r\n  "bomFormat": "CycloneDX", "note": "synthetic ä", "components": []\r\n}\r\n'
-async function fixture(page: Page, options: { existing?: boolean; connector?: boolean; readonly?: boolean; statuses?: number[] } = {}) {
+async function fixture(page: Page, options: { existing?: boolean; connector?: boolean; readonly?: boolean; statuses?: number[]; hold?: boolean; projection?: string } = {}) {
   const writes: { path: string; metadata: Record<string, unknown>; raw: string }[] = [], reads: string[] = []
+  let release: (() => void) | undefined
   let imported = false
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
@@ -12,10 +13,11 @@ async function fixture(page: Page, options: { existing?: boolean; connector?: bo
       const form = await new Response(request.postData()!, { headers: { 'Content-Type': request.headers()['content-type']! } }).formData()
       const file = form.get('file') as File
       writes.push({ path, metadata: JSON.parse(form.get('metadata') as string), raw: await file.text() })
+      if (options.hold) await new Promise<void>(resolve => { release = resolve })
       const status = options.statuses?.[writes.length - 1] || 201
       if (status !== 201) return route.fulfill({ status, json: { detail: status === 409 ? 'Source baseline changed' : 'Publication uncertain; retry identical input' } })
       if (!path.includes('/parts/')) imported = true
-      return route.fulfill({ status, json: { committed: true, projection: 'current', updates: [{ target: next }] } })
+      return route.fulfill({ status, json: { committed: true, projection: options.projection || 'current', updates: [{ target: next }] } })
     }
     reads.push(url.pathname + url.search)
     let result: unknown = { items: [], capabilities: [], next_cursor: null, next_offset: null }
@@ -32,7 +34,7 @@ async function fixture(page: Page, options: { existing?: boolean; connector?: bo
   await page.getByRole('option', { name: 'Empty native product', exact: true }).click()
   await openProductView(page, 'Imports')
   await openDisclosure(page.locator('.knowledge-intake > summary'))
-  return { writes, reads, panel: page.getByRole('region', { name: 'Native composition intake' }) }
+  return { writes, reads, release: () => release?.(), panel: page.getByRole('region', { name: 'Native composition intake' }) }
 }
 async function target(page: Page, version = 'new-version', part = false) {
   const panel = page.getByRole('region', { name: 'Native composition intake' })
@@ -122,4 +124,21 @@ test('a new product imports with default metadata and retains it across an uncer
   expect(state.writes[0]!.metadata).toMatchObject({ expected: null, source: 'file:upload', build_number: 1, completeness: 'complete' })
   expect(Number.isFinite(Date.parse(state.writes[0]!.metadata.occurred_at as string))).toBe(true)
   expect(state.writes[1]).toEqual(state.writes[0])
+})
+
+
+test('captured commit shows elapsed progress until confirmation and distinguishes pending projection', async ({ page }) => {
+  const state = await fixture(page, { hold: true, projection: 'pending' })
+  await target(page); await prepare(page)
+  await state.panel.getByRole('button', { name: 'Commit captured import', exact: true }).click()
+  const capture = state.panel.getByRole('region', { name: 'Captured composition import' })
+  await expect(capture.getByRole('button', { name: 'Committing import…' })).toHaveAttribute('aria-busy', 'true')
+  await expect(capture.getByRole('progressbar', { name: 'Import progress' })).toBeVisible()
+  await expect(capture.getByText(/^[1-9]\d*s elapsed$/)).toBeVisible()
+  await expect(capture.getByRole('button', { name: 'Committing import…' })).toBeDisabled()
+  await expect(state.panel.getByText(/Product baseline imported/)).toHaveCount(0)
+  state.release()
+  await expect(state.panel.getByRole('status').filter({ hasText: 'Product baseline imported' })).toContainText('Projection is pending')
+  await expect(capture.getByRole('progressbar')).toHaveCount(0)
+  expect(state.writes).toHaveLength(1)
 })

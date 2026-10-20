@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import KnowledgeLegacyArchiveIntake from './KnowledgeLegacyArchiveIntake.vue'
 import { knowledgeApi } from '../knowledgeApi'
+import { knowledgeUpload } from '../knowledgeUpload'
 
 type Target = { defaults: { source: string; build_number: number; occurred_at: string; completeness: 'complete' }; project_id: string; version: string; part_id: string | null; kind: 'product' | 'part'; state: string | null; source_authority: string; scope_template?: Record<string, unknown>; blocked_reasons: string[]; baseline: { source: string | null; build_number: number | null; occurred_at: string | null; collection: unknown }; capabilities: string[]; max_upload_bytes: number; formats: string[] }
 type Frozen = { project: string; version: string; part: string; metadata: Record<string, unknown>; raw: Uint8Array<ArrayBuffer>; filename: string; sha: string }
@@ -13,6 +14,9 @@ function setArchiveLock(value: boolean) { archiveLocked.value = value; emit('loc
 const opened = ref(false), busy = ref(false), target = ref<Target | null>(null), error = ref(''), notice = ref('')
 const selectedVersion = ref(''), mode = ref('product'), part = ref(''), source = ref(''), build = ref(''), observed = ref(''), context = ref(''), predecessor = ref(''), replace = ref(false)
 const file = ref<File | null>(null), inputKey = ref(0), frozen = ref<Frozen | null>(null), committed = ref(false)
+const importPhase = ref<'uploading' | 'processing' | null>(null), uploadPercent = ref<number | null>(null), elapsed = ref(0)
+let progressTimer: ReturnType<typeof setInterval> | undefined
+function stopProgress() { clearInterval(progressTimer); progressTimer = undefined; importPhase.value = null }
 const versionOptions = ref<string[]>([]), partOptions = ref<string[]>([])
 let sequence = 0, timer: ReturnType<typeof setTimeout> | undefined
 const base = () => `/projects/${encodeURIComponent(props.project)}`
@@ -67,12 +71,14 @@ async function prepare() {
 async function publish() {
   if (busy.value || !frozen.value || committed.value) return
   const selected = frozen.value, current = sequence
-  busy.value = true; error.value = ''; notice.value = ''
+  busy.value = true; error.value = ''; notice.value = ''; importPhase.value = 'uploading'; uploadPercent.value = null; elapsed.value = 0
+  const started = performance.now()
+  progressTimer = setInterval(() => { elapsed.value = Math.floor((performance.now() - started) / 1000) }, 1000)
   try {
     const body = new FormData()
     body.append('metadata', JSON.stringify(selected.metadata)); body.append('file', new Blob([selected.raw]), selected.filename)
     const path = `/projects/${encodeURIComponent(selected.project)}/versions/${encodeURIComponent(selected.version)}${selected.part ? `/parts/${encodeURIComponent(selected.part)}` : ''}/files`
-    const result = await knowledgeApi<{ committed: boolean | null; projection?: string }>(path, { method: 'POST', body })
+    const result = await knowledgeUpload<{ committed: boolean | null; projection?: string }>(path, body, (percent, sent) => { if (current !== sequence) return; uploadPercent.value = percent; if (sent) importPhase.value = 'processing' })
     if (current !== sequence) return
     if (result.committed !== true) throw new Error('Publication is uncertain. Retry this exact captured request; do not create a replacement request.')
     committed.value = true; setNativeLock(false)
@@ -80,12 +86,12 @@ async function publish() {
     if (result.projection === 'pending') notice.value += ' Projection is pending; the authoritative import is committed.'
     emit('imported', { version: selected.version, part_id: selected.part || null })
   } catch (value) { if (current === sequence) error.value = `${message(value)} Captured bytes, metadata and request ID are retained. Retry unchanged, or explicitly start a new import after reviewing the target.` }
-  finally { if (current === sequence) busy.value = false }
+  finally { if (current === sequence) { stopProgress(); busy.value = false } }
 }
-function reset() { if (busy.value) return; ++sequence; frozen.value = null; committed.value = false; target.value = null; file.value = null; ++inputKey.value; replace.value = false; error.value = ''; notice.value = ''; setNativeLock(false) }
+function reset() { if (busy.value) return; stopProgress(); ++sequence; frozen.value = null; committed.value = false; target.value = null; file.value = null; ++inputKey.value; replace.value = false; error.value = ''; notice.value = ''; setNativeLock(false) }
 function toggle(event: Event) { opened.value = (event.currentTarget as HTMLDetailsElement).open; if (opened.value && !selectedVersion.value) selectedVersion.value = props.version; if (opened.value) void suggestions() }
 watch(() => props.project, () => { ++sequence; busy.value = false; reset(); selectedVersion.value = props.version; versionOptions.value = []; partOptions.value = [] })
-onBeforeUnmount(() => { ++sequence; clearTimeout(timer); setNativeLock(false) })
+onBeforeUnmount(() => { ++sequence; clearTimeout(timer); stopProgress(); setNativeLock(false) })
 </script>
 <template>
   <details v-if="project" class="knowledge-intake" @toggle="toggle">
@@ -98,7 +104,7 @@ onBeforeUnmount(() => { ++sequence; clearTimeout(timer); setNativeLock(false) })
         <label v-if="mode === 'part'">Source part ID<input v-model="part" list="intake-parts" required maxlength="200" @input="search"><datalist id="intake-parts"><option v-for="value in partOptions" :key="value" :value="value" /></datalist></label>
         <button>Inspect target</button>
       </fieldset></form>
-      <p v-if="busy" role="status">Working…</p><p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
+      <p v-if="busy && !importPhase" role="status">Working…</p><p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
       <template v-if="target">
         <p>{{ target.state ? 'Existing source baseline' : 'New source baseline' }} · {{ target.version }}<span v-if="target.part_id"> · part {{ target.part_id }}</span> · authority: {{ target.source_authority }}</p>
         <p v-if="target.baseline.build_number != null">Last accepted source sequence: {{ target.baseline.build_number }}. The next import sequence is filled automatically.</p>
@@ -117,11 +123,12 @@ onBeforeUnmount(() => { ++sequence; clearTimeout(timer); setNativeLock(false) })
           <p v-if="mode === 'part'" class="hint">Importing this source part does not publish an assembled product.</p><button class="primary">Review captured import</button>
         </fieldset></form>
       </template>
-      <section v-if="frozen" aria-label="Captured composition import"><h3>{{ committed ? 'Import recorded' : 'Review import' }}</h3><p>{{ frozen.version }}<span v-if="frozen.part"> · source part {{ frozen.part }}</span> · {{ frozen.filename }} · {{ frozen.raw.byteLength }} bytes</p><details><summary>Exact request and file digest</summary><code>SHA-256 {{ frozen.sha }}</code><pre>{{ JSON.stringify(frozen.metadata, null, 2) }}</pre></details><p v-if="!committed" class="hint">This captured request stays fixed across retries. A conflict requires explicit target review before starting a new import.</p><button v-if="!committed" class="primary" :disabled="busy" @click="publish">Commit captured import</button><button :disabled="busy" @click="reset">{{ committed ? 'Start another import' : 'Discard capture and start a new import' }}</button></section>
+      <section v-if="frozen" aria-label="Captured composition import"><h3>{{ committed ? 'Import recorded' : 'Review import' }}</h3><p>{{ frozen.version }}<span v-if="frozen.part"> · source part {{ frozen.part }}</span> · {{ frozen.filename }} · {{ frozen.raw.byteLength }} bytes</p><details><summary>Exact request and file digest</summary><code>SHA-256 {{ frozen.sha }}</code><pre>{{ JSON.stringify(frozen.metadata, null, 2) }}</pre></details><p v-if="!committed" class="hint">This captured request stays fixed across retries. A conflict requires explicit target review before starting a new import.</p><div v-if="importPhase" class="import-progress"><strong role="status">{{ importPhase === 'uploading' ? `Uploading SBOM${uploadPercent == null ? '…' : ` · ${uploadPercent}%`}` : 'Upload sent · waiting for server confirmation…' }}</strong><span>{{ elapsed }}s elapsed</span><progress aria-label="Import progress" max="100" :value="importPhase === 'uploading' ? uploadPercent ?? undefined : undefined"></progress><small v-if="importPhase === 'processing'">The server is validating and committing the import. Upload completion does not confirm publication.</small></div><button v-if="!committed" class="primary" :disabled="busy" :aria-busy="!!importPhase" @click="publish">{{ importPhase ? 'Committing import…' : 'Commit captured import' }}</button><button :disabled="busy" @click="reset">{{ committed ? 'Start another import' : 'Discard capture and start a new import' }}</button></section>
     </fieldset><KnowledgeLegacyArchiveIntake :key="project" :project="project" :disabled="disabled || busy || nativeLocked" @locked="setArchiveLock" @imported="emit('imported', $event)" /></section>
   </details>
 </template>
 <style scoped>
 .knowledge-intake { border-block: 1px solid var(--border, #64748b33); padding: .8rem 0; min-width: 0; }
 summary { cursor: pointer; } form, section { min-width: 0; } fieldset { min-width: 0; border: 0; padding: 0; display: grid; gap: .6rem; } label { display: grid; gap: .3rem; min-width: 0; } input, select, textarea { max-width: 100%; box-sizing: border-box; } input[type=checkbox] { width: auto; justify-self: start; } pre, code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; } pre { max-height: 20rem; overflow: auto; } button { margin-right: .5rem; margin-block: .3rem; }
+.import-progress { display:grid; gap:6px; padding:12px; background:var(--accent-soft); border-radius:5px; margin-block:10px; } .import-progress span,.import-progress small { color:var(--muted); } .import-progress progress { width:100%; height:8px; accent-color:var(--accent); }
 </style>

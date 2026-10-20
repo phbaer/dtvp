@@ -131,7 +131,11 @@ def test_pipeline_cli_uploads_original_bytes_and_explicit_retry_metadata(
     assert fields["file"].get_payload(decode=True) == raw
     assert fields["file"].get_filename() == "supplier.xml"
     assert json.loads(fields["metadata"].get_payload(decode=True)) == metadata
-    assert json.loads(capsys.readouterr().out) == {"committed": True}
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {"committed": True}
+    assert "Uploading 'supplier.xml'" in output.err
+    assert "100%" in output.err and "Waiting for server" in output.err
+    assert "Import committed" in output.err
 
 
 @respx.mock

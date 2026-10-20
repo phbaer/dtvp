@@ -1154,17 +1154,31 @@ def run(args):
                         if args.part:
                             path += f"/parts/{quote(args.part, safe='')}"
                         path += "/files"
-                result = read_response(
-                    client.post(
-                        path,
-                        data={
-                            "metadata": metadata_text
-                            if args.knowledge_command == "import-file"
-                            else json.dumps(metadata)
-                        },
-                        files={"file": (Path(args.file).name, source, "application/octet-stream")},
-                    )
+                from contextlib import nullcontext
+
+                from dtvp.knowledge.upload_progress import UploadProgress
+
+                progress = (
+                    UploadProgress(source, Path(args.file).name)
+                    if args.knowledge_command == "import-file"
+                    else nullcontext(source)
                 )
+                with progress as upload:
+                    result = read_response(
+                        client.post(
+                            path,
+                            data={
+                                "metadata": metadata_text
+                                if args.knowledge_command == "import-file"
+                                else json.dumps(metadata)
+                            },
+                            files={
+                                "file": (Path(args.file).name, upload, "application/octet-stream")
+                            },
+                        )
+                    )
+                    if args.knowledge_command == "import-file":
+                        upload.finish(result)
             print(json.dumps(result, indent=2))
             return
         if args.knowledge_command == "correspondence-draft":

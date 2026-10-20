@@ -336,6 +336,12 @@ creating a product opens Imports; source, sequence and timestamp overrides live 
 **Advanced import metadata**. UTF-8 BOM-prefixed CycloneDX XML is recognized while
 original bytes remain retained.
 
+UI imports show measured upload percentage, then indeterminate server processing
+with elapsed time until the receipt arrives. Upload completion is not commit
+confirmation; pending projection remains explicit. CLI `import-file` reports file
+bytes/percentage and periodic elapsed waiting status to stderr, preserving JSON
+results on stdout. Failed or uncertain requests retain exact retry guidance.
+
 Use optional `--metadata import.json` for producer metadata or an exact retry.
 When defaults are filled, the CLI prints the complete captured metadata to stderr;
 reuse that JSON with the same file after an uncertain response. Concurrent baseline
