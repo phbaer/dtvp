@@ -471,6 +471,38 @@ use `--offset`/`--limit` to page them. Discovery commands support `--json` for s
 Teams list accessible workspaces/team IDs; component ownership remains separately
 configured. Results follow the authenticated user's permissions.
 
+### Team administration
+
+Create teams and assign users without raw API requests:
+
+```sh
+uv run dtvp knowledge --persona administrator teams create --name "Platform"
+uv run dtvp knowledge --persona administrator teams members --team TEAM_ID
+uv run dtvp knowledge --persona administrator teams assign --team TEAM_ID \
+  --issuer https://identity.example --subject USER_SUBJECT --name "Alice" \
+  --role analyst --role reviewer
+```
+
+`teams` and `teams list` both list accessible teams. All team commands support
+`--json`. Creation requires an organization administrator; the creator receives
+team administration. Listing members and assigning roles require administration
+of the selected team. Production uses `--url "$DTVP_URL" --session-env
+DTVP_SESSION_TOKEN` instead of `--persona`, with the session/CSRF environment
+variables described above. CI tokens cannot manage memberships or create teams.
+
+Assignments identify users by the exact OIDC issuer and subject, creating a user
+mapping if needed; the supplied name initializes new users only. Repeat `--role`
+for multiple roles. **Assignment replaces all existing roles in that team**;
+include every role to retain. Assignments in other teams remain unchanged. There
+is no automatic group synchronization or password creation. Team creation and
+assignment are not automatically retried after uncertain responses: inspect
+`teams` or `teams members` before repeating a request.
+
+The UI already provides **Administration → Access and integrations → Add team
+workspace** and **Member mapping**. Its member form saves one selected role;
+use the CLI for multiple roles. These same teams can own products and components;
+component rules and explicit product sharing remain separate from memberships.
+
 SBOM uploads accept a product ID or exact name. Missing products and versions are
 created implicitly; later uploads replace that version's source baseline, preserving
 historical imports and assessments:

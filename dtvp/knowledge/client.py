@@ -154,6 +154,9 @@ def configure(parser):
     token_revoke.add_argument("id", help="Token ID from tokens list")
     teams = add_command("teams", help="List accessible workspaces/teams and their IDs")
     teams.add_argument("--json", action="store_true")
+    from dtvp.knowledge.team_client import configure_teams
+
+    configure_teams(teams)
     demo = add_command("demo", help="Load explicit synthetic playground scenario data")
     demo_commands = demo.add_subparsers(dest="demo_command", required=True)
     loader = demo_commands.add_parser(
@@ -664,6 +667,11 @@ def run(args):
                         )
                     if not result:
                         print("No tokens.")
+            return
+        if args.knowledge_command == "teams" and args.teams_command:
+            from dtvp.knowledge.team_client import run_teams
+
+            run_teams(client, args)
             return
         if args.knowledge_command in {"projects", "versions", "teams"}:
             from urllib.parse import quote
