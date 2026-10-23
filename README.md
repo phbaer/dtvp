@@ -10,6 +10,9 @@ and applies consistent decisions across releases.
 - Team and global assessments, CVSS rescoring, SSVC prioritization, and exploitation evidence.
 - Bulk assessment repair, audit-backed recovery, and project archive import/export.
 - Optional threat-model rescoring through tmrescore/vscorer and code analysis through Agentyzer.
+- Code-analysis proposals use Agentyzer's compact `assessment.details`, with the
+  human review notice first. Detailed rationale stays in the saved run payload;
+  older responses retain the legacy formatter.
 - Mock services for local development and testing.
 
 [Quick start](#quick-start) · [Deployment](#docker-deployment) ·

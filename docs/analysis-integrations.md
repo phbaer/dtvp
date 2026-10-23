@@ -60,31 +60,19 @@ confirmed. A generic dependency-usage reachability result does not override a
 later full-source analysis that affirmatively excludes the
 vulnerability-specific path. Static guidance is never evidence by itself.
 
-Each completed assessment also carries a compact `executive_summary` with two
-separate statements: `vulnerability` briefly describes the advisory and its
-affected dependency, while `assessment` states the final repository-specific
-verdict, confidence, exposure, audit state, key basis, and at most one next
-action. The assessment uses formal disposition, confidence, exposure, basis,
-required-action, and audit-assurance language. A structured `why` list is
-rendered as the **Decision rationale** and retains the complete deciding facts
-from advisory applicability, dependency presence, current and product-release
-versions, direct reachability, deep exploitability, transitive paths, and audit
-caveats. Path
-claims are explicitly scoped to the current workspace; a missing path remains
-"not confirmed" unless affirmative evidence supports "not reachable". This
-gives Affected, Not Affected, and Inconclusive results an audit-ready evidence
-record without restoring the old raw report in the primary view. Compactness
-comes from separating these evidence categories; the assessment payload and
-human-facing statements never cut them at a character or item-count limit. It is
-assembled after the deterministic audit guardrails, retained in lightweight
-result metadata and shown in assessment drafts and run outcomes. The separate
-follow-up prompt context remains bounded to the model's input budget.
-Human-facing assessment text also lists every covered product version from the
-repository intersection on one comma-separated `Product versions covered:`
-line; dependency/component versions remain separately labeled evidence. The
-complete summary, reasoning, role views, version
-inventory, audit checks, and pipeline evidence remain available in the saved
-run payload.
+Code-analysis proposals prefer the analyzer's compact `assessment.details` when
+it begins with `HUMAN REVIEW REQUIRED:` and contains a `VERDICT:` line. The UI
+uses this text directly instead of rebuilding it from `executive_summary.why`,
+role views, and evidence. The notice stays first; accepting the proposal supplies
+human approval, with no additional approval footer. Selected-component/team drafts
+use only the matching component reports; an overall report is never substituted
+for a narrower scope. Mixed or older responses retain the existing scoped fallback
+and start with the human review notice. Archived proposal text is not rewritten.
+
+Automatic/bulk proposals also prefer compact analyzer details for each run, keeping
+existing run/team/state/rescore metadata. Their human review notice precedes those
+blocks. Summary, reasoning, version inventory, role views, and audit evidence remain
+in the saved response for inspection; they are not appended to compact proposals.
 
 When the latest results for several targets are combined, the Code Evidence
 view renders the vulnerability and worst-case decision once, followed by one
