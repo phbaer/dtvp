@@ -1,0 +1,21 @@
+name: Commit Message Policy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-commit-subjects:
+    runs-on: node
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Validate commit subjects
+        run: >-
+          python3 scripts/check_commit_messages.py --range
+          "${{ github.event.pull_request.base.sha }}"
+          "${{ github.event.pull_request.head.sha }}"

@@ -15,5 +15,6 @@ Read `README.md` before broad project scans or code changes. It is the canonical
 - If the README conflicts with source code, configuration, tests, package metadata, or lockfiles, trust the source and update the README.
 - Update `README.md` in the same change when you make meaningful changes to behavior, architecture, APIs, integrations, configuration, commands, workflows, or repository structure.
 - Do not create or maintain a second project overview in agent-specific files.
+- Follow the commit discipline in `AGENTS.md`: use the checked commit types/scopes, commit related changes together, and commit coherent batches continuously.
 - Use `uv` for Python/backend work from the repository root.
 - Use `npm` for the Node/frontend part from `frontend/`.
