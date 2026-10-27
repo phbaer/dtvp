@@ -218,7 +218,9 @@ class DependencyTrackConnector:
             external_id = str(project.get("uuid") or "").strip()
             product_name = str(project.get("name") or "").strip()
             if not external_id or not product_name:
-                continue
+                raise ValueError(
+                    "Dependency-Track project catalog entry is missing its stable identity"
+                )
             normalized.append(
                 {
                     "external_id": external_id,

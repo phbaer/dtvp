@@ -32,8 +32,9 @@ different version.
 Project discovery and several analysis/archive integrations still have
 Dependency-Track paths. Project catalog discovery runs through the connector,
 retains provider project records as artifacts, and publishes the active catalog
-in DTVP's database. Existing inventory reads and refreshes use the DTVP snapshot
-store.
+in DTVP's database. Incomplete or malformed discovery results do not replace
+the last published catalog. Existing inventory reads and refreshes use the
+DTVP snapshot store.
 
 ## Import and sync
 
