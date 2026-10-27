@@ -856,6 +856,7 @@ def get_latest_source_snapshot(source_type: str, base_url: str, source_version_i
             "id": snapshot.id,
             "revision": snapshot.revision,
             "payload_sha256": snapshot.payload_sha256,
+            "state_sha256": snapshot.state_sha256,
             "captured_at": _iso(snapshot.captured_at),
         }
 

@@ -15,14 +15,15 @@ from uuid import uuid4
 
 from .artifact_store import ArtifactStore
 from .catalog_repository import (
-    get_local_product_version_id,
-    get_version_snapshot_record,
-    list_product_versions,
-    list_products,
+    get_latest_source_snapshot,
 )
 from .database_migrations import run_database_migrations
 from .source_connectors.legacy_cache import LegacyCacheConnector
-from .source_import_service import discover_source_projects, import_source_scope
+from .source_import_service import (
+    _state_sha256,
+    discover_source_projects,
+    import_source_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,17 +84,6 @@ def _load_legacy_projects(cache_path: Path) -> list[dict[str, Any]]:
     return projects
 
 
-def _existing_snapshot(project_name: str, version_name: str) -> bool:
-    for product in list_products(project_name):
-        if product.get("name") != project_name:
-            continue
-        for version in list_product_versions(product["id"]):
-            if version.get("version") == version_name:
-                if get_version_snapshot_record(version["id"]) is not None:
-                    return True
-    return False
-
-
 async def migrate_legacy_inventory(*, apply: bool, cache_path: str | None = None) -> dict[str, Any]:
     await asyncio.to_thread(run_database_migrations)
     resolved_cache_path = Path(
@@ -105,27 +95,34 @@ async def migrate_legacy_inventory(*, apply: bool, cache_path: str | None = None
         "cache_path": str(resolved_cache_path.resolve()),
         "projects_found": len(projects),
         "imported": [],
-        "skipped_existing": [],
+        "unchanged": [],
         "failed": [],
     }
     candidates = []
     catalog_projects = []
-    previously_imported = []
+    unchanged_projects = []
+    connector = LegacyCacheConnector(projects)
     for project in projects:
         project_id = project["uuid"]
-        if await asyncio.to_thread(
-            _existing_snapshot, project["name"], project["version"]
-        ):
-            report["skipped_existing"].append(project_id)
-            migrated_version_id = await asyncio.to_thread(
-                get_local_product_version_id,
+        try:
+            normalized = await connector.fetch_snapshot(
+                None, {"project_id": project_id}
+            )
+            desired_state = _state_sha256(normalized)
+            latest_legacy = await asyncio.to_thread(
+                get_latest_source_snapshot,
                 "legacy-cache",
                 "dtvp-cache://local",
                 project_id,
             )
-            if migrated_version_id:
-                catalog_projects.append(project)
-                previously_imported.append(project)
+        except Exception as exc:
+            logger.exception("Could not inspect legacy cache for %s", project_id)
+            report["failed"].append({"project_id": project_id, "error": str(exc)})
+            continue
+        if latest_legacy and latest_legacy.get("state_sha256") == desired_state:
+            report["unchanged"].append(project_id)
+            unchanged_projects.append(project)
+            catalog_projects.append(project)
         else:
             candidates.append(project)
     report["eligible"] = len(candidates)
@@ -138,7 +135,7 @@ async def migrate_legacy_inventory(*, apply: bool, cache_path: str | None = None
     from .dt_cache import CacheManager
 
     cache = CacheManager(base_path=str(resolved_cache_path))
-    for project in previously_imported:
+    for project in unchanged_projects:
         project_id = project["uuid"]
         try:
             migrated = await cache._migrate_pending_local_assessments(

@@ -30,9 +30,11 @@ With outbound publication disabled, pending queue items are retired after
 promotion; a failed promotion is logged and retried on a later refresh.
 Installations with inventory only in the former JSON caches can preview and
 resume a content-preserving import using `uv run dtvp-legacy-cache-migrate`
-and `uv run dtvp-legacy-cache-migrate --apply`. The command skips versions that
-already have a DTVP snapshot, imports each eligible version independently, and
-keeps the original cache files for reconciliation and rollback.
+and `uv run dtvp-legacy-cache-migrate --apply`. The command compares normalized
+content against its prior legacy-cache import, skips unchanged versions, and
+imports missing or changed versions independently even if another source has a
+snapshot for that product version. It keeps the original cache files for
+reconciliation and rollback.
 The first adapter groups Dependency-Track project versions by exact project name;
 ambiguous duplicate name/version mappings fail visibly instead of overwriting a
 different version.
