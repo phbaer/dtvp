@@ -180,9 +180,10 @@ FastAPI remains the backend. The DTVP database and artifact store are separate
 from Dependency-Track's database. Source-neutral snapshot import and read APIs
 are now available. Inventory cache misses and refreshes publish DTVP snapshots
 before returning the existing UI response, and cached snapshots supply reads
-during Dependency-Track outages. Source analysis comes from the normalized DTVP
-snapshot, with the provider analysis retained as attributed source observation.
-Assessment decisions are stored locally with
+during Dependency-Track outages. Compatibility inventory reads project findings,
+advisories, and BOMs from the normalized DTVP snapshot; exact provider payloads
+remain available for archive export and provenance. Source analysis is retained
+as an attributed observation. Assessment decisions are stored locally with
 revision history; outbound synchronization is optional and disabled by default.
 Project browsing reads the persisted DTVP catalog without a Dependency-Track
 client. Catalog discovery and inventory refresh still run through the source

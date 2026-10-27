@@ -34,6 +34,11 @@ from .catalog_repository import (
 )
 from .source_import_service import _safe_base_url
 from .source_connectors.dependency_track import DependencyTrackConnector
+from .snapshot_projection import (
+    project_advisories,
+    project_bom,
+    project_findings,
+)
 from .source_import_service import discover_source_projects, import_source_scope
 from .dt_client import DTClient, DTSettings
 
@@ -347,15 +352,9 @@ class CacheManager:
         if record is not None:
             try:
                 snapshot = ArtifactStore().get_json(record["payload_sha256"])
-                findings = copy.deepcopy(
-                    ((snapshot.get("source_artifacts") or {}).get("findings") or [])
-                )
-                project_vulnerabilities = copy.deepcopy(
-                    ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
-                )
-                bom = copy.deepcopy(
-                    ((snapshot.get("source_artifacts") or {}).get("bom") or {})
-                )
+                findings = project_findings(snapshot)
+                project_vulnerabilities = project_advisories(snapshot)
+                bom = project_bom(snapshot)
             except (OSError, ValueError):
                 logger.exception("Could not read imported project snapshot %s", project_uuid)
                 return None
@@ -1156,14 +1155,18 @@ class CacheManager:
         project_uuid: str,
         cve: Optional[str] = None,
         refresh: bool = False,
+        preserve_source_payload: bool = False,
     ) -> List[Dict[str, Any]]:
         await self.record_project_access(project_uuid)
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        findings = copy.deepcopy(
-            ((snapshot.get("source_artifacts") or {}).get("findings") or [])
-        )
+        if preserve_source_payload:
+            findings = copy.deepcopy(
+                ((snapshot.get("source_artifacts") or {}).get("findings") or [])
+            )
+        else:
+            findings = project_findings(snapshot)
         findings = self._overlay_local_analysis(project_uuid, findings)
         if cve:
             cve_upper = cve.upper()
@@ -1190,27 +1193,31 @@ class CacheManager:
         client: DTClient,
         project_uuid: str,
         refresh: bool = False,
+        preserve_source_payload: bool = False,
     ) -> List[Dict[str, Any]]:
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        return copy.deepcopy(
-            ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
-        )
+        if preserve_source_payload:
+            return copy.deepcopy(
+                ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
+            )
+        return project_advisories(snapshot)
 
     async def get_bom(
         self,
         client: DTClient,
         project_uuid: str,
         refresh: bool = False,
+        preserve_source_payload: bool = False,
     ) -> Optional[Dict[str, Any]]:
         await self.record_project_access(project_uuid)
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        return copy.deepcopy(
-            ((snapshot.get("source_artifacts") or {}).get("bom"))
-        )
+        if preserve_source_payload:
+            return copy.deepcopy(((snapshot.get("source_artifacts") or {}).get("bom")))
+        return project_bom(snapshot)
 
     async def get_analysis(
         self,

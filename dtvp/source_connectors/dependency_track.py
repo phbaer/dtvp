@@ -13,7 +13,7 @@ def _as_mapping(value: Any) -> dict[str, Any]:
 
 
 def _component_identity(component: dict[str, Any], ordinal: int) -> str:
-    for key in ("bom-ref", "uuid", "purl"):
+    for key in ("uuid", "bom-ref", "purl"):
         value = str(component.get(key) or "").strip()
         if value:
             return value
@@ -91,6 +91,10 @@ def _normalize_finding(
     return {
         "external_id": external_id,
         "component_external_id": component_id,
+        "component_source_ids": {
+            "uuid": component.get("uuid"),
+            "bom_ref": component.get("bom-ref"),
+        },
         "component_identity": component_identity,
         "vulnerability": {
             "external_id": str(vulnerability.get("uuid") or ""),
@@ -100,8 +104,12 @@ def _normalize_finding(
             "aliases": vulnerability.get("aliases") or [],
             "severity": vulnerability.get("severity"),
             "cvss_v2": vulnerability.get("cvssV2BaseScore"),
+            "cvss_v2_vector": vulnerability.get("cvssV2Vector"),
             "cvss_v3": vulnerability.get("cvssV3BaseScore"),
+            "cvss_v3_vector": vulnerability.get("cvssV3Vector"),
             "cvss_v4": vulnerability.get("cvssV4BaseScore"),
+            "cvss_v4_vector": vulnerability.get("cvssV4Vector"),
+            "title": vulnerability.get("title"),
             "metadata": {
                 key: vulnerability[key]
                 for key in ("description", "recommendation", "references", "cwe")
@@ -162,12 +170,19 @@ def build_normalized_snapshot(
             {
                 "external_id": str(advisory.get("uuid") or ""),
                 "id": str(advisory.get("vulnId") or advisory.get("name") or "unknown"),
+                "name": advisory.get("name"),
                 "source": advisory.get("source"),
                 "severity": advisory.get("severity"),
                 "aliases": advisory.get("aliases") or [],
+                "cvss_v2": advisory.get("cvssV2BaseScore"),
+                "cvss_v2_vector": advisory.get("cvssV2Vector"),
+                "cvss_v3": advisory.get("cvssV3BaseScore"),
+                "cvss_v3_vector": advisory.get("cvssV3Vector"),
+                "cvss_v4": advisory.get("cvssV4BaseScore"),
+                "cvss_v4_vector": advisory.get("cvssV4Vector"),
                 "metadata": {
                     key: advisory[key]
-                    for key in ("description", "recommendation", "references", "cwe")
+                    for key in ("title", "description", "recommendation", "references", "cwe")
                     if key in advisory
                 },
             }

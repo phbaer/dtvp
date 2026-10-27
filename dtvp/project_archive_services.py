@@ -493,16 +493,19 @@ async def export_project_archive(
             client,
             project_uuid,
             refresh=False,
+            preserve_source_payload=True,
         )
         vulnerabilities = await deps.cache_manager.get_project_vulnerabilities(
             client,
             project_uuid,
             refresh=False,
+            preserve_source_payload=True,
         )
         bom = await deps.cache_manager.get_bom(
             client,
             project_uuid,
             refresh=False,
+            preserve_source_payload=True,
         )
         assessments = await _collect_assessments(
             deps,

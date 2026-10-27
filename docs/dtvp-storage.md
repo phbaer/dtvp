@@ -39,9 +39,11 @@ different version.
 Project catalog discovery runs through the Dependency-Track connector, retains
 provider project records as artifacts, and publishes the active catalog in
 DTVP's database. Incomplete or malformed discovery results do not replace the
-last published catalog. Inventory reads, archive restore, and source analysis
-use DTVP snapshots; provider analysis is read from its normalized, attributed
-observation. Archive export can request a connector refresh first.
+last published catalog. Compatibility inventory reads project findings,
+advisories, and BOMs from normalized DTVP snapshots. Archive restore and source
+analysis also use DTVP snapshots; provider analysis is read from its normalized,
+attributed observation. Exact captures remain available for provenance and
+archive export, which can request a connector refresh first.
 
 ## Import and sync
 
