@@ -18,7 +18,7 @@ and applies consistent decisions across releases.
 
 ## Quick Start
 
-Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)
+Requirements: Python 3.15+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)
 or a newer supported Node.js release.
 DTVP's Python environment and test suite are independent of Agentyzer, which
 is accessed through the optional code-analysis HTTP integration.
@@ -69,9 +69,11 @@ a strong `DTVP_DB_PASSWORD` before deployment. Pending schema migrations run
 automatically during startup before API traffic is served. Persistent file data
 continues to live in `./data`.
 
-The published DTVP image uses Python 3.14 free threading. Code analysis uses
+The published DTVP image uses Python 3.15 free threading. Code analysis uses
 a separately deployed Agentyzer service; set `DTVP_CODE_ANALYSIS_URL` to its
 reachable base URL and configure repository mappings in that service.
+The image includes PostgreSQL 18 client utilities and builds Psycopg's C
+adapter for Python 3.15 during image construction.
 See [Deployment](docs/deployment.md) for networking, authentication, runtime
 checks, and release details, and [Configuration](docs/configuration.md) for
 all environment variables.

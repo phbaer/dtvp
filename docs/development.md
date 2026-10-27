@@ -10,14 +10,17 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 ## Toolchain and CI
 
-DTVP requires Python 3.14 or newer. Its development dependencies do not install
+DTVP requires Python 3.15 or newer. Its development dependencies do not install
 Agentyzer or its LangGraph stack; code analysis is an external HTTP integration.
 Use `uv sync --python 3.15 --dev --frozen` to select Python 3.15 explicitly.
-Use a released Python version; early 3.15 alphas may lack APIs expected by
-current dependencies. If a Pydantic wheel is unavailable for the interpreter,
-the locked `pydantic-core` source build requires Rust 1.88 or newer.
-Local `.python-version` preferences are ignored by Git. Docker images currently
-use Python 3.14.
+The Docker images use Python 3.15; the published image uses the free-threaded
+`3.15t` build. If a Pydantic wheel is unavailable for the interpreter, the
+locked `pydantic-core` source build requires Rust 1.88 or newer. Local
+`.python-version` preferences are ignored by Git. PostgreSQL-backed local
+development can install the optimized PostgreSQL adapter with
+`uv sync --python 3.15 --extra postgres --dev`; this needs a C compiler and
+PostgreSQL client development headers. SQLite development does not need that
+extra.
 
 The root pytest configuration uses importlib import mode and collects only
 `tests/`, so `uv run pytest` runs DTVP's suite independently of the legacy

@@ -53,7 +53,7 @@ def validate_python_runtime(
     if not status["free_threaded_build"]:
         raise RuntimeError(
             "DTVP requires a free-threaded CPython build, but this interpreter "
-            "was built with the GIL. Use the 3.14t deployment variant."
+            "was built with the GIL. Use the 3.15t deployment variant."
         )
     if status["gil_enabled"] is not False:
         raise RuntimeError(

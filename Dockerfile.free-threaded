@@ -1,5 +1,5 @@
 # Sole published DTVP image: CPython free-threaded with fail-closed validation.
-ARG PYTHON_VERSION=3.14t
+ARG PYTHON_VERSION=3.15t
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:alpine3.23
 
 FROM node:lts-alpine AS frontend-build
@@ -32,14 +32,18 @@ ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT \
 
 WORKDIR /app
 
-# Compose runs PostgreSQL 18; include matching logical backup utilities.
-RUN apk add --no-cache postgresql18-client
-
 RUN uv python install "$PYTHON_VERSION"
 
 COPY pyproject.toml uv.lock ./
 COPY alembic.ini ./
-RUN uv sync --python "$PYTHON_VERSION" --frozen --no-dev
+
+# Compile Psycopg's C implementation against the image's PostgreSQL client
+# libraries, then remove build tools. Compose runs PostgreSQL 18 and uses
+# matching logical backup utilities from the retained client package.
+RUN apk add --no-cache --virtual .build-deps build-base postgresql18-dev \
+    && apk add --no-cache postgresql18-client \
+    && uv sync --python "$PYTHON_VERSION" --frozen --no-dev --extra postgres \
+    && apk del .build-deps
 
 COPY dtvp ./dtvp
 COPY scripts/dtvp_storage.py ./scripts/dtvp_storage.py
@@ -51,7 +55,7 @@ RUN chmod +x start.sh
 # Load the native dependencies that DTVP uses and prove that none of them has
 # re-enabled the GIL before publishing the image.
 RUN DTVP_REQUIRE_FREE_THREADED=true /app/.venv/bin/python -c \
-    "import _cffi_backend, cryptography.hazmat.bindings._rust, pydantic_core; from dtvp.python_runtime_services import validate_python_runtime; validate_python_runtime()"
+    "import _cffi_backend, cryptography.hazmat.bindings._rust, psycopg, pydantic_core; from dtvp.python_runtime_services import validate_python_runtime; validate_python_runtime()"
 
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 RUN cp ./frontend/dist/index.html ./frontend/dist/index.html.template

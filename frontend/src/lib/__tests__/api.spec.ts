@@ -219,7 +219,7 @@ describe('api.ts', () => {
     })
 
     it('getPerformanceStatus calls /performance-status', async () => {
-        const mockData = { python: { version: '3.14.4', free_threading_active: true } }
+        const mockData = { python: { version: '3.15.2', free_threading_active: true } }
         mocks.get.mockResolvedValue({ data: mockData })
 
         const result = await getPerformanceStatus()

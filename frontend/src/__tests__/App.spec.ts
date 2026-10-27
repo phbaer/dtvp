@@ -186,7 +186,7 @@ describe('App bootstrap state', () => {
             build: 'abc123',
             runtime: {
                 implementation: 'CPython',
-                version: '3.14.4',
+                version: '3.15.2',
                 free_threaded_build: true,
                 gil_enabled: false,
                 free_threading_active: true,
@@ -198,7 +198,7 @@ describe('App bootstrap state', () => {
         await flushBootstrapDom(wrapper)
 
         expect(wrapper.get('[data-testid="backend-runtime-label"]').text())
-            .toContain('CPython 3.14.4 · Free-threaded · GIL off')
+            .toContain('CPython 3.15.2 · Free-threaded · GIL off')
     })
 
     it('does not show backend runtime details to analysts', async () => {
@@ -208,7 +208,7 @@ describe('App bootstrap state', () => {
             build: 'abc123',
             runtime: {
                 implementation: 'CPython',
-                version: '3.14.4',
+                version: '3.15.2',
                 free_threaded_build: true,
                 gil_enabled: false,
                 free_threading_active: true,

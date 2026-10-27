@@ -1,5 +1,5 @@
 # Build arguments for Python version
-ARG PYTHON_VERSION=3.14
+ARG PYTHON_VERSION=3.15
 
 # Stage 1: Build the frontend
 FROM node:lts-alpine AS frontend-build
@@ -37,9 +37,6 @@ ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT \
 
 WORKDIR /app
 
-# Provide matching PostgreSQL 18 dump/restore utilities for DTVP-owned storage.
-RUN apk add --no-cache postgresql18-client
-
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
@@ -47,10 +44,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml uv.lock ./
 COPY alembic.ini ./
 
-# Install dependencies using uv
-# --frozen ensures we use the exact versions from uv.lock
-# --no-dev excludes development dependencies
-RUN uv sync --frozen --no-dev
+# Compile Psycopg's C implementation against the image's PostgreSQL client
+# libraries, then remove build tools. Keep matching PostgreSQL 18 dump/restore
+# utilities for DTVP-owned storage.
+RUN apk add --no-cache --virtual .build-deps build-base postgresql18-dev \
+    && apk add --no-cache postgresql18-client \
+    && uv sync --frozen --no-dev --extra postgres \
+    && apk del .build-deps
 
 # Copy application code
 COPY dtvp ./dtvp

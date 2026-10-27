@@ -81,7 +81,7 @@ def app_info_client(tmp_path):
         get_performance_status=lambda: {"group_queries": {"active": 0}},
         get_runtime_status=lambda: {
             "implementation": "CPython",
-            "version": "3.14.4",
+            "version": "3.15.2",
             "free_threaded_build": True,
             "gil_enabled": False,
             "free_threading_active": True,
@@ -112,7 +112,7 @@ def test_app_info_routes_return_metadata_and_generated_openapi(app_info_client):
         "build": "abc123",
         "runtime": {
             "implementation": "CPython",
-            "version": "3.14.4",
+            "version": "3.15.2",
             "free_threaded_build": True,
             "gil_enabled": False,
             "free_threading_active": True,

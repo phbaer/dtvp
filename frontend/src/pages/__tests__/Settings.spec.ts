@@ -42,7 +42,7 @@ describe('Settings.vue', () => {
         vi.mocked(api.getPerformanceStatus).mockResolvedValue({
             python: {
                 implementation: 'CPython',
-                version: '3.14.4',
+                version: '3.15.2',
                 free_threaded_build: true,
                 gil_enabled: false,
                 free_threading_active: true,
@@ -122,7 +122,7 @@ describe('Settings.vue', () => {
         await flushPromises()
 
         expect(api.getPerformanceStatus).toHaveBeenCalledOnce()
-        expect(wrapper.get('[data-testid="backend-python-version"]').text()).toContain('CPython 3.14.4')
+        expect(wrapper.get('[data-testid="backend-python-version"]').text()).toContain('CPython 3.15.2')
         expect(wrapper.get('[data-testid="backend-gil-state"]').text()).toContain('GIL disabled')
         expect(wrapper.get('[data-testid="backend-executor-queries"]').text()).toContain('Capacity')
         expect(wrapper.get('[data-testid="backend-runtime-panel"]').text()).toContain('Memory entries')

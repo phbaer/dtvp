@@ -165,8 +165,9 @@ medium projects. Mostly idle or dashboard users are substantially cheaper;
 not all retaining large grouped-vulnerability tasks.
 
 These are sizing estimates, not production guarantees. The reproducible
-benchmark below was run on a 20-CPU, 15 GiB host with 20,000 groups, filtered
-facet counts enabled, and ten cold searches per simulated user:
+benchmark below was collected before the Python 3.15 upgrade, using CPython
+3.14.4 on a 20-CPU, 15 GiB host with 20,000 groups, filtered facet counts
+enabled, and ten cold searches per simulated user:
 
 | Runtime | Simultaneous searches | Throughput | p95 search latency |
 | :--- | ---: | ---: | ---: |
@@ -224,10 +225,10 @@ order, and then measures new search/filter contexts separately from identical
 cached requests. It reports build time, retained Python allocations,
 throughput, and p50/p95 latency in the `dtvp.group-query-benchmark/v1` schema;
 add `--json` for machine-readable output and `--no-counts` to model follow-up
-pages. Compare the normal project runtime with a clean `3.14t` interpreter on
+pages. Compare the normal project runtime with a clean `3.15t` interpreter on
 the same host (the benchmark itself has no third-party dependencies):
 
 ```bash
 uv run python scripts/benchmark_group_queries.py
-uv run --no-project --python 3.14t python scripts/benchmark_group_queries.py
+uv run --no-project --python 3.15t python scripts/benchmark_group_queries.py
 ```

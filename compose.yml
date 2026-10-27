@@ -79,7 +79,7 @@ services:
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
       DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}
       DTVP_UVICORN_KEEP_ALIVE_SECONDS: ${DTVP_UVICORN_KEEP_ALIVE_SECONDS:-30}
-      # The packaged deployment defaults to the verified CPython 3.14t image.
+      # The packaged deployment defaults to the verified CPython 3.15t image.
       # The application refuses to serve if the GIL is unexpectedly active.
       DTVP_REQUIRE_FREE_THREADED: "true"
       DTVP_ATTRIBUTION_AGE_FILTER_DAYS: ${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}

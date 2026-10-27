@@ -5,7 +5,7 @@ authors = ["phbaer <git@ph.baer.one>"]
 urls = { "Homepage" = "https://baer.one", "Main repo" = "https://git.baer.one/phbaer/dtvp", "GitHub" = "https://github.com/phbaer/dtvp", "Mastodon" = "https://baer.im/@phbaer" }
 description = "A vulnerability management platform for dependency track"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
     "fastapi",
     "uvicorn",
@@ -18,9 +18,12 @@ dependencies = [
     "authlib>=1.8.0,<2",
     "itsdangerous>=2.2,<3",
     "sqlalchemy>=2.0,<3",
-    "psycopg[binary]>=3.2,<4",
+    "psycopg>=3.2,<4",
     "alembic>=1.16,<2",
 ]
+
+[project.optional-dependencies]
+postgres = ["psycopg[c]>=3.2,<4"]
 
 [project.scripts]
 dtvp-db-upgrade = "dtvp.database_migrations:main"

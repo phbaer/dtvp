@@ -49,7 +49,7 @@ async def test_start_application_runtime_logs_runtime_and_environment_details():
         load_tmrescore_project_cache=lambda: {"Project": {"session": "fresh"}},
         runtime_details_provider=lambda: {
             "runtime": {
-                "python": "3.14.0",
+                "python": "3.15.2",
                 "hostname": "dtvp-test",
                 "container": "docker",
             },
@@ -71,7 +71,7 @@ async def test_start_application_runtime_logs_runtime_and_environment_details():
     try:
         assert console_lines[:3] == [
             "DTVP startup: name=DTVP, version=1.2.3, build=abc123",
-            "DTVP runtime: python=3.14.0, hostname=dtvp-test, container=docker",
+            "DTVP runtime: python=3.15.2, hostname=dtvp-test, container=docker",
             "DTVP environment: context_path=/dtvp, dependency_track=configured",
         ]
         assert any(
@@ -90,7 +90,7 @@ async def test_start_application_runtime_logs_runtime_and_environment_details():
         )
         joined_logs = "\n".join(logger.messages)
         assert "Starting DTVP version 1.2.3 (build abc123)" in joined_logs
-        assert "DTVP runtime: python=3.14.0, hostname=dtvp-test, container=docker" in joined_logs
+        assert "DTVP runtime: python=3.15.2, hostname=dtvp-test, container=docker" in joined_logs
         assert "DTVP environment: context_path=/dtvp, dependency_track=configured" in joined_logs
         assert "DTVP startup step completed: tmrescore cache loaded" in joined_logs
         assert "DTVP startup step completed: Dependency-Track cache initialized" in joined_logs

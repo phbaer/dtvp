@@ -46,7 +46,8 @@ Deployment rules:
   --output-dir /app/data/backups` creates a permission-restricted archive with a
   consistent SQLite copy or PostgreSQL custom dump plus SHA-256-verified DTVP
   artifacts. Compose includes PostgreSQL 18 client utilities for its PostgreSQL
-  18 service. `pg_dump` must be at least as new as the server major version;
+  18 service and compiles Psycopg's C adapter into the Python 3.15 image.
+  `pg_dump` must be at least as new as the server major version;
   PostgreSQL refuses a dump when the client major version is older than the
   server. [PostgreSQL pg_dump compatibility](https://www.postgresql.org/docs/18/app-pgdump.html)
 - Restore with DTVP stopped while leaving the database service running:
@@ -121,14 +122,14 @@ Deployment rules:
 
 ## Python Runtime Images
 
-The default Compose and published DTVP image use the Python 3.14 free-threaded
+The default Compose and published DTVP image use the Python 3.15 free-threaded
 build. Start it normally:
 
 ```bash
 docker compose up -d --build
 ```
 
-`Dockerfile.free-threaded` asks `uv` for the explicit `3.14t` interpreter. It
+`Dockerfile.free-threaded` asks `uv` for the explicit `3.15t` interpreter. It
 loads DTVP's native dependencies and verifies the runtime during the image
 build. Compose also sets `DTVP_REQUIRE_FREE_THREADED=true`, so the
 application refuses to start if it receives a normal interpreter or a native
@@ -139,7 +140,7 @@ extension re-enables the GIL. Confirm the live state under `python` in
 See the official [CPython free-threading
 guide](https://docs.python.org/3/howto/free-threading-python.html) and [`uv`
 Python variant documentation](https://docs.astral.sh/uv/concepts/python-versions/)
-for the interpreter guarantees and `3.14t` selector.
+for the interpreter guarantees and `3.15t` selector.
 
 Free threading lets DTVP's dedicated CPU worker pools execute Python code on
 multiple cores. It does not make Dependency-Track/network I/O faster, and the
