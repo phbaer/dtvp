@@ -186,8 +186,9 @@ remain available for archive export and provenance. Source analysis is retained
 as an attributed observation. Assessment decisions are stored locally with
 revision history; outbound synchronization is optional and disabled by default.
 Project browsing and statistics read the persisted DTVP catalog/snapshots
-without a Dependency-Track client. Catalog discovery and inventory refresh
-still run through the source connector when requested. Threat-model inventory
+without a Dependency-Track client. The project browsing router no longer takes
+that client dependency. Catalog discovery and inventory refresh still run
+through the source connector when requested. Threat-model inventory
 inputs also come from DTVP snapshots; the external tmrescore service remains an
 optional analysis integration. Assessment detail, conflict checks, restore, and
 rescore routes, along with bulk workflow apply, also read and write DTVP-owned

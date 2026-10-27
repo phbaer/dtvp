@@ -726,7 +726,6 @@ def _register_project_routes(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
     current_user_dependency: Callable[..., Any],
-    client_dependency: Callable[..., Any],
 ) -> None:
     @router.get("/projects", responses=deps.service_unavailable_response)
     async def search_projects(
@@ -2751,10 +2750,9 @@ def create_general_api_router(
     deps: GeneralApiRouteDeps,
     *,
     current_user_dependency: Callable[..., Any],
-    client_dependency: Callable[..., Any],
 ) -> APIRouter:
     router = APIRouter()
-    _register_project_routes(router, deps, current_user_dependency, client_dependency)
+    _register_project_routes(router, deps, current_user_dependency)
     _register_task_routes(router, deps, current_user_dependency)
     _register_statistics_route(router, deps, current_user_dependency)
     _register_assessment_routes(router, deps, current_user_dependency)

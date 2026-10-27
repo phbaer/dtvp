@@ -712,7 +712,6 @@ api_router.include_router(
             task_event_hub=task_event_hub,
         ),
         current_user_dependency=get_current_user,
-        client_dependency=get_client,
     )
 )
 

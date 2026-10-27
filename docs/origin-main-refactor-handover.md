@@ -121,6 +121,10 @@ capability; it must not be required for normal DTVP reads or writes.
 - **Optional source at startup:** Compose no longer gates DTVP startup on the
   Dependency-Track API service. Project browsing reads the DTVP catalog without
   a DT client; source import and refresh still require the configured connector.
+- **Grouped review reads use DTVP:** grouped vulnerability tasks no longer
+  construct a DT client, and the general project-browsing router has no DT
+  client dependency. Both operate on previously imported catalog and inventory
+  snapshots.
 - **Legacy inventory migration command:** `uv run dtvp-legacy-cache-migrate`
   reports eligible versions; `--apply` imports them resumably while preserving
   legacy files. It does not delete or disable the old cache. The next backend
