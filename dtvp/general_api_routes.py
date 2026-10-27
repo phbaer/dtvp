@@ -734,16 +734,15 @@ def _register_project_routes(
     async def search_projects(
         name: Optional[str] = None,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         try:
-            return await deps.cache_manager.get_projects(client, name or "")
+            return await deps.cache_manager.get_projects(None, name or "")
         except Exception as exc:
-            deps.logger.error("Error fetching projects from Dependency-Track: %s", exc)
+            deps.logger.error("Error reading the DTVP project catalog: %s", exc)
             raise HTTPException(
                 status_code=503,
-                detail="Dependency-Track unavailable for project search. Please check DT server settings.",
+                detail="DTVP project catalog is unavailable. Check the DTVP database and imported catalog.",
             )
 
 

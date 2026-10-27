@@ -929,12 +929,22 @@ class CacheManager:
                 self._save_active_projects(self._active_project_last_access)
 
     async def get_projects(
-        self, client: DTClient, name: Optional[str] = None
+        self, client: DTClient | None, name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         async with self.lock:
             projects = self._load_project_cache(self._projects_path(), []) or []
             full_list_is_fresh = self._project_list_is_fresh()
-        discovered = await self._get_discovered_projects(client)
+        discovered = await asyncio.to_thread(list_source_catalog_projects)
+        if client is None:
+            catalog = discovered or projects
+            if name:
+                normalized_name = name.casefold()
+                catalog = [
+                    project for project in catalog
+                    if normalized_name in str(project.get("name") or "").casefold()
+                ]
+            return copy.deepcopy(catalog)
+
         if discovered and full_list_is_fresh:
             catalog = discovered
         else:

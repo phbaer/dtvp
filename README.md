@@ -178,9 +178,9 @@ during Dependency-Track outages. Source analysis comes from the normalized DTVP
 snapshot, with the provider analysis retained as attributed source observation.
 Assessment decisions are stored locally with
 revision history; outbound synchronization is optional and disabled by default.
-Project discovery still refreshes through the Dependency-Track connector.
-Some backend routes retain a Dependency-Track client dependency for request
-compatibility, while imported inventory reads use DTVP snapshots.
+Project browsing reads the persisted DTVP catalog without a Dependency-Track
+client. Catalog discovery and inventory refresh still run through the source
+connector when requested.
 
 | Path | Purpose |
 | :--- | :--- |
