@@ -49,7 +49,10 @@ def _resolve_assessment_context(
         raise LookupError("Assessment finding has not been imported into DTVP")
     latest = session.scalar(
         select(InventorySnapshot)
-        .where(InventorySnapshot.product_version_id == version_ref.local_id)
+        .where(
+            InventorySnapshot.product_version_id == version_ref.local_id,
+            InventorySnapshot.source_connection_id == version_ref.source_connection_id,
+        )
         .order_by(InventorySnapshot.revision.desc())
         .limit(1)
     )
@@ -380,17 +383,22 @@ def list_source_catalog_projects() -> list[dict]:
 
 
 def get_latest_snapshot_for_source_project(
-    source_project_id: str, preferred_base_url: str | None = None
+    source_project_id: str,
+    preferred_base_url: str | None = None,
+    source_type: str | None = None,
 ) -> dict | None:
     with get_session_factory()() as session:
-        refs = session.execute(
+        query = (
             select(ExternalReference, SourceConnection)
             .join(SourceConnection, SourceConnection.id == ExternalReference.source_connection_id)
             .where(
                 ExternalReference.external_type == "product-version",
                 ExternalReference.external_id == source_project_id,
             )
-        ).all()
+        )
+        if source_type:
+            query = query.where(SourceConnection.source_type == source_type)
+        refs = session.execute(query).all()
         candidates = []
         for version_ref, source in refs:
             latest = session.scalar(

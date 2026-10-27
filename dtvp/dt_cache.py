@@ -1017,10 +1017,10 @@ class CacheManager:
 
     async def _migrate_pending_local_assessments(
         self, project_uuid: str, *, source_type: str = "dependency-track"
-    ) -> None:
+    ) -> bool:
         """Promote legacy local decision states after their snapshot exists."""
         if project_uuid in self._legacy_assessments_migrated:
-            return
+            return True
         states = await asyncio.to_thread(
             self.assessment_outbox.list_states_for_project, project_uuid
         )
@@ -1029,7 +1029,10 @@ class CacheManager:
         # imported snapshot; file names alone are not a reliable identity map.
         legacy_analyses = []
         snapshot_record = await asyncio.to_thread(
-            get_latest_snapshot_for_source_project, project_uuid
+            get_latest_snapshot_for_source_project,
+            project_uuid,
+            None,
+            source_type,
         )
         if snapshot_record is not None:
             try:
@@ -1060,7 +1063,7 @@ class CacheManager:
                     })
             except (OSError, ValueError):
                 logger.exception("Could not inspect legacy assessment cache for %s", project_uuid)
-                return
+                return False
         publication_enabled = os.getenv(
             "DTVP_DT_ASSESSMENT_SYNC_ENABLED", "false"
         ).strip().lower() in {"1", "true", "yes", "on", "enabled"}
@@ -1116,6 +1119,7 @@ class CacheManager:
                 )
         if all_migrated:
             self._legacy_assessments_migrated.add(project_uuid)
+        return all_migrated
 
     async def _get_or_import_snapshot(
         self, client: DTClient, project_uuid: str, *, refresh: bool

@@ -82,6 +82,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | :--- | :--- |
 | Run DTVP Python tests | `uv run pytest` |
 | Apply DTVP database migrations manually | `uv run dtvp-db-upgrade` |
+| Preview or import pre-DTVP inventory caches | `uv run dtvp-legacy-cache-migrate` / `uv run dtvp-legacy-cache-migrate --apply` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- --run ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |

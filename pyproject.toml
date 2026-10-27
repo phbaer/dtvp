@@ -24,6 +24,7 @@ dependencies = [
 
 [project.scripts]
 dtvp-db-upgrade = "dtvp.database_migrations:main"
+dtvp-legacy-cache-migrate = "dtvp.legacy_cache_migration:main"
 
 [dependency-groups]
 dev = [
