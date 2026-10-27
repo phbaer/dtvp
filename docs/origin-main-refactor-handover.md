@@ -107,15 +107,16 @@ capability; it must not be required for normal DTVP reads or writes.
   database with actor and revision metadata, pinned to the inventory snapshot
   used. The legacy SQLite queue remains only for explicitly enabled
   publication and promotion of older pending decisions; outbound
-  synchronization is disabled by default. Pending legacy decisions migrate
-  after a successful project import. Archive import/restore now publish through
-  DTVP's generic source importer; scheduled export still uses the connector for
-  source discovery and refresh. Some analysis integrations still call
-  Dependency-Track directly.
-- **Next backend slice:** migrate remaining analysis integrations to
-  source-neutral DTVP query services, provide a clear
-  retirement/migration path for legacy cache and outbox data, then remove
-  remaining Dependency-Track-backed reads.
+  synchronization is disabled by default. Legacy SQLite decisions and
+  per-finding JSON overlays migrate after a successful project import. Archive
+  restore publishes through DTVP's generic source importer; export can refresh
+  through the configured source connector. The automatic-analysis sweep reads
+  the DTVP catalog and retained snapshots. Project discovery and optional DT
+  publication still use the Dependency-Track connector/client.
+- **Next backend slice:** provide a supported migration and retirement path for
+  legacy project caches/outbox data, then remove client dependencies from
+  compatibility routes where they are no longer needed. Add operational backup,
+  restore, and verification procedures for the DTVP database and artifact store.
 
 ### Target backend boundaries
 

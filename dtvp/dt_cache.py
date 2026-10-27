@@ -329,35 +329,13 @@ class CacheManager:
         }
 
     def get_cached_project_versions(self) -> List[Dict[str, Any]]:
-        projects = self._load_project_cache(self._projects_path(), []) or []
-        versions_by_uuid: Dict[str, Dict[str, Any]] = {
-            project.get("uuid"): project
-            for project in projects
-            if project.get("uuid")
-        }
-
-        for project_uuid in self.active_project_uuids:
-            if project_uuid and project_uuid not in versions_by_uuid:
-                versions_by_uuid[project_uuid] = {
-                    "uuid": project_uuid,
-                    "name": project_uuid,
-                    "version": "",
-                }
-
-        findings_dir = os.path.join(self.base_path, "findings")
-        if os.path.isdir(findings_dir):
-            for filename in os.listdir(findings_dir):
-                if not filename.endswith(".json"):
-                    continue
-                project_uuid = filename[:-5]
-                if project_uuid and project_uuid not in versions_by_uuid:
-                    versions_by_uuid[project_uuid] = {
-                        "uuid": project_uuid,
-                        "name": project_uuid,
-                        "version": "",
-                    }
-
-        return list(versions_by_uuid.values())
+        projects = list_source_catalog_projects()
+        if projects:
+            return projects
+        # Before the DTVP catalog migration, the local project list was the
+        # only source of project identities. Keep it as a one-way fallback for
+        # installations that have not imported their catalog yet.
+        return self._load_project_cache(self._projects_path(), []) or []
 
     def get_cached_project_snapshot(
         self,

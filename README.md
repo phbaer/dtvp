@@ -176,8 +176,9 @@ are now available. Inventory cache misses and refreshes publish DTVP snapshots
 before returning the existing UI response, and cached snapshots supply reads
 during Dependency-Track outages. Assessment decisions are stored locally with
 revision history; outbound synchronization is optional and disabled by default.
-Project discovery and several analysis integrations still use transitional
-Dependency-Track paths.
+Project discovery still refreshes through the Dependency-Track connector.
+Some backend routes retain a Dependency-Track client dependency for request
+compatibility, while imported inventory reads use DTVP snapshots.
 
 | Path | Purpose |
 | :--- | :--- |
@@ -194,8 +195,8 @@ Dependency-Track paths.
 Grouped tasks serve filtered summary windows and hydrate full details on demand.
 Assessment saves append revisioned decisions to the DTVP database. Publishing
 those decisions back to Dependency-Track is optional and disabled by default.
-Pending local decisions from the earlier SQLite queue are promoted on the
-project's first successful import.
+Local decisions from the earlier SQLite queue and per-finding JSON overlays
+are promoted on the project's first successful import.
 Inventory cache misses, refreshes, and complete project discovery pass through
 source connectors and publish their results to DTVP before reads return. Task
 registries are process-local: the supplied deployment uses one backend worker;
