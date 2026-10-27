@@ -26,8 +26,10 @@ The first adapter groups Dependency-Track project versions by exact project name
 ambiguous duplicate name/version mappings fail visibly instead of overwriting a
 different version.
 Project discovery and several analysis/archive integrations still have
-Dependency-Track paths. Existing inventory reads and refreshes go through the
-DTVP snapshot store.
+Dependency-Track paths. Project catalog discovery runs through the connector,
+retains provider project records as artifacts, and publishes the active catalog
+in DTVP's database. Existing inventory reads and refreshes use the DTVP snapshot
+store.
 
 ## Import and sync
 

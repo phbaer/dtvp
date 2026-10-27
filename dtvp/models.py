@@ -85,6 +85,9 @@ class SourceConnection(Base):
 
     import_runs: Mapped[list[ImportRun]] = relationship(back_populates="source")
     snapshots: Mapped[list[InventorySnapshot]] = relationship(back_populates="source")
+    catalog_projects: Mapped[list[SourceCatalogProject]] = relationship(
+        back_populates="source"
+    )
 
 
 class ExternalReference(Base):
@@ -179,6 +182,37 @@ class InventorySnapshot(Base):
     product_version: Mapped[ProductVersion] = relationship(back_populates="snapshots")
     source: Mapped[SourceConnection] = relationship(back_populates="snapshots")
     import_run: Mapped[ImportRun] = relationship()
+
+
+class SourceCatalogProject(Base):
+    """Provider discovery observation retained separately from DTVP products."""
+
+    __tablename__ = "source_catalog_projects"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_connection_id", "external_project_id",
+            name="uq_source_catalog_project_identity",
+        ),
+        Index("ix_source_catalog_project_active", "source_connection_id", "active"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    source_connection_id: Mapped[str] = mapped_column(
+        ForeignKey("source_connections.id", ondelete="CASCADE"), nullable=False
+    )
+    external_project_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    version_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+    source: Mapped[SourceConnection] = relationship(back_populates="catalog_projects")
 
 
 class AssessmentRevision(Base):

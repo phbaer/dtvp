@@ -21,6 +21,7 @@ from .models import (
     Product,
     ProductVersion,
     SourceConnection,
+    SourceCatalogProject,
 )
 
 
@@ -264,6 +265,93 @@ def ensure_source_connection(
                 )
             )
     return source_id
+
+
+def sync_source_catalog_projects(
+    *, source_connection_id: str, projects: list[dict],
+) -> list[dict]:
+    """Atomically publish a complete discovered catalog and retain source records."""
+    captured_at = datetime.now(UTC)
+    artifacts: dict[str, str] = {}
+    normalized = []
+    for project in projects:
+        external_id = str(project.get("external_id") or "").strip()
+        product_name = str(project.get("product_name") or "").strip()
+        version_name = str(project.get("version_name") or "")
+        raw = project.get("source_artifacts")
+        if not external_id or not product_name or not isinstance(raw, dict):
+            raise ValueError("Source returned an invalid project catalog entry")
+        if external_id in artifacts:
+            raise ValueError("Source returned duplicate project identities")
+        artifacts[external_id] = ArtifactStore().put_json(raw)
+        normalized.append(
+            {
+                "external_id": external_id,
+                "product_name": product_name,
+                "version_name": version_name,
+                "active": bool(project.get("active", True)),
+                "payload_sha256": artifacts[external_id],
+            }
+        )
+
+    with get_session_factory().begin() as session:
+        existing = session.scalars(
+            select(SourceCatalogProject).where(
+                SourceCatalogProject.source_connection_id == source_connection_id
+            )
+        ).all()
+        by_identity = {entry.external_project_id: entry for entry in existing}
+        seen_ids = set(artifacts)
+        for entry in existing:
+            if entry.external_project_id not in seen_ids:
+                entry.active = False
+        result = []
+        for item in normalized:
+            entry = by_identity.get(item["external_id"])
+            if entry is None:
+                entry = SourceCatalogProject(
+                    source_connection_id=source_connection_id,
+                    external_project_id=item["external_id"],
+                    product_name=item["product_name"],
+                    version_name=item["version_name"],
+                    active=item["active"],
+                    payload_sha256=item["payload_sha256"],
+                    last_seen_at=captured_at,
+                )
+                session.add(entry)
+            else:
+                entry.product_name = item["product_name"]
+                entry.version_name = item["version_name"]
+                entry.active = item["active"]
+                entry.payload_sha256 = item["payload_sha256"]
+                entry.last_seen_at = captured_at
+            result.append((item["external_id"], item["payload_sha256"], item["active"]))
+    store = ArtifactStore()
+    return [
+        store.get_json(payload_hash)
+        for _external_id, payload_hash, active in result
+        if active
+    ]
+
+
+def list_source_catalog_projects(source_type: str, base_url: str) -> list[dict]:
+    with get_session_factory()() as session:
+        rows = session.execute(
+            select(SourceCatalogProject.payload_sha256)
+            .join(SourceConnection, SourceConnection.id == SourceCatalogProject.source_connection_id)
+            .where(
+                SourceConnection.source_type == source_type,
+                SourceConnection.config["base_url"].as_string() == base_url,
+                SourceCatalogProject.active.is_(True),
+            )
+            .order_by(
+                SourceCatalogProject.product_name,
+                SourceCatalogProject.version_name,
+                SourceCatalogProject.external_project_id,
+            )
+        ).all()
+    store = ArtifactStore()
+    return [store.get_json(row[0]) for row in rows]
 
 
 def begin_import_run(

@@ -207,6 +207,29 @@ def build_normalized_snapshot(
 class DependencyTrackConnector:
     source_type = "dependency-track"
 
+    async def discover_projects(self, client: Any) -> list[dict[str, Any]]:
+        projects = await client.get_projects("")
+        if not isinstance(projects, list):
+            raise ValueError("Dependency-Track returned an invalid project catalog")
+        normalized = []
+        for project in projects:
+            if not isinstance(project, dict):
+                continue
+            external_id = str(project.get("uuid") or "").strip()
+            product_name = str(project.get("name") or "").strip()
+            if not external_id or not product_name:
+                continue
+            normalized.append(
+                {
+                    "external_id": external_id,
+                    "product_name": product_name,
+                    "version_name": str(project.get("version") or ""),
+                    "active": bool(project.get("active", True)),
+                    "source_artifacts": project,
+                }
+            )
+        return normalized
+
     async def fetch_snapshot(self, client: Any, scope: dict[str, Any]) -> dict[str, Any]:
         project_id = str(scope.get("project_id") or "").strip()
         if not project_id:

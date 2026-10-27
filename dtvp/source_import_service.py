@@ -18,6 +18,7 @@ from .catalog_repository import (
     ensure_source_connection,
     fail_import_run,
     publish_snapshot,
+    sync_source_catalog_projects,
 )
 from .source_connectors.base import SourceConnector
 
@@ -66,6 +67,29 @@ def _state_sha256(snapshot: dict[str, Any]) -> str:
                 if isinstance(attribution, dict):
                     attribution.pop("observed_at", None)
     return hashlib.sha256(ArtifactStore.encode_json(state)).hexdigest()
+
+
+async def discover_source_projects(
+    *,
+    connector: SourceConnector,
+    client: Any,
+    source_base_url: str,
+) -> list[dict[str, Any]]:
+    """Discover a complete provider catalog and persist its DTVP-owned view."""
+    normalized_base_url = _safe_base_url(source_base_url)
+    source_connection_id = await asyncio.to_thread(
+        ensure_source_connection,
+        source_type=connector.source_type,
+        display_name=f"{connector.source_type} ({normalized_base_url})",
+        config={"base_url": normalized_base_url, "connector_version": 1},
+        secret_ref="env:DTVP_DT_API_KEY" if connector.source_type == "dependency-track" else None,
+    )
+    discovered = await connector.discover_projects(client)
+    return await asyncio.to_thread(
+        sync_source_catalog_projects,
+        source_connection_id=source_connection_id,
+        projects=discovered,
+    )
 
 
 async def import_source_scope(

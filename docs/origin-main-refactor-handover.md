@@ -99,15 +99,18 @@ capability; it must not be required for normal DTVP reads or writes.
   Dependency-Track outage. The legacy cache facade no longer fetches BOMs,
   findings, advisories, or source analysis directly; those reads go through the
   connector/import service.
-- **Still transitional:** project discovery normally queries Dependency-Track;
-  DTVP assessment decisions now append to the relational database with actor
+- **Implemented DTVP-owned project catalog:** complete project discovery runs
+  through the connector, and active/inactive catalog observations plus original
+  provider records are stored in DTVP before the compatibility API returns
+  them. The local project cache is disposable.
+- **Still transitional:** DTVP assessment decisions append to the relational database with actor
   and revision metadata, pinned to the inventory snapshot used. The legacy
   SQLite queue remains only for explicitly enabled publication and
   compatibility with older queued updates; outbound synchronization is
-  disabled by default. Project discovery and several analysis workflows still
-  call Dependency-Track.
-- **Next backend slice:** migrate remaining analysis/archive integrations and
-  project discovery to source-neutral DTVP query services, provide a clear
+  disabled by default. Archive import/restore and several analysis workflows
+  still call Dependency-Track.
+- **Next backend slice:** migrate remaining analysis/archive integrations to
+  source-neutral DTVP query services, provide a clear
   retirement/migration path for legacy cache and outbox data, then remove
   remaining Dependency-Track-backed reads.
 

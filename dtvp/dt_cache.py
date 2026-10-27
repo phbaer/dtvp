@@ -23,11 +23,14 @@ from .assessment_outbox_services import (
     get_assessment_outbox_path,
 )
 from .artifact_store import ArtifactStore
-from .catalog_repository import get_latest_source_snapshot, list_latest_source_snapshots
+from .catalog_repository import (
+    get_latest_source_snapshot,
+    list_source_catalog_projects,
+)
 from .catalog_repository import get_current_assessment, persist_assessment_revisions
 from .source_import_service import _safe_base_url
 from .source_connectors.dependency_track import DependencyTrackConnector
-from .source_import_service import import_source_scope
+from .source_import_service import discover_source_projects, import_source_scope
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
 
@@ -1009,7 +1012,11 @@ class CacheManager:
 
     async def _refresh_project_list(self, client: DTClient) -> None:
         try:
-            projects = await client.get_projects("")
+            projects = await discover_source_projects(
+                connector=DependencyTrackConnector(),
+                client=client,
+                source_base_url=client.base_url,
+            )
             async with self.lock:
                 self._mark_project_list_refreshed()
                 self._save_project_cache(self._projects_path(), projects)
@@ -1059,115 +1066,46 @@ class CacheManager:
     ) -> List[Dict[str, Any]]:
         async with self.lock:
             projects = self._load_project_cache(self._projects_path(), []) or []
-            projects_meta = self.cache_meta
             full_list_is_fresh = self._project_list_is_fresh()
-
-        if not name:
-            if full_list_is_fresh:
-                return copy.deepcopy(projects)
+        discovered = await self._get_discovered_projects(client)
+        if discovered and full_list_is_fresh:
+            catalog = discovered
+        else:
             try:
-
-                async def fetch_all_projects() -> List[Dict[str, Any]]:
-                    fresh_projects = await client.get_projects("")
-                    async with self.lock:
-                        self._mark_project_list_refreshed()
-                        self._save_project_cache(
-                            self._projects_path(), fresh_projects
-                        )
-                    return fresh_projects
-
-                projects = await self._singleflight_fetch(
-                    ("projects", "all"),
-                    fetch_all_projects,
+                catalog = await self._singleflight_fetch(
+                    ("source-project-catalog", _safe_base_url(client.base_url)),
+                    lambda: discover_source_projects(
+                        connector=DependencyTrackConnector(),
+                        client=client,
+                        source_base_url=client.base_url,
+                    ),
                 )
-                return projects
+                async with self.lock:
+                    self._mark_project_list_refreshed()
+                    self._save_project_cache(self._projects_path(), catalog)
             except Exception:
-                imported = await self._get_imported_projects(client)
-                if imported:
+                if discovered:
                     logger.warning(
-                        "Dependency-Track project list unavailable; using %d DTVP-imported projects",
-                        len(imported),
+                        "Project discovery unavailable; using %d DTVP catalog entries",
+                        len(discovered),
                     )
-                    return [
-                        project for project in imported
-                        if not name or name.lower() in (project.get("name") or "").lower()
-                    ]
-                if projects:
+                    catalog = discovered
+                elif projects:
                     logger.warning(
-                        "Dependency-Track project list unavailable; using stale "
-                        "cached project list with %d entries",
+                        "Project discovery unavailable; using %d legacy cached entries",
                         len(projects),
                     )
-                    return copy.deepcopy(projects)
-                raise
+                    catalog = projects
+                else:
+                    raise
 
-        if projects_meta.get("fully_cached"):
-            return copy.deepcopy(
-                [
-                    project
-                    for project in projects
-                    if name.lower() in (project.get("name", "") or "").lower()
-                ]
-            )
-
-        if name in self.project_query_cache:
-            self.project_query_cache.move_to_end(name)
-            return copy.deepcopy(self.project_query_cache[name])
-
-        try:
-
-            async def fetch_matching_projects() -> List[Dict[str, Any]]:
-                fresh_results = await client.get_projects(name)
-                async with self.lock:
-                    self.project_query_cache[name] = fresh_results
-                    self.project_query_cache.move_to_end(name)
-                    while (
-                        len(self.project_query_cache)
-                        > self.project_query_cache_max_entries
-                    ):
-                        self.project_query_cache.popitem(last=False)
-                    if fresh_results:
-                        current = self._load_project_cache(
-                            self._projects_path(), []
-                        ) or []
-                        existing_uuids = {
-                            project.get("uuid")
-                            for project in current
-                            if project.get("uuid")
-                        }
-                        merged = list(current)
-                        for project in fresh_results:
-                            if project.get("uuid") not in existing_uuids:
-                                merged.append(project)
-                        self._save_project_cache(self._projects_path(), merged)
-                return fresh_results
-
-            results = await self._singleflight_fetch(
-                ("projects", "query", name),
-                fetch_matching_projects,
-            )
-        except Exception:
-            imported_matches = [
-                project for project in await self._get_imported_projects(client)
-                if name.lower() in (project.get("name") or "").lower()
+        if name:
+            normalized_name = name.casefold()
+            catalog = [
+                project for project in catalog
+                if normalized_name in str(project.get("name") or "").casefold()
             ]
-            if imported_matches:
-                return imported_matches
-            cached_matches = [
-                project
-                for project in projects
-                if name.lower() in (project.get("name", "") or "").lower()
-            ]
-            if cached_matches:
-                logger.warning(
-                    "Dependency-Track project search for %r unavailable; using "
-                    "stale cached matches with %d entries",
-                    name,
-                    len(cached_matches),
-                )
-                return copy.deepcopy(cached_matches)
-            raise
-        return results
+        return copy.deepcopy(catalog)
 
     async def _get_imported_project_snapshot(
         self, client: DTClient, project_uuid: str
@@ -1189,24 +1127,15 @@ class CacheManager:
             logger.warning("Could not read DTVP snapshot for project %s: %s", project_uuid, exc)
             return None
 
-    async def _get_imported_projects(self, client: DTClient) -> List[Dict[str, Any]]:
+    async def _get_discovered_projects(self, client: DTClient) -> List[Dict[str, Any]]:
         try:
-            records = await asyncio.to_thread(
-                list_latest_source_snapshots,
+            return await asyncio.to_thread(
+                list_source_catalog_projects,
                 "dependency-track",
                 _safe_base_url(client.base_url),
             )
-            projects = []
-            for record in records:
-                payload = await asyncio.to_thread(
-                    ArtifactStore().get_json, record["payload_sha256"]
-                )
-                project = ((payload.get("source_artifacts") or {}).get("project") or {})
-                if project:
-                    projects.append(project)
-            return projects
         except (OSError, ValueError) as exc:
-            logger.warning("Could not list DTVP-imported projects: %s", exc)
+            logger.warning("Could not list DTVP source project catalog: %s", exc)
             return []
 
     async def _import_project(self, client: DTClient, project_uuid: str) -> None:
