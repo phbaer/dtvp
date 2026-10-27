@@ -131,7 +131,8 @@ rationale, source reference, source assessment/check dates, and assessor.
 Incomplete assessments explicitly document `SSVC priority: Incomplete`.
 The save-review preview includes changed SSVC priority and inputs. Ordinary
 edits preserve/regenerate the summary; explicit clear removes it and metadata.
-This travels with existing Dependency-Track assessment and archive workflows.
+This travels with DTVP assessment and archive workflows and remains attributed
+to the imported source observations that informed the decision.
 Team edits, CVSS changes, and bulk assessment workflows preserve SSVC per finding.
 Grouped `ssvc_summary` reports coverage and explicitly distinguishes unassessed,
 incomplete, mixed, and invalid/unsupported records; it never picks one result

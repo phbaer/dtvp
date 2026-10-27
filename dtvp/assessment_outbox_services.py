@@ -386,6 +386,16 @@ class AssessmentOutboxStore:
             )
             return copy.deepcopy(values)
 
+    def list_states_for_project(self, project_uuid: str) -> list[dict[str, Any]]:
+        """Return the latest legacy local decision state for one project."""
+        self._ensure_initialized()
+        with self._lock:
+            values = [
+                state for key, state in self._states.items()
+                if key[0] == project_uuid
+            ]
+            return copy.deepcopy(values)
+
     def list_due(self, now: datetime | None = None) -> list[dict[str, Any]]:
         current = (now or datetime.now(UTC)).astimezone(UTC)
         return [

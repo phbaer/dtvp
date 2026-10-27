@@ -29,7 +29,9 @@ class ImportRequestConflict(ValueError):
     """An idempotency key was reused for a different source scope."""
 
 
-def _resolve_assessment_context(session, payload: dict) -> tuple[str, str, str]:
+def _resolve_assessment_context(
+    session, payload: dict, source_type: str
+) -> tuple[str, str, str]:
     key = assessment_key(payload)
     if key is None:
         raise ValueError("Assessment is missing its finding identity")
@@ -38,7 +40,7 @@ def _resolve_assessment_context(session, payload: dict) -> tuple[str, str, str]:
         select(ExternalReference)
         .join(SourceConnection, SourceConnection.id == ExternalReference.source_connection_id)
         .where(
-            SourceConnection.source_type == "dependency-track",
+            SourceConnection.source_type == source_type,
             ExternalReference.external_type == "product-version",
             ExternalReference.external_id == project_id,
         )
@@ -83,6 +85,7 @@ def persist_assessment_revisions(
     actor: str | None = None,
     expected_revisions: dict[tuple[str, str, str], int] | None = None,
     only_if_absent: bool = False,
+    source_type: str = "dependency-track",
 ) -> list[dict]:
     """Save accepted decisions in DTVP and append a revision per change."""
     if not payloads:
@@ -93,7 +96,9 @@ def persist_assessment_revisions(
             key = assessment_key(payload)
             if key is None:
                 raise ValueError("Assessment is missing its finding identity")
-            version_id, snapshot_id, finding_identity = _resolve_assessment_context(session, payload)
+            version_id, snapshot_id, finding_identity = _resolve_assessment_context(
+                session, payload, source_type
+            )
             # Lock the canonical version row so concurrent first decisions for
             # a finding serialize even before any revision row exists.
             session.scalar(
@@ -280,7 +285,7 @@ def ensure_source_connection(
 
 
 def sync_source_catalog_projects(
-    *, source_connection_id: str, projects: list[dict],
+    *, source_connection_id: str, projects: list[dict], complete: bool = True,
 ) -> list[dict]:
     """Atomically publish a complete discovered catalog and retain source records."""
     captured_at = datetime.now(UTC)
@@ -314,9 +319,10 @@ def sync_source_catalog_projects(
         ).all()
         by_identity = {entry.external_project_id: entry for entry in existing}
         seen_ids = set(artifacts)
-        for entry in existing:
-            if entry.external_project_id not in seen_ids:
-                entry.active = False
+        if complete:
+            for entry in existing:
+                if entry.external_project_id not in seen_ids:
+                    entry.active = False
         result = []
         for item in normalized:
             entry = by_identity.get(item["external_id"])
@@ -346,24 +352,100 @@ def sync_source_catalog_projects(
     ]
 
 
-def list_source_catalog_projects(source_type: str, base_url: str) -> list[dict]:
+def list_source_catalog_projects() -> list[dict]:
     with get_session_factory()() as session:
         rows = session.execute(
-            select(SourceCatalogProject.payload_sha256)
-            .join(SourceConnection, SourceConnection.id == SourceCatalogProject.source_connection_id)
-            .where(
-                SourceConnection.source_type == source_type,
-                SourceConnection.config["base_url"].as_string() == base_url,
-                SourceCatalogProject.active.is_(True),
+            select(
+                SourceCatalogProject.external_project_id,
+                SourceCatalogProject.payload_sha256,
+                SourceConnection.source_type,
             )
+            .join(SourceConnection, SourceConnection.id == SourceCatalogProject.source_connection_id)
+            .where(SourceCatalogProject.active.is_(True))
             .order_by(
+                SourceCatalogProject.external_project_id,
                 SourceCatalogProject.product_name,
                 SourceCatalogProject.version_name,
-                SourceCatalogProject.external_project_id,
+                SourceConnection.source_type,
             )
         ).all()
     store = ArtifactStore()
-    return [store.get_json(row[0]) for row in rows]
+    projects: dict[str, tuple[int, dict]] = {}
+    for external_id, payload_hash, source_type in rows:
+        priority = 0 if source_type == "dependency-track" else 1
+        previous = projects.get(external_id)
+        if previous is None or priority < previous[0]:
+            projects[external_id] = (priority, store.get_json(payload_hash))
+    return [project for _priority, project in projects.values()]
+
+
+def get_latest_snapshot_for_source_project(
+    source_project_id: str, preferred_base_url: str | None = None
+) -> dict | None:
+    with get_session_factory()() as session:
+        refs = session.execute(
+            select(ExternalReference, SourceConnection)
+            .join(SourceConnection, SourceConnection.id == ExternalReference.source_connection_id)
+            .where(
+                ExternalReference.external_type == "product-version",
+                ExternalReference.external_id == source_project_id,
+            )
+        ).all()
+        candidates = []
+        for version_ref, source in refs:
+            latest = session.scalar(
+                select(InventorySnapshot)
+                .where(
+                    InventorySnapshot.product_version_id == version_ref.local_id,
+                    InventorySnapshot.source_connection_id == source.id,
+                )
+                .order_by(InventorySnapshot.revision.desc())
+                .limit(1)
+            )
+            if latest is None:
+                continue
+            priority = (
+                0
+                if preferred_base_url
+                and (source.config or {}).get("base_url") == preferred_base_url
+                else 1
+            )
+            candidates.append((priority, latest.created_at, source, latest))
+        if not candidates:
+            return None
+        _priority, _created, source, snapshot = min(
+            candidates, key=lambda item: (item[0], -item[1].timestamp())
+        )
+        return {
+            "id": snapshot.id,
+            "revision": snapshot.revision,
+            "payload_sha256": snapshot.payload_sha256,
+            "source_type": source.source_type,
+            "source_base_url": (source.config or {}).get("base_url"),
+            "captured_at": _iso(snapshot.captured_at),
+        }
+
+
+def get_source_finding_analysis(
+    project_id: str, component_id: str, vulnerability_id: str
+) -> dict | None:
+    record = get_latest_snapshot_for_source_project(project_id)
+    if record is None:
+        return None
+    try:
+        snapshot = ArtifactStore().get_json(record["payload_sha256"])
+    except (OSError, ValueError):
+        return None
+    for finding in (snapshot.get("source_artifacts") or {}).get("findings") or []:
+        component = finding.get("component") or {}
+        vulnerability = finding.get("vulnerability") or {}
+        if (
+            str(component.get("uuid") or "") == component_id
+            and str(vulnerability.get("uuid") or "") == vulnerability_id
+        ):
+            analysis = finding.get("analysis")
+            return analysis if isinstance(analysis, dict) else {}
+    return None
 
 
 def begin_import_run(
@@ -467,63 +549,68 @@ def publish_snapshot(
                     ExternalReference.external_id == source_product_id,
                 )
             )
-            if product_ref is None:
+            product = (
+                session.get(Product, product_ref.local_id)
+                if product_ref is not None
+                else None
+            )
+            if product_ref is not None and product is None:
+                raise LookupError("Mapped DTVP product does not exist")
+            if product is None and product_ref is None:
+                same_name = session.scalars(
+                    select(Product).where(Product.name == product_name).limit(2)
+                ).all()
+                if len(same_name) == 1:
+                    product = same_name[0]
+            if product is None:
                 product = Product(name=product_name)
                 session.add(product)
                 session.flush()
-                version = ProductVersion(product_id=product.id, version=version_name)
-                session.add(version)
-                session.flush()
-                session.add_all(
-                    [
-                        ExternalReference(
-                            source_connection_id=source_connection_id,
-                            external_type="product",
-                            external_id=source_product_id,
-                            local_type="product",
-                            local_id=product.id,
-                            observed_at=captured_at,
-                        ),
-                        ExternalReference(
-                            source_connection_id=source_connection_id,
-                            external_type="product-version",
-                            external_id=source_version_id,
-                            local_type="product-version",
-                            local_id=version.id,
-                            observed_at=captured_at,
-                        ),
-                    ]
-                )
-            else:
-                product = session.get(Product, product_ref.local_id)
-                version_ref = session.scalar(
-                    select(ExternalReference).where(
-                        ExternalReference.source_connection_id == source_connection_id,
-                        ExternalReference.external_type == "product-version",
-                        ExternalReference.external_id == source_version_id,
+            if product_ref is None:
+                session.add(
+                    ExternalReference(
+                        source_connection_id=source_connection_id,
+                        external_type="product",
+                        external_id=source_product_id,
+                        local_type="product",
+                        local_id=product.id,
+                        observed_at=captured_at,
                     )
                 )
-                version = (
-                    session.get(ProductVersion, version_ref.local_id)
-                    if version_ref is not None
-                    else None
+
+            version_ref = session.scalar(
+                select(ExternalReference).where(
+                    ExternalReference.source_connection_id == source_connection_id,
+                    ExternalReference.external_type == "product-version",
+                    ExternalReference.external_id == source_version_id,
                 )
-                if product is None:
-                    raise LookupError("Mapped DTVP product does not exist")
+            )
+            version = (
+                session.get(ProductVersion, version_ref.local_id)
+                if version_ref is not None
+                else None
+            )
+            if version is None:
+                version = session.scalar(
+                    select(ProductVersion).where(
+                        ProductVersion.product_id == product.id,
+                        ProductVersion.version == version_name,
+                    )
+                )
                 if version is None:
                     version = ProductVersion(product_id=product.id, version=version_name)
                     session.add(version)
                     session.flush()
-                    session.add(
-                        ExternalReference(
-                            source_connection_id=source_connection_id,
-                            external_type="product-version",
-                            external_id=source_version_id,
-                            local_type="product-version",
-                            local_id=version.id,
-                            observed_at=captured_at,
-                        )
+                session.add(
+                    ExternalReference(
+                        source_connection_id=source_connection_id,
+                        external_type="product-version",
+                        external_id=source_version_id,
+                        local_type="product-version",
+                        local_id=version.id,
+                        observed_at=captured_at,
                     )
+                )
 
             latest = session.scalar(
                 select(InventorySnapshot)
@@ -763,3 +850,20 @@ def get_latest_source_snapshot(source_type: str, base_url: str, source_version_i
             "payload_sha256": snapshot.payload_sha256,
             "captured_at": _iso(snapshot.captured_at),
         }
+
+
+def get_local_product_version_id(
+    source_type: str, base_url: str, source_version_id: str
+) -> str | None:
+    with get_session_factory()() as session:
+        version_ref = session.scalar(
+            select(ExternalReference)
+            .join(SourceConnection, SourceConnection.id == ExternalReference.source_connection_id)
+            .where(
+                SourceConnection.source_type == source_type,
+                SourceConnection.config["base_url"].as_string() == base_url,
+                ExternalReference.external_type == "product-version",
+                ExternalReference.external_id == source_version_id,
+            )
+        )
+        return version_ref.local_id if version_ref else None

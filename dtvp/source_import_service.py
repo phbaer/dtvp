@@ -74,6 +74,7 @@ async def discover_source_projects(
     connector: SourceConnector,
     client: Any,
     source_base_url: str,
+    complete: bool = True,
 ) -> list[dict[str, Any]]:
     """Discover a complete provider catalog and persist its DTVP-owned view."""
     normalized_base_url = _safe_base_url(source_base_url)
@@ -89,6 +90,7 @@ async def discover_source_projects(
         sync_source_catalog_projects,
         source_connection_id=source_connection_id,
         projects=discovered,
+        complete=complete,
     )
 
 

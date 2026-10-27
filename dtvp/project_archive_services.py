@@ -13,7 +13,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from .artifact_store import ArtifactStore
+from .catalog_repository import (
+    get_current_assessment,
+    get_local_product_version_id,
+    list_product_versions,
+    list_products,
+)
 from .dt_client import DTClient
+from .source_connectors.project_archive import ProjectArchiveConnector
+from .source_import_service import discover_source_projects, import_source_scope
 
 
 ARCHIVE_SCHEMA_VERSION = "dtvp.project-archive/v1"
@@ -114,6 +123,16 @@ def _safe_project_tree_name(project_name: str) -> str:
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _find_dtvp_product_version_id(project_name: str, version_name: str) -> str | None:
+    for product in list_products(project_name):
+        if product.get("name") != project_name:
+            continue
+        for version in list_product_versions(product["id"]):
+            if version.get("version") == version_name:
+                return str(version["id"])
+    return None
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -463,6 +482,8 @@ async def export_project_archive(
     for index, project in enumerate(selected, start=1):
         project_uuid = project.get("uuid")
         version_label = str(project.get("version") or "")
+        if refresh:
+            await deps.cache_manager.refresh_project(project_uuid, client)
         version_dir = (
             f"versions/{index:04d}-"
             f"{_safe_filename(version_label or project_uuid or str(index))}"
@@ -471,17 +492,17 @@ async def export_project_archive(
         findings = await deps.cache_manager.get_vulnerabilities(
             client,
             project_uuid,
-            refresh=refresh,
+            refresh=False,
         )
         vulnerabilities = await deps.cache_manager.get_project_vulnerabilities(
             client,
             project_uuid,
-            refresh=refresh,
+            refresh=False,
         )
         bom = await deps.cache_manager.get_bom(
             client,
             project_uuid,
-            refresh=refresh,
+            refresh=False,
         )
         assessments = await _collect_assessments(
             deps,
@@ -489,7 +510,7 @@ async def export_project_archive(
             project,
             findings,
             bom,
-            refresh=refresh,
+            refresh=False,
         )
 
         project_path = f"{version_dir}/project.json"
@@ -639,7 +660,6 @@ def load_project_archive(path: str) -> dict[str, Any]:
 
 async def preview_project_archive(
     deps: ProjectArchiveServiceDeps,
-    client: DTClient,
     *,
     archive_path: str,
 ) -> dict[str, Any]:
@@ -654,7 +674,9 @@ async def preview_project_archive(
     for version in archive["versions"]:
         source_project = version["project"]
         version_label = source_project.get("version") or ""
-        existing = await client.find_project_by_name_version(project_name, version_label)
+        existing_id = await asyncio.to_thread(
+            _find_dtvp_product_version_id, project_name, version_label
+        )
         assessment_count = len(version.get("assessments") or [])
         empty_assessment_count = sum(
             1
@@ -666,8 +688,8 @@ async def preview_project_archive(
                 "project_name": project_name,
                 "version": version_label,
                 "source_uuid": source_project.get("uuid"),
-                "target_uuid": existing.get("uuid") if existing else None,
-                "target_exists": bool(existing),
+                "target_uuid": existing_id,
+                "target_exists": existing_id is not None,
                 "finding_count": len(version.get("findings") or []),
                 "vulnerability_count": len(version.get("vulnerabilities") or []),
                 "assessment_count": assessment_count,
@@ -738,9 +760,9 @@ def _find_target_finding(
 
 async def _restore_version_assessments(
     deps: ProjectArchiveServiceDeps,
-    client: DTClient,
     *,
     project_uuid: str,
+    source_type: str,
     target_findings: list[dict[str, Any]],
     target_bom: dict[str, Any] | None,
     assessments: list[dict[str, Any]],
@@ -748,6 +770,7 @@ async def _restore_version_assessments(
     target_entries = _target_finding_entries(target_findings, target_bom)
     restored = 0
     skipped_empty = 0
+    skipped_unchanged = 0
     unmatched = 0
     ambiguous = 0
     queued = 0
@@ -783,11 +806,26 @@ async def _restore_version_assessments(
             "suppressed": _analysis_suppressed(analysis),
         }
 
+        current = await asyncio.to_thread(
+            get_current_assessment,
+            project_uuid,
+            component_uuid,
+            vulnerability_uuid,
+        )
+        if current is not None and (
+            current.get("analysisState") == payload["state"]
+            and current.get("analysisDetails") == payload["details"]
+            and current.get("isSuppressed") == payload["suppressed"]
+        ):
+            skipped_unchanged += 1
+            continue
+
         try:
             await deps.cache_manager.persist_assessment_updates(
                 [payload],
                 replace=True,
                 actor="system:archive-restore",
+                source_type=source_type,
             )
             restored += 1
         except Exception as exc:
@@ -809,6 +847,7 @@ async def _restore_version_assessments(
         "restored": restored,
         "queued": queued,
         "skipped_empty": skipped_empty,
+        "skipped_unchanged": skipped_unchanged,
         "unmatched": unmatched,
         "ambiguous": ambiguous,
         "failed": failed,
@@ -817,7 +856,6 @@ async def _restore_version_assessments(
 
 async def apply_project_archive(
     deps: ProjectArchiveServiceDeps,
-    client: DTClient,
     *,
     archive_path: str,
     mode: Literal["create_missing", "update"],
@@ -831,68 +869,68 @@ async def apply_project_archive(
         manifest.get("source") or {}
     ).get("project_name")
 
+    connector = ProjectArchiveConnector(archive)
+    version_source_ids = connector.version_ids()
+    archive_fingerprint = hashlib.sha256(ArtifactStore.encode_json(archive)).hexdigest()
+    await discover_source_projects(
+        connector=connector,
+        client=None,
+        source_base_url="dtvp-archive://local",
+        complete=False,
+    )
     version_results: list[dict[str, Any]] = []
-    for version in archive["versions"]:
+    for index, version in enumerate(archive["versions"]):
         source_project = version["project"]
         version_label = source_project.get("version") or ""
-        existing = await client.find_project_by_name_version(project_name, version_label)
+        existing_id = await asyncio.to_thread(
+            _find_dtvp_product_version_id, project_name, version_label
+        )
 
-        if existing and mode != "update":
+        if existing_id and mode != "update":
             version_results.append(
                 {
                     "version": version_label,
                     "status": "skipped_existing",
-                    "target_uuid": existing.get("uuid"),
+                    "target_uuid": existing_id,
                     "assessment_result": None,
                 }
             )
             continue
 
-        target_uuid = existing.get("uuid") if existing else None
-        await client.upload_bom(
-            version.get("bom") or {},
-            project_uuid=target_uuid,
-            project_name=project_name,
-            project_version=version_label,
-            auto_create=True,
+        source_version_id = version_source_ids[index]
+        request_suffix = hashlib.sha256(source_version_id.encode("utf-8")).hexdigest()
+        run = await import_source_scope(
+            connector=connector,
+            client=None,
+            source_base_url="dtvp-archive://local",
+            request_id=f"archive:{archive_fingerprint[:32]}:{request_suffix}",
+            initiated_by="system:archive-import",
+            scope={"project_id": source_version_id},
         )
-        target_project = await client.wait_for_project_version(
-            project_name,
-            version_label,
-        )
-        if not target_project:
+        if run.get("status") != "succeeded":
             raise ProjectArchiveValidationError(
-                f"Dependency-Track did not expose restored version {project_name} {version_label}"
+                run.get("error_summary")
+                or f"Could not import archived version {project_name} {version_label}"
             )
-
-        target_uuid = target_project["uuid"]
-        expected_findings = len(version.get("findings") or [])
-        target_findings = await client.wait_for_project_findings(
-            target_uuid,
-            expected_min_findings=1 if expected_findings else 0,
-        )
-        try:
-            await deps.cache_manager.refresh_project(target_uuid, client)
-        except Exception as exc:
-            deps.logger.debug("Failed to import restored archive project: %s", exc)
-        try:
-            target_bom = await client.get_bom(target_uuid)
-        except Exception:
-            target_bom = {}
 
         assessment_result = await _restore_version_assessments(
             deps,
-            client,
-            project_uuid=target_uuid,
-            target_findings=target_findings,
-            target_bom=target_bom,
+            project_uuid=source_version_id,
+            source_type=connector.source_type,
+            target_findings=version.get("findings") or [],
+            target_bom=version.get("bom") or {},
             assessments=version.get("assessments") or [],
         )
         version_results.append(
             {
                 "version": version_label,
-                "status": "updated" if existing else "created",
-                "target_uuid": target_uuid,
+                "status": "updated" if existing_id else "created",
+                "target_uuid": await asyncio.to_thread(
+                    get_local_product_version_id,
+                    connector.source_type,
+                    "dtvp-archive://local",
+                    source_version_id,
+                ),
                 "assessment_result": assessment_result,
             }
         )

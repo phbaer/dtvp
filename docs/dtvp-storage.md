@@ -17,8 +17,10 @@ provenance. Provider-specific fields and exact source responses remain inside
 the retained `source_artifacts` section. Provider identifiers are mapped using
 `external_references`; they do not define DTVP product/version keys.
 
-Dependency-Track is the first connector. This is an inbound import and repeatable
-full-scope sync. Assessment decisions are stored by DTVP as append-only records
+Dependency-Track and DTVP project archives use the shared connector/import
+contract. DT is an inbound source with repeatable full-scope sync. Archive
+restore also publishes through DTVP and does not write to DT. Assessment
+decisions are stored by DTVP as append-only records
 pinned to an imported inventory snapshot, with actor and revision metadata.
 Publishing decisions back to Dependency-Track is a separate optional capability
 and is disabled by default.

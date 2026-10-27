@@ -291,7 +291,6 @@ def _register_import_routes(
     @router.post("/project-archives/imports")
     async def upload_project_archive_import(
         file: Annotated[UploadFile, File(...)],
-        request: Request,
         user: CurrentUser,
     ):
         _require_reviewer(deps, user)
@@ -314,8 +313,6 @@ def _register_import_routes(
             raise _archive_http_error(exc) from exc
 
         task["_archive_path"] = archive_path
-        settings, token, cookies = _client_context_from_request(deps, request)
-
         async def run_preview():
             _update_task(
                 task,
@@ -324,18 +321,10 @@ def _register_import_routes(
                 progress=10,
             )
             try:
-                client_cls = deps.get_dt_client_cls()
-                async with client_cls(
-                    settings.api_url,
-                    api_key=settings.api_key,
-                    token=token or "",
-                    cookies=cookies,
-                ) as client:
-                    preview = await preview_project_archive(
-                        deps.service_deps,
-                        client,
-                        archive_path=archive_path,
-                    )
+                preview = await preview_project_archive(
+                    deps.service_deps,
+                    archive_path=archive_path,
+                )
                 _update_task(
                     task,
                     status="completed",
@@ -360,7 +349,6 @@ def _register_import_routes(
     async def apply_project_archive_import(
         task_id: str,
         req: ProjectArchiveApplyRequest,
-        request: Request,
         user: CurrentUser,
     ):
         _require_reviewer(deps, user)
@@ -382,29 +370,19 @@ def _register_import_routes(
             message=f"Queued project archive import apply ({req.mode}).",
             progress=0,
         )
-        settings, token, cookies = _client_context_from_request(deps, request)
-
         async def run_apply():
             _update_task(
                 task,
                 status="running",
-                message="Applying project archive to Dependency-Track...",
+                message="Importing project archive into DTVP...",
                 progress=5,
             )
             try:
-                client_cls = deps.get_dt_client_cls()
-                async with client_cls(
-                    settings.api_url,
-                    api_key=settings.api_key,
-                    token=token or "",
-                    cookies=cookies,
-                ) as client:
-                    result = await apply_project_archive(
-                        deps.service_deps,
-                        client,
-                        archive_path=archive_path,
-                        mode=req.mode,
-                    )
+                result = await apply_project_archive(
+                    deps.service_deps,
+                    archive_path=archive_path,
+                    mode=req.mode,
+                )
                 _update_task(
                     task,
                     status="completed",

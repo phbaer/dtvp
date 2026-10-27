@@ -69,7 +69,7 @@ def _flatten_components(components: Any) -> list[dict[str, Any]]:
 
 
 def _normalize_finding(
-    finding: dict[str, Any], ordinal: int, captured_at: datetime
+    finding: dict[str, Any], ordinal: int, captured_at: datetime, source_type: str
 ) -> dict[str, Any]:
     component = _as_mapping(finding.get("component"))
     vulnerability = _as_mapping(finding.get("vulnerability"))
@@ -110,7 +110,7 @@ def _normalize_finding(
         },
         "source_analysis": source_analysis,
         "attribution": {
-            "source_type": "dependency-track",
+            "source_type": source_type,
             "observed_at": captured_at.isoformat(),
         },
     }
@@ -123,6 +123,9 @@ def build_normalized_snapshot(
     findings: list[dict[str, Any]],
     advisories: list[dict[str, Any]],
     captured_at: datetime | None = None,
+    source_type: str = "dependency-track",
+    source_product_id: str | None = None,
+    source_version_id: str | None = None,
 ) -> dict[str, Any]:
     captured_at = captured_at or datetime.now(UTC)
     metadata = _as_mapping(bom.get("metadata"))
@@ -182,16 +185,16 @@ def build_normalized_snapshot(
         },
         "security": {
             "findings": [
-                _normalize_finding(finding, ordinal, captured_at)
+                _normalize_finding(finding, ordinal, captured_at, source_type)
                 for ordinal, finding in enumerate(findings)
                 if isinstance(finding, dict)
             ],
             "advisories": normalized_advisories,
         },
         "provenance": {
-            "source_type": "dependency-track",
-            "source_product_id": f"name:{product_name}",
-            "source_version_id": source_project_id,
+            "source_type": source_type,
+            "source_product_id": source_product_id or f"name:{product_name}",
+            "source_version_id": source_version_id or source_project_id,
             "source_project_name": product_name,
             "captured_at": captured_at.isoformat(),
         },

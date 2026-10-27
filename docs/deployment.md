@@ -128,8 +128,9 @@ DTVP's packaged version before the container is published. The workflow
 publishes version tags and `latest` for the `dtvp` container package only.
 External code-analysis services have their own releases and dependency state.
 
-Archive imports require read, BOM upload, and vulnerability-analysis update
-permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
-are controlled by the [archive variables](configuration.md#project-archives). The optional
+Archive imports write into DTVP and do not require Dependency-Track write
+permissions. Export and scheduled snapshots use the DTVP catalog and its
+configured source connector. These behaviors and expanded Git trees are
+controlled by the [archive variables](configuration.md#project-archives). The optional
 `dtvp-archive-git-push` Compose job pushes an expanded tree; schedule it with
 cron, systemd, or CI when required.

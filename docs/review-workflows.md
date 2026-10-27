@@ -324,7 +324,10 @@ vulnerability details, and normalized assessments.
 - Stored snapshots: `GET /api/project-archives/snapshots`
 - Schema: `dtvp.project-archive/v1`
 
-Restore matches project name/version first, then remaps changed UUIDs by
-component PURL/name/version/BOM ref and vulnerability ID/name/aliases. Audit
-history and comments are not replayed. ZIPs default to `data/project_archives`;
-optional Git-friendly expanded trees default to `data/project_archives_git`.
+Import preview checks DTVP's catalog. Applying an archive publishes its SBOM,
+findings, and vulnerability observations into DTVP; it does not create or update
+a Dependency-Track project. Assessment entries are matched by component
+PURL/name/version/BOM ref and vulnerability ID/name/aliases, then saved as
+DTVP decisions with revision history. Audit history and comments are not
+replayed. ZIPs default to `data/project_archives`; optional Git-friendly
+expanded trees default to `data/project_archives_git`.

@@ -165,7 +165,8 @@ filtering, editing, bulk operations, and archives; or the
 
 ```text
 Browser → Vue SPA → FastAPI → DTVP database + content-addressed source snapshots
-                           → Dependency-Track import + optional publication queue
+                           → source connectors (Dependency-Track, archives)
+                           → optional Dependency-Track publication queue
                            → optional tmrescore and code-analysis services
 ```
 

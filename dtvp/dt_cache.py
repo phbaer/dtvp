@@ -24,15 +24,18 @@ from .assessment_outbox_services import (
 )
 from .artifact_store import ArtifactStore
 from .catalog_repository import (
-    get_latest_source_snapshot,
+    get_latest_snapshot_for_source_project,
     list_source_catalog_projects,
 )
-from .catalog_repository import get_current_assessment, persist_assessment_revisions
+from .catalog_repository import (
+    get_current_assessment,
+    get_source_finding_analysis,
+    persist_assessment_revisions,
+)
 from .source_import_service import _safe_base_url
 from .source_connectors.dependency_track import DependencyTrackConnector
 from .source_import_service import discover_source_projects, import_source_scope
 from .dt_client import DTClient, DTSettings
-from .logic import RE_SCORE
 
 logger = logging.getLogger(__name__)
 CACHE_STATUS_TTL_SECONDS = 5.0
@@ -95,143 +98,6 @@ def _read_json(path: str, default: Any = None) -> Any:
     except Exception as exc:
         logger.warning("Failed to read cache file %s: %s", path, exc)
         return default
-
-
-def _normalize_analysis_details(details: Optional[str]) -> str:
-    if not isinstance(details, str):
-        return ""
-    return details.strip()
-
-
-def _get_analysis_details(analysis: Optional[Dict[str, Any]]) -> str:
-    if not analysis:
-        return ""
-    return _normalize_analysis_details(
-        analysis.get("analysisDetails") or analysis.get("analysis_details")
-    )
-
-
-def _get_analysis_state(analysis: Optional[Dict[str, Any]]) -> str:
-    if not analysis:
-        return "NOT_SET"
-    return (
-        analysis.get("analysisState")
-        or analysis.get("analysis_state")
-        or "NOT_SET"
-    )
-
-
-def _get_analysis_suppressed(analysis: Optional[Dict[str, Any]]) -> bool:
-    if not analysis:
-        return False
-    if "isSuppressed" in analysis:
-        return bool(analysis.get("isSuppressed"))
-    return bool(analysis.get("is_suppressed", False))
-
-
-def _has_meaningful_assessment(analysis: Optional[Dict[str, Any]]) -> bool:
-    return bool(_get_analysis_details(analysis))
-
-
-def _mark_assessment_for_review(analysis: Dict[str, Any]) -> Dict[str, Any]:
-    details = _get_analysis_details(analysis)
-    if not details:
-        return {
-            "analysisState": _get_analysis_state(analysis),
-            "analysisDetails": "",
-            "isSuppressed": _get_analysis_suppressed(analysis),
-        }
-
-    if "[Status: Pending Review]" not in details:
-        details = f"{details}\n\n[Status: Pending Review]"
-
-    return {
-        "analysisState": _get_analysis_state(analysis),
-        "analysisDetails": details,
-        "isSuppressed": _get_analysis_suppressed(analysis),
-    }
-
-
-def _extract_threadmodel_score(analysis: Optional[Dict[str, Any]]) -> Optional[float]:
-    details = _get_analysis_details(analysis)
-    if not details:
-        return None
-
-    match = RE_SCORE.search(details)
-    if not match:
-        return None
-
-    try:
-        return float(match.group(1))
-    except ValueError:
-        return None
-
-
-def _threadmodel_score_changed(
-    previous_analysis: Optional[Dict[str, Any]],
-    current_analysis: Optional[Dict[str, Any]],
-) -> Tuple[bool, Optional[float], Optional[float]]:
-    previous_score = _extract_threadmodel_score(previous_analysis)
-    current_score = _extract_threadmodel_score(current_analysis)
-    if previous_score is None or current_score is None:
-        return False, previous_score, current_score
-    return previous_score != current_score, previous_score, current_score
-
-
-def _mark_assessment_for_review_with_threadmodel_change(
-    analysis: Dict[str, Any],
-    previous_score: Optional[float],
-    current_score: Optional[float],
-) -> Dict[str, Any]:
-    marked = _mark_assessment_for_review(analysis)
-    if previous_score is None or current_score is None or previous_score == current_score:
-        return marked
-
-    details = _get_analysis_details(marked)
-    change_note = f"TM rescoring changed from {previous_score} to {current_score}."
-    if change_note not in details:
-        details = f"{details}\n\n{change_note}"
-    marked["analysisDetails"] = details
-    return marked
-
-
-def _component_cache_identity(component: Dict[str, Any]) -> Optional[str]:
-    purl = (component.get("purl") or "").strip().lower()
-    if purl:
-        return re.sub(r"@[^?]+", "", purl, count=1)
-
-    name = (component.get("name") or "").strip().lower()
-    if name:
-        return name
-
-    return None
-
-
-def _vulnerability_cache_identity(vulnerability: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
-    identifiers: List[str] = []
-
-    vuln_id = (vulnerability.get("vulnId") or "").strip().upper()
-    if vuln_id:
-        identifiers.append(vuln_id)
-
-    name = (vulnerability.get("name") or "").strip().upper()
-    if name and name not in identifiers:
-        identifiers.append(name)
-
-    for alias_obj in vulnerability.get("aliases", []) or []:
-        if not isinstance(alias_obj, dict):
-            continue
-        for value in alias_obj.values():
-            if not isinstance(value, str):
-                continue
-            normalized = value.strip().upper()
-            if normalized and normalized not in identifiers:
-                identifiers.append(normalized)
-
-    if not identifiers:
-        return None
-
-    return tuple(sorted(identifiers))
 
 
 class CacheManager:
@@ -499,9 +365,30 @@ class CacheManager:
     ) -> Optional[
         Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]
     ]:
-        findings = self._load_project_cache(self._findings_path(project_uuid), None)
-        if findings is None:
-            return None
+        record = get_latest_snapshot_for_source_project(project_uuid)
+        if record is not None:
+            try:
+                snapshot = ArtifactStore().get_json(record["payload_sha256"])
+                findings = copy.deepcopy(
+                    ((snapshot.get("source_artifacts") or {}).get("findings") or [])
+                )
+                project_vulnerabilities = copy.deepcopy(
+                    ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
+                )
+                bom = copy.deepcopy(
+                    ((snapshot.get("source_artifacts") or {}).get("bom") or {})
+                )
+            except (OSError, ValueError):
+                logger.exception("Could not read imported project snapshot %s", project_uuid)
+                return None
+        else:
+            findings = self._load_project_cache(self._findings_path(project_uuid), None)
+            if findings is None:
+                return None
+            project_vulnerabilities = self._load_project_cache(
+                self._project_vulns_path(project_uuid), []
+            ) or []
+            bom = self._load_project_cache(self._bom_path(project_uuid), {}) or {}
 
         # Overlay locally stored assessments so callers (e.g. the automatic
         # code-analysis sweep) see the same analysis state as the live project
@@ -510,11 +397,6 @@ class CacheManager:
         # would be incorrectly treated as "open" and re-queued for analysis.
         findings = self._overlay_local_analysis(project_uuid, findings)
 
-        project_vulnerabilities = self._load_project_cache(
-            self._project_vulns_path(project_uuid),
-            [],
-        ) or []
-        bom = self._load_project_cache(self._bom_path(project_uuid), {}) or {}
         return findings, project_vulnerabilities, bom
 
     def _touch_cache_meta(
@@ -1041,6 +923,12 @@ class CacheManager:
 
     async def refresh_project(self, project_uuid: str, client: DTClient) -> None:
         await self.record_project_access(project_uuid)
+        snapshot = await self._get_imported_project_snapshot(client, project_uuid)
+        if snapshot is not None and (
+            (snapshot.get("provenance") or {}).get("source_type")
+            != "dependency-track"
+        ):
+            return
         await self._import_project(client, project_uuid)
 
     async def record_project_access(self, project_uuid: str) -> None:
@@ -1114,10 +1002,9 @@ class CacheManager:
         try:
             base_url = _safe_base_url(client.base_url)
             record = await asyncio.to_thread(
-                get_latest_source_snapshot,
-                "dependency-track",
-                base_url,
+                get_latest_snapshot_for_source_project,
                 project_uuid,
+                base_url,
             )
             if record is None:
                 return None
@@ -1132,8 +1019,6 @@ class CacheManager:
         try:
             return await asyncio.to_thread(
                 list_source_catalog_projects,
-                "dependency-track",
-                _safe_base_url(client.base_url),
             )
         except (OSError, ValueError) as exc:
             logger.warning("Could not list DTVP source project catalog: %s", exc)
@@ -1159,26 +1044,64 @@ class CacheManager:
         await self._singleflight_fetch(("dtvp-import", project_uuid), import_once)
         await self._migrate_pending_local_assessments(project_uuid)
 
-    async def _migrate_pending_local_assessments(self, project_uuid: str) -> None:
-        """Promote accepted pre-cutover local decisions after their snapshot exists."""
+    async def _migrate_pending_local_assessments(
+        self, project_uuid: str, *, source_type: str = "dependency-track"
+    ) -> None:
+        """Promote legacy local decision states after their snapshot exists."""
         if project_uuid in self._legacy_assessments_migrated:
             return
-        pending = await asyncio.to_thread(self.assessment_outbox.list_pending)
+        states = await asyncio.to_thread(
+            self.assessment_outbox.list_states_for_project, project_uuid
+        )
+        # The earlier cache also wrote accepted local decisions as individual
+        # JSON overlays. Promote those only for findings present in the
+        # imported snapshot; file names alone are not a reliable identity map.
+        legacy_analyses = []
+        snapshot_record = await asyncio.to_thread(
+            get_latest_snapshot_for_source_project, project_uuid
+        )
+        if snapshot_record is not None:
+            try:
+                snapshot = await asyncio.to_thread(
+                    ArtifactStore().get_json, snapshot_record["payload_sha256"]
+                )
+                findings = (snapshot.get("source_artifacts") or {}).get("findings") or []
+                for finding in findings:
+                    component = finding.get("component") or {}
+                    vulnerability = finding.get("vulnerability") or {}
+                    component_id = str(component.get("uuid") or "")
+                    vulnerability_id = str(vulnerability.get("uuid") or "")
+                    if not component_id or not vulnerability_id:
+                        continue
+                    legacy = self._load_project_cache(
+                        self._analysis_path(project_uuid, component_id, vulnerability_id),
+                        None,
+                    )
+                    if not isinstance(legacy, dict):
+                        continue
+                    legacy_analyses.append({
+                        "project_uuid": project_uuid,
+                        "component_uuid": component_id,
+                        "vulnerability_uuid": vulnerability_id,
+                        "state": legacy.get("analysisState") or legacy.get("analysis_state") or "NOT_SET",
+                        "details": legacy.get("analysisDetails") or legacy.get("analysis_details") or "",
+                        "suppressed": legacy.get("isSuppressed", legacy.get("is_suppressed", False)),
+                    })
+            except (OSError, ValueError):
+                logger.exception("Could not inspect legacy assessment cache for %s", project_uuid)
+                return
         publication_enabled = os.getenv(
             "DTVP_DT_ASSESSMENT_SYNC_ENABLED", "false"
         ).strip().lower() in {"1", "true", "yes", "on", "enabled"}
         all_migrated = True
-        for entry in pending:
-            payload = entry.get("payload") or {}
-            if str(payload.get("project_uuid") or "") != project_uuid:
-                continue
+        for state in states:
             migrated = {
                 "project_uuid": project_uuid,
-                "component_uuid": payload.get("component_uuid"),
-                "vulnerability_uuid": payload.get("vulnerability_uuid"),
-                "state": payload.get("state"),
-                "details": payload.get("details") or "",
-                "suppressed": bool(payload.get("suppressed", False)),
+                "component_uuid": state.get("component_uuid"),
+                "vulnerability_uuid": state.get("vulnerability_uuid"),
+                "state": state.get("analysisState"),
+                "details": state.get("analysisDetails") or "",
+                "suppressed": bool(state.get("isSuppressed", False)),
             }
             try:
                 await asyncio.to_thread(
@@ -1186,6 +1109,7 @@ class CacheManager:
                     [migrated],
                     actor="migration:legacy-local-queue",
                     only_if_absent=True,
+                    source_type=source_type,
                 )
             except Exception:
                 all_migrated = False
@@ -1193,11 +1117,32 @@ class CacheManager:
                     "Could not migrate a pre-existing local assessment "
                     "(project_uuid=%s, update_id=%s)",
                     project_uuid,
-                    entry.get("id"),
+                    state.get("update_id"),
                 )
                 continue
-            if not publication_enabled and entry.get("id"):
-                await asyncio.to_thread(self.assessment_outbox.discard, entry["id"])
+            if (
+                not publication_enabled
+                and state.get("sync_status") in {"pending", "error"}
+                and state.get("update_id")
+            ):
+                await asyncio.to_thread(
+                    self.assessment_outbox.discard, state["update_id"]
+                )
+        for legacy in legacy_analyses:
+            try:
+                await asyncio.to_thread(
+                    persist_assessment_revisions,
+                    [legacy],
+                    actor="migration:legacy-analysis-cache",
+                    only_if_absent=True,
+                    source_type=source_type,
+                )
+            except Exception:
+                all_migrated = False
+                logger.exception(
+                    "Could not migrate legacy cached assessment (project_uuid=%s)",
+                    project_uuid,
+                )
         if all_migrated:
             self._legacy_assessments_migrated.add(project_uuid)
 
@@ -1205,6 +1150,10 @@ class CacheManager:
         self, client: DTClient, project_uuid: str, *, refresh: bool
     ) -> Optional[Dict[str, Any]]:
         snapshot = await self._get_imported_project_snapshot(client, project_uuid)
+        if snapshot is not None:
+            source_type = (snapshot.get("provenance") or {}).get("source_type")
+            if source_type != "dependency-track":
+                return snapshot
         if snapshot is not None and not refresh:
             await self._migrate_pending_local_assessments(project_uuid)
             return snapshot
@@ -1353,7 +1302,6 @@ class CacheManager:
 
     def get_cached_assessment_details(self, instances: List[Dict[str, Any]]) -> List[str]:
         """Read trusted metadata without fetching Dependency-Track on the write path."""
-        finding_analyses: dict[str, dict[tuple[str, str, str], dict]] = {}
         result = []
         for instance in instances:
             key = tuple(instance[name] for name in (
@@ -1361,143 +1309,9 @@ class CacheManager:
             ))
             analysis = self.get_assessment_overlay(*key)
             if analysis is None:
-                analysis = self._load_project_cache(self._analysis_path(*key), None)
-            if analysis is None:
-                project_uuid = key[0]
-                if project_uuid not in finding_analyses:
-                    findings = self._load_project_cache(self._findings_path(project_uuid), []) or []
-                    finding_analyses[project_uuid] = {
-                        self._finding_analysis_key(project_uuid, finding): finding.get("analysis") or {}
-                        for finding in findings
-                    }
-                analysis = finding_analyses[project_uuid].get(key, {})
+                analysis = get_source_finding_analysis(*key)
             result.append(analysis.get("analysisDetails") or analysis.get("analysis_details") or "")
         return result
-
-    def _finding_cache_identity(
-        self, finding: Dict[str, Any]
-    ) -> Optional[Tuple[str, Tuple[str, ...]]]:
-        component = finding.get("component", {}) or {}
-        vulnerability = finding.get("vulnerability", {}) or {}
-
-        component_identity = _component_cache_identity(component)
-        vulnerability_identity = _vulnerability_cache_identity(vulnerability)
-        if not component_identity or not vulnerability_identity:
-            return None
-
-        return component_identity, vulnerability_identity
-
-    def _finding_analysis_key(
-        self, project_uuid: str, finding: Dict[str, Any]
-    ) -> Optional[Tuple[str, str, str]]:
-        component_uuid = (finding.get("component", {}) or {}).get("uuid")
-        vulnerability_uuid = (finding.get("vulnerability", {}) or {}).get("uuid")
-        if not component_uuid or not vulnerability_uuid:
-            return None
-        return project_uuid, component_uuid, vulnerability_uuid
-
-    def _merge_blank_source_analysis(
-        self,
-        cached_analysis: Optional[Dict[str, Any]],
-        source_analysis: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
-        if _get_analysis_details(source_analysis):
-            return source_analysis
-
-        if not _has_meaningful_assessment(cached_analysis):
-            return source_analysis
-
-        return _mark_assessment_for_review(cached_analysis)
-
-    def _restore_recreated_finding_assessments(
-        self,
-        project_uuid: str,
-        findings: List[Dict[str, Any]],
-        previous_findings: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        if not findings or not previous_findings:
-            return findings
-
-        previous_candidates: Dict[
-            Tuple[str, Tuple[str, ...]], List[Tuple[Tuple[str, str, str], Dict[str, Any]]]
-        ] = {}
-
-        for previous_finding in previous_findings:
-            identity = self._finding_cache_identity(previous_finding)
-            analysis_key = self._finding_analysis_key(project_uuid, previous_finding)
-            if not identity or not analysis_key:
-                continue
-
-            previous_analysis = self._load_project_cache(
-                self._analysis_path(*analysis_key),
-                previous_finding.get("analysis"),
-            )
-            if not _has_meaningful_assessment(previous_analysis):
-                continue
-
-            previous_candidates.setdefault(identity, []).append(
-                (analysis_key, previous_analysis)
-            )
-
-        for finding in findings:
-            source_analysis = finding.get("analysis") or {}
-            identity = self._finding_cache_identity(finding)
-            analysis_key = self._finding_analysis_key(project_uuid, finding)
-            if not analysis_key:
-                continue
-
-            current_path = self._analysis_path(*analysis_key)
-            current_cached_analysis = self._load_project_cache(current_path, None)
-
-            if _get_analysis_details(source_analysis):
-                previous_analysis = (
-                    current_cached_analysis
-                    if _has_meaningful_assessment(current_cached_analysis)
-                    else None
-                )
-                if previous_analysis is None and identity:
-                    candidates = previous_candidates.get(identity, [])
-                    if len(candidates) == 1:
-                        _, previous_analysis = candidates[0]
-
-                if previous_analysis:
-                    changed, previous_score, current_score = _threadmodel_score_changed(
-                        previous_analysis, source_analysis
-                    )
-                    if changed:
-                        marked = _mark_assessment_for_review_with_threadmodel_change(
-                            source_analysis, previous_score, current_score
-                        )
-                        self._save_project_cache(
-                            current_path,
-                            marked,
-                            project_uuid=project_uuid,
-                        )
-                        finding["analysis"] = marked
-                        continue
-                continue
-
-            if _has_meaningful_assessment(current_cached_analysis):
-                finding["analysis"] = _mark_assessment_for_review(current_cached_analysis)
-                continue
-
-            if not identity:
-                continue
-
-            candidates = previous_candidates.get(identity, [])
-            if len(candidates) != 1:
-                continue
-
-            _, previous_analysis = candidates[0]
-            preserved_analysis = _mark_assessment_for_review(previous_analysis)
-            self._save_project_cache(
-                current_path,
-                preserved_analysis,
-                project_uuid=project_uuid,
-            )
-            finding["analysis"] = preserved_analysis
-
-        return findings
 
     def _overlay_local_analysis(
         self,
@@ -1507,39 +1321,19 @@ class CacheManager:
         if not findings:
             return findings
 
-        pending = self._load_pending_updates()
         for finding in findings:
             component = finding.get("component", {})
             vulnerability = finding.get("vulnerability", {})
             comp_uuid = component.get("uuid")
             vuln_uuid = vulnerability.get("uuid")
             if comp_uuid and vuln_uuid:
-                analysis = self._load_project_cache(
-                    self._analysis_path(project_uuid, comp_uuid, vuln_uuid), None
-                )
                 overlay = self.get_assessment_overlay(
                     project_uuid,
                     comp_uuid,
                     vuln_uuid,
                 )
                 if overlay is not None:
-                    analysis = overlay
-                if analysis is None:
-                    for pending_update in pending:
-                        payload = pending_update.get("payload", {})
-                        if (
-                            payload.get("project_uuid") == project_uuid
-                            and payload.get("component_uuid") == comp_uuid
-                            and payload.get("vulnerability_uuid") == vuln_uuid
-                        ):
-                            analysis = {
-                                "analysisState": payload.get("state"),
-                                "analysisDetails": payload.get("details"),
-                                "isSuppressed": payload.get("suppressed", False),
-                            }
-                            break
-                if analysis is not None:
-                    finding["analysis"] = analysis
+                    finding["analysis"] = overlay
         return findings
 
     async def queue_analysis_update(
@@ -1558,6 +1352,7 @@ class CacheManager:
         replace: bool = True,
         expected_revisions: dict[AssessmentKey, int] | None = None,
         actor: str | None = None,
+        source_type: str = "dependency-track",
     ) -> List[Dict[str, Any]]:
         if not payloads:
             return []
@@ -1567,6 +1362,7 @@ class CacheManager:
                 payloads,
                 actor=actor,
                 expected_revisions=expected_revisions,
+                source_type=source_type,
             )
         except AssessmentOutboxConflictError as exc:
             raise PendingUpdateExistsError(str(exc)) from exc

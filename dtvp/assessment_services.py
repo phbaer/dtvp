@@ -139,7 +139,7 @@ async def fetch_current_assessment_analyses(
                     project_uuid=instance["project_uuid"],
                     component_uuid=instance["component_uuid"],
                     vulnerability_uuid=instance["vulnerability_uuid"],
-                    refresh=True,
+                    refresh=False,
                 )
             except Exception as exc:
                 results[index] = exc

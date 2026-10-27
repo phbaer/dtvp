@@ -108,9 +108,11 @@ capability; it must not be required for normal DTVP reads or writes.
   used. The legacy SQLite queue remains only for explicitly enabled
   publication and promotion of older pending decisions; outbound
   synchronization is disabled by default. Pending legacy decisions migrate
-  after a successful project import. Archive import/restore and several
-  analysis workflows still call Dependency-Track.
-- **Next backend slice:** migrate remaining analysis/archive integrations to
+  after a successful project import. Archive import/restore now publish through
+  DTVP's generic source importer; scheduled export still uses the connector for
+  source discovery and refresh. Some analysis integrations still call
+  Dependency-Track directly.
+- **Next backend slice:** migrate remaining analysis integrations to
   source-neutral DTVP query services, provide a clear
   retirement/migration path for legacy cache and outbox data, then remove
   remaining Dependency-Track-backed reads.
