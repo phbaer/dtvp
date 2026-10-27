@@ -91,13 +91,19 @@ capability; it must not be required for normal DTVP reads or writes.
   initiating user and durable run status, and avoids a new state revision when
   normalized content is unchanged. DTVP catalog/read endpoints expose products,
   versions, pinned snapshots, import runs, and source artifacts.
-- **Not yet migrated:** the existing UI project/finding APIs and assessment
-  writes still use the legacy `CacheManager`/Dependency-Track path. The new API
-  is currently the native DTVP catalog surface; it is not yet the only backend
-  read/write path.
-- **Next backend slice:** point existing project/inventory query services at
-  DTVP snapshots, migrate assessment/review writes to DTVP-owned records, then
-  retire DT-backed reads and the local SQLite outbox where no longer needed.
+- **Implemented DTVP-backed inventory reads:** after a project is imported,
+  the existing cache facade serves its findings, BOM, and advisories from the
+  retained DTVP snapshot. Project lookup can fall back to the imported catalog
+  when Dependency-Track is unavailable. Explicit refreshes and project
+  discovery still use Dependency-Track during this transition.
+- **Still transitional:** assessment writes and synchronization, explicit
+  refreshes, and project discovery retain Dependency-Track paths. DTVP catalog
+  and imported snapshot reads are available, but this is not yet the only
+  backend read/write path.
+- **Next backend slice:** publish explicit refreshes directly as snapshots,
+  migrate assessment/review writes to DTVP-owned records, then retire
+  Dependency-Track-backed reads and the local SQLite outbox where no longer
+  needed.
 
 ### Target backend boundaries
 

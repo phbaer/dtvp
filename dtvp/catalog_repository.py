@@ -383,3 +383,87 @@ def list_product_versions(product_id: str) -> list[dict]:
                 "latest_snapshot_revision": latest.revision if latest else None,
             })
         return result
+
+
+def list_latest_source_snapshots(source_type: str, base_url: str) -> list[dict]:
+    """Return latest published snapshots and identities for a configured source."""
+    with get_session_factory()() as session:
+        rows = session.execute(
+            select(
+                Product.name,
+                ProductVersion.version,
+                ExternalReference.external_id,
+                InventorySnapshot.id,
+                InventorySnapshot.payload_sha256,
+                InventorySnapshot.revision,
+                SourceConnection.config,
+            )
+            .join(ProductVersion, ProductVersion.product_id == Product.id)
+            .join(InventorySnapshot, InventorySnapshot.product_version_id == ProductVersion.id)
+            .join(SourceConnection, SourceConnection.id == InventorySnapshot.source_connection_id)
+            .join(
+                ExternalReference,
+                (ExternalReference.source_connection_id == SourceConnection.id)
+                & (ExternalReference.local_type == "product-version")
+                & (ExternalReference.local_id == ProductVersion.id),
+            )
+            .where(SourceConnection.source_type == source_type)
+            .order_by(InventorySnapshot.revision.desc())
+        ).all()
+        latest: dict[str, dict] = {}
+        for name, version, external_id, snapshot_id, payload_hash, revision, config in rows:
+            if (config or {}).get("base_url") != base_url or external_id in latest:
+                continue
+            latest[external_id] = {
+                "product_name": name,
+                "version_name": version,
+                "source_version_id": external_id,
+                "snapshot_id": snapshot_id,
+                "payload_sha256": payload_hash,
+                "revision": revision,
+            }
+        return list(latest.values())
+
+
+def get_latest_source_snapshot(source_type: str, base_url: str, source_version_id: str) -> dict | None:
+    """Return the latest snapshot record for one imported provider identity."""
+    with get_session_factory()() as session:
+        version_refs = session.scalars(
+            select(ExternalReference)
+            .join(SourceConnection, SourceConnection.id == ExternalReference.source_connection_id)
+            .where(
+                SourceConnection.source_type == source_type,
+                ExternalReference.external_type == "product-version",
+                ExternalReference.external_id == source_version_id,
+            )
+        ).all()
+        version_ref = next(
+            (
+                candidate for candidate in version_refs
+                if (source := session.get(SourceConnection, candidate.source_connection_id))
+                and (source.config or {}).get("base_url") == base_url
+            ),
+            None,
+        )
+        if version_ref is None:
+            return None
+        source = session.get(SourceConnection, version_ref.source_connection_id)
+        if source is None:
+            return None
+        snapshot = session.scalar(
+            select(InventorySnapshot)
+            .where(
+                InventorySnapshot.product_version_id == version_ref.local_id,
+                InventorySnapshot.source_connection_id == source.id,
+            )
+            .order_by(InventorySnapshot.revision.desc())
+            .limit(1)
+        )
+        if snapshot is None:
+            return None
+        return {
+            "id": snapshot.id,
+            "revision": snapshot.revision,
+            "payload_sha256": snapshot.payload_sha256,
+            "captured_at": _iso(snapshot.captured_at),
+        }

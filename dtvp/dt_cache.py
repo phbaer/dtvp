@@ -21,6 +21,9 @@ from .assessment_outbox_services import (
     assessment_key,
     get_assessment_outbox_path,
 )
+from .artifact_store import ArtifactStore
+from .catalog_repository import get_latest_source_snapshot, list_latest_source_snapshots
+from .source_import_service import _safe_base_url
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
 
@@ -1076,6 +1079,16 @@ class CacheManager:
                 )
                 return projects
             except Exception:
+                imported = await self._get_imported_projects(client)
+                if imported:
+                    logger.warning(
+                        "Dependency-Track project list unavailable; using %d DTVP-imported projects",
+                        len(imported),
+                    )
+                    return [
+                        project for project in imported
+                        if not name or name.lower() in (project.get("name") or "").lower()
+                    ]
                 if projects:
                     logger.warning(
                         "Dependency-Track project list unavailable; using stale "
@@ -1131,6 +1144,12 @@ class CacheManager:
                 fetch_matching_projects,
             )
         except Exception:
+            imported_matches = [
+                project for project in await self._get_imported_projects(client)
+                if name.lower() in (project.get("name") or "").lower()
+            ]
+            if imported_matches:
+                return imported_matches
             cached_matches = [
                 project
                 for project in projects
@@ -1147,6 +1166,46 @@ class CacheManager:
             raise
         return results
 
+    async def _get_imported_project_snapshot(
+        self, client: DTClient, project_uuid: str
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            base_url = _safe_base_url(client.base_url)
+            record = await asyncio.to_thread(
+                get_latest_source_snapshot,
+                "dependency-track",
+                base_url,
+                project_uuid,
+            )
+            if record is None:
+                return None
+            return await asyncio.to_thread(
+                ArtifactStore().get_json, record["payload_sha256"]
+            )
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not read DTVP snapshot for project %s: %s", project_uuid, exc)
+            return None
+
+    async def _get_imported_projects(self, client: DTClient) -> List[Dict[str, Any]]:
+        try:
+            records = await asyncio.to_thread(
+                list_latest_source_snapshots,
+                "dependency-track",
+                _safe_base_url(client.base_url),
+            )
+            projects = []
+            for record in records:
+                payload = await asyncio.to_thread(
+                    ArtifactStore().get_json, record["payload_sha256"]
+                )
+                project = ((payload.get("source_artifacts") or {}).get("project") or {})
+                if project:
+                    projects.append(project)
+            return projects
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not list DTVP-imported projects: %s", exc)
+            return []
+
     async def get_vulnerabilities(
         self,
         client: DTClient,
@@ -1155,6 +1214,24 @@ class CacheManager:
         refresh: bool = False,
     ) -> List[Dict[str, Any]]:
         await self.record_project_access(project_uuid)
+        if not refresh:
+            snapshot = await self._get_imported_project_snapshot(client, project_uuid)
+            if snapshot is not None:
+                findings = copy.deepcopy(
+                    ((snapshot.get("source_artifacts") or {}).get("findings") or [])
+                )
+                findings = self._overlay_local_analysis(project_uuid, findings)
+                if cve:
+                    query = cve.upper()
+                    findings = [
+                        finding for finding in findings
+                        if query in str((finding.get("vulnerability") or {}).get("vulnId") or "").upper()
+                        or query in str((finding.get("vulnerability") or {}).get("name") or "").upper()
+                        or any(query in str(value).upper()
+                               for alias in ((finding.get("vulnerability") or {}).get("aliases") or [])
+                               if isinstance(alias, dict) for value in alias.values())
+                    ]
+                return findings
         path = self._findings_path(project_uuid)
         findings = None
 
@@ -1222,6 +1299,12 @@ class CacheManager:
         project_uuid: str,
         refresh: bool = False,
     ) -> List[Dict[str, Any]]:
+        if not refresh:
+            snapshot = await self._get_imported_project_snapshot(client, project_uuid)
+            if snapshot is not None:
+                return copy.deepcopy(
+                    ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
+                )
         path = self._project_vulns_path(project_uuid)
         vulns = None
         if not refresh:
@@ -1252,6 +1335,12 @@ class CacheManager:
         refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
         await self.record_project_access(project_uuid)
+        if not refresh:
+            snapshot = await self._get_imported_project_snapshot(client, project_uuid)
+            if snapshot is not None:
+                return copy.deepcopy(
+                    ((snapshot.get("source_artifacts") or {}).get("bom"))
+                )
         path = self._bom_path(project_uuid)
         bom = None
         if not refresh:

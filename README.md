@@ -171,8 +171,10 @@ Browser → Vue SPA → FastAPI → DTVP database + content-addressed source sna
 
 FastAPI remains the backend. The DTVP database and artifact store are separate
 from Dependency-Track's database. Source-neutral snapshot import and read APIs
-are now available; existing project/finding UI reads and assessment writes
-still use the legacy Dependency-Track path while those workflows are migrated.
+are now available. Imported snapshots now supply cached inventory reads and
+can serve project/finding data during Dependency-Track outages. Explicit refreshes
+and assessment synchronization still use transitional Dependency-Track paths
+while those workflows are migrated.
 
 | Path | Purpose |
 | :--- | :--- |
