@@ -189,11 +189,11 @@ def build_prepare_tmrescore_inventory_or_raise(
     *,
     tmrescore_inventory_service_deps: TMRescoreInventoryServiceDeps,
     inventory_error_cls: type[InventoryPreparationError],
-) -> Callable[[str, str, DTClient], Awaitable[dict[str, Any]]]:
+) -> Callable[[str, str, DTClient | None], Awaitable[dict[str, Any]]]:
     async def prepare_tmrescore_inventory_or_raise(
         project_name: str,
         scope: str,
-        client: DTClient,
+        client: DTClient | None,
     ) -> dict[str, Any]:
         try:
             return await prepare_tmrescore_analysis_inventory_impl(

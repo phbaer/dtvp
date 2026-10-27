@@ -2,7 +2,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-from .dt_client import DTClient
 from .tmrescore_errors import InventoryPreparationError
 
 
@@ -25,7 +24,7 @@ class TMRescoreInventoryServiceDeps:
 
 async def fetch_version_analysis_input(
     deps: TMRescoreInventoryServiceDeps,
-    client: DTClient,
+    client: Any,
     version_info: Dict[str, Any],
 ) -> Dict[str, Any]:
     findings_result, full_vulns_result, bom_result = await asyncio.gather(
@@ -57,7 +56,7 @@ async def fetch_version_analysis_input(
 async def collect_tmrescore_analysis_inputs(
     deps: TMRescoreInventoryServiceDeps,
     versions: List[Dict[str, Any]],
-    client: DTClient,
+    client: Any,
 ) -> List[Dict[str, Any]]:
     if not versions:
         return []
@@ -91,7 +90,7 @@ async def prepare_tmrescore_analysis_inventory(
     deps: TMRescoreInventoryServiceDeps,
     project_name: str,
     scope: str,
-    client: DTClient,
+    client: Any,
 ) -> Dict[str, Any]:
     if scope not in deps.supported_tmrescore_scopes:
         raise deps.inventory_error_cls(
@@ -102,10 +101,10 @@ async def prepare_tmrescore_analysis_inventory(
     try:
         projects = await deps.cache_manager.get_projects(client, project_name)
     except Exception as exc:
-        deps.logger.error("Error fetching projects for tmrescore analysis: %s", exc)
+        deps.logger.error("Error reading DTVP projects for tmrescore analysis: %s", exc)
         raise deps.inventory_error_cls(
             status_code=503,
-            detail="Dependency-Track unavailable while preparing threat-model analysis.",
+            detail="DTVP project catalog unavailable while preparing threat-model analysis.",
         )
 
     versions = [project for project in projects if project.get("name") == project_name]
@@ -117,9 +116,16 @@ async def prepare_tmrescore_analysis_inventory(
     selected_versions = versions[-1:] if scope == "latest_only" else versions
     latest_version = versions[-1].get("version", "unknown")
 
-    analysis_inputs = await collect_tmrescore_analysis_inputs(
-        deps, selected_versions, client
-    )
+    try:
+        analysis_inputs = await collect_tmrescore_analysis_inputs(
+            deps, selected_versions, client
+        )
+    except Exception as exc:
+        deps.logger.error("Could not read imported DTVP inventory for tmrescore: %s", exc)
+        raise deps.inventory_error_cls(
+            status_code=503,
+            detail="Imported DTVP inventory is unavailable for threat-model analysis.",
+        ) from exc
     synthetic_sbom = deps.build_analysis_sbom(
         project_name,
         analysis_inputs,

@@ -7,7 +7,6 @@ from typing import Annotated, Any, Awaitable, Callable, Coroutine
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
-from .dt_client import DTClient
 from .tmrescore_integration import (
     TMRescoreClient,
     TMRescoreSettings,
@@ -25,9 +24,9 @@ def _merge_responses(
 
 @dataclass(frozen=True)
 class TMRescoreRouteDeps:
-    list_projects: Callable[[DTClient, str], Awaitable[list[dict[str, Any]]]]
+    list_projects: Callable[[Any, str], Awaitable[list[dict[str, Any]]]]
     prepare_tmrescore_inventory_or_raise: Callable[
-        [str, str, DTClient], Awaitable[dict[str, Any]]
+        [str, str, Any], Awaitable[dict[str, Any]]
     ]
     prune_tmrescore_analysis_tasks: Callable[[], None]
     create_tracked_task: Callable[[Coroutine[Any, Any, Any]], asyncio.Task[Any]]
@@ -41,7 +40,6 @@ class TMRescoreRouteDeps:
     logger: logging.Logger
     media_type_json: str
     tmrescore_not_configured_detail: str
-    dependency_track_unavailable_detail: str
     tmrescore_disabled_detail: str
 
 
@@ -80,7 +78,6 @@ def _require_tmrescore_task_for_user(
 def _register_tmrescore_context_route(
     router: APIRouter,
     deps: TMRescoreRouteDeps,
-    client_dependency: Callable[..., Any],
     current_user_dependency: Callable[..., Any],
 ) -> None:
     @router.get(
@@ -94,7 +91,6 @@ def _register_tmrescore_context_route(
     async def get_tmrescore_context(
         project_name: str,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         settings = TMRescoreSettings()
@@ -137,12 +133,12 @@ def _register_tmrescore_context_route(
             llm_enrichment_warning = deps.tmrescore_disabled_detail
 
         try:
-            projects = await deps.list_projects(client, project_name)
+            projects = await deps.list_projects(None, project_name)
         except Exception as exc:
             deps.logger.error("Error fetching projects for tmrescore context: %s", exc)
             raise HTTPException(
                 status_code=503,
-                detail=deps.dependency_track_unavailable_detail,
+                detail="DTVP project catalog is unavailable for threat-model analysis.",
             )
 
         versions = [
@@ -194,7 +190,6 @@ def _register_tmrescore_inventory_routes(
     bad_request_response: dict[int | str, dict[str, Any]],
     not_found_response: dict[int | str, dict[str, Any]],
     service_unavailable_response: dict[int | str, dict[str, Any]],
-    client_dependency: Callable[..., Any],
     current_user_dependency: Callable[..., Any],
 ) -> None:
     @router.get(
@@ -209,13 +204,12 @@ def _register_tmrescore_inventory_routes(
         project_name: str,
         scope: str = "merged_versions",
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         inventory = await deps.prepare_tmrescore_inventory_or_raise(
             project_name,
             scope,
-            client,
+            None,
         )
         synthetic_sbom = inventory["synthetic_sbom"]
         latest_version = inventory["latest_version"]
@@ -238,13 +232,12 @@ def _register_tmrescore_inventory_routes(
         project_name: str,
         scope: str = "merged_versions",
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         inventory = await deps.prepare_tmrescore_inventory_or_raise(
             project_name,
             scope,
-            client,
+            None,
         )
         synthetic_sbom = inventory["synthetic_sbom"]
         return {
@@ -260,7 +253,6 @@ def _register_tmrescore_inventory_routes(
 def _register_tmrescore_analysis_route(
     router: APIRouter,
     deps: TMRescoreRouteDeps,
-    client_dependency: Callable[..., Any],
     current_user_dependency: Callable[..., Any],
 ) -> None:
     @router.post(
@@ -285,7 +277,6 @@ def _register_tmrescore_analysis_route(
         mitre_enrichment: Annotated[bool, Form()] = False,
         offline: Annotated[bool, Form()] = False,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         settings = TMRescoreSettings()
@@ -300,7 +291,7 @@ def _register_tmrescore_analysis_route(
         inventory = await deps.prepare_tmrescore_inventory_or_raise(
             project_name,
             scope,
-            client,
+            None,
         )
         latest_version = inventory["latest_version"]
         synthetic_sbom = inventory["synthetic_sbom"]
@@ -592,14 +583,12 @@ def create_tmrescore_router(
     not_found_response: dict[int | str, dict[str, Any]],
     service_unavailable_response: dict[int | str, dict[str, Any]],
     current_user_dependency: Callable[..., Any],
-    client_dependency: Callable[..., Any],
 ) -> APIRouter:
     router = APIRouter()
 
     _register_tmrescore_context_route(
         router,
         deps,
-        client_dependency,
         current_user_dependency,
     )
     _register_tmrescore_inventory_routes(
@@ -608,13 +597,11 @@ def create_tmrescore_router(
         bad_request_response,
         not_found_response,
         service_unavailable_response,
-        client_dependency,
         current_user_dependency,
     )
     _register_tmrescore_analysis_route(
         router,
         deps,
-        client_dependency,
         current_user_dependency,
     )
     _register_tmrescore_cached_state_routes(
