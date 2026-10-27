@@ -2758,7 +2758,6 @@ def _register_assessment_routes(
 def _register_dependency_route(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
-    client_dependency: Callable[..., Any],
 ) -> None:
     @router.get("/project/{project_uuid}/component/{component_uuid}/dependency-chains")
     async def get_dependency_chains(
@@ -2767,10 +2766,8 @@ def _register_dependency_route(
         limit: Annotated[
             int, Query(ge=1, le=1000)
         ] = deps.default_dependency_chain_limit,
-        *,
-        client: Annotated[DTClient, Depends(client_dependency)],
     ):
-        bom = await deps.cache_manager.get_bom(client, project_uuid)
+        bom = await deps.cache_manager.get_bom(None, project_uuid)
         if not bom:
             return []
         team_mapping = deps.load_team_mapping()
@@ -2794,5 +2791,5 @@ def create_general_api_router(
     _register_statistics_route(router, deps, current_user_dependency)
     _register_assessment_routes(router, deps, current_user_dependency)
     _register_bulk_workflow_routes(router, deps, current_user_dependency)
-    _register_dependency_route(router, deps, client_dependency)
+    _register_dependency_route(router, deps)
     return router

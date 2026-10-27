@@ -191,7 +191,8 @@ still run through the source connector when requested. Threat-model inventory
 inputs also come from DTVP snapshots; the external tmrescore service remains an
 optional analysis integration. Assessment detail, conflict checks, restore, and
 rescore routes, along with bulk workflow apply, also read and write DTVP-owned
-state without constructing a Dependency-Track client.
+state without constructing a Dependency-Track client. Dependency-chain browsing
+uses the retained DTVP BOM snapshot as well.
 
 | Path | Purpose |
 | :--- | :--- |
