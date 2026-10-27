@@ -1231,14 +1231,13 @@ class CacheManager:
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        for finding in ((snapshot.get("source_artifacts") or {}).get("findings") or []):
-            component = finding.get("component") or {}
+        for finding in ((snapshot.get("security") or {}).get("findings") or []):
             vulnerability = finding.get("vulnerability") or {}
             if (
-                str(component.get("uuid") or "") == component_uuid
-                and str(vulnerability.get("uuid") or "") == vulnerability_uuid
+                str(finding.get("component_external_id") or "") == component_uuid
+                and str(vulnerability.get("external_id") or "") == vulnerability_uuid
             ):
-                return copy.deepcopy(finding.get("analysis") or {})
+                return copy.deepcopy(finding.get("source_analysis") or {})
         return None
 
     def get_assessment_overlay(

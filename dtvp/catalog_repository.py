@@ -436,14 +436,14 @@ def get_source_finding_analysis(
         snapshot = ArtifactStore().get_json(record["payload_sha256"])
     except (OSError, ValueError):
         return None
-    for finding in (snapshot.get("source_artifacts") or {}).get("findings") or []:
-        component = finding.get("component") or {}
-        vulnerability = finding.get("vulnerability") or {}
+    for finding in (snapshot.get("security") or {}).get("findings") or []:
         if (
-            str(component.get("uuid") or "") == component_id
-            and str(vulnerability.get("uuid") or "") == vulnerability_id
+            str(finding.get("component_external_id") or "") == component_id
+            and str(
+                (finding.get("vulnerability") or {}).get("external_id") or ""
+            ) == vulnerability_id
         ):
-            analysis = finding.get("analysis")
+            analysis = finding.get("source_analysis")
             return analysis if isinstance(analysis, dict) else {}
     return None
 
