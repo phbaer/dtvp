@@ -91,19 +91,19 @@ capability; it must not be required for normal DTVP reads or writes.
   initiating user and durable run status, and avoids a new state revision when
   normalized content is unchanged. DTVP catalog/read endpoints expose products,
   versions, pinned snapshots, import runs, and source artifacts.
-- **Implemented DTVP-backed inventory reads:** after a project is imported,
-  the existing cache facade serves its findings, BOM, and advisories from the
-  retained DTVP snapshot. Project lookup can fall back to the imported catalog
-  when Dependency-Track is unavailable. Explicit refreshes and project
-  discovery still use Dependency-Track during this transition.
-- **Still transitional:** assessment writes and synchronization, explicit
-  refreshes, and project discovery retain Dependency-Track paths. DTVP catalog
-  and imported snapshot reads are available, but this is not yet the only
-  backend read/write path.
-- **Next backend slice:** publish explicit refreshes directly as snapshots,
-  migrate assessment/review writes to DTVP-owned records, then retire
-  Dependency-Track-backed reads and the local SQLite outbox where no longer
-  needed.
+- **Implemented DTVP-backed inventory reads and refreshes:** inventory cache
+  misses and refreshes import a complete Dependency-Track project scope and
+  publish it before returning the existing UI response. Cached reads use the
+  retained DTVP snapshot; a failed refresh serves the last published snapshot.
+  Project discovery can fall back to the imported catalog during a
+  Dependency-Track outage.
+- **Still transitional:** project discovery normally queries Dependency-Track;
+  assessment writes and synchronization still use the legacy outbox and
+  Dependency-Track path. DTVP inventory and import records are durable, but
+  decisions are not yet persisted through the DTVP database.
+- **Next backend slice:** migrate assessment/review writes to DTVP-owned
+  records, then retire the legacy SQLite outbox and remaining
+  Dependency-Track-backed paths where no longer needed.
 
 ### Target backend boundaries
 

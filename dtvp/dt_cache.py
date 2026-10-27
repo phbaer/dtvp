@@ -11,6 +11,7 @@ from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from uuid import uuid4
 
 import httpx
 
@@ -24,6 +25,8 @@ from .assessment_outbox_services import (
 from .artifact_store import ArtifactStore
 from .catalog_repository import get_latest_source_snapshot, list_latest_source_snapshots
 from .source_import_service import _safe_base_url
+from .source_connectors.dependency_track import DependencyTrackConnector
+from .source_import_service import import_source_scope
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
 
@@ -1206,6 +1209,44 @@ class CacheManager:
             logger.warning("Could not list DTVP-imported projects: %s", exc)
             return []
 
+    async def _import_project(self, client: DTClient, project_uuid: str) -> None:
+        """Fetch a complete source scope and publish it before serving the read."""
+        async def import_once() -> dict:
+            run = await import_source_scope(
+                connector=DependencyTrackConnector(),
+                client=client,
+                source_base_url=client.base_url,
+                request_id=f"cache-refresh:{project_uuid}:{uuid4()}",
+                initiated_by="system:cache-refresh",
+                scope={"project_id": project_uuid},
+            )
+            if run.get("status") != "succeeded":
+                raise RuntimeError(
+                    run.get("error_summary") or "Dependency-Track import did not succeed"
+                )
+            return run
+
+        await self._singleflight_fetch(("dtvp-import", project_uuid), import_once)
+
+    async def _get_or_import_snapshot(
+        self, client: DTClient, project_uuid: str, *, refresh: bool
+    ) -> Optional[Dict[str, Any]]:
+        snapshot = await self._get_imported_project_snapshot(client, project_uuid)
+        if snapshot is not None and not refresh:
+            return snapshot
+        try:
+            await self._import_project(client, project_uuid)
+        except Exception:
+            if snapshot is not None:
+                logger.exception(
+                    "DTVP refresh failed; serving last published snapshot "
+                    "(project_uuid=%s)",
+                    project_uuid,
+                )
+                return snapshot
+            raise
+        return await self._get_imported_project_snapshot(client, project_uuid)
+
     async def get_vulnerabilities(
         self,
         client: DTClient,
@@ -1214,24 +1255,25 @@ class CacheManager:
         refresh: bool = False,
     ) -> List[Dict[str, Any]]:
         await self.record_project_access(project_uuid)
-        if not refresh:
-            snapshot = await self._get_imported_project_snapshot(client, project_uuid)
-            if snapshot is not None:
-                findings = copy.deepcopy(
-                    ((snapshot.get("source_artifacts") or {}).get("findings") or [])
-                )
-                findings = self._overlay_local_analysis(project_uuid, findings)
-                if cve:
-                    query = cve.upper()
-                    findings = [
-                        finding for finding in findings
-                        if query in str((finding.get("vulnerability") or {}).get("vulnId") or "").upper()
-                        or query in str((finding.get("vulnerability") or {}).get("name") or "").upper()
-                        or any(query in str(value).upper()
-                               for alias in ((finding.get("vulnerability") or {}).get("aliases") or [])
-                               if isinstance(alias, dict) for value in alias.values())
-                    ]
-                return findings
+        snapshot = await self._get_or_import_snapshot(
+            client, project_uuid, refresh=refresh
+        )
+        if snapshot is not None:
+            findings = copy.deepcopy(
+                ((snapshot.get("source_artifacts") or {}).get("findings") or [])
+            )
+            findings = self._overlay_local_analysis(project_uuid, findings)
+            if cve:
+                query = cve.upper()
+                findings = [
+                    finding for finding in findings
+                    if query in str((finding.get("vulnerability") or {}).get("vulnId") or "").upper()
+                    or query in str((finding.get("vulnerability") or {}).get("name") or "").upper()
+                    or any(query in str(value).upper()
+                           for alias in ((finding.get("vulnerability") or {}).get("aliases") or [])
+                           if isinstance(alias, dict) for value in alias.values())
+                ]
+            return findings
         path = self._findings_path(project_uuid)
         findings = None
 
@@ -1299,12 +1341,13 @@ class CacheManager:
         project_uuid: str,
         refresh: bool = False,
     ) -> List[Dict[str, Any]]:
-        if not refresh:
-            snapshot = await self._get_imported_project_snapshot(client, project_uuid)
-            if snapshot is not None:
-                return copy.deepcopy(
-                    ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
-                )
+        snapshot = await self._get_or_import_snapshot(
+            client, project_uuid, refresh=refresh
+        )
+        if snapshot is not None:
+            return copy.deepcopy(
+                ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
+            )
         path = self._project_vulns_path(project_uuid)
         vulns = None
         if not refresh:
@@ -1335,12 +1378,13 @@ class CacheManager:
         refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
         await self.record_project_access(project_uuid)
-        if not refresh:
-            snapshot = await self._get_imported_project_snapshot(client, project_uuid)
-            if snapshot is not None:
-                return copy.deepcopy(
-                    ((snapshot.get("source_artifacts") or {}).get("bom"))
-                )
+        snapshot = await self._get_or_import_snapshot(
+            client, project_uuid, refresh=refresh
+        )
+        if snapshot is not None:
+            return copy.deepcopy(
+                ((snapshot.get("source_artifacts") or {}).get("bom"))
+            )
         path = self._bom_path(project_uuid)
         bom = None
         if not refresh:
