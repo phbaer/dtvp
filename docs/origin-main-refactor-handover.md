@@ -118,8 +118,9 @@ capability; it must not be required for normal DTVP reads or writes.
   legacy files. It does not delete or disable the old cache. The next backend
   slice is reconciliation and retirement of legacy project caches/outbox data,
   then removing client dependencies from compatibility routes where they are
-  no longer needed. Add operational backup, restore, and verification
-  procedures for the DTVP database and artifact store.
+  no longer needed. Paired DTVP database/artifact backup and restore commands
+  are available; cache reconciliation and end-to-end recovery verification
+  remain.
 
 ### Target backend boundaries
 

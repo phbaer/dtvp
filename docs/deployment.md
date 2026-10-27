@@ -40,6 +40,30 @@ Deployment rules:
   with `DTVP_ARTIFACT_STORE_PATH` (`data/dtvp_artifacts` by default) before
   releases that change persisted data. The existing Dependency-Track PostgreSQL
   volume remains independent.
+- `docker compose exec -T dtvp uv run python scripts/dtvp_storage.py backup
+  --output-dir /app/data/backups` creates a permission-restricted archive with a
+  consistent SQLite copy or PostgreSQL custom dump plus SHA-256-verified DTVP
+  artifacts. Compose includes PostgreSQL 18 client utilities for its PostgreSQL
+  18 service. `pg_dump` must be at least as new as the server major version;
+  PostgreSQL refuses a dump when the client major version is older than the
+  server. [PostgreSQL pg_dump compatibility](https://www.postgresql.org/docs/18/app-pgdump.html)
+- Restore with DTVP stopped while leaving the database service running:
+
+  ```bash
+  docker compose stop dtvp
+  BACKUP=/app/data/backups/dtvp-backup-20261027T120000Z.tar.gz
+  docker compose run --rm --no-deps dtvp uv run python scripts/dtvp_storage.py restore "$BACKUP" --replace
+  docker compose start dtvp
+  ```
+
+  Restore verifies the database checksum and every artifact hash, adds artifacts
+  first, then replaces the DTVP objects in the configured database. The
+  PostgreSQL restore runs in a single transaction. `--replace` is required
+  because the operation replaces DTVP database state. After restoring, DTVP's normal
+  startup migration check upgrades the restored schema if needed. Keep the
+  backup outside the artifact directory and protect it as sensitive project
+  data. This archive covers the DTVP database and artifact store; preserve other
+  `./data` configuration and archive directories separately.
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
   archives survive container restarts.
 - Code analysis is an optional external service. Deploy Agentyzer separately,

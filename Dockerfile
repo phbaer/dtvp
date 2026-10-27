@@ -28,7 +28,7 @@ COPY dtvp/resources/ssvc /app/dtvp/resources/ssvc
 RUN npm run build
 
 # Stage 2: Build the backend and include frontend assets
-FROM python:${PYTHON_VERSION}-alpine
+FROM python:${PYTHON_VERSION}-alpine3.23
 
 ARG BUILD_COMMIT=unknown
 ARG BUILD_NUMBER=unknown
@@ -36,6 +36,9 @@ ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT \
     DTVP_BUILD_NUMBER=$BUILD_NUMBER
 
 WORKDIR /app
+
+# Provide matching PostgreSQL 18 dump/restore utilities for DTVP-owned storage.
+RUN apk add --no-cache postgresql18-client
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
@@ -51,6 +54,7 @@ RUN uv sync --frozen --no-dev
 
 # Copy application code
 COPY dtvp ./dtvp
+COPY scripts/dtvp_storage.py ./scripts/dtvp_storage.py
 COPY start.sh CHANGELOG.md ./
 COPY sbom/dtvp-frontend-cyclonedx.json /app/sbom/dtvp-frontend-cyclonedx.json
 COPY sbom/dtvp-backend-cyclonedx.json /app/sbom/dtvp-backend-cyclonedx.json

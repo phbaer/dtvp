@@ -83,6 +83,8 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Run DTVP Python tests | `uv run pytest` |
 | Apply DTVP database migrations manually | `uv run dtvp-db-upgrade` |
 | Preview or import pre-DTVP inventory caches | `uv run dtvp-legacy-cache-migrate` / `uv run dtvp-legacy-cache-migrate --apply` |
+| Back up DTVP database and artifacts | `docker compose exec -T dtvp uv run python scripts/dtvp_storage.py backup --output-dir /app/data/backups` |
+| Restore a DTVP backup | Stop DTVP, then run the restore command in [Deployment](docs/deployment.md#compose) |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- --run ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |

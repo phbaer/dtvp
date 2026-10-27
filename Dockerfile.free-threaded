@@ -1,6 +1,6 @@
 # Sole published DTVP image: CPython free-threaded with fail-closed validation.
 ARG PYTHON_VERSION=3.14t
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:alpine
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:alpine3.23
 
 FROM node:lts-alpine AS frontend-build
 
@@ -32,6 +32,9 @@ ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT \
 
 WORKDIR /app
 
+# Compose runs PostgreSQL 18; include matching logical backup utilities.
+RUN apk add --no-cache postgresql18-client
+
 RUN uv python install "$PYTHON_VERSION"
 
 COPY pyproject.toml uv.lock ./
@@ -39,6 +42,7 @@ COPY alembic.ini ./
 RUN uv sync --python "$PYTHON_VERSION" --frozen --no-dev
 
 COPY dtvp ./dtvp
+COPY scripts/dtvp_storage.py ./scripts/dtvp_storage.py
 COPY start.sh CHANGELOG.md ./
 COPY sbom/dtvp-frontend-cyclonedx.json /app/sbom/dtvp-frontend-cyclonedx.json
 COPY sbom/dtvp-backend-cyclonedx.json /app/sbom/dtvp-backend-cyclonedx.json
