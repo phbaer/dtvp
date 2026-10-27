@@ -134,6 +134,7 @@ async def migrate_legacy_inventory(*, apply: bool, cache_path: str | None = None
 
     # Import lazily because CacheManager initializes the legacy SQLite outbox
     # and its local directories as part of application startup.
+    os.environ["DTVP_DT_CACHE_PATH"] = str(resolved_cache_path)
     from .dt_cache import CacheManager
 
     cache = CacheManager(base_path=str(resolved_cache_path))
