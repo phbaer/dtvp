@@ -24,6 +24,7 @@ from .assessment_outbox_services import (
 )
 from .artifact_store import ArtifactStore
 from .catalog_repository import get_latest_source_snapshot, list_latest_source_snapshots
+from .catalog_repository import get_current_assessment, persist_assessment_revisions
 from .source_import_service import _safe_base_url
 from .source_connectors.dependency_track import DependencyTrackConnector
 from .source_import_service import import_source_scope
@@ -1417,6 +1418,26 @@ class CacheManager:
         refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
         path = self._analysis_path(project_uuid, component_uuid, vulnerability_uuid)
+        overlay = self.get_assessment_overlay(
+            project_uuid, component_uuid, vulnerability_uuid
+        )
+        if overlay is not None:
+            return overlay
+        snapshot = await self._get_or_import_snapshot(
+            client, project_uuid, refresh=refresh
+        )
+        if snapshot is not None:
+            for finding in (
+                (snapshot.get("source_artifacts") or {}).get("findings") or []
+            ):
+                component = finding.get("component") or {}
+                vulnerability = finding.get("vulnerability") or {}
+                if (
+                    str(component.get("uuid") or "") == component_uuid
+                    and str(vulnerability.get("uuid") or "") == vulnerability_uuid
+                ):
+                    return copy.deepcopy(finding.get("analysis") or {})
+            return None
         analysis = None
         if not refresh:
             overlay = self.get_assessment_overlay(
@@ -1478,6 +1499,22 @@ class CacheManager:
         component_uuid: str,
         vulnerability_uuid: str,
     ) -> Optional[Dict[str, Any]]:
+        local_decision = get_current_assessment(
+            project_uuid, component_uuid, vulnerability_uuid
+        )
+        if local_decision is not None:
+            sync_enabled = os.getenv(
+                "DTVP_DT_ASSESSMENT_SYNC_ENABLED", "false"
+            ).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+            if sync_enabled:
+                publication = self.assessment_outbox.get_overlay(
+                    (project_uuid, component_uuid, vulnerability_uuid)
+                )
+                if publication is not None:
+                    local_decision["dtvpSyncStatus"] = publication.get("sync_status")
+                    local_decision["dtvpUpdateId"] = publication.get("update_id")
+                    local_decision["dtvpSyncError"] = publication.get("last_error")
+            return local_decision
         overlay = self.assessment_outbox.get_overlay(
             (project_uuid, component_uuid, vulnerability_uuid)
         )
@@ -1699,18 +1736,34 @@ class CacheManager:
         *,
         replace: bool = True,
         expected_revisions: dict[AssessmentKey, int] | None = None,
+        actor: str | None = None,
     ) -> List[Dict[str, Any]]:
         if not payloads:
             return []
         try:
             entries = await asyncio.to_thread(
-                self.assessment_outbox.enqueue_many,
+                persist_assessment_revisions,
                 payloads,
-                replace=replace,
+                actor=actor,
                 expected_revisions=expected_revisions,
             )
         except AssessmentOutboxConflictError as exc:
             raise PendingUpdateExistsError(str(exc)) from exc
+        if os.getenv("DTVP_DT_ASSESSMENT_SYNC_ENABLED", "false").strip().lower() in {
+            "1", "true", "yes", "on", "enabled"
+        }:
+            try:
+                await asyncio.to_thread(
+                    self.assessment_outbox.enqueue_many,
+                    payloads,
+                    replace=replace,
+                )
+                self._assessment_sync_wakeup.set()
+            except Exception:
+                logger.exception(
+                    "DTVP decision persisted, but optional Dependency-Track "
+                    "publication could not be queued"
+                )
         async with self.lock:
             self.pending_updates = self._load_pending_updates()
             self._invalidate_cache_status()
@@ -1721,7 +1774,6 @@ class CacheManager:
                     if str(payload.get("project_uuid") or "").strip()
                 }
             )
-        self._assessment_sync_wakeup.set()
         return entries
 
     async def queue_analysis_updates(
@@ -1742,6 +1794,10 @@ class CacheManager:
         self._invalidate_cache_status()
 
     async def flush_pending_updates(self, client: DTClient) -> None:
+        if os.getenv("DTVP_DT_ASSESSMENT_SYNC_ENABLED", "false").strip().lower() not in {
+            "1", "true", "yes", "on", "enabled"
+        }:
+            return
         async with self._assessment_sync_lock:
             pending = await asyncio.to_thread(self.assessment_outbox.list_due)
             if not pending:

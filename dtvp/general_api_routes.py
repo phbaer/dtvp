@@ -1816,9 +1816,10 @@ async def _apply_bulk_workflow_payloads(
     client: DTClient,
     payloads: list[tuple[dict[str, Any], dict[str, Any]]],
     *,
+    actor: str | None = None,
     progress_callback: Callable[[int, int, dict[str, Any]], Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    persisted = await _persist_local_assessment_payloads(deps, payloads)
+    persisted = await _persist_local_assessment_payloads(deps, payloads, actor=actor)
 
     try:
         await asyncio.to_thread(
@@ -1837,7 +1838,7 @@ async def _apply_bulk_workflow_payloads(
             if inspect.isawaitable(callback_result):
                 await callback_result
     outcome = {
-        "succeeded": 0,
+        "succeeded": sum(1 for result in finalized if result.get("status") == "success"),
         "queued": sum(1 for result in finalized if result.get("queued")),
         "failed": 0,
     }
@@ -1847,11 +1848,13 @@ async def _apply_bulk_workflow_payloads(
 async def _persist_local_assessment_payloads(
     deps: GeneralApiRouteDeps,
     payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+    *,
+    actor: str | None = None,
 ) -> list[dict[str, Any]]:
     raw_payloads = [payload for _instance, payload in payloads]
     persist = getattr(deps.cache_manager, "persist_assessment_updates", None)
     if callable(persist):
-        return await persist(raw_payloads, replace=True)
+        return await persist(raw_payloads, replace=True, actor=actor)
 
     bulk_queue = getattr(deps.cache_manager, "queue_analysis_updates", None)
     if callable(bulk_queue):
@@ -1884,8 +1887,8 @@ def _accepted_assessment_results(
                 "uuid": instance.get("finding_uuid"),
                 "new_state": payload.get("state"),
                 "new_details": payload.get("details"),
-                "queued": True,
-                "sync_status": "pending",
+                "queued": False,
+                "sync_status": "local",
                 "update_id": record.get("id"),
                 "revision": int(record.get("revision") or 0),
             }
@@ -2111,6 +2114,7 @@ def _register_bulk_workflow_routes(
             deps,
             client,
             payloads,
+            actor=user,
             progress_callback=progress_callback,
         )
         await asyncio.to_thread(
@@ -2615,6 +2619,7 @@ def _register_assessment_routes(
             deps,
             client,
             payloads,
+            actor=user,
         )
         return {
             "task_id": req.task_id,
@@ -2642,6 +2647,7 @@ def _register_assessment_routes(
             deps,
             client,
             payloads,
+            actor=user,
         )
         return {
             "task_id": req.task_id,
@@ -2716,6 +2722,7 @@ def _register_assessment_routes(
                 raw_payloads,
                 replace=True,
                 expected_revisions=_expected_assessment_revisions(req),
+                actor=user,
             )
         except AssessmentRevisionConflictError as exc:
             return JSONResponse(

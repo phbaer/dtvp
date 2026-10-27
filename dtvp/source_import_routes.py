@@ -15,6 +15,7 @@ from .catalog_repository import (
     get_import_run,
     get_snapshot_record,
     get_version_snapshot_record,
+    list_assessment_revisions,
     list_product_versions,
     list_products,
 )
@@ -131,6 +132,22 @@ def create_source_import_router(
         if run is None:
             raise HTTPException(status_code=404, detail="DTVP import run not found")
         return run
+
+    @router.get("/versions/{version_id}/assessment-revisions")
+    async def assessment_revisions(
+        version_id: str,
+        project_id: str | None = Query(default=None, max_length=512),
+        component_id: str | None = Query(default=None, max_length=512),
+        vulnerability_id: str | None = Query(default=None, max_length=512),
+        user=Depends(current_user_dependency),
+    ):
+        return await asyncio.to_thread(
+            list_assessment_revisions,
+            version_id,
+            project_id=project_id,
+            component_id=component_id,
+            vulnerability_id=vulnerability_id,
+        )
 
     @router.get("/import-runs/{run_id}/artifact")
     async def import_run_artifact(

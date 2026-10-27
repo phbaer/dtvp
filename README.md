@@ -165,7 +165,7 @@ filtering, editing, bulk operations, and archives; or the
 
 ```text
 Browser → Vue SPA → FastAPI → DTVP database + content-addressed source snapshots
-                           → Dependency-Track API + transitional local cache/outbox
+                           → Dependency-Track import + optional publication queue
                            → optional tmrescore and code-analysis services
 ```
 
@@ -173,8 +173,10 @@ FastAPI remains the backend. The DTVP database and artifact store are separate
 from Dependency-Track's database. Source-neutral snapshot import and read APIs
 are now available. Inventory cache misses and refreshes publish DTVP snapshots
 before returning the existing UI response, and cached snapshots supply reads
-during Dependency-Track outages. Project discovery and assessment
-synchronization still use transitional Dependency-Track paths.
+during Dependency-Track outages. Assessment decisions are stored locally with
+revision history; outbound synchronization is optional and disabled by default.
+Project discovery and several analysis integrations still use transitional
+Dependency-Track paths.
 
 | Path | Purpose |
 | :--- | :--- |
@@ -189,9 +191,10 @@ synchronization still use transitional Dependency-Track paths.
 | `skills/` | Agent entry points that route back to this README |
 
 Grouped tasks serve filtered summary windows and hydrate full details on demand.
-Assessment saves commit to a local SQLite outbox before background synchronization
-with Dependency-Track. Task registries are process-local: the supplied deployment
-uses one backend worker; horizontal scaling requires shared task storage.
+Assessment saves append revisioned decisions to the DTVP database. Publishing
+those decisions back to Dependency-Track is optional and disabled by default.
+Task registries are process-local: the supplied deployment uses one backend
+worker; horizontal scaling requires shared task storage.
 
 [Runtime and capacity](docs/runtime.md) documents the key modules, caching,
 concurrency, access boundaries, benchmarks, and sizing guidance.

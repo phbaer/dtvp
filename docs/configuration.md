@@ -46,7 +46,8 @@ PostgreSQL upgrades with an advisory lock and logs each applied revision.
 | `DTVP_DT_ACTIVE_PROJECT_LIMIT` | Most-recent projects eligible for periodic refresh | `8` |
 | `DTVP_DT_MEMORY_CACHE_MAX_ENTRIES` | Process-local LRU file-object cache entries; disk files remain persistent | `256` |
 | `DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES` | Process-local named-project query LRU entries | `128` |
-| `DTVP_ASSESSMENT_OUTBOX_PATH` | Transactional assessment overlay and synchronization outbox | `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` |
+| `DTVP_ASSESSMENT_OUTBOX_PATH` | Legacy SQLite queue for optional publication of DTVP decisions to Dependency-Track | `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` |
+| `DTVP_DT_ASSESSMENT_SYNC_ENABLED` | Publish locally saved DTVP assessment decisions back to Dependency-Track; disabled by default | `false` |
 | `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
 | `DTVP_ASSESSMENT_STRICT_DT_CONFLICTS` | Perform live Dependency-Track conflict reads before accepting assessment saves | `false` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |

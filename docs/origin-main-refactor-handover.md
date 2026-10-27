@@ -98,12 +98,16 @@ capability; it must not be required for normal DTVP reads or writes.
   Project discovery can fall back to the imported catalog during a
   Dependency-Track outage.
 - **Still transitional:** project discovery normally queries Dependency-Track;
-  assessment writes and synchronization still use the legacy outbox and
-  Dependency-Track path. DTVP inventory and import records are durable, but
-  decisions are not yet persisted through the DTVP database.
-- **Next backend slice:** migrate assessment/review writes to DTVP-owned
-  records, then retire the legacy SQLite outbox and remaining
-  Dependency-Track-backed paths where no longer needed.
+  DTVP assessment decisions now append to the relational database with actor
+  and revision metadata, pinned to the inventory snapshot used. The legacy
+  SQLite queue remains only for explicitly enabled publication and
+  compatibility with older queued updates; outbound synchronization is
+  disabled by default. Project discovery and several analysis workflows still
+  call Dependency-Track.
+- **Next backend slice:** migrate remaining analysis/archive integrations and
+  project discovery to source-neutral DTVP query services, provide a clear
+  retirement/migration path for legacy cache and outbox data, then remove
+  remaining Dependency-Track-backed reads.
 
 ### Target backend boundaries
 

@@ -784,23 +784,22 @@ async def _restore_version_assessments(
         }
 
         try:
-            await client.update_analysis(**payload)
-            deps.cache_manager._save_local_analysis(payload)
+            await deps.cache_manager.persist_assessment_updates(
+                [payload],
+                replace=True,
+                actor="system:archive-restore",
+            )
             restored += 1
         except Exception as exc:
-            try:
-                await deps.cache_manager.queue_analysis_update(payload, replace=True)
-                queued += 1
-            except Exception:
-                failed.append(
-                    {
-                        "component": (assessment.get("component") or {}).get("name"),
-                        "vulnerability": (
-                            assessment.get("vulnerability") or {}
-                        ).get("vulnId"),
-                        "error": str(exc),
-                    }
-                )
+            failed.append(
+                {
+                    "component": (assessment.get("component") or {}).get("name"),
+                    "vulnerability": (
+                        assessment.get("vulnerability") or {}
+                    ).get("vulnId"),
+                    "error": str(exc),
+                }
+            )
 
     flush_writes = getattr(deps.cache_manager, "flush_cache_writes", None)
     if callable(flush_writes):
@@ -873,6 +872,10 @@ async def apply_project_archive(
             expected_min_findings=1 if expected_findings else 0,
         )
         try:
+            await deps.cache_manager.refresh_project(target_uuid, client)
+        except Exception as exc:
+            deps.logger.debug("Failed to import restored archive project: %s", exc)
+        try:
             target_bom = await client.get_bom(target_uuid)
         except Exception:
             target_bom = {}
@@ -885,11 +888,6 @@ async def apply_project_archive(
             target_bom=target_bom,
             assessments=version.get("assessments") or [],
         )
-        try:
-            await deps.cache_manager.refresh_project(target_uuid, client)
-        except Exception as exc:
-            deps.logger.debug("Failed to refresh restored archive project: %s", exc)
-
         version_results.append(
             {
                 "version": version_label,

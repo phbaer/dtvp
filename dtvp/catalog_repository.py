@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -10,7 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from .database import get_session_factory
+from .artifact_store import ArtifactStore
+from .assessment_outbox_services import AssessmentRevisionConflictError, assessment_key
 from .models import (
+    AssessmentRevision,
     ExternalReference,
     ImportRun,
     InventorySnapshot,
@@ -22,6 +26,198 @@ from .models import (
 
 class ImportRequestConflict(ValueError):
     """An idempotency key was reused for a different source scope."""
+
+
+def _resolve_assessment_context(session, payload: dict) -> tuple[str, str, str]:
+    key = assessment_key(payload)
+    if key is None:
+        raise ValueError("Assessment is missing its finding identity")
+    project_id, component_id, vulnerability_id = key
+    version_ref = session.scalar(
+        select(ExternalReference)
+        .join(SourceConnection, SourceConnection.id == ExternalReference.source_connection_id)
+        .where(
+            SourceConnection.source_type == "dependency-track",
+            ExternalReference.external_type == "product-version",
+            ExternalReference.external_id == project_id,
+        )
+    )
+    if version_ref is None:
+        raise LookupError("Assessment finding has not been imported into DTVP")
+    latest = session.scalar(
+        select(InventorySnapshot)
+        .where(InventorySnapshot.product_version_id == version_ref.local_id)
+        .order_by(InventorySnapshot.revision.desc())
+        .limit(1)
+    )
+    if latest is None:
+        raise LookupError("Assessment finding has no published DTVP snapshot")
+    finding_identity = None
+    if latest is not None:
+        try:
+            snapshot = ArtifactStore().get_json(latest.payload_sha256)
+        except (OSError, ValueError):
+            snapshot = {}
+        for finding in (snapshot.get("security") or {}).get("findings") or []:
+            vulnerability = finding.get("vulnerability") or {}
+            if (
+                str(finding.get("component_external_id") or "") == component_id
+                and str(vulnerability.get("external_id") or "") == vulnerability_id
+            ):
+                finding_identity = str(finding.get("external_id") or "") or None
+                if finding_identity:
+                    break
+    if not finding_identity:
+        # Preserve a deterministic context for older DT findings whose export
+        # lacks a stable finding UUID. The source keys remain provenance fields.
+        finding_identity = hashlib.sha256(
+            json.dumps([component_id, vulnerability_id], separators=(",", ":")).encode()
+        ).hexdigest()
+    return version_ref.local_id, latest.id, finding_identity
+
+
+def persist_assessment_revisions(
+    payloads: list[dict],
+    *,
+    actor: str | None = None,
+    expected_revisions: dict[tuple[str, str, str], int] | None = None,
+) -> list[dict]:
+    """Save accepted decisions in DTVP and append a revision per change."""
+    if not payloads:
+        return []
+    results = []
+    with get_session_factory().begin() as session:
+        for payload in payloads:
+            key = assessment_key(payload)
+            if key is None:
+                raise ValueError("Assessment is missing its finding identity")
+            version_id, snapshot_id, finding_identity = _resolve_assessment_context(session, payload)
+            # Lock the canonical version row so concurrent first decisions for
+            # a finding serialize even before any revision row exists.
+            session.scalar(
+                select(ProductVersion.id)
+                .where(ProductVersion.id == version_id)
+                .with_for_update()
+            )
+            latest_by_source = session.scalar(
+                select(AssessmentRevision)
+                .where(
+                    AssessmentRevision.product_version_id == version_id,
+                    AssessmentRevision.project_source_id == key[0],
+                    AssessmentRevision.component_source_id == key[1],
+                    AssessmentRevision.vulnerability_source_id == key[2],
+                )
+                .order_by(AssessmentRevision.revision.desc())
+                .with_for_update()
+                .limit(1)
+            )
+            if latest_by_source is not None:
+                finding_identity = latest_by_source.finding_identity
+            latest = latest_by_source or session.scalar(
+                select(AssessmentRevision)
+                .where(
+                    AssessmentRevision.product_version_id == version_id,
+                    AssessmentRevision.finding_identity == finding_identity,
+                )
+                .order_by(AssessmentRevision.revision.desc())
+                .with_for_update()
+                .limit(1)
+            )
+            current_revision = latest.revision if latest else 0
+            expected = (expected_revisions or {}).get(key)
+            if expected is not None and expected != current_revision:
+                raise AssessmentRevisionConflictError(key, expected, current_revision)
+            revision = current_revision + 1
+            record = AssessmentRevision(
+                product_version_id=version_id,
+                inventory_snapshot_id=snapshot_id,
+                finding_identity=finding_identity,
+                project_source_id=key[0],
+                component_source_id=key[1],
+                vulnerability_source_id=key[2],
+                revision=revision,
+                actor=actor,
+                payload=dict(payload),
+            )
+            session.add(record)
+            session.flush()
+            results.append(
+                {
+                    "id": record.id,
+                    "revision": revision,
+                    "payload": dict(payload),
+                    "actor": actor,
+                    "created_at": _iso(record.created_at),
+                }
+            )
+    return results
+
+
+def get_current_assessment(
+    project_id: str, component_id: str, vulnerability_id: str
+) -> dict | None:
+    with get_session_factory()() as session:
+        record = session.scalar(
+            select(AssessmentRevision)
+            .where(
+                AssessmentRevision.project_source_id == project_id,
+                AssessmentRevision.component_source_id == component_id,
+                AssessmentRevision.vulnerability_source_id == vulnerability_id,
+            )
+            .order_by(AssessmentRevision.revision.desc())
+            .limit(1)
+        )
+        if record is None:
+            return None
+        payload = record.payload or {}
+        return {
+            "analysisState": payload.get("state") or "NOT_SET",
+            "analysisDetails": payload.get("details") or "",
+            "isSuppressed": bool(payload.get("suppressed", False)),
+            "dtvpRevision": record.revision,
+            "dtvpSyncStatus": "local",
+            "dtvpUpdateId": record.id,
+            "dtvpSyncError": None,
+            "actor": record.actor,
+            "created_at": _iso(record.created_at),
+        }
+
+
+def list_assessment_revisions(
+    product_version_id: str,
+    *,
+    project_id: str | None = None,
+    component_id: str | None = None,
+    vulnerability_id: str | None = None,
+) -> list[dict]:
+    with get_session_factory()() as session:
+        query = select(AssessmentRevision).where(
+            AssessmentRevision.product_version_id == product_version_id
+        )
+        if project_id:
+            query = query.where(AssessmentRevision.project_source_id == project_id)
+        if component_id:
+            query = query.where(AssessmentRevision.component_source_id == component_id)
+        if vulnerability_id:
+            query = query.where(
+                AssessmentRevision.vulnerability_source_id == vulnerability_id
+            )
+        records = session.scalars(
+            query.order_by(AssessmentRevision.created_at, AssessmentRevision.revision)
+        ).all()
+        return [
+            {
+                "id": record.id,
+                "product_version_id": record.product_version_id,
+                "inventory_snapshot_id": record.inventory_snapshot_id,
+                "finding_identity": record.finding_identity,
+                "revision": record.revision,
+                "actor": record.actor,
+                "payload": record.payload,
+                "created_at": _iso(record.created_at),
+            }
+            for record in records
+        ]
 
 
 def _iso(value: datetime | None) -> str | None:

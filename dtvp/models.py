@@ -179,3 +179,37 @@ class InventorySnapshot(Base):
     product_version: Mapped[ProductVersion] = relationship(back_populates="snapshots")
     source: Mapped[SourceConnection] = relationship(back_populates="snapshots")
     import_run: Mapped[ImportRun] = relationship()
+
+
+class AssessmentRevision(Base):
+    """Append-only DTVP decision history for one imported finding context."""
+
+    __tablename__ = "assessment_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "product_version_id", "finding_identity", "revision",
+            name="uq_assessment_revision_context",
+        ),
+        Index(
+            "ix_assessment_revision_source_key",
+            "project_source_id", "component_source_id", "vulnerability_source_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    product_version_id: Mapped[str] = mapped_column(
+        ForeignKey("product_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    inventory_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("inventory_snapshots.id", ondelete="RESTRICT"), nullable=False
+    )
+    finding_identity: Mapped[str] = mapped_column(String(128), nullable=False)
+    project_source_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    component_source_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    vulnerability_source_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(255))
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )

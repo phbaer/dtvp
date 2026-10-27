@@ -290,57 +290,28 @@ async def _try_update_assessment_payload(
     max_attempts: int,
     retry_base_delay_seconds: float,
 ) -> Dict[str, Any]:
-    for attempt in range(1, max_attempts + 1):
-        try:
-            deps.logger.debug(
-                "Updating instance: %s (Vulnerability: %s; attempt %d/%d)",
-                instance.get("finding_uuid"),
-                instance.get("vulnerability_uuid"),
-                attempt,
-                max_attempts,
-            )
-            await client.update_analysis(**payload)
-            result = {
-                "status": "success",
-                "uuid": instance.get("finding_uuid"),
-                "new_state": payload["state"],
-                "new_details": payload["details"],
-            }
-            if attempt > 1:
-                result["attempts"] = attempt
-            return result
-        except Exception as exc:
-            if attempt >= max_attempts or not _retryable_assessment_write_error(exc):
-                return {
-                    "status": "error",
-                    "uuid": instance.get("finding_uuid"),
-                    "error": str(exc),
-                    "attempts": attempt,
-                    "payload": payload,
-                }
-
-            retry_after = _retry_after_seconds(exc)
-            delay = (
-                retry_after
-                if retry_after is not None
-                else min(
-                    retry_base_delay_seconds * (2 ** (attempt - 1)),
-                    MAX_ASSESSMENT_WRITE_RETRY_DELAY_SECONDS,
-                )
-            )
-            deps.logger.warning(
-                "Transient Dependency-Track assessment write failure for %s "
-                "(attempt %d/%d); retrying in %.2fs: %s",
-                instance.get("finding_uuid"),
-                attempt,
-                max_attempts,
-                delay,
-                exc,
-            )
-            if delay > 0:
-                await asyncio.sleep(delay)
-
-    raise AssertionError("assessment write retry loop exited unexpectedly")
+    try:
+        persisted = await deps.cache_manager.persist_assessment_updates(
+            [payload], replace=True, actor=None
+        )
+        entry = persisted[0]
+        return {
+            "status": "success",
+            "uuid": instance.get("finding_uuid"),
+            "new_state": payload["state"],
+            "new_details": payload["details"],
+            "queued": False,
+            "sync_status": "local",
+            "update_id": entry.get("id"),
+            "revision": entry.get("revision"),
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "uuid": instance.get("finding_uuid"),
+            "error": str(exc),
+            "payload": payload,
+        }
 
 
 async def apply_assessment_payloads(
@@ -414,37 +385,8 @@ async def finalize_assessment_results(
     api_results: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
-    failed_results: list[tuple[Dict[str, Any], dict[str, Any]]] = []
     for result in api_results:
         if result["status"] == "error":
-            payload = result.pop("payload")
-            failed_results.append((result, payload))
+            result.pop("payload", None)
         results.append(result)
-
-    if not failed_results:
-        return results
-
-    bulk_queue = getattr(deps.cache_manager, "queue_analysis_updates", None)
-    if callable(bulk_queue):
-        try:
-            await bulk_queue(
-                [payload for _result, payload in failed_results],
-                replace=True,
-            )
-            for result, _payload in failed_results:
-                result["queued"] = True
-            return results
-        except Exception:
-            deps.logger.exception(
-                "Failed to queue assessment updates as one batch; "
-                "falling back to individual queue writes"
-            )
-
-    for result, payload in failed_results:
-        try:
-            await deps.cache_manager.queue_analysis_update(payload, replace=True)
-            result["queued"] = True
-        except Exception as queue_error:
-            result["queued"] = False
-            result["error"] += f" (queue failed: {queue_error})"
     return results

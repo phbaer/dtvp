@@ -18,12 +18,16 @@ the retained `source_artifacts` section. Provider identifiers are mapped using
 `external_references`; they do not define DTVP product/version keys.
 
 Dependency-Track is the first connector. This is an inbound import and repeatable
-full-scope sync; it does not publish DTVP decisions back to Dependency-Track.
+full-scope sync. Assessment decisions are stored by DTVP as append-only records
+pinned to an imported inventory snapshot, with actor and revision metadata.
+Publishing decisions back to Dependency-Track is a separate optional capability
+and is disabled by default.
 The first adapter groups Dependency-Track project versions by exact project name;
 ambiguous duplicate name/version mappings fail visibly instead of overwriting a
 different version.
-Existing project/finding UI APIs and assessment writes still use the legacy
-Dependency-Track path until their migration batches are completed.
+Project discovery and several analysis/archive integrations still have
+Dependency-Track paths. Existing inventory reads and refreshes go through the
+DTVP snapshot store.
 
 ## Import and sync
 
@@ -66,6 +70,7 @@ All endpoints below require DTVP authentication.
 | `GET /api/catalog/versions/{version_id}/snapshot` | Read the latest snapshot |
 | `GET /api/catalog/versions/{version_id}/snapshot?revision=N` | Read a pinned revision |
 | `GET /api/catalog/versions/{version_id}/snapshots/{snapshot_id}` | Read a specific snapshot ID |
+| `GET /api/catalog/versions/{version_id}/assessment-revisions` | Read assessment history pinned to DTVP inventory state |
 | `GET /api/catalog/import-runs/{run_id}` | Inspect run status and captured cursors/counts |
 | `GET /api/catalog/import-runs/{run_id}/artifact` | Retrieve the exact retained source capture for that run |
 
