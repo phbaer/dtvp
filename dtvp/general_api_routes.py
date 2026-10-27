@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, Any, Awaitable, Callable, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -166,11 +166,9 @@ class GeneralApiRouteDeps:
     cache_manager: Any
     logger: Any
     tasks: dict[str, Any]
-    dt_settings_cls: Callable[[], Any]
-    get_dt_client_cls: Callable[[], type]
     create_tracked_task: Callable[[Any], Any]
     process_grouped_vulns_task: Callable[
-        [str, str, Optional[str], DTClient, str], Awaitable[None]
+        [str, str, Optional[str], DTClient | None, str], Awaitable[None]
     ]
     sort_projects_by_version: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
     load_team_mapping: Callable[[], dict[str, Any]]
@@ -754,7 +752,6 @@ def _register_task_routes(
     @router.post("/tasks/group-vulns")
     async def start_group_vulns_task(
         name: str,
-        request: Request,
         cve: Optional[str] = None,
         response_mode: str = Query("full", pattern="^(full|summary)$"),
         *,
@@ -804,29 +801,15 @@ def _register_task_routes(
                 "log": ["Starting..."],
             }
 
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        cookies = dict(request.cookies)
-
         async def task_wrapper():
-            settings = deps.dt_settings_cls()
-            client_cls = deps.get_dt_client_cls()
-            async with client_cls(
-                settings.api_url,
-                api_key=settings.api_key,
-                token=token or "",
-                cookies=cookies,
-            ) as client:
-                await deps.process_grouped_vulns_task(
-                    task_id,
-                    name,
-                    cve,
-                    client,
-                    response_mode,
-                )
-                _finalize_grouped_vuln_task_key(deps, task_id)
+            await deps.process_grouped_vulns_task(
+                task_id,
+                name,
+                cve,
+                None,
+                response_mode,
+            )
+            _finalize_grouped_vuln_task_key(deps, task_id)
 
         deps.create_tracked_task(task_wrapper())
         return {"task_id": task_id, "reused": False}
@@ -2319,7 +2302,6 @@ def _register_bulk_workflow_routes(
     async def start_bulk_workflow_apply(
         workflow_id: str,
         req: BulkWorkflowApplyRequest,
-        request: Request,
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
@@ -2328,12 +2310,6 @@ def _register_bulk_workflow_routes(
         if plugin is None:
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
         _completed_task_full_groups(deps, req.task_id, user)
-        settings = deps.dt_settings_cls()
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        cookies = dict(request.cookies)
         operation = _create_bulk_workflow_task(
             deps,
             kind="apply",
@@ -2380,20 +2356,12 @@ def _register_bulk_workflow_routes(
                         append_log=(completed == total or progress % 10 == 0),
                     )
 
-                client_cls = deps.get_dt_client_cls()
-                async with client_cls(
-                    settings.api_url,
-                    api_key=settings.api_key,
-                    token=token or "",
-                    cookies=cookies,
-                ) as client:
-                    result = await prepare_apply_response(
-                        plugin,
-                        req,
-                        user,
-                        client,
-                        progress_callback=update_progress,
-                    )
+                result = await prepare_apply_response(
+                    plugin,
+                    req,
+                    user,
+                    progress_callback=update_progress,
+                )
                 _update_bulk_workflow_task(
                     operation,
                     status="completed",

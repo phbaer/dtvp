@@ -116,7 +116,8 @@ capability; it must not be required for normal DTVP reads or writes.
 - **Assessment routes no longer require DT:** assessment detail and conflict
   checks resolve from DTVP snapshots and local revisions; individual writes,
   restore, rescore, and bulk workflow apply persist locally without injecting a
-  DT client. Dependency-chain browsing also uses the retained BOM snapshot.
+  DT client. Dependency-chain browsing and grouped vulnerability tasks use
+  retained DTVP BOM and inventory snapshots.
 - **Optional source at startup:** Compose no longer gates DTVP startup on the
   Dependency-Track API service. Project browsing reads the DTVP catalog without
   a DT client; source import and refresh still require the configured connector.

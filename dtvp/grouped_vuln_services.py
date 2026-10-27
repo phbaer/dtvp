@@ -698,7 +698,7 @@ def _queue_open_vulnerabilities_after_grouping(
 
 async def fetch_version_snapshot(
     deps: GroupedVulnServiceDeps,
-    client: DTClient,
+    client: DTClient | None,
     version_info: Dict[str, Any],
     cve: Optional[str],
     team_mapping: Dict[str, Any],
@@ -848,7 +848,7 @@ async def process_grouped_vulns_task(
     task_id: str,
     name: str,
     cve: Optional[str],
-    client: DTClient,
+    client: DTClient | None,
     response_mode: str = "full",
 ) -> None:
     try:

@@ -231,8 +231,6 @@ def build_general_api_route_deps(
     background_tasks: set[asyncio.Task[Any]],
     grouped_vuln_service_deps: GroupedVulnServiceDeps,
     assessment_service_deps: AssessmentServiceDeps,
-    dt_settings_cls: Callable[[], Any],
-    get_dt_client_cls: Callable[[], type],
     get_user_role: Callable[[str], str],
     load_rescore_rules: Callable[[], dict[str, Any] | None],
     get_bom_analysis_cache_cls: Callable[[], type],
@@ -250,8 +248,6 @@ def build_general_api_route_deps(
         cache_manager=cache_manager,
         logger=logger,
         tasks=tasks,
-        dt_settings_cls=dt_settings_cls,
-        get_dt_client_cls=get_dt_client_cls,
         create_tracked_task=lambda coro: create_tracked_task_impl(
             background_tasks,
             asyncio.create_task,
