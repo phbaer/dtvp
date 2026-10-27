@@ -453,25 +453,6 @@ class CacheManager:
             "project_revisions": revisions,
         }
 
-    def _project_list_is_fresh(self) -> bool:
-        if (
-            not self.cache_meta.get("fully_cached")
-            or self.project_list_ttl_seconds <= 0
-        ):
-            return False
-        refreshed_value = self.cache_meta.get("projects_refreshed_at")
-        if not refreshed_value:
-            return False
-        try:
-            refreshed_at = datetime.fromisoformat(str(refreshed_value))
-            if refreshed_at.tzinfo is None:
-                refreshed_at = refreshed_at.replace(tzinfo=timezone.utc)
-        except (TypeError, ValueError):
-            return False
-        return datetime.now(timezone.utc) - refreshed_at <= timedelta(
-            seconds=self.project_list_ttl_seconds
-        )
-
     def _mark_project_list_refreshed(self) -> None:
         self.cache_meta["fully_cached"] = True
         self.cache_meta["projects_refreshed_at"] = datetime.now(
@@ -933,7 +914,6 @@ class CacheManager:
     ) -> List[Dict[str, Any]]:
         async with self.lock:
             projects = self._load_project_cache(self._projects_path(), []) or []
-            full_list_is_fresh = self._project_list_is_fresh()
         discovered = await asyncio.to_thread(list_source_catalog_projects)
         if client is None:
             catalog = discovered or projects
@@ -945,7 +925,10 @@ class CacheManager:
                 ]
             return copy.deepcopy(catalog)
 
-        if discovered and full_list_is_fresh:
+        # Reads stay on the DTVP catalog. The background refresh loop owns
+        # provider discovery, so an old-but-valid catalog remains available
+        # during a source outage without making each API request call DT.
+        if discovered:
             catalog = discovered
         else:
             try:
