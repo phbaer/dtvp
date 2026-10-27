@@ -16,6 +16,7 @@ def reset_cache_manager(tmp_path, monkeypatch):
         "DTVP_LOCAL_DATABASE_URL",
         f"sqlite:///{tmp_path / 'dtvp.sqlite3'}",
     )
+    monkeypatch.setenv("DTVP_ARTIFACT_STORE_PATH", str(tmp_path / "artifacts"))
     from dtvp.database import get_engine, get_session_factory
 
     get_session_factory.cache_clear()

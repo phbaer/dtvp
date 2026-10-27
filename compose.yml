@@ -70,6 +70,7 @@ services:
       DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-change_me} # Generate this in Dependency-Track and update it.
       DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
       DTVP_DATABASE_URL: ${DTVP_DATABASE_URL:-}
+      DTVP_ARTIFACT_STORE_PATH: ${DTVP_ARTIFACT_STORE_PATH:-data/dtvp_artifacts}
       DTVP_DB_HOST: ${DTVP_DB_HOST:-dtvp-postgres}
       DTVP_DB_PORT: ${DTVP_DB_PORT:-5432}
       DTVP_DB_NAME: ${DTVP_DB_NAME:-dtvp}

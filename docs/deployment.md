@@ -37,8 +37,9 @@ Deployment rules:
   file lock. Large data backfills should use resumable, bounded migrations;
   routine schema changes need no manual SQL.
 - DTVP uses its own `dtvp-postgres-data` volume. Back up this database together
-  with any DTVP journal/artifact storage before releases that change persisted
-  data. The existing Dependency-Track PostgreSQL volume remains independent.
+  with `DTVP_ARTIFACT_STORE_PATH` (`data/dtvp_artifacts` by default) before
+  releases that change persisted data. The existing Dependency-Track PostgreSQL
+  volume remains independent.
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
   archives survive container restarts.
 - Code analysis is an optional external service. Deploy Agentyzer separately,

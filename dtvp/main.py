@@ -91,6 +91,8 @@ from .dt_client import (
     close_shared_dt_client,
     get_client,
 )
+from .source_connectors.dependency_track import DependencyTrackConnector
+from .source_import_routes import create_source_import_router
 from .file_io_services import read_text as read_text_impl
 from .file_io_services import (
     write_and_validate_json_bytes as write_and_validate_json_bytes_impl,
@@ -452,6 +454,14 @@ app.include_router(auth_router, prefix=context_path)
 
 # API Router
 api_router = APIRouter(prefix="/api", tags=["api"])
+api_router.include_router(
+    create_source_import_router(
+        current_user_dependency=get_current_user,
+        client_dependency=get_client,
+        get_user_role=get_user_role,
+        connector=DependencyTrackConnector(),
+    )
+)
 
 
 @app.get(_path_with_context("/startup"), include_in_schema=False)

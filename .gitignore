@@ -15,6 +15,7 @@ htmlcov/
 data/dt_cache/
 data/dtvp.sqlite3
 data/dtvp.sqlite3.migration.lock
+data/dtvp_artifacts/
 
 # Virtual environments
 .venv

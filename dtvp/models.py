@@ -5,7 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -51,6 +60,9 @@ class ProductVersion(Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="versions")
+    snapshots: Mapped[list[InventorySnapshot]] = relationship(
+        back_populates="product_version"
+    )
 
 
 class SourceConnection(Base):
@@ -72,6 +84,7 @@ class SourceConnection(Base):
     )
 
     import_runs: Mapped[list[ImportRun]] = relationship(back_populates="source")
+    snapshots: Mapped[list[InventorySnapshot]] = relationship(back_populates="source")
 
 
 class ExternalReference(Base):
@@ -117,6 +130,7 @@ class ImportRun(Base):
         ForeignKey("source_connections.id", ondelete="RESTRICT"), nullable=False
     )
     request_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    initiated_by: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     scope: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     cursor_before: Mapped[dict | None] = mapped_column(JSON)
@@ -130,3 +144,38 @@ class ImportRun(Base):
     )
 
     source: Mapped[SourceConnection] = relationship(back_populates="import_runs")
+
+
+class InventorySnapshot(Base):
+    """Immutable, normalized inventory revision captured from any connector."""
+
+    __tablename__ = "inventory_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "product_version_id", "revision", name="uq_inventory_snapshot_revision"
+        ),
+        UniqueConstraint("import_run_id", name="uq_inventory_snapshot_import_run"),
+        Index("ix_inventory_snapshots_version_created", "product_version_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    product_version_id: Mapped[str] = mapped_column(
+        ForeignKey("product_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_connection_id: Mapped[str] = mapped_column(
+        ForeignKey("source_connections.id", ondelete="RESTRICT"), nullable=False
+    )
+    import_run_id: Mapped[str] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    state_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+    product_version: Mapped[ProductVersion] = relationship(back_populates="snapshots")
+    source: Mapped[SourceConnection] = relationship(back_populates="snapshots")
+    import_run: Mapped[ImportRun] = relationship()

@@ -164,16 +164,15 @@ filtering, editing, bulk operations, and archives; or the
 ## Repository And Architecture
 
 ```text
-Browser → Vue SPA → FastAPI → DTVP-owned database (initial product/source catalog)
+Browser → Vue SPA → FastAPI → DTVP database + content-addressed source snapshots
                            → Dependency-Track API + transitional local cache/outbox
                            → optional tmrescore and code-analysis services
 ```
 
-FastAPI remains the backend. The DTVP database is separate from
-Dependency-Track's database and is being introduced as DTVP's own store. At this
-stage, existing project/finding reads and assessment synchronization still use
-the Dependency-Track integration; moving those workflows onto DTVP storage is
-the next backend work.
+FastAPI remains the backend. The DTVP database and artifact store are separate
+from Dependency-Track's database. Source-neutral snapshot import and read APIs
+are now available; existing project/finding UI reads and assessment writes
+still use the legacy Dependency-Track path while those workflows are migrated.
 
 | Path | Purpose |
 | :--- | :--- |
@@ -209,6 +208,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
+| [DTVP storage and source imports](docs/dtvp-storage.md) | DTVP catalog, snapshot imports, and connector contract |
 | [Origin main refactor handover](docs/origin-main-refactor-handover.md) | Batch plan for porting the knowledge-journal branch architecture |
 
 OpenAPI specifications: [tmrescore](openapi/tmrescore-openapi.json) and

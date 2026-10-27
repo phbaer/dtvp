@@ -24,6 +24,7 @@ means the integration or override is disabled.
 | `DTVP_DB_PASSWORD` | DTVP database password | unset locally; local-only Compose default; set a strong value in deployments |
 | `DTVP_DATABASE_URL` | Optional full SQLAlchemy URL override | unset |
 | `DTVP_LOCAL_DATABASE_URL` | Local file-backed SQLite URL when no host or full URL is configured | `sqlite:///data/dtvp.sqlite3` |
+| `DTVP_ARTIFACT_STORE_PATH` | Content-addressed original source captures and normalized snapshots | `data/dtvp_artifacts` |
 
 The database is independent of Dependency-Track's storage. The backend applies
 versioned Alembic migrations automatically at startup; use `uv run

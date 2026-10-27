@@ -80,20 +80,24 @@ capability; it must not be required for normal DTVP reads or writes.
 
 ### Implementation progress
 
-- **Started: persistence foundation.** The current implementation adds a
-  separate DTVP PostgreSQL database in Compose (file-backed SQLite for direct
-  local development), versioned Alembic migrations, and initial product/version,
-  source connection, external reference, and import-run tables. Startup applies
-  migrations automatically under a PostgreSQL advisory lock; schema revision
-  and migration outcomes are logged, and the current revision is available from
-  `/api/startup` after the migration check.
-- **Not yet migrated:** project/finding reads still use the existing
-  `CacheManager`/Dependency-Track path, and assessment writes still use the
-  SQLite outbox and Dependency-Track API. The new catalog tables are foundation
-  only; they do not yet make DTVP the source of truth for those workflows.
-- **Next backend slice:** repository/query services over DTVP state, followed by
-  the first read-path migration and an inbound DT importer that records source
-  provenance and durable import runs.
+- **Implemented foundation:** separate DTVP PostgreSQL storage in Compose
+  (file-backed SQLite for direct local development), automatically applied
+  Alembic migrations, DTVP product/version records, generic source connections
+  and external references, durable import runs, immutable snapshot metadata,
+  and SHA-256 verified content-addressed artifacts.
+- **Implemented first connector slice:** authenticated reviewer endpoints can
+  import or fully refresh one Dependency-Track project. The adapter returns a
+  source-neutral snapshot, preserves the exact provider capture, records the
+  initiating user and durable run status, and avoids a new state revision when
+  normalized content is unchanged. DTVP catalog/read endpoints expose products,
+  versions, pinned snapshots, import runs, and source artifacts.
+- **Not yet migrated:** the existing UI project/finding APIs and assessment
+  writes still use the legacy `CacheManager`/Dependency-Track path. The new API
+  is currently the native DTVP catalog surface; it is not yet the only backend
+  read/write path.
+- **Next backend slice:** point existing project/inventory query services at
+  DTVP snapshots, migrate assessment/review writes to DTVP-owned records, then
+  retire DT-backed reads and the local SQLite outbox where no longer needed.
 
 ### Target backend boundaries
 
