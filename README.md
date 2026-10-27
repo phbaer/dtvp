@@ -60,7 +60,11 @@ docker compose up -d
 
 Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and a
 strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
-`DTVP_HTTP_PORT` controls the host port. Persistent data lives in `./data`.
+`DTVP_HTTP_PORT` controls the host port. Compose provisions a DTVP-owned
+PostgreSQL database in a separate volume from Dependency-Track's database; set
+a strong `DTVP_DB_PASSWORD` before deployment. Pending schema migrations run
+automatically during startup before API traffic is served. Persistent file data
+continues to live in `./data`.
 
 The published DTVP image uses Python 3.14 free threading. Code analysis uses
 a separately deployed Agentyzer service; set `DTVP_CODE_ANALYSIS_URL` to its
@@ -77,6 +81,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Task | Command |
 | :--- | :--- |
 | Run DTVP Python tests | `uv run pytest` |
+| Apply DTVP database migrations manually | `uv run dtvp-db-upgrade` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- --run ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |
@@ -159,9 +164,16 @@ filtering, editing, bulk operations, and archives; or the
 ## Repository And Architecture
 
 ```text
-Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
+Browser → Vue SPA → FastAPI → DTVP-owned database (initial product/source catalog)
+                           → Dependency-Track API + transitional local cache/outbox
                            → optional tmrescore and code-analysis services
 ```
+
+FastAPI remains the backend. The DTVP database is separate from
+Dependency-Track's database and is being introduced as DTVP's own store. At this
+stage, existing project/finding reads and assessment synchronization still use
+the Dependency-Track integration; moving those workflows onto DTVP storage is
+the next backend work.
 
 | Path | Purpose |
 | :--- | :--- |
@@ -197,6 +209,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
+| [Origin main refactor handover](docs/origin-main-refactor-handover.md) | Batch plan for porting the knowledge-journal branch architecture |
 
 OpenAPI specifications: [tmrescore](openapi/tmrescore-openapi.json) and
 [code analysis](openapi/code-analysis-openapi.json).
