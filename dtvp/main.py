@@ -895,15 +895,10 @@ def _build_auto_analysis_sweep_worker_deps() -> AutoAnalysisSweepDeps:
 
 def _run_auto_analysis_sweep_worker():
     async def _run():
-        settings = DTSettings()
-        async with DTClient(
-            settings.api_url,
-            api_key=settings.api_key,
-        ) as client:
-            return await build_existing_open_vulnerability_sweep_plan(
-                _build_auto_analysis_sweep_worker_deps(),
-                client,
-            )
+        return await build_existing_open_vulnerability_sweep_plan(
+            _build_auto_analysis_sweep_worker_deps(),
+            None,
+        )
 
     return asyncio.run(_run())
 

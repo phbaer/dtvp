@@ -124,7 +124,8 @@ capability; it must not be required for normal DTVP reads or writes.
 - **Grouped review reads use DTVP:** grouped vulnerability tasks no longer
   construct a DT client, and the general project-browsing router has no DT
   client dependency. Both operate on previously imported catalog and inventory
-  snapshots.
+  snapshots. The automatic code-analysis sweep also reads those retained
+  snapshots without opening a DT client.
 - **Legacy inventory migration command:** `uv run dtvp-legacy-cache-migrate`
   reports eligible versions; `--apply` imports them resumably while preserving
   legacy files. It does not delete or disable the old cache. The next backend

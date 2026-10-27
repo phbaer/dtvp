@@ -193,7 +193,8 @@ inputs also come from DTVP snapshots; the external tmrescore service remains an
 optional analysis integration. Assessment detail, conflict checks, restore, and
 rescore routes, along with bulk workflow apply, also read and write DTVP-owned
 state without constructing a Dependency-Track client. Dependency-chain browsing
-and grouped vulnerability tasks use retained DTVP snapshots as well.
+and grouped vulnerability tasks use retained DTVP snapshots as well. The
+automatic code-analysis sweep also builds its inputs from DTVP snapshots.
 
 | Path | Purpose |
 | :--- | :--- |
