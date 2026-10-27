@@ -324,6 +324,7 @@ def build_general_api_route_deps(
 
 def build_tmrescore_route_deps(
     *,
+    list_projects: Callable[..., Any],
     prepare_tmrescore_inventory_or_raise: Callable[..., Any],
     tmrescore_task_service_deps: TMRescoreTaskServiceDeps,
     tmrescore_cache_service_deps: TMRescoreCacheServiceDeps,
@@ -338,6 +339,7 @@ def build_tmrescore_route_deps(
     tmrescore_disabled_detail: str,
 ) -> TMRescoreRouteDeps:
     return TMRescoreRouteDeps(
+        list_projects=list_projects,
         prepare_tmrescore_inventory_or_raise=prepare_tmrescore_inventory_or_raise,
         prune_tmrescore_analysis_tasks=lambda: prune_tmrescore_analysis_tasks_impl(
             tmrescore_task_service_deps

@@ -193,8 +193,11 @@ Dependency-Track paths.
 Grouped tasks serve filtered summary windows and hydrate full details on demand.
 Assessment saves append revisioned decisions to the DTVP database. Publishing
 those decisions back to Dependency-Track is optional and disabled by default.
-Task registries are process-local: the supplied deployment uses one backend
-worker; horizontal scaling requires shared task storage.
+Inventory cache misses and refreshes pass through the Dependency-Track source
+connector and publish a DTVP snapshot before reads return. Project discovery
+still uses Dependency-Track. Task registries are process-local: the supplied
+deployment uses one backend worker; horizontal scaling requires shared task
+storage.
 
 [Runtime and capacity](docs/runtime.md) documents the key modules, caching,
 concurrency, access boundaries, benchmarks, and sizing guidance.

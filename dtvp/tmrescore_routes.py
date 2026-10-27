@@ -25,6 +25,7 @@ def _merge_responses(
 
 @dataclass(frozen=True)
 class TMRescoreRouteDeps:
+    list_projects: Callable[[DTClient, str], Awaitable[list[dict[str, Any]]]]
     prepare_tmrescore_inventory_or_raise: Callable[
         [str, str, DTClient], Awaitable[dict[str, Any]]
     ]
@@ -136,7 +137,7 @@ def _register_tmrescore_context_route(
             llm_enrichment_warning = deps.tmrescore_disabled_detail
 
         try:
-            projects = await client.get_projects(project_name)
+            projects = await deps.list_projects(client, project_name)
         except Exception as exc:
             deps.logger.error("Error fetching projects for tmrescore context: %s", exc)
             raise HTTPException(

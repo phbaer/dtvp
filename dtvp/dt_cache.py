@@ -1032,9 +1032,8 @@ class CacheManager:
                 logger.debug("Failed to refresh project %s: %s", project_uuid, exc)
 
     async def refresh_project(self, project_uuid: str, client: DTClient) -> None:
-        await self.get_vulnerabilities(client, project_uuid, refresh=True)
-        await self.get_project_vulnerabilities(client, project_uuid, refresh=True)
-        await self.get_bom(client, project_uuid, refresh=True)
+        await self.record_project_access(project_uuid)
+        await self._import_project(client, project_uuid)
 
     async def record_project_access(self, project_uuid: str) -> None:
         project_uuid = str(project_uuid or "").strip()
@@ -1246,7 +1245,12 @@ class CacheManager:
                 )
                 return snapshot
             raise
-        return await self._get_imported_project_snapshot(client, project_uuid)
+        published = await self._get_imported_project_snapshot(client, project_uuid)
+        if published is None:
+            raise RuntimeError(
+                f"DTVP has no published inventory snapshot for project {project_uuid}"
+            )
+        return published
 
     async def get_vulnerabilities(
         self,
@@ -1259,63 +1263,10 @@ class CacheManager:
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        if snapshot is not None:
-            findings = copy.deepcopy(
-                ((snapshot.get("source_artifacts") or {}).get("findings") or [])
-            )
-            findings = self._overlay_local_analysis(project_uuid, findings)
-            if cve:
-                query = cve.upper()
-                findings = [
-                    finding for finding in findings
-                    if query in str((finding.get("vulnerability") or {}).get("vulnId") or "").upper()
-                    or query in str((finding.get("vulnerability") or {}).get("name") or "").upper()
-                    or any(query in str(value).upper()
-                           for alias in ((finding.get("vulnerability") or {}).get("aliases") or [])
-                           if isinstance(alias, dict) for value in alias.values())
-                ]
-            return findings
-        path = self._findings_path(project_uuid)
-        findings = None
-
-        if not refresh:
-            async with self.lock:
-                findings = self._load_project_cache(path, None)
-
-        if findings is None:
-
-            async def fetch_findings() -> List[Dict[str, Any]]:
-                async with self.lock:
-                    cached_findings = self._load_project_cache(path, None)
-                fresh_findings = await client.get_vulnerabilities(
-                    project_uuid,
-                    cve=None,
-                )
-                fresh_findings = self._restore_recreated_finding_assessments(
-                    project_uuid,
-                    fresh_findings,
-                    cached_findings or [],
-                )
-                fresh_findings = self._overlay_local_analysis(
-                    project_uuid,
-                    fresh_findings,
-                )
-                async with self.lock:
-                    self._save_project_cache(
-                        path,
-                        fresh_findings,
-                        project_uuid=project_uuid,
-                    )
-                return fresh_findings
-
-            findings = await self._singleflight_fetch(
-                ("vulnerabilities", project_uuid),
-                fetch_findings,
-            )
-        else:
-            findings = copy.deepcopy(findings)
-            findings = self._overlay_local_analysis(project_uuid, findings)
-
+        findings = copy.deepcopy(
+            ((snapshot.get("source_artifacts") or {}).get("findings") or [])
+        )
+        findings = self._overlay_local_analysis(project_uuid, findings)
         if cve:
             cve_upper = cve.upper()
             filtered = []
@@ -1345,32 +1296,9 @@ class CacheManager:
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        if snapshot is not None:
-            return copy.deepcopy(
-                ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
-            )
-        path = self._project_vulns_path(project_uuid)
-        vulns = None
-        if not refresh:
-            async with self.lock:
-                vulns = self._load_project_cache(path, None)
-        if vulns is None:
-
-            async def fetch_project_vulnerabilities() -> List[Dict[str, Any]]:
-                fresh_vulns = await client.get_project_vulnerabilities(project_uuid)
-                async with self.lock:
-                    self._save_project_cache(
-                        path,
-                        fresh_vulns,
-                        project_uuid=project_uuid,
-                    )
-                return fresh_vulns
-
-            return await self._singleflight_fetch(
-                ("project_vulnerabilities", project_uuid),
-                fetch_project_vulnerabilities,
-            )
-        return copy.deepcopy(vulns)
+        return copy.deepcopy(
+            ((snapshot.get("source_artifacts") or {}).get("advisories") or [])
+        )
 
     async def get_bom(
         self,
@@ -1382,32 +1310,9 @@ class CacheManager:
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        if snapshot is not None:
-            return copy.deepcopy(
-                ((snapshot.get("source_artifacts") or {}).get("bom"))
-            )
-        path = self._bom_path(project_uuid)
-        bom = None
-        if not refresh:
-            async with self.lock:
-                bom = self._load_project_cache(path, None)
-        if bom is None:
-
-            async def fetch_bom() -> Optional[Dict[str, Any]]:
-                fresh_bom = await client.get_bom(project_uuid)
-                async with self.lock:
-                    self._save_project_cache(
-                        path,
-                        fresh_bom,
-                        project_uuid=project_uuid,
-                    )
-                return fresh_bom
-
-            return await self._singleflight_fetch(
-                ("bom", project_uuid),
-                fetch_bom,
-            )
-        return copy.deepcopy(bom)
+        return copy.deepcopy(
+            ((snapshot.get("source_artifacts") or {}).get("bom"))
+        )
 
     async def get_analysis(
         self,
@@ -1417,7 +1322,6 @@ class CacheManager:
         vulnerability_uuid: str,
         refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        path = self._analysis_path(project_uuid, component_uuid, vulnerability_uuid)
         overlay = self.get_assessment_overlay(
             project_uuid, component_uuid, vulnerability_uuid
         )
@@ -1426,72 +1330,15 @@ class CacheManager:
         snapshot = await self._get_or_import_snapshot(
             client, project_uuid, refresh=refresh
         )
-        if snapshot is not None:
-            for finding in (
-                (snapshot.get("source_artifacts") or {}).get("findings") or []
+        for finding in ((snapshot.get("source_artifacts") or {}).get("findings") or []):
+            component = finding.get("component") or {}
+            vulnerability = finding.get("vulnerability") or {}
+            if (
+                str(component.get("uuid") or "") == component_uuid
+                and str(vulnerability.get("uuid") or "") == vulnerability_uuid
             ):
-                component = finding.get("component") or {}
-                vulnerability = finding.get("vulnerability") or {}
-                if (
-                    str(component.get("uuid") or "") == component_uuid
-                    and str(vulnerability.get("uuid") or "") == vulnerability_uuid
-                ):
-                    return copy.deepcopy(finding.get("analysis") or {})
-            return None
-        analysis = None
-        if not refresh:
-            overlay = self.get_assessment_overlay(
-                project_uuid,
-                component_uuid,
-                vulnerability_uuid,
-            )
-            if overlay is not None:
-                return overlay
-            async with self.lock:
-                analysis = self._load_project_cache(path, None)
-        if analysis is None:
-
-            async def fetch_analysis() -> Optional[Dict[str, Any]]:
-                async with self.lock:
-                    previous_analysis = self._load_project_cache(path, None)
-                fresh_analysis = await client.get_analysis(
-                    project_uuid=project_uuid,
-                    component_uuid=component_uuid,
-                    vulnerability_uuid=vulnerability_uuid,
-                )
-                fresh_analysis = self._merge_blank_source_analysis(
-                    previous_analysis,
-                    fresh_analysis,
-                )
-                async with self.lock:
-                    self._save_project_cache(
-                        path,
-                        fresh_analysis,
-                        project_uuid=project_uuid,
-                    )
-                overlay = self.get_assessment_overlay(
-                    project_uuid,
-                    component_uuid,
-                    vulnerability_uuid,
-                )
-                if overlay is not None:
-                    return overlay
-                if isinstance(fresh_analysis, dict):
-                    fresh_analysis = dict(fresh_analysis)
-                    fresh_analysis["dtvpRevision"] = 0
-                    fresh_analysis["dtvpSyncStatus"] = "synced"
-                return fresh_analysis
-
-            return await self._singleflight_fetch(
-                (
-                    "analysis",
-                    project_uuid,
-                    component_uuid,
-                    vulnerability_uuid,
-                ),
-                fetch_analysis,
-            )
-        return copy.deepcopy(analysis)
+                return copy.deepcopy(finding.get("analysis") or {})
+        return None
 
     def get_assessment_overlay(
         self,

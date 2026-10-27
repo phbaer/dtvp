@@ -96,7 +96,9 @@ capability; it must not be required for normal DTVP reads or writes.
   publish it before returning the existing UI response. Cached reads use the
   retained DTVP snapshot; a failed refresh serves the last published snapshot.
   Project discovery can fall back to the imported catalog during a
-  Dependency-Track outage.
+  Dependency-Track outage. The legacy cache facade no longer fetches BOMs,
+  findings, advisories, or source analysis directly; those reads go through the
+  connector/import service.
 - **Still transitional:** project discovery normally queries Dependency-Track;
   DTVP assessment decisions now append to the relational database with actor
   and revision metadata, pinned to the inventory snapshot used. The legacy

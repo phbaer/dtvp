@@ -739,6 +739,7 @@ api_router.include_router(
 api_router.include_router(
     create_tmrescore_router(
         build_tmrescore_route_deps(
+            list_projects=lambda client, name: cache_manager.get_projects(client, name),
             prepare_tmrescore_inventory_or_raise=prepare_tmrescore_inventory_or_raise,
             tmrescore_task_service_deps=tmrescore_task_service_deps,
             tmrescore_cache_service_deps=tmrescore_cache_service_deps,
