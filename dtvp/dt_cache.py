@@ -348,7 +348,9 @@ class CacheManager:
     ) -> Optional[
         Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]
     ]:
-        record = get_latest_snapshot_for_source_project(project_uuid)
+        record = get_latest_snapshot_for_source_project(
+            project_uuid, preferred_source_type="dependency-track"
+        )
         if record is not None:
             try:
                 snapshot = ArtifactStore().get_json(record["payload_sha256"])
@@ -967,14 +969,16 @@ class CacheManager:
         return copy.deepcopy(catalog)
 
     async def _get_imported_project_snapshot(
-        self, client: DTClient, project_uuid: str
+        self, client: DTClient | None, project_uuid: str
     ) -> Optional[Dict[str, Any]]:
         try:
-            base_url = _safe_base_url(client.base_url)
+            base_url = _safe_base_url(client.base_url) if client is not None else None
             record = await asyncio.to_thread(
                 get_latest_snapshot_for_source_project,
                 project_uuid,
                 base_url,
+                None,
+                "dependency-track",
             )
             if record is None:
                 return None
@@ -1121,9 +1125,15 @@ class CacheManager:
         return all_migrated
 
     async def _get_or_import_snapshot(
-        self, client: DTClient, project_uuid: str, *, refresh: bool
+        self, client: DTClient | None, project_uuid: str, *, refresh: bool
     ) -> Optional[Dict[str, Any]]:
         snapshot = await self._get_imported_project_snapshot(client, project_uuid)
+        if client is None:
+            if snapshot is None:
+                raise LookupError(
+                    f"DTVP has no imported inventory snapshot for project {project_uuid}"
+                )
+            return snapshot
         if snapshot is not None:
             source_type = (snapshot.get("provenance") or {}).get("source_type")
             if source_type != "dependency-track":
@@ -1151,7 +1161,7 @@ class CacheManager:
 
     async def get_vulnerabilities(
         self,
-        client: DTClient,
+        client: DTClient | None,
         project_uuid: str,
         cve: Optional[str] = None,
         refresh: bool = False,
@@ -1190,7 +1200,7 @@ class CacheManager:
 
     async def get_project_vulnerabilities(
         self,
-        client: DTClient,
+        client: DTClient | None,
         project_uuid: str,
         refresh: bool = False,
         preserve_source_payload: bool = False,
@@ -1206,7 +1216,7 @@ class CacheManager:
 
     async def get_bom(
         self,
-        client: DTClient,
+        client: DTClient | None,
         project_uuid: str,
         refresh: bool = False,
         preserve_source_payload: bool = False,
@@ -1221,7 +1231,7 @@ class CacheManager:
 
     async def get_analysis(
         self,
-        client: DTClient,
+        client: DTClient | None,
         project_uuid: str,
         component_uuid: str,
         vulnerability_uuid: str,

@@ -734,7 +734,7 @@ async def fetch_version_snapshot(
 async def collect_version_snapshots(
     deps: GroupedVulnServiceDeps,
     versions: List[Dict[str, Any]],
-    client: DTClient,
+    client: DTClient | None,
     cve: Optional[str],
     team_mapping: Dict[str, Any],
     progress_callback: Callable[[int, int, Dict[str, Any]], None] | None = None,

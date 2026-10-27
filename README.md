@@ -185,9 +185,9 @@ advisories, and BOMs from the normalized DTVP snapshot; exact provider payloads
 remain available for archive export and provenance. Source analysis is retained
 as an attributed observation. Assessment decisions are stored locally with
 revision history; outbound synchronization is optional and disabled by default.
-Project browsing reads the persisted DTVP catalog without a Dependency-Track
-client. Catalog discovery and inventory refresh still run through the source
-connector when requested.
+Project browsing and statistics read the persisted DTVP catalog/snapshots
+without a Dependency-Track client. Catalog discovery and inventory refresh
+still run through the source connector when requested.
 
 | Path | Purpose |
 | :--- | :--- |

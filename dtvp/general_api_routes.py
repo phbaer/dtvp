@@ -1217,23 +1217,21 @@ def _register_statistics_route(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
     current_user_dependency: Callable[..., Any],
-    client_dependency: Callable[..., Any],
 ) -> None:
     @router.get("/statistics", responses=deps.service_unavailable_response)
     async def get_statistics(
         name: Optional[str] = None,
         cve: Optional[str] = None,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         try:
-            projects = await deps.cache_manager.get_projects(client, name or "")
+            projects = await deps.cache_manager.get_projects(None, name or "")
         except Exception as exc:
-            deps.logger.error("Error fetching projects from Dependency-Track: %s", exc)
+            deps.logger.error("Error reading the DTVP project catalog: %s", exc)
             raise HTTPException(
                 status_code=503,
-                detail="Dependency-Track unavailable when fetching statistics. Please verify DT server is reachable.",
+                detail="DTVP project catalog is unavailable when calculating statistics.",
             )
 
         versions = [p for p in projects if p.get("name") == name] if name else projects
@@ -1249,16 +1247,23 @@ def _register_statistics_route(
 
         versions = deps.sort_projects_by_version(versions)
         team_mapping = deps.load_team_mapping()
-        (
-            combined_data,
-            bom_cache_map,
-            version_severity_counts,
-        ) = await deps.collect_version_snapshots(
-            versions,
-            client,
-            cve,
-            team_mapping,
-        )
+        try:
+            (
+                combined_data,
+                bom_cache_map,
+                version_severity_counts,
+            ) = await deps.collect_version_snapshots(
+                versions,
+                None,
+                cve,
+                team_mapping,
+            )
+        except Exception as exc:
+            deps.logger.error("Could not read imported DTVP inventory for statistics: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Imported DTVP inventory is unavailable for statistics.",
+            ) from exc
         version_counts = {
             entry["version"].get("version"): len(entry["vulnerabilities"])
             for entry in combined_data
@@ -2798,7 +2803,7 @@ def create_general_api_router(
     router = APIRouter()
     _register_project_routes(router, deps, current_user_dependency, client_dependency)
     _register_task_routes(router, deps, current_user_dependency)
-    _register_statistics_route(router, deps, current_user_dependency, client_dependency)
+    _register_statistics_route(router, deps, current_user_dependency)
     _register_assessment_routes(
         router, deps, current_user_dependency, client_dependency
     )

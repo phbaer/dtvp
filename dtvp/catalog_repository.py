@@ -386,6 +386,7 @@ def get_latest_snapshot_for_source_project(
     source_project_id: str,
     preferred_base_url: str | None = None,
     source_type: str | None = None,
+    preferred_source_type: str | None = "dependency-track",
 ) -> dict | None:
     with get_session_factory()() as session:
         query = (
@@ -412,17 +413,27 @@ def get_latest_snapshot_for_source_project(
             )
             if latest is None:
                 continue
-            priority = (
+            base_priority = (
                 0
                 if preferred_base_url
                 and (source.config or {}).get("base_url") == preferred_base_url
                 else 1
             )
-            candidates.append((priority, latest.created_at, source, latest))
+            source_priority = (
+                0 if preferred_source_type == source.source_type else 1
+            )
+            candidates.append(
+                (source_priority, base_priority, latest.created_at, source, latest)
+            )
         if not candidates:
             return None
-        _priority, _created, source, snapshot = min(
-            candidates, key=lambda item: (item[0], -item[1].timestamp())
+        _source_priority, _base_priority, _created, source, snapshot = min(
+            candidates,
+            key=lambda item: (
+                item[0],
+                item[1],
+                -item[2].timestamp(),
+            ),
         )
         return {
             "id": snapshot.id,
@@ -437,7 +448,9 @@ def get_latest_snapshot_for_source_project(
 def get_source_finding_analysis(
     project_id: str, component_id: str, vulnerability_id: str
 ) -> dict | None:
-    record = get_latest_snapshot_for_source_project(project_id)
+    record = get_latest_snapshot_for_source_project(
+        project_id, preferred_source_type="dependency-track"
+    )
     if record is None:
         return None
     try:
