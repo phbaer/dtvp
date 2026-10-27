@@ -34,7 +34,8 @@ and `uv run dtvp-legacy-cache-migrate --apply`. The command compares normalized
 content against its prior legacy-cache import, skips unchanged versions, and
 imports missing or changed versions independently even if another source has a
 snapshot for that product version. It keeps the original cache files for
-reconciliation and rollback.
+reconciliation and rollback. Import request IDs are stable for each project
+payload so interrupted runs can be resumed or deduplicated on retry.
 The first adapter groups Dependency-Track project versions by exact project name;
 ambiguous duplicate name/version mappings fail visibly instead of overwriting a
 different version.
