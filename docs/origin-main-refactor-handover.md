@@ -113,6 +113,9 @@ capability; it must not be required for normal DTVP reads or writes.
   automatic-analysis sweep reads the DTVP catalog and retained snapshots.
   Project discovery and optional DT publication still use the
   Dependency-Track connector/client.
+- **Assessment routes no longer require DT:** assessment detail and conflict
+  checks resolve from DTVP snapshots and local revisions; individual writes,
+  restore, and rescore apply persist locally without injecting a DT client.
 - **Optional source at startup:** Compose no longer gates DTVP startup on the
   Dependency-Track API service. Project browsing reads the DTVP catalog without
   a DT client; source import and refresh still require the configured connector.

@@ -186,7 +186,7 @@ class GeneralApiRouteDeps:
     calculate_statistics: Callable[[list[dict[str, Any]]], dict[str, Any]]
     get_user_role: Callable[[str], str]
     fetch_current_assessment_analyses: Callable[
-        [Any, DTClient], Awaitable[list[Any]]
+        [Any, DTClient | None], Awaitable[list[Any]]
     ]
     collect_assessment_conflicts: Callable[
         [AssessmentRequest, list[Any]], list[dict[str, Any]]
@@ -1817,7 +1817,6 @@ def _record_code_analysis_applications(
 
 async def _apply_bulk_workflow_payloads(
     deps: GeneralApiRouteDeps,
-    client: DTClient,
     payloads: list[tuple[dict[str, Any], dict[str, Any]]],
     *,
     actor: str | None = None,
@@ -2478,7 +2477,6 @@ def _register_assessment_routes(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
     current_user_dependency: Callable[..., Any],
-    client_dependency: Callable[..., Any],
 ) -> None:
     @router.get("/ssvc/models")
     async def ssvc_models(user: Annotated[str, Depends(current_user_dependency)]):
@@ -2505,7 +2503,6 @@ def _register_assessment_routes(
     async def get_assessment_details(
         req: AssessmentDetailsRequest,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.logger.info(
@@ -2515,7 +2512,7 @@ def _register_assessment_routes(
         )
         gathered_results = await deps.fetch_current_assessment_analyses(
             req,
-            client,
+            None,
         )
 
         results = []
@@ -2603,7 +2600,6 @@ def _register_assessment_routes(
     async def apply_rescore_rule_sync(
         req: AssessmentRestoreRequest,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         if deps.get_user_role(user).upper() != "REVIEWER":
@@ -2621,7 +2617,6 @@ def _register_assessment_routes(
 
         finalized, outcome = await _apply_bulk_workflow_payloads(
             deps,
-            client,
             payloads,
             actor=user,
         )
@@ -2639,7 +2634,6 @@ def _register_assessment_routes(
     async def apply_assessment_restore(
         req: AssessmentRestoreRequest,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         if deps.get_user_role(user).upper() != "REVIEWER":
@@ -2649,7 +2643,6 @@ def _register_assessment_routes(
         payloads, skipped = workflow_assessment_restore_payloads(groups, req.group_ids)
         finalized, outcome = await _apply_bulk_workflow_payloads(
             deps,
-            client,
             payloads,
             actor=user,
         )
@@ -2667,7 +2660,6 @@ def _register_assessment_routes(
     async def update_assessment(
         req: AssessmentRequest,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.logger.info(
@@ -2688,7 +2680,7 @@ def _register_assessment_routes(
             and not req.force
             and req.original_analysis
         ):
-            current_analyses = await deps.fetch_current_assessment_analyses(req, client)
+            current_analyses = await deps.fetch_current_assessment_analyses(req, None)
             conflicts = deps.collect_assessment_conflicts(req, current_analyses)
             if conflicts:
                 return JSONResponse(
@@ -2804,9 +2796,7 @@ def create_general_api_router(
     _register_project_routes(router, deps, current_user_dependency, client_dependency)
     _register_task_routes(router, deps, current_user_dependency)
     _register_statistics_route(router, deps, current_user_dependency)
-    _register_assessment_routes(
-        router, deps, current_user_dependency, client_dependency
-    )
+    _register_assessment_routes(router, deps, current_user_dependency)
     _register_bulk_workflow_routes(
         router, deps, current_user_dependency, client_dependency
     )

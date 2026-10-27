@@ -117,7 +117,7 @@ def _get_analysis_snapshot(analysis: Dict[str, Any]) -> tuple[str, str, bool]:
 async def fetch_current_assessment_analyses(
     deps: AssessmentServiceDeps,
     req: AssessmentRequest,
-    client: DTClient,
+    client: DTClient | None,
 ) -> List[Dict[str, Any] | BaseException | None]:
     if not req.instances:
         return []
