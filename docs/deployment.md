@@ -14,8 +14,10 @@ cp .env.dist .env
 docker compose up -d
 ```
 
-Set at least the Dependency-Track API key and public URL. For a non-default
-gateway:
+Set at least the Dependency-Track API key, public URL, a strong
+`DTVP_DB_PASSWORD`, and a strong session secret. DTVP's PostgreSQL service and
+volume are separate from the PostgreSQL service used by Dependency-Track. For a
+non-default gateway:
 
 ```env
 DTVP_HTTP_PORT=8083
@@ -24,6 +26,19 @@ DTVP_FRONTEND_URL=http://host.example:8083/dtvp
 
 Deployment rules:
 
+- DTVP schema migrations run automatically at startup before the application
+  serves traffic. Startup output reports the migration check, applied revision,
+  and current schema revision; `/api/startup` exposes the current revision after
+  the migration check. A failed upgrade leaves DTVP unavailable with a
+  startup error instead of serving against an unknown schema. `uv run
+  dtvp-db-upgrade` runs the same migration path explicitly for staged upgrades.
+- PostgreSQL migration execution uses a database advisory lock so simultaneous
+  app starts cannot apply DDL concurrently. Local SQLite development uses a
+  file lock. Large data backfills should use resumable, bounded migrations;
+  routine schema changes need no manual SQL.
+- DTVP uses its own `dtvp-postgres-data` volume. Back up this database together
+  with any DTVP journal/artifact storage before releases that change persisted
+  data. The existing Dependency-Track PostgreSQL volume remains independent.
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
   archives survive container restarts.
 - Code analysis is an optional external service. Deploy Agentyzer separately,
@@ -61,7 +76,8 @@ Deployment rules:
   task event streams. Uvicorn keeps those upstream connections for 30 seconds
   and uses a 2048-connection accept backlog.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
-  logs time cache and integration initialization.
+  logs time cache and integration initialization, as well as database migration
+  status.
 - The DTVP container startup script prints its packaged project version and
   image build number before importing the application, so deployment identity
   remains visible in Docker logs even if initialization fails.

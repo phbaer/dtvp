@@ -272,18 +272,21 @@ app_runtime_state: Dict[str, Any] = {
     "status": "ready",
     "message": "DTVP is ready.",
     "error": None,
+    "database_schema_revision": None,
 }
 _runtime_tasks: StartupRuntimeTasks | None = None
 _startup_task: asyncio.Task[Any] | None = None
 
 
 def _set_runtime_state(status: str, message: str, error: str | None = None) -> None:
+    schema_revision = app_runtime_state.get("database_schema_revision")
     app_runtime_state.clear()
     app_runtime_state.update(
         {
             "status": status,
             "message": message,
             "error": error,
+            "database_schema_revision": schema_revision,
         }
     )
 
@@ -349,6 +352,11 @@ async def _initialize_application_runtime() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runtime_tasks, _startup_task
     _runtime_tasks = None
+    from .database_migrations import run_database_migrations
+
+    schema_revision = await asyncio.to_thread(run_database_migrations)
+    app_runtime_state["database_schema_revision"] = schema_revision
+    logger.info("DTVP database ready (schema_revision=%s)", schema_revision)
     _startup_task = asyncio.create_task(_initialize_application_runtime())
     try:
         try:

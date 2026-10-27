@@ -40,6 +40,21 @@ services:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  dtvp-postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${DTVP_DB_USER:-dtvp}
+      POSTGRES_PASSWORD: ${DTVP_DB_PASSWORD:-dtvp_local_change_me}
+      POSTGRES_DB: ${DTVP_DB_NAME:-dtvp}
+    volumes:
+      - dtvp-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   dtvp:
     build:
       context: .
@@ -54,6 +69,12 @@ services:
       DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}
       DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-change_me} # Generate this in Dependency-Track and update it.
       DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
+      DTVP_DATABASE_URL: ${DTVP_DATABASE_URL:-}
+      DTVP_DB_HOST: ${DTVP_DB_HOST:-dtvp-postgres}
+      DTVP_DB_PORT: ${DTVP_DB_PORT:-5432}
+      DTVP_DB_NAME: ${DTVP_DB_NAME:-dtvp}
+      DTVP_DB_USER: ${DTVP_DB_USER:-dtvp}
+      DTVP_DB_PASSWORD: ${DTVP_DB_PASSWORD:-dtvp_local_change_me}
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
       DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}
       DTVP_UVICORN_KEEP_ALIVE_SECONDS: ${DTVP_UVICORN_KEEP_ALIVE_SECONDS:-30}
@@ -82,7 +103,10 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      - dtrack-apiserver
+      dtrack-apiserver:
+        condition: service_started
+      dtvp-postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   dtvp-archive-git-push:
@@ -151,4 +175,5 @@ services:
 
 volumes:
   postgres-data:
+  dtvp-postgres-data:
   archive-git-repo:

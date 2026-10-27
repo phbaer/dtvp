@@ -15,11 +15,15 @@ def build_startup_status_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     message = str(state.get("message") or "DTVP is starting.")
     if status == "failed":
         message = "DTVP startup failed. Check the backend logs."
-    return {
+    payload = {
         "status": status,
         "ready": status == "ready",
         "message": message,
     }
+    schema_revision = state.get("database_schema_revision")
+    if schema_revision:
+        payload["database_schema_revision"] = str(schema_revision)
+    return payload
 
 
 def build_startup_page_html(

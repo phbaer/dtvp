@@ -10,6 +10,16 @@ from dtvp.dt_client import DTClient
 @pytest.fixture(autouse=True)
 def reset_cache_manager(tmp_path, monkeypatch):
     monkeypatch.setenv("DTVP_SSVC_ENRICHMENT_ENABLED", "false")
+    monkeypatch.delenv("DTVP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DTVP_DB_HOST", raising=False)
+    monkeypatch.setenv(
+        "DTVP_LOCAL_DATABASE_URL",
+        f"sqlite:///{tmp_path / 'dtvp.sqlite3'}",
+    )
+    from dtvp.database import get_engine, get_session_factory
+
+    get_session_factory.cache_clear()
+    get_engine.cache_clear()
     cache_dir = tmp_path / "dt_cache"
     analysis_results_path = tmp_path / "code_analysis_results.json"
     monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
@@ -18,6 +28,10 @@ def reset_cache_manager(tmp_path, monkeypatch):
     main.code_analysis_result_store.reset()
     yield
     main.code_analysis_result_store.reset()
+    if get_engine.cache_info().currsize:
+        get_engine().dispose()
+    get_session_factory.cache_clear()
+    get_engine.cache_clear()
 
 
 # Mock Dependency Track Client

@@ -5,12 +5,30 @@
 Paths and commands refer to the repository root unless stated otherwise.
 
 - [Dependency-Track, Cache, And Rules](#dependency-track-cache-and-rules)
+- [DTVP Database](#dtvp-database)
 - [Authentication, Runtime, And Frontend](#authentication-runtime-and-frontend)
 - [Project Archives](#project-archives)
 - [Threat Model And Code Analysis](#threat-model-and-code-analysis)
 
 Set values in `.env` for Compose or in the shell for local `uv` runs. `unset`
 means the integration or override is disabled.
+
+## DTVP Database
+
+| Variable | Purpose | Default |
+| :--- | :--- | :--- |
+| `DTVP_DB_HOST` | DTVP database host; Compose uses its dedicated PostgreSQL service | unset locally; `dtvp-postgres` in Compose |
+| `DTVP_DB_PORT` | DTVP database port | `5432` |
+| `DTVP_DB_NAME` | DTVP database name | `dtvp` |
+| `DTVP_DB_USER` | DTVP database user | `dtvp` |
+| `DTVP_DB_PASSWORD` | DTVP database password | unset locally; local-only Compose default; set a strong value in deployments |
+| `DTVP_DATABASE_URL` | Optional full SQLAlchemy URL override | unset |
+| `DTVP_LOCAL_DATABASE_URL` | Local file-backed SQLite URL when no host or full URL is configured | `sqlite:///data/dtvp.sqlite3` |
+
+The database is independent of Dependency-Track's storage. The backend applies
+versioned Alembic migrations automatically at startup; use `uv run
+dtvp-db-upgrade` to apply the same migrations explicitly. The runner serializes
+PostgreSQL upgrades with an advisory lock and logs each applied revision.
 
 ## Dependency-Track, Cache, And Rules
 
