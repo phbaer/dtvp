@@ -193,6 +193,8 @@ Dependency-Track paths.
 Grouped tasks serve filtered summary windows and hydrate full details on demand.
 Assessment saves append revisioned decisions to the DTVP database. Publishing
 those decisions back to Dependency-Track is optional and disabled by default.
+Pending local decisions from the earlier SQLite queue are promoted on the
+project's first successful import.
 Inventory cache misses, refreshes, and project discovery pass through source
 connectors and publish their results to DTVP before reads return. Task
 registries are process-local: the supplied deployment uses one backend worker;

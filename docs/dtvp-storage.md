@@ -22,6 +22,10 @@ full-scope sync. Assessment decisions are stored by DTVP as append-only records
 pinned to an imported inventory snapshot, with actor and revision metadata.
 Publishing decisions back to Dependency-Track is a separate optional capability
 and is disabled by default.
+On a project's first successful snapshot import, pending decisions in the old
+SQLite outbox are promoted into DTVP revision history. With outbound publication
+disabled, the imported queue items are then retired; a failed promotion is
+logged and retried on a later refresh.
 The first adapter groups Dependency-Track project versions by exact project name;
 ambiguous duplicate name/version mappings fail visibly instead of overwriting a
 different version.

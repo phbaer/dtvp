@@ -311,6 +311,7 @@ class CacheManager:
         self._cache_status_expires_at = 0.0
         self._assessment_sync_lock = asyncio.Lock()
         self._assessment_sync_wakeup = asyncio.Event()
+        self._legacy_assessments_migrated: Set[str] = set()
         self._ensure_directories()
         self.assessment_outbox = AssessmentOutboxStore(
             get_assessment_outbox_path(self.base_path),
@@ -1156,12 +1157,56 @@ class CacheManager:
             return run
 
         await self._singleflight_fetch(("dtvp-import", project_uuid), import_once)
+        await self._migrate_pending_local_assessments(project_uuid)
+
+    async def _migrate_pending_local_assessments(self, project_uuid: str) -> None:
+        """Promote accepted pre-cutover local decisions after their snapshot exists."""
+        if project_uuid in self._legacy_assessments_migrated:
+            return
+        pending = await asyncio.to_thread(self.assessment_outbox.list_pending)
+        publication_enabled = os.getenv(
+            "DTVP_DT_ASSESSMENT_SYNC_ENABLED", "false"
+        ).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+        all_migrated = True
+        for entry in pending:
+            payload = entry.get("payload") or {}
+            if str(payload.get("project_uuid") or "") != project_uuid:
+                continue
+            migrated = {
+                "project_uuid": project_uuid,
+                "component_uuid": payload.get("component_uuid"),
+                "vulnerability_uuid": payload.get("vulnerability_uuid"),
+                "state": payload.get("state"),
+                "details": payload.get("details") or "",
+                "suppressed": bool(payload.get("suppressed", False)),
+            }
+            try:
+                await asyncio.to_thread(
+                    persist_assessment_revisions,
+                    [migrated],
+                    actor="migration:legacy-local-queue",
+                    only_if_absent=True,
+                )
+            except Exception:
+                all_migrated = False
+                logger.exception(
+                    "Could not migrate a pre-existing local assessment "
+                    "(project_uuid=%s, update_id=%s)",
+                    project_uuid,
+                    entry.get("id"),
+                )
+                continue
+            if not publication_enabled and entry.get("id"):
+                await asyncio.to_thread(self.assessment_outbox.discard, entry["id"])
+        if all_migrated:
+            self._legacy_assessments_migrated.add(project_uuid)
 
     async def _get_or_import_snapshot(
         self, client: DTClient, project_uuid: str, *, refresh: bool
     ) -> Optional[Dict[str, Any]]:
         snapshot = await self._get_imported_project_snapshot(client, project_uuid)
         if snapshot is not None and not refresh:
+            await self._migrate_pending_local_assessments(project_uuid)
             return snapshot
         try:
             await self._import_project(client, project_uuid)

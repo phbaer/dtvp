@@ -82,6 +82,7 @@ def persist_assessment_revisions(
     *,
     actor: str | None = None,
     expected_revisions: dict[tuple[str, str, str], int] | None = None,
+    only_if_absent: bool = False,
 ) -> list[dict]:
     """Save accepted decisions in DTVP and append a revision per change."""
     if not payloads:
@@ -113,6 +114,17 @@ def persist_assessment_revisions(
                 .limit(1)
             )
             if latest_by_source is not None:
+                if only_if_absent:
+                    results.append(
+                        {
+                            "id": latest_by_source.id,
+                            "revision": latest_by_source.revision,
+                            "payload": dict(latest_by_source.payload or {}),
+                            "actor": latest_by_source.actor,
+                            "created_at": _iso(latest_by_source.created_at),
+                        }
+                    )
+                    continue
                 finding_identity = latest_by_source.finding_identity
             latest = latest_by_source or session.scalar(
                 select(AssessmentRevision)

@@ -103,12 +103,13 @@ capability; it must not be required for normal DTVP reads or writes.
   through the connector, and active/inactive catalog observations plus original
   provider records are stored in DTVP before the compatibility API returns
   them. The local project cache is disposable.
-- **Still transitional:** DTVP assessment decisions append to the relational database with actor
-  and revision metadata, pinned to the inventory snapshot used. The legacy
-  SQLite queue remains only for explicitly enabled publication and
-  compatibility with older queued updates; outbound synchronization is
-  disabled by default. Archive import/restore and several analysis workflows
-  still call Dependency-Track.
+- **Still transitional:** DTVP assessment decisions append to the relational
+  database with actor and revision metadata, pinned to the inventory snapshot
+  used. The legacy SQLite queue remains only for explicitly enabled
+  publication and promotion of older pending decisions; outbound
+  synchronization is disabled by default. Pending legacy decisions migrate
+  after a successful project import. Archive import/restore and several
+  analysis workflows still call Dependency-Track.
 - **Next backend slice:** migrate remaining analysis/archive integrations to
   source-neutral DTVP query services, provide a clear
   retirement/migration path for legacy cache and outbox data, then remove
