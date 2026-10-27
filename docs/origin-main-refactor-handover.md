@@ -128,12 +128,12 @@ capability; it must not be required for normal DTVP reads or writes.
   snapshots without opening a DT client.
 - **Legacy inventory migration command:** `uv run dtvp-legacy-cache-migrate`
   reports eligible versions; `--apply` imports them resumably while preserving
-  legacy files. It does not delete or disable the old cache. The next backend
-  slice is reconciliation and retirement of legacy project caches/outbox data,
-  then removing client dependencies from compatibility routes where they are
-  no longer needed. Paired DTVP database/artifact backup and restore commands
-  are available; cache reconciliation and end-to-end recovery verification
-  remain.
+  legacy files. It does not delete or disable the old cache. Standard catalog,
+  inventory, assessment, grouped-review, statistics, and analysis-input reads
+  use DTVP without a DT client; remaining client use is in explicit source
+  import/refresh and optional publication paths. Paired DTVP database/artifact
+  backup and restore commands are available. Legacy cache/outbox reconciliation
+  and end-to-end recovery verification remain.
 
 ### Target backend boundaries
 
