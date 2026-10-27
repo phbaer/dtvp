@@ -104,8 +104,6 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      dtrack-apiserver:
-        condition: service_started
       dtvp-postgres:
         condition: service_healthy
     restart: unless-stopped

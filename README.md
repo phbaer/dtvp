@@ -58,8 +58,11 @@ cp .env.dist .env
 docker compose up -d
 ```
 
-Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and a
-strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
+Set the public frontend URL, OIDC settings, and a strong
+`DTVP_SESSION_SECRET_KEY`. Configure a Dependency-Track API URL/key when using
+that source's import and refresh features. DTVP serves imported data and local
+decisions from its own database when Dependency-Track is unavailable. Compose
+serves DTVP under `/dtvp` by default;
 `DTVP_HTTP_PORT` controls the host port. Compose provisions a DTVP-owned
 PostgreSQL database in a separate volume from Dependency-Track's database; set
 a strong `DTVP_DB_PASSWORD` before deployment. Pending schema migrations run

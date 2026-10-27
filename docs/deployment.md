@@ -14,9 +14,11 @@ cp .env.dist .env
 docker compose up -d
 ```
 
-Set at least the Dependency-Track API key, public URL, a strong
-`DTVP_DB_PASSWORD`, and a strong session secret. DTVP's PostgreSQL service and
-volume are separate from the PostgreSQL service used by Dependency-Track. For a
+Set the public URL, a strong `DTVP_DB_PASSWORD`, and a strong session secret.
+Configure the Dependency-Track URL/key for source imports, refresh, or optional
+decision publication. DTVP starts without Dependency-Track and serves already
+imported inventory and local decisions from its own store. Its PostgreSQL
+service and volume are separate from Dependency-Track's database. For a
 non-default gateway:
 
 ```env
