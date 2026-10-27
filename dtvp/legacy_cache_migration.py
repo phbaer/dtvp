@@ -11,7 +11,6 @@ import os
 import re
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from .artifact_store import ArtifactStore
 from .catalog_repository import (
@@ -159,7 +158,7 @@ async def migrate_legacy_inventory(*, apply: bool, cache_path: str | None = None
                 connector=connector,
                 client=None,
                 source_base_url="dtvp-cache://local",
-                request_id=f"legacy-cache:{project_id}:{payload_digest[:24]}:{uuid4()}",
+                request_id=f"legacy-cache:{project_id}:{payload_digest[:24]}",
                 initiated_by="system:legacy-cache-migration",
                 scope={"project_id": project_id},
             )
