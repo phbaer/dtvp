@@ -2035,7 +2035,6 @@ def _register_bulk_workflow_routes(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
     current_user_dependency: Callable[..., Any],
-    client_dependency: Callable[..., Any],
 ) -> None:
     def require_reviewer(user: str) -> None:
         if deps.get_user_role(user).upper() != "REVIEWER":
@@ -2079,7 +2078,6 @@ def _register_bulk_workflow_routes(
         plugin: Any,
         req: BulkWorkflowApplyRequest,
         user: str,
-        client: DTClient,
         progress_callback: Callable[[int, int, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
         context = await asyncio.to_thread(
@@ -2115,7 +2113,6 @@ def _register_bulk_workflow_routes(
         )
         finalized, outcome = await _apply_bulk_workflow_payloads(
             deps,
-            client,
             payloads,
             actor=user,
             progress_callback=progress_callback,
@@ -2221,14 +2218,13 @@ def _register_bulk_workflow_routes(
         workflow_id: str,
         req: BulkWorkflowApplyRequest,
         *,
-        client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         require_reviewer(user)
         plugin = registry.get(workflow_id)
         if plugin is None:
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
-        return await prepare_apply_response(plugin, req, user, client)
+        return await prepare_apply_response(plugin, req, user)
 
     @router.post("/bulk-workflows/{workflow_id}/document")
     async def build_bulk_workflow_document(
@@ -2797,8 +2793,6 @@ def create_general_api_router(
     _register_task_routes(router, deps, current_user_dependency)
     _register_statistics_route(router, deps, current_user_dependency)
     _register_assessment_routes(router, deps, current_user_dependency)
-    _register_bulk_workflow_routes(
-        router, deps, current_user_dependency, client_dependency
-    )
+    _register_bulk_workflow_routes(router, deps, current_user_dependency)
     _register_dependency_route(router, deps, client_dependency)
     return router
