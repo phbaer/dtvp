@@ -13,6 +13,8 @@ htmlcov/
 .ruff_cache/
 .coverage/
 data/dt_cache/
+data/dtvp.sqlite3
+data/dtvp.sqlite3.migration.lock
 
 # Virtual environments
 .venv
@@ -20,6 +22,12 @@ venv/
 frontend/playwright-report
 frontend/test-results
 frontend/coverage
+# Local frontend test and Playwright diagnostic output.
+frontend/filtering_test_output.log
+frontend/playwright_output.txt
+frontend/test_output.log
+frontend/tests.log
+frontend/vitest_*.txt
 .coverage
 .python-version
 data/tmrescore_proposals.json
