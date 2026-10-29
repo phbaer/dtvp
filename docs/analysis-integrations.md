@@ -334,3 +334,10 @@ visible in the current dashboard/panel; after a restart, a previously copied job
 can still address the download endpoint. Failures predating this feature cannot
 be reconstructed. Explicit vulnerability cleanup can delete external analyzer jobs;
 ordinary failed-job polling does not delete them.
+
+The main vulnerability list shows active analysis progress per component: current
+activity, completed-step percentage, and a progress bar when available. Queued
+jobs show their queue position instead. CVE/GHSA aliases are matched; multiple
+active component scans remain visible. Progress uses the shared queue polling
+(approximately every five seconds during activity), without per-row requests.
+Percentages describe completed steps, not estimated time remaining.
