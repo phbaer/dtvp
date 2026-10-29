@@ -310,3 +310,20 @@ when the analyzer host and model backend support parallel scans. Agentyzer
 serializes shared-cache Git mutations with per-repository filesystem locks and
 analyzes configured repositories in detached per-run worktrees, so concurrent
 components mapped to the same repository do not share mutable scan files.
+
+### Investigating analyzer failures
+
+Downloads use authenticated `GET /api/code-analysis/jobs/{job_id}/diagnostics`
+through DTVP, keeping the analyzer URL out of browser requests. The analyzer must
+support `GET /jobs/{job_id}/diagnostics`. Downloads contain allowlisted job state,
+timestamps and structured failure metadata, excluding requests, prompts, responses,
+credentials, free-text errors and logs. A 404 explains that the job may have expired,
+been deleted, belong to another instance, or the endpoint may be unsupported.
+
+When polling observes a failed job, DTVP saves sanitized failure details before
+finishing the queue item. These remain downloadable if the remote job disappears
+or is unreachable. They are stored beside `DTVP_CODE_ANALYSIS_RESULTS_PATH` with
+`.diagnostics.sqlite` appended, and use `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS`
+and `DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS` limits. After a restart, a previously recorded job ID can still address the download endpoint. Failures predating this feature cannot
+be reconstructed. Explicit vulnerability cleanup can delete external analyzer jobs;
+ordinary failed-job polling does not delete them.

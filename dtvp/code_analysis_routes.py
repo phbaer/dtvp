@@ -1,4 +1,7 @@
 import asyncio
+import re
+import httpx
+from fastapi.responses import JSONResponse
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -1238,6 +1241,37 @@ def _register_code_analysis_routes(
             )
         async with deps.code_analysis_client_cls(settings) as client:
             return await client.get_job_status(job_id)
+
+    @router.get("/code-analysis/jobs/{job_id}/diagnostics")
+    async def code_analysis_download_diagnostics(
+        job_id: str, *, user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        from .code_analysis_diagnostics import load_failure_snapshot, safe_snapshot
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", job_id):
+            raise HTTPException(status_code=400, detail="Invalid analyzer job ID.")
+        saved = await asyncio.to_thread(load_failure_snapshot, job_id)
+        settings = deps.code_analysis_settings_cls()
+        snapshot = None
+        if settings.enabled:
+            try:
+                async with deps.code_analysis_client_cls(settings) as client:
+                    snapshot = safe_snapshot(job_id, await client.get_job_diagnostics(job_id))
+            except httpx.HTTPStatusError as exc:
+                if saved is None:
+                    if exc.response.status_code == 404:
+                        raise HTTPException(status_code=404, detail="Analyzer diagnostics unavailable: the job may have expired, been deleted, belong to another instance, or this analyzer may not support diagnostic downloads. No saved DTVP failure details are available.") from None
+                    raise HTTPException(status_code=502, detail="Analyzer diagnostic request failed; try again later.") from None
+            except (httpx.RequestError, ValueError):
+                if saved is None:
+                    raise HTTPException(status_code=502, detail="Analyzer diagnostics unavailable; try again later.") from None
+        if snapshot is None:
+            snapshot = saved
+        if snapshot is None:
+            raise HTTPException(status_code=503, detail=deps.code_analysis_not_configured_detail)
+        return JSONResponse(snapshot, headers={
+            "Content-Disposition": f'attachment; filename="agentyzer-{job_id}-diagnostics.json"',
+            "Cache-Control": "no-store",
+        })
 
     @router.get(
         "/code-analysis/jobs/{job_id}/result",
