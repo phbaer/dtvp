@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CodeAnalysisJobDiagnostics from './CodeAnalysisJobDiagnostics.vue'
 import { CheckCircle, ChevronDown, ChevronUp, Eye, History, Loader2, Trash2 } from '@lucide/vue'
 import type { CodeAnalysisResultRecord } from '../lib/api'
 
@@ -81,6 +82,7 @@ const formatContextSummary = (record: CodeAnalysisResultRecord) => {
         ]"
     >
         <div class="min-w-0">
+            <CodeAnalysisJobDiagnostics :job-id="record.job_id" />
             <div class="flex min-w-0 flex-wrap items-center gap-2">
                 <History :size="12" class="shrink-0 text-cyan-400" />
                 <span class="min-w-0 truncate font-mono text-gray-200">{{ record.component_name }}</span>

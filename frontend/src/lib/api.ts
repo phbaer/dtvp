@@ -1468,7 +1468,19 @@ export interface CodeAnalysisBackendInformation {
     [key: string]: any;
 }
 
+export interface CodeAnalysisErrorDetails {
+    code: string;
+    retryable?: boolean;
+    diagnostics?: Record<string, string | number | boolean>;
+}
+
+export const codeAnalysisDownloadDiagnostics = async (jobId: string): Promise<Blob> => {
+    const response = await api.get(`/code-analysis/jobs/${encodeURIComponent(jobId)}/diagnostics`, { responseType: 'blob' });
+    return response.data;
+};
+
 export interface CodeAnalysisJobStatus {
+    error_details?: CodeAnalysisErrorDetails | null;
     job_id: string;
     status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
     created_at: string;
@@ -2036,6 +2048,7 @@ export const codeAnalysisRunAssessment = async (
 // ── Analysis Queue ───────────────────────────────────────────────────────────
 
 export interface AnalysisQueueItem {
+    error_details?: CodeAnalysisErrorDetails | null;
     queue_id: string;
     vuln_id: string;
     component_name: string;

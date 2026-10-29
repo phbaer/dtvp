@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CodeAnalysisJobDiagnostics from './CodeAnalysisJobDiagnostics.vue'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, Eye, History, Ban, FileText, Copy, ExternalLink, Trash2 } from '@lucide/vue'
 import {
@@ -606,6 +607,12 @@ const activeQueueItems = computed(() => {
             && (i.status === 'queued' || i.status === 'running')
     )
 })
+
+const failedDiagnosticItems = computed(() => analysisQueueStore.items.value.filter(
+    i => vulnerabilityIdKeys.value.has(String(i.vuln_id || '').toLocaleLowerCase())
+        && relevantComponentKeys.value.has(String(i.component_name || '').toLocaleLowerCase())
+        && matchesTeamScope(i) && (i.status === 'failed' || i.status === 'cancelled')
+))
 
 const activeComponentNames = computed(() => new Set(
     activeQueueItems.value.map(item => item.component_name.toLowerCase()),
@@ -3334,6 +3341,7 @@ watch(combinedCandidateRuns, runs => {
                     </button>
                 </div>
 
+                <CodeAnalysisJobDiagnostics v-if="entry.kind === 'active' || entry.kind === 'completed'" class="px-3 pb-2" :job-id="entry.item.job_id" :error-details="entry.item.error_details" />
         <div
             v-if="isSelectedAnalysisRunEntry(entry) && result"
             class="space-y-2 border-l-2 border-cyan-900/70 px-3 pb-3 pt-1"
@@ -4174,6 +4182,10 @@ watch(combinedCandidateRuns, runs => {
             {{ historyError }}
         </div>
 
+        <div v-for="item in failedDiagnosticItems" :key="item.queue_id" class="rounded border border-red-900/40 p-2">
+            <span class="text-xs text-red-300">{{ item.component_name }} — {{ item.status }}</span>
+            <CodeAnalysisJobDiagnostics :job-id="item.job_id" :error-details="item.error_details" />
+        </div>
         <div v-if="error" class="flex items-start gap-2 rounded border border-red-700/40 bg-red-900/20 p-2 text-xs text-red-300">
             <XCircle :size="14" class="mt-0.5 shrink-0" />
             <span>{{ error }}</span>

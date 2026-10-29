@@ -71,15 +71,29 @@ const handleClick = () => emit('select', group.value)
 const handleReload = () => emit('reload', group.value)
 
 type WorkflowTone = 'amber' | 'cyan' | 'blue' | 'green' | 'purple'
-const workflowState = computed<{ label: string; tone: WorkflowTone }>(() => {
+const activeAnalyses = computed(() => {
     const vulnerabilityIds = new Set(
         [group.value.id, ...(group.value.aliases || [])]
             .map(value => String(value || '').trim().toLocaleLowerCase())
             .filter(Boolean),
     )
-    const analysisActive = [...vulnerabilityIds]
-        .some(vulnerabilityId => analysisQueueStore.activeVulnerabilityIds.value.has(vulnerabilityId))
-    if (analysisActive) return { label: 'Analysis running', tone: 'cyan' }
+    return analysisQueueStore.items.value.filter(item =>
+        (item.status === 'queued' || item.status === 'running')
+        && vulnerabilityIds.has(String(item.vuln_id || '').trim().toLocaleLowerCase()),
+    ).map(item => ({
+        ...item,
+        percent: item.status === 'running' && Number.isFinite(item.progress?.percent)
+            ? Math.round(Math.max(0, Math.min(100, item.progress!.percent))) : null,
+        activity: item.status === 'queued'
+            ? `Queued${item.position > 0 ? ` · position ${item.position}` : ''}`
+            : item.progress?.current_activity || item.progress?.current_title || 'Waiting for analyzer progress',
+    }))
+})
+const workflowState = computed<{ label: string; tone: WorkflowTone }>(() => {
+    if (activeAnalyses.value.length) return {
+        label: activeAnalyses.value.some(item => item.status === 'running') ? 'Analysis running' : 'Analysis queued',
+        tone: 'cyan',
+    }
     if (isPendingReview.value) return { label: 'Awaiting review', tone: 'purple' }
     if (isAssessed.value) return { label: 'Complete', tone: 'green' }
     if (normalizedTags.value.filter(team => team.toLocaleLowerCase() !== 'automation').length === 0) {
@@ -180,6 +194,17 @@ const workflowStateClass = computed(() => ({
                     :hasTmrescoreAnalysis="listItem.hasTmrescoreProposal"
                     compact
                 />
+                <div v-if="activeAnalyses.length" class="mt-2 space-y-2 text-xs text-cyan-200" data-testid="analysis-progress">
+                    <div v-for="analysis in activeAnalyses" :key="analysis.queue_id" :title="analysis.job_id ? `Analyzer job ${analysis.job_id}` : undefined">
+                        <div class="flex min-w-0 gap-2">
+                            <span class="min-w-0 flex-1 truncate" :title="`${analysis.component_name}: ${analysis.activity}`">{{ analysis.component_name }}: {{ analysis.activity }}</span>
+                            <span v-if="analysis.percent !== null" class="shrink-0 font-mono">{{ analysis.percent }}%</span>
+                        </div>
+                        <div v-if="analysis.percent !== null" role="progressbar" :aria-label="`${analysis.component_name} analysis steps completed`" :aria-valuenow="analysis.percent" :aria-valuemin="0" :aria-valuemax="100" class="mt-1 h-1 rounded bg-gray-700">
+                            <div class="h-full rounded bg-cyan-400 transition-all" :style="{ width: `${analysis.percent}%` }"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <button
                 type="button"
