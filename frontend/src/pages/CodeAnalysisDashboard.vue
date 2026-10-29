@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CodeAnalysisJobDiagnostics from '../components/CodeAnalysisJobDiagnostics.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
     Activity,
@@ -615,6 +616,7 @@ onBeforeUnmount(() => {
                                         <td class="px-4 py-3 font-mono text-gray-200">{{ item.vuln_id }}</td>
                                         <td class="px-4 py-3">
                                             <div class="font-mono text-gray-300">{{ item.component_name }}</div>
+                                            <CodeAnalysisJobDiagnostics :job-id="item.job_id" :error-details="item.error_details" />
                                             <div v-if="item.project_name" class="mt-1 truncate text-[10px] text-gray-500">{{ item.project_name }}</div>
                                         </td>
                                         <td class="px-4 py-3">
@@ -814,7 +816,7 @@ onBeforeUnmount(() => {
                                             {{ job.status }}
                                         </span>
                                     </td>
-                                    <td class="px-4 py-3 font-mono text-gray-200">{{ job.job_id }}</td>
+                                    <td class="px-4 py-3"><CodeAnalysisJobDiagnostics :job-id="job.job_id" :error-details="job.error_details" /></td>
                                     <td class="px-4 py-3">
                                         <div class="font-mono text-gray-300">{{ job.request?.component_name || '-' }}</div>
                                         <div class="mt-1 font-mono text-[10px] text-gray-500">{{ job.request?.vuln_id || job.model || '' }}</div>
