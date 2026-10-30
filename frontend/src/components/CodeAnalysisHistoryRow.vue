@@ -82,7 +82,7 @@ const formatContextSummary = (record: CodeAnalysisResultRecord) => {
         ]"
     >
         <div class="min-w-0">
-            <CodeAnalysisJobDiagnostics :job-id="record.job_id" />
+            <CodeAnalysisJobDiagnostics :job-id="record.job_id" status="completed" :analysis-run-id="record.analysis_run_id" :report-markdown="record.result?.assessment?.report_markdown" />
             <div class="flex min-w-0 flex-wrap items-center gap-2">
                 <History :size="12" class="shrink-0 text-cyan-400" />
                 <span class="min-w-0 truncate font-mono text-gray-200">{{ record.component_name }}</span>

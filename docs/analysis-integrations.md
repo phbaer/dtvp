@@ -329,3 +329,24 @@ jobs show their queue position instead. CVE/GHSA aliases are matched; multiple
 active component scans remain visible. Progress uses the shared queue polling
 (approximately every five seconds during activity), without per-row requests.
 Percentages describe completed steps, not estimated time remaining.
+
+### Full assessment report
+
+Completed jobs and saved history offer **Download assessment (.md)** beside job
+and debug controls. The document includes advisory sources, dependency paths,
+version/ref/commit evidence, limitations and CVSS rationale. New Agentyzer versions
+supply `assessment.report_markdown`; DTVP preserves it in saved results and prefers
+that copy so it remains downloadable after analyzer job retention. History rows
+load the full saved result on demand rather than adding report bodies to list polls.
+Otherwise, authenticated `GET /api/code-analysis/jobs/{job_id}/report` proxies the
+configured analyzer's report download. Missing, expired, incomplete or older
+reports produce an explanation; DTVP does not invent a replacement report.
+Downloads contain assessment evidence and are distinct from sanitized debug JSON.
+They do not apply or approve the assessment. Older analyzers remain usable for
+ordinary scans and proposals; generating Markdown reports requires updated Agentyzer.
+
+When a report is present, run outcomes, per-component/target results, and expanded
+queue results show **Full assessment** in place of Decision rationale. Older
+results retain the existing rationale view. Markdown is rendered through an HTML
+allowlist: scripts, embedded content, images, event handlers and unsafe links are
+removed. This display change does not change draft/application approval rules.

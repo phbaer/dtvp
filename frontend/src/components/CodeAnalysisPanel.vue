@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CodeAnalysisReport from './CodeAnalysisReport.vue'
 import CodeAnalysisJobDiagnostics from './CodeAnalysisJobDiagnostics.vue'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, Eye, History, Ban, FileText, Copy, ExternalLink, Trash2 } from '@lucide/vue'
@@ -3341,7 +3342,7 @@ watch(combinedCandidateRuns, runs => {
                     </button>
                 </div>
 
-                <CodeAnalysisJobDiagnostics v-if="entry.kind === 'active' || entry.kind === 'completed'" class="px-3 pb-2" :job-id="entry.item.job_id" :error-details="entry.item.error_details" />
+                <CodeAnalysisJobDiagnostics v-if="entry.kind === 'active' || entry.kind === 'completed'" class="px-3 pb-2" :job-id="entry.item.job_id" :status="entry.item.status" :report-markdown="entry.item.result?.assessment?.report_markdown" :error-details="entry.item.error_details" />
         <div
             v-if="isSelectedAnalysisRunEntry(entry) && result"
             class="space-y-2 border-l-2 border-cyan-900/70 px-3 pb-3 pt-1"
@@ -3589,7 +3590,8 @@ watch(combinedCandidateRuns, runs => {
                             </span>
                             <span class="text-[10px] text-gray-500">{{ componentResult.assessment.confidence }} confidence</span>
                         </div>
-                        <div v-if="componentResult.assessment.executive_summary" class="mt-2 space-y-1.5">
+                        <CodeAnalysisReport v-if="componentResult.assessment.report_markdown?.trim()" :markdown="componentResult.assessment.report_markdown" />
+                        <div v-else-if="componentResult.assessment.executive_summary" class="mt-2 space-y-1.5">
                             <p class="text-xs leading-relaxed text-gray-400">{{ componentResult.assessment.executive_summary.vulnerability }}</p>
                             <p class="text-xs leading-relaxed text-gray-300">{{ componentResult.assessment.executive_summary.assessment }}</p>
                             <ul v-if="componentResult.assessment.executive_summary.why?.length" class="space-y-1 pl-4 text-xs leading-relaxed text-gray-400 list-disc">
@@ -4314,7 +4316,8 @@ watch(combinedCandidateRuns, runs => {
                                         {{ target.assessment.confidence }} confidence · {{ target.assessment.exposure }}
                                     </span>
                                 </header>
-                                <div v-if="combinedTargetReasons(target).length" class="mt-2">
+                                <CodeAnalysisReport v-if="target.assessment.report_markdown?.trim()" :markdown="target.assessment.report_markdown" />
+                                <div v-else-if="combinedTargetReasons(target).length" class="mt-2">
                                     <p class="text-[9px] font-semibold uppercase tracking-wide text-gray-600">Decision rationale</p>
                                     <ul class="mt-1 space-y-1 pl-4 text-xs leading-relaxed text-gray-400 list-disc">
                                         <li v-for="reason in combinedTargetReasons(target)" :key="reason">{{ reason }}</li>

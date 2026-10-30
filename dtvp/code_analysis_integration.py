@@ -264,6 +264,11 @@ class CodeAnalysisClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_job_report(self, job_id: str) -> str:
+        response = await self.client.get(f"{self.settings.base_url}/jobs/{job_id}/report")
+        response.raise_for_status()
+        return response.text
+
     async def list_jobs(self) -> Dict[str, Any]:
         response = await self.client.get(f"{self.settings.base_url}/jobs")
         response.raise_for_status()

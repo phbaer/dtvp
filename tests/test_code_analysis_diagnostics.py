@@ -49,3 +49,24 @@ def test_download_requires_auth(client):
     main.app.dependency_overrides.pop(main.get_current_user, None)
     response = client.get("/api/code-analysis/jobs/job1/diagnostics")
     assert response.status_code in (401, 403)
+
+
+def test_report_download_is_authenticated_and_preserves_markdown(client):
+    with patch("dtvp.main.CodeAnalysisClient.get_job_report", AsyncMock(return_value="# Assessment\nEvidence.")):
+        response = client.get("/api/code-analysis/jobs/job1/report")
+    assert response.status_code == 200
+    assert response.text == "# Assessment\nEvidence."
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert "assessment.md" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store"
+    main.app.dependency_overrides.pop(main.get_current_user, None)
+    assert client.get("/api/code-analysis/jobs/job1/report").status_code in (401, 403)
+
+
+@pytest.mark.parametrize("status,expected", [(404, 404), (409, 409), (500, 502)])
+def test_report_download_failure_is_safe(client, status, expected):
+    error = httpx.HTTPStatusError("PRIVATE provider body", request=httpx.Request("GET", "http://analyzer"), response=httpx.Response(status))
+    with patch("dtvp.main.CodeAnalysisClient.get_job_report", AsyncMock(side_effect=error)):
+        response = client.get("/api/code-analysis/jobs/job1/report")
+    assert response.status_code == expected
+    assert "PRIVATE" not in response.text

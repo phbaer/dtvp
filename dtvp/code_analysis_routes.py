@@ -1,7 +1,7 @@
 import asyncio
 import re
 import httpx
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -1271,6 +1271,31 @@ def _register_code_analysis_routes(
         return JSONResponse(snapshot, headers={
             "Content-Disposition": f'attachment; filename="agentyzer-{job_id}-diagnostics.json"',
             "Cache-Control": "no-store",
+        })
+
+    @router.get("/code-analysis/jobs/{job_id}/report")
+    async def code_analysis_download_report(
+        job_id: str, *, user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", job_id):
+            raise HTTPException(status_code=400, detail="Invalid analyzer job ID.")
+        settings = deps.code_analysis_settings_cls()
+        if not settings.enabled:
+            raise HTTPException(503, deps.code_analysis_not_configured_detail)
+        try:
+            async with deps.code_analysis_client_cls(settings) as client:
+                report = await client.get_job_report(job_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise HTTPException(404, "Report unavailable: the job expired, was deleted, or the analyzer does not support reports.") from None
+            if exc.response.status_code == 409:
+                raise HTTPException(409, "Report unavailable: the job is incomplete or predates Markdown reports.") from None
+            raise HTTPException(502, "Analyzer report request failed; try again later.") from None
+        except httpx.RequestError:
+            raise HTTPException(502, "Analyzer report unavailable; try again later.") from None
+        return Response(report, media_type="text/markdown", headers={
+            "Content-Disposition": f'attachment; filename="agentyzer-{job_id}-assessment.md"',
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
         })
 
     @router.get(

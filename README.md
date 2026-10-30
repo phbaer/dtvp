@@ -192,7 +192,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | :--- | :--- |
 | [Assessment model](docs/assessment-model.md) | Lifecycle rules, team ownership, SSVC, original severity, and official evidence |
 | [Review workflows](docs/review-workflows.md) | Search, filters, assessments, bulk changes, and project archives |
-| [Analysis integrations](docs/analysis-integrations.md) | Threat-model rescoring, code analysis, live analysis progress, job IDs/debug downloads, follow-ups, and automatic scanning |
+| [Analysis integrations](docs/analysis-integrations.md) | Threat-model rescoring, code analysis, live analysis progress, full assessment reports, downloads, and job IDs, follow-ups, and automatic scanning |
 | [Runtime and capacity](docs/runtime.md) | Module map, background tasks, caching, concurrency, and benchmarks |
 | [Development and testing](docs/development.md) | Separate processes, test guidance, toolchain constraints, and CI |
 | [Deployment](docs/deployment.md) | Docker, networking, OIDC, persistent data, and Python runtime images |
