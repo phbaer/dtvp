@@ -34,13 +34,31 @@ jobs:
           mkdir -p frontend/dist
           cp tests/assets/index.html frontend/dist/index.html
       - name: Run tests with coverage
-        run: uv run pytest
+        run: >-
+          uv run pytest
+          --junitxml=test-results/pytest-junit.xml
+          --cov-report=json:test-results/coverage.json
+      - name: Summarize results
+        if: always()
+        run: >-
+          node scripts/ci-summary.mjs
+          --title "Backend tests"
+          --junit test-results/pytest-junit.xml
+          --coverage-py test-results/coverage.json
+          --resources "after tests"
       - name: Upload Python Coverage Report
         uses: actions/upload-artifact@v3
         if: always()
         with:
           name: python-coverage-report
           path: htmlcov/
+          retention-days: 30
+      - name: Upload Python Test Results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: python-test-results
+          path: test-results/
           retention-days: 30
 
   test-frontend:
@@ -62,7 +80,25 @@ jobs:
           command: cd frontend && npm ci --include=optional
       - name: Run unit tests with coverage
         working-directory: frontend
-        run: npm run test:unit -- --run --coverage
+        run: >-
+          npm run test:unit -- --run --coverage
+          --reporter=default --reporter=junit
+          --outputFile.junit=test-results/vitest-junit.xml
+      - name: Summarize results
+        if: always()
+        run: >-
+          node scripts/ci-summary.mjs
+          --title "Frontend unit tests"
+          --junit frontend/test-results/vitest-junit.xml
+          --coverage-istanbul frontend/coverage/coverage-summary.json
+          --resources "after tests"
+      - name: Upload Vitest Test Results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: vitest-test-results
+          path: frontend/test-results/
+          retention-days: 30
       - name: Upload Vitest Coverage Report
         uses: actions/upload-artifact@v3
         if: always()
@@ -90,15 +126,33 @@ jobs:
           timeout_minutes: 10
           max_attempts: 3
           command: cd frontend && npm ci --include=optional
+      - name: Record runner resources
+        run: node scripts/ci-summary.mjs --title "Browser tests" --resources "before tests"
       - name: Run E2E tests
         working-directory: frontend
-        run: npx playwright test --reporter=line
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
+        run: npx playwright test --reporter=line,html,json
+      - name: Summarize results
+        if: always()
+        run: >-
+          node scripts/ci-summary.mjs
+          --playwright frontend/test-results/results.json
+          --resources "after tests"
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v3
         if: always()
         with:
           name: playwright-report
           path: frontend/playwright-report/
+          retention-days: 30
+      - name: Upload Playwright Traces
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-test-results
+          path: frontend/test-results/
           retention-days: 30
 
   check-version:
@@ -180,11 +234,15 @@ jobs:
         uses: astral-sh/setup-uv@v10.0.1
       - name: Install Docker Cli
         run: |-
+          # The runner image is not guaranteed to ship these tools.
+          for i in {1..3}; do apt-get -qq update && break || sleep 5; done
+          DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y ca-certificates curl
           install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-          chmod a+r /etc/apt/keyrings/docker.gpg
+          # apt reads the ASCII-armored key directly, so gpg is not needed.
+          curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
           echo \
-            "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+            "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
             "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > /etc/apt/sources.list.d/docker.list
           for i in {1..3}; do apt-get -qq update && break || sleep 5; done
           DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y docker-ce-cli
@@ -307,6 +365,13 @@ jobs:
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "HEREDOC" >> $GITHUB_OUTPUT
 
+      - name: Install HTTP tools
+        run: |
+          # The runner image is not guaranteed to ship these tools.
+          if ! command -v curl >/dev/null || ! command -v jq >/dev/null; then
+            for i in {1..3}; do apt-get -qq update && break || sleep 5; done
+            DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y ca-certificates curl jq
+          fi
       - name: Create Forgejo Release
         run: |
           curl -s -X POST \
@@ -324,6 +389,13 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: node
     steps:
+      - name: Install HTTP tools
+        run: |
+          # The runner image is not guaranteed to ship these tools.
+          if ! command -v curl >/dev/null || ! command -v jq >/dev/null; then
+            for i in {1..3}; do apt-get -qq update && break || sleep 5; done
+            DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y ca-certificates curl jq
+          fi
       - name: Delete PR Image Tag
         run: |-
           VERSION="pr-${{ github.event.pull_request.number }}"
