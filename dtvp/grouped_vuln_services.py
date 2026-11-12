@@ -391,6 +391,12 @@ def _derive_group_lifecycle(
             return "INCOMPLETE"
         return "NEEDS_APPROVAL"
 
+    # Finding coverage comes before every assessed classification: a legacy
+    # or reviewer-approved General assessment that never reached some finding
+    # instances (for example another project version) is still incomplete.
+    if has_missing and has_any:
+        return "INCOMPLETE"
+
     if not blocks and has_any:
         return "ASSESSED_LEGACY"
 
@@ -402,9 +408,9 @@ def _derive_group_lifecycle(
     ):
         return "ASSESSED_LEGACY"
 
-    # A reviewer-approved General assessment is terminal. It may have been
-    # approved before every team-specific block was recorded, but it still
-    # means the vulnerability is done rather than incomplete.
+    # A reviewer-approved General assessment that covers every finding is
+    # terminal. It may have been approved before every team-specific block was
+    # recorded, but it still means the vulnerability is done.
     if has_global:
         return "ASSESSED"
 
@@ -439,9 +445,6 @@ def _derive_group_lifecycle(
     ]
     if len(set(non_empty_states)) > 1 or "INCONSISTENT_VERSION" in version_states:
         return "INCONSISTENT"
-
-    if has_missing and has_any:
-        return "INCOMPLETE" if len(set(non_empty_states)) <= 1 else "INCONSISTENT"
 
     # Complete, consistent team coverage does not require a General block.
     return "ASSESSED" if has_any else "OPEN"

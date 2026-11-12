@@ -68,7 +68,9 @@ is resolved once per card scope so switching filters does not repeatedly scan
 the full mapping. Advisory metadata remains vulnerability-wide context. An
 approved General assessment remains the authoritative aggregate state and makes
 the vulnerability done once approved, even when team coverage is incomplete.
-Before approval, a pending item with missing team or finding coverage is
+Finding coverage is still required: an approved or legacy assessment that is
+missing from some finding instances, such as another project version, is
+classified as `INCOMPLETE`. Before approval, a pending item with missing team or finding coverage is
 classified as `INCOMPLETE`, while complete-but-pending work remains
 `NEEDS_APPROVAL`, displayed as Ready for approval. The `READY_FOR_APPROVAL`
 filter selects only that complete pending subset. The tab badges
