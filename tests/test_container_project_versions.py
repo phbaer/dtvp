@@ -50,7 +50,8 @@ def test_publish_workflow_supplies_build_number_to_every_project_image():
         encoding="utf-8"
     )
 
-    assert workflow.count("BUILD_NUMBER=${{ github.run_number }}") == 1
+    assert workflow.count("BUILD_NUMBER: ${{ github.run_number }}") == 1
+    assert workflow.count('--build-arg "BUILD_NUMBER=$BUILD_NUMBER"') == 1
 
 
 def test_uv_release_is_discovered_without_a_hard_coded_tool_version():
@@ -86,5 +87,5 @@ def test_dtvp_packaging_and_deployment_exclude_bundled_agentyzer():
     assert "agentyzer" not in workflow.lower()
     assert "agentyzer" not in compose.lower()
     assert "DTVP_CODE_ANALYSIS_URL: ${DTVP_CODE_ANALYSIS_URL:-}" in compose
-    assert "/dtvp:{2}" in workflow
-    assert "/dtvp:latest" in workflow
+    assert 'repository="$REGISTRY/$REGISTRY_USER/dtvp"' in workflow
+    assert 'tags+=("latest" "$VERSION")' in workflow
