@@ -232,26 +232,16 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install uv
         uses: astral-sh/setup-uv@v10.0.1
-      - name: Install Docker Cli
-        run: |-
-          # The runner image is not guaranteed to ship these tools.
+      - name: Install Buildah
+        run: |
+          # Daemonless image builds: no Docker socket and no privileged mode.
           for i in {1..3}; do apt-get -qq update && break || sleep 5; done
-          DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y ca-certificates curl
-          install -m 0755 -d /etc/apt/keyrings
-          # apt reads the ASCII-armored key directly, so gpg is not needed.
-          curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-          chmod a+r /etc/apt/keyrings/docker.asc
-          echo \
-            "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-            "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > /etc/apt/sources.list.d/docker.list
-          for i in {1..3}; do apt-get -qq update && break || sleep 5; done
-          DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y docker-ce-cli
-      - name: Registry Login
-        uses: docker/login-action@v4
-        with:
-          registry: https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
-          username: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}
-          password: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+          DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y buildah netavark ca-certificates
+          buildah --version
+          if ! unshare --user true 2>/dev/null; then
+            echo "::error::User namespaces are blocked in this job container, so Buildah cannot run build steps. Start job containers with '--security-opt seccomp=unconfined' (and 'apparmor=unconfined' where AppArmor restricts user namespaces); see docs/deployment.md."
+            exit 1
+          fi
       - name: Generate Python CycloneDX SBOMs
         run: |
           mkdir -p sbom
@@ -280,10 +270,6 @@ jobs:
           name: dtvp-sbom
           path: sbom/*.json
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
-        with:
-          platforms: linux/amd64
       - name: Extract Version
         id: get_version
         run: |
@@ -303,24 +289,51 @@ jobs:
         run: |
           uv run git-cliff -o CHANGELOG.md
       - name: Build and Push DTVP (free-threaded)
-        uses: docker/build-push-action@v7
-        with:
-          push: true
-          platforms: linux/amd64
-          file: Dockerfile.free-threaded
-          tags: |
-            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
-            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/dtvp:dev', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
-            ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
-            ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
-          context: .
-          build-args: |
-            BUILD_COMMIT=${{ github.sha }}
-            BUILD_NUMBER=${{ github.run_number }}
-          secrets: |
-            GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
-          cache-from: type=registry,ref=${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/dtvp:dev
-          cache-to: type=inline
+        env:
+          REGISTRY: ${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
+          REGISTRY_USER: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}
+          REGISTRY_TOKEN: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          BUILD_COMMIT: ${{ github.sha }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          # vfs storage, chroot isolation and host networking are the modes
+          # that work inside an unprivileged job container.
+          buildah() { command buildah --storage-driver vfs "$@"; }
+          repository="$REGISTRY/$REGISTRY_USER/dtvp"
+          tags=()
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            tags+=("pr-$PR_NUMBER")
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            tags+=("dev")
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tags+=("latest" "$VERSION")
+          fi
+          if [[ ${#tags[@]} -eq 0 ]]; then
+            echo "No image tag applies to $GITHUB_EVENT_NAME on $GITHUB_REF." >&2
+            exit 1
+          fi
+
+          buildah build \
+            --isolation chroot \
+            --network host \
+            --platform linux/amd64 \
+            --file Dockerfile.free-threaded \
+            --build-arg "BUILD_COMMIT=$BUILD_COMMIT" \
+            --build-arg "BUILD_NUMBER=$BUILD_NUMBER" \
+            --tag "$repository:${tags[0]}" \
+            .
+
+          printf '%s' "$REGISTRY_TOKEN" | buildah login --username "$REGISTRY_USER" --password-stdin "$REGISTRY"
+          for tag in "${tags[@]}"; do
+            buildah push "$repository:${tags[0]}" "docker://$repository:$tag"
+            echo "Pushed $repository:$tag"
+          done
+          buildah logout "$REGISTRY"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
