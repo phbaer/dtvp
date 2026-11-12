@@ -39,8 +39,8 @@ count). Summaries are displayed by Forgejo 17 with Forgejo Runner 13.2 or
 newer; on older versions the same Markdown is printed to the step log. JUnit
 XML, the Playwright JSON report, traces, and HTML reports are uploaded as
 artifacts. The script only reads reports, and a missing report is noted in the
-summary rather than failing the job. Jobs that need `curl`, `jq`, or Buildah
-install them, so the runner image only has to provide Node.js and `apt`; see
+summary rather than failing the job. Jobs that need `git`, `curl`, `jq`, or
+Buildah install them, so the runner image only has to provide Node.js and `apt`; see
 [Deployment](deployment.md#python-runtime-images) for the image build's runner
 requirements.
 Mocked E2E project fixtures provide lifecycle metadata for non-open groups;
