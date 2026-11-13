@@ -58,7 +58,9 @@ aggregate state follows these rules:
   historical blocks do not count toward current team coverage or aggregate state.
   The current team's copied block records `[Copied From: TeamA]`, and its
   assessment remains pending review. Takeover copies decision, justification,
-  and rationale, but resets assignees and review checks.
+  and rationale, but resets assignees and review checks. The bulk
+  [Repair Assessments](review-workflows.md#bulk-changes) operation instead
+  moves a former team's active block into the global assessment.
 - Structured details retain at most one block per team (case-insensitive).
   Code-analysis assessment drafts keep evidence in the owning-team blocks and
   maintain one General block that references those teams and takes their worst

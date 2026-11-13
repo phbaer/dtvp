@@ -19,7 +19,12 @@ from dtvp.bulk_workflows.automatic_assessments import (
     build_automatic_assessment_payloads,
     build_automatic_assessment_preview,
 )
-from dtvp.bulk_workflows.rescore_rule_sync import create_rescore_rule_sync_workflow
+from dtvp.bulk_workflows.assessment_repair import (
+    build_assessment_repair_payloads,
+    build_assessment_repair_preview,
+    create_assessment_repair_workflow,
+)
+from dtvp.rescore_rule_services import build_rescore_rule_sync_preview
 from dtvp.code_analysis_assessment_services import assessment_status_for_group
 from dtvp.assessment_snapshot_services import build_assessment_group_index
 from dtvp.general_api_routes import (
@@ -435,16 +440,16 @@ def test_visible_filtered_cvss_rule_candidate_is_included_in_preview():
         "reviewer",
     )
     rules = json.loads(Path("data/rescore_rules.json").read_text())
-    plugin = create_rescore_rule_sync_workflow(lambda: rules)
+    plugin = create_assessment_repair_workflow(lambda: rules)
     preview = plugin.preview(
         BulkWorkflowContext(task_id="task-1", groups=groups, user="reviewer")
     )
 
     assert plugin.selectable_ids(preview) == ["CVE-RULE-SYNC"]
-    assert plugin.metadata()["label"] == "Repair Rescoring Definitions"
-    assert plugin.metadata()["version"] == 2
-    assert preview["items"][0]["syncable_finding_count"] == 1
-    finding = preview["items"][0]["findings"][0]
+    assert plugin.metadata()["label"] == "Repair Assessments"
+    assert [repair["id"] for repair in preview["items"][0]["repairs"]] == ["rescoring"]
+    assert preview["items"][0]["finding_count"] == 1
+    finding = preview["items"][0]["rescore_findings"][0]
     assert finding["issue_type"] == "missing_rescore"
     assert finding["current_vector"] is None
     assert finding["proposed_score"] == 0.0
@@ -1039,15 +1044,13 @@ def test_automatic_assessment_applies_configured_rescore_rules_to_the_global_sta
         + f"[Rescored: 0.0] [Rescored Vector: {item['rescore']['proposed_vector']}]"
     )
 
-    # The applied result must satisfy Repair Rescoring Definitions right away.
+    # The applied result must satisfy the rescoring repair right away.
     applied = json.loads(json.dumps(group))
     for version in applied["affected_versions"]:
         for component in version["components"]:
             component["analysis_state"] = payloads[0][1]["state"]
             component["analysis_details"] = details
-    repair = create_rescore_rule_sync_workflow(_rescore_rules).preview(
-        BulkWorkflowContext(task_id="task-1", groups=[applied], user="reviewer")
-    )
+    repair = build_rescore_rule_sync_preview([applied], _rescore_rules())
     assert repair["items"] == []
 
 
@@ -1744,153 +1747,6 @@ def _takeover_group(*, details: str, tags: list[str] | None = None, group_id: st
     }
 
 
-def test_team_takeover_copies_former_owner_as_pending_and_retires_old_state():
-    from dtvp.bulk_workflows.team_takeover import (
-        build_team_takeover_payloads,
-        build_team_takeover_preview,
-    )
-    from dtvp.logic import _parse_assessment_blocks, calculate_aggregated_state
-
-    group = _takeover_group(details=(
-        "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] "
-        "[Justification: NOT_SET] [Assigned: alice] ---\n"
-        "Earlier rationale"
-    ))
-    context = BulkWorkflowContext(
-        task_id="task-1", groups=[group], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-        takeover_components=["library-a"],
-    )
-    preview = build_team_takeover_preview(context)
-    assert preview["items"][0]["eligible_finding_count"] == 1
-    payloads, skipped = build_team_takeover_payloads(context, ["CVE-TAKEOVER"])
-    assert skipped == {}
-    assert len(payloads) == 1
-    details = payloads[0][1]["details"]
-    assert "[Team: TeamA]" in details and "[Historical: yes]" in details
-    assert "[Team: TeamB]" in details and "[Copied From: TeamA]" in details
-    assert "[Assigned: alice]" in details
-    assert "[Status: Pending Review]" in details
-    _shared, blocks = _parse_assessment_blocks(details)
-    assert blocks[0]["historical"] is True
-    assert blocks[1]["assigned"] == []
-    assert blocks[1]["details"] == "Earlier rationale"
-    assert calculate_aggregated_state(details.replace("[Team: TeamB] [State: EXPLOITABLE]", "[Team: TeamB] [State: RESOLVED]")) == "RESOLVED"
-
-
-def test_team_takeover_skips_existing_target_and_conflicting_sources():
-    from dtvp.bulk_workflows.team_takeover import build_team_takeover_preview
-
-    source = "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] ---\nEarlier rationale"
-    existing = _takeover_group(details=source + "\n\n--- [Team: TeamB] [State: RESOLVED] ---\nCurrent")
-    conflicting = _takeover_group(details=source, group_id="CVE-CONFLICT")
-    other = dict(conflicting["affected_versions"][0]["components"][0])
-    other.update({
-        "component_uuid": "component-2",
-        "finding_uuid": "finding-2",
-        "analysis_details": source.replace("Earlier rationale", "Different rationale"),
-    })
-    conflicting["affected_versions"][0]["components"].append(other)
-    context = BulkWorkflowContext(
-        task_id="task-1", groups=[existing, conflicting], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-        takeover_components=["library-a"],
-    )
-    preview = build_team_takeover_preview(context)
-    assert all(item["eligible_finding_count"] == 0 for item in preview["items"])
-    assert preview["summary"]["target_exists"] == 1
-    assert preview["summary"]["conflicting_source"] == 2
-
-
-def test_team_takeover_skips_findings_still_owned_by_source():
-    from dtvp.bulk_workflows.team_takeover import build_team_takeover_preview
-
-    group = _takeover_group(details="--- [Team: TeamA] [State: RESOLVED] ---\nEarlier")
-    group["affected_versions"][0]["components"][0]["tags"] = ["TeamA", "TeamB"]
-    context = BulkWorkflowContext(
-        task_id="task-1", groups=[group], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-        takeover_components=["library-a"],
-    )
-    preview = build_team_takeover_preview(context)
-    assert preview["items"][0]["eligible_finding_count"] == 0
-    assert preview["summary"]["source_still_responsible"] == 1
-
-
-def test_team_takeover_only_updates_selected_components():
-    from dtvp.bulk_workflows.team_takeover import (
-        build_team_takeover_payloads,
-        build_team_takeover_preview,
-    )
-
-    source = "--- [Team: TeamA] [State: RESOLVED] ---\nEarlier"
-    group = _takeover_group(details=source)
-    outside = dict(group["affected_versions"][0]["components"][0])
-    outside.update({
-        "component_uuid": "component-2",
-        "component_name": "library-b",
-        "finding_uuid": "finding-2",
-        "tags": ["TeamA", "TeamB"],
-    })
-    group["affected_versions"][0]["components"].append(outside)
-    group["tags"] = ["TeamA", "TeamB"]
-    context = BulkWorkflowContext(
-        task_id="task-1", groups=[group], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-        takeover_components=["library-a"],
-    )
-    preview = build_team_takeover_preview(context)
-    assert preview["items"][0]["finding_count"] == 1
-    assert preview["items"][0]["components"] == ["library-a"]
-    payloads, skipped = build_team_takeover_payloads(context, [group["id"]])
-    assert skipped == {}
-    assert [instance["finding_uuid"] for instance, _ in payloads] == ["finding-1"]
-    empty_scope = BulkWorkflowContext(
-        task_id="task-1", groups=[group], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-    )
-    assert build_team_takeover_preview(empty_scope)["items"] == []
-    assert build_team_takeover_payloads(empty_scope, [group["id"]])[0] == []
-
-
-def test_team_takeover_scopes_by_mapped_owner_component():
-    from dtvp.bulk_workflows.team_takeover import (
-        build_team_takeover_payloads,
-        build_team_takeover_preview,
-        team_takeover_component_options,
-    )
-
-    group = _takeover_group(details="--- [Team: TeamA] [State: RESOLVED] ---\nEarlier")
-    instance = group["affected_versions"][0]["components"][0]
-    instance["component_name"] = "multer"
-    instance["owner_mapping_keys"] = ["@gehc/nest-back-pack"]
-    other = dict(instance, component_uuid="component-2", finding_uuid="finding-2",
-                 owner_mapping_keys=["@gehc/other-pack"])
-    group["affected_versions"][0]["components"].append(other)
-    assert team_takeover_component_options([group]) == [
-        "@gehc/nest-back-pack", "@gehc/other-pack",
-    ]
-
-    context = BulkWorkflowContext(
-        task_id="task-1", groups=[group], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-        takeover_components=["@gehc/nest-back-pack"],
-    )
-    preview = build_team_takeover_preview(context)
-    assert preview["summary"]["eligible_findings"] == 1
-    assert preview["items"][0]["finding_count"] == 1
-    payloads, skipped = build_team_takeover_payloads(context, [group["id"]])
-    assert skipped == {}
-    assert [instance["component_name"] for instance, _ in payloads] == ["multer"]
-
-    wrong_scope = BulkWorkflowContext(
-        task_id="task-1", groups=[group], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-        takeover_components=["multer"],
-    )
-    assert build_team_takeover_preview(wrong_scope)["items"] == []
-
-
 def test_historical_blocks_do_not_count_as_current_team_coverage():
     details = (
         "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] "
@@ -1924,14 +1780,277 @@ def test_historical_marker_survives_ordinary_backend_assessment_edit():
     assert state == "RESOLVED"
 
 
-def test_team_takeover_does_not_duplicate_a_current_team_alias():
-    from dtvp.bulk_workflows.team_takeover import build_team_takeover_preview
 
-    group = _takeover_group(details="--- [Team: TeamA] [State: RESOLVED] ---\nOlder name")
+def _repair_group(details_by_finding: list[tuple[str, str]], *, tags: list[str], lifecycle: str | None = None):
+    group = {
+        "id": "CVE-REPAIR",
+        "title": "CVE-REPAIR",
+        "tags": tags,
+        "affected_versions": [{
+            "project_name": "Project",
+            "project_version": f"{index}.0",
+            "components": [{
+                "project_uuid": f"project-{index}",
+                "component_uuid": f"component-{index}",
+                "component_name": "library-a",
+                "vulnerability_uuid": "vulnerability-1",
+                "finding_uuid": f"finding-{index}",
+                "tags": tags,
+                "analysis_state": state,
+                "analysis_details": details,
+                "justification": "NOT_SET",
+            }],
+        } for index, (state, details) in enumerate(details_by_finding, start=1)],
+    }
+    metadata = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    group["list_metadata"] = {**metadata, **({"lifecycle": lifecycle} if lifecycle else {})}
+    return group
+
+
+def _repair(group, *, team_mapping=None, rules=None):
     context = BulkWorkflowContext(
-        task_id="task-1", groups=[group], user="reviewer",
-        takeover_from="TeamA", takeover_to="TeamB",
-        takeover_components=["library-a"],
-        team_mapping={"component": ["TeamB", "TeamA"]},
+        task_id="task-1", groups=[group], user="reviewer", team_mapping=team_mapping or {},
     )
-    assert build_team_takeover_preview(context)["items"] == []
+    load_rules = lambda: rules if rules is not None else {}
+    preview = build_assessment_repair_preview(context, load_rules)
+    payloads, skipped = build_assessment_repair_payloads(context, [group["id"]], load_rules)
+    return preview, payloads, skipped
+
+
+_FORMER = "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+_CURRENT = "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+
+
+def _labels(preview):
+    return [repair["id"] for repair in preview["items"][0]["repairs"]]
+
+
+def _former_label(preview):
+    return next(
+        repair["label"]
+        for repair in preview["items"][0]["repairs"]
+        if repair["id"] == "former_teams"
+    )
+
+
+def test_repair_moves_superseded_former_team_into_global_notes_without_deciding():
+    both = ("NOT_AFFECTED", f"{_FORMER}\n\n{_CURRENT}")
+    group = _repair_group([both, both], tags=["TeamB"])
+    assert group["list_metadata"]["lifecycle"] == "ASSESSED"
+
+    preview, payloads, _ = _repair(group)
+
+    assert _labels(preview) == ["former_teams"]
+    assert preview["items"][0]["former_teams"] == ["TeamA"]
+    assert preview["items"][0]["finding_count"] == 2
+    assert _former_label(preview) == "Move former team assessment to global notes: TeamA"
+    details = payloads[0][1]["details"]
+    assert "[Team: TeamA]" not in details
+    assert "[Team: General] [State: NOT_SET]" in details
+    assert "Former team assessment (TeamA; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice):\nNot reachable." in details
+    assert "[Team: TeamB] [State: NOT_AFFECTED]" in details and "Not shipped." in details
+    assert payloads[0][1]["state"] == "NOT_AFFECTED"
+
+    applied = _repair_group([("NOT_AFFECTED", details)] * 2, tags=["TeamB"])
+    assert applied["list_metadata"]["lifecycle"] == "ASSESSED"
+    assert applied["list_metadata"]["assessed_teams"] == ["TeamB"]
+    assert _repair(applied)[0]["items"] == []
+
+
+def test_repair_promotes_approved_former_team_to_global_and_refers_open_teams():
+    group = _repair_group([("NOT_AFFECTED", _FORMER)], tags=["TeamB", "TeamC"])
+
+    preview, payloads, _ = _repair(group)
+
+    assert _labels(preview) == ["former_teams"]
+    assert _former_label(preview) == (
+        "Make former team assessment the global decision: TeamA; "
+        "TeamB, TeamC refer to global"
+    )
+    details = payloads[0][1]["details"]
+    assert "[Team: TeamA]" not in details
+    assert "[Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
+    assert "[Justification: CODE_NOT_REACHABLE]" in details
+    assert "Not reachable." in details
+    for team in ("TeamB", "TeamC"):
+        assert f"--- [Team: {team}] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
+    assert details.count("See global assessment.") == 2
+    assert "[Status: Pending Review]" not in details
+
+    applied = _repair_group([("NOT_AFFECTED", details)], tags=["TeamB", "TeamC"])
+    assert applied["list_metadata"]["lifecycle"] == "ASSESSED"
+    assert applied["list_metadata"]["assessed_teams"] == ["TeamB", "TeamC"]
+    assert _repair(applied)[0]["items"] == []
+
+
+def test_repair_keeps_pending_former_team_decision_open_for_current_teams():
+    group = _repair_group(
+        [("NOT_AFFECTED", f"{_FORMER}\n\n[Status: Pending Review]")], tags=["TeamB"],
+    )
+
+    preview, payloads, _ = _repair(group)
+
+    assert _former_label(preview).endswith("TeamB still to assess")
+    details = payloads[0][1]["details"]
+    assert "[Team: General] [State: NOT_AFFECTED]" in details
+    assert "See global assessment." not in details
+    assert details.endswith("[Status: Pending Review]")
+    applied = _repair_group([("NOT_AFFECTED", details)], tags=["TeamB"])
+    assert applied["list_metadata"]["lifecycle"] == "INCOMPLETE"
+
+
+def test_repair_deduplicates_former_teams_and_never_overrides_an_existing_global():
+    other = _FORMER.replace("TeamA", "TeamX").replace("alice", "xavier")
+    general = "--- [Team: General] [State: EXPLOITABLE] [Assessed By: rev] [Justification: NOT_SET] ---\nGlobal view."
+    group = _repair_group([("EXPLOITABLE", f"{general}\n\n{_FORMER}\n\n{other}")], tags=["TeamB"])
+
+    _, payloads, _ = _repair(group)
+
+    details = payloads[0][1]["details"]
+    assert "[Team: General] [State: EXPLOITABLE] [Assessed By: rev]" in details
+    assert "Global view." in details
+    assert details.count("Former team assessment (") == 1
+    assert "(TeamA, TeamX; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice, xavier)" in details
+    assert "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: reviewer]" in details
+    assert payloads[0][1]["state"] == "EXPLOITABLE"
+
+
+def test_repair_leaves_current_historical_and_unowned_groups_alone():
+    historical = _FORMER.replace("] ---", "] [Historical: yes] ---")
+    assert _repair(_repair_group([("NOT_AFFECTED", _CURRENT)], tags=["TeamB"]))[0]["items"] == []
+    assert _repair(
+        _repair_group([("NOT_AFFECTED", f"{historical}\n\n{_CURRENT}")], tags=["TeamB"])
+    )[0]["items"] == []
+    # Without known owners a block cannot be called a former team's.
+    assert _repair(_repair_group([("NOT_AFFECTED", _FORMER)], tags=[]))[0]["items"] == []
+    # An alias of a current team is the current team.
+    assert _repair(
+        _repair_group([("NOT_AFFECTED", _FORMER)], tags=["TeamB"]),
+        team_mapping={"component": ["TeamB", "TeamA"]},
+    )[0]["items"] == []
+
+
+def test_repair_synchronizes_and_moves_former_team_in_one_write_per_finding():
+    both = ("NOT_AFFECTED", f"{_FORMER}\n\n{_CURRENT}")
+    group = _repair_group([both, both, ("NOT_SET", "")], tags=["TeamB"])
+    assert group["list_metadata"]["lifecycle"] == "INCOMPLETE"
+
+    preview, payloads, skipped = _repair(group)
+
+    assert _labels(preview) == ["sync_findings", "former_teams"]
+    assert preview["items"][0]["repairs"][0]["label"] == "Synchronize assessment to 1 finding"
+    assert preview["items"][0]["finding_count"] == 3
+    assert preview["summary"]["repairable_groups"] == 1
+    assert len(payloads) == 3
+    assert len({payload["details"] for _, payload in payloads}) == 1
+    assert {payload["state"] for _, payload in payloads} == {"NOT_AFFECTED"}
+    assert "[Team: TeamA]" not in payloads[0][1]["details"]
+    assert skipped == {}
+
+
+def test_repair_chains_rescoring_on_the_synchronized_result():
+    vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    group = _repair_group([("NOT_AFFECTED", _CURRENT), ("NOT_SET", "")], tags=["TeamB"])
+    group["cvss_vector"] = vector
+
+    preview, payloads, _ = _repair(group, rules=_rescore_rules())
+
+    assert _labels(preview) == ["sync_findings", "rescoring"]
+    assert preview["items"][0]["finding_count"] == 2
+    assert len(payloads) == 2
+    for instance, payload in payloads:
+        assert instance in [
+            component
+            for version in group["affected_versions"]
+            for component in version["components"]
+        ]
+        assert "[Team: TeamB] [State: NOT_AFFECTED]" in payload["details"]
+        assert "[Rescored: 0.0]" in payload["details"]
+
+
+def test_repair_reports_invalid_rescore_rules_without_blocking_other_repairs():
+    both = ("NOT_AFFECTED", f"{_FORMER}\n\n{_CURRENT}")
+    group = _repair_group([both, both], tags=["TeamB"])
+
+    preview, payloads, _ = _repair(group, rules={"version": "broken"})
+
+    assert _labels(preview) == ["former_teams"]
+    assert len(payloads) == 2
+    assert preview["notes"] and preview["notes"][0].startswith("Rescoring repair skipped:")
+
+
+def test_repair_does_not_merge_conflicts_between_current_teams():
+    group = _repair_group(
+        [("NOT_AFFECTED", _FORMER), ("EXPLOITABLE", _CURRENT.replace("NOT_AFFECTED", "EXPLOITABLE"))],
+        tags=["TeamB"],
+    )
+    assert group["list_metadata"]["lifecycle"] == "INCONSISTENT"
+    assert _repair(group)[0]["items"] == []
+
+
+def _conflict_repair(findings, tags=("TeamB", "TeamC")):
+    group = _repair_group(findings, tags=list(tags))
+    assert group["list_metadata"]["lifecycle"] == "INCONSISTENT"
+    preview, payloads, _ = _repair(group)
+    assert _labels(preview) == ["combine_conflict"]
+    assert len({payload["details"] for _, payload in payloads}) == 1
+    details = payloads[0][1]["details"]
+    applied = _repair_group([(payloads[0][1]["state"], details)] * len(findings), tags=list(tags))
+    return preview["items"][0], payloads, details, applied
+
+
+def test_repair_combines_agreeing_conflict_into_approved_global_and_refers_teams():
+    other = _FORMER.replace("TeamA", "TeamX").replace("Not reachable.", "Feature disabled.")
+    general = "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: NOT_SET] ---\nApproved earlier."
+    item, payloads, details, applied = _conflict_repair(
+        [("NOT_AFFECTED", _FORMER), ("NOT_AFFECTED", other), ("NOT_AFFECTED", general), ("NOT_SET", "")]
+    )
+
+    assert item["repairs"][0]["label"] == (
+        "Combine conflicting assessments into one global decision (NOT_AFFECTED): "
+        "former teams TeamA, TeamX and existing global assessment; TeamB, TeamC refer to global"
+    )
+    assert item["finding_count"] == 4 and len(payloads) == 4
+    assert details.count("[Team: General]") == 1
+    assert "[Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
+    assert "Approved earlier." in details
+    assert "Former team assessment (TeamA; " in details and "Not reachable." in details
+    assert "Former team assessment (TeamX; " in details and "Feature disabled." in details
+    assert "[Team: TeamA]" not in details and "[Team: TeamX]" not in details
+    assert details.count("See global assessment.") == 2
+    assert "[Status: Pending Review]" not in details
+    assert applied["list_metadata"]["lifecycle"] == "ASSESSED"
+    assert applied["list_metadata"]["assessed_teams"] == ["TeamB", "TeamC"]
+    assert _repair(applied)[0]["items"] == []
+
+
+def test_repair_combines_disagreeing_conflict_as_pending_worst_state():
+    exploitable = (
+        "--- [Team: TeamX] [State: EXPLOITABLE] [Assessed By: xavier] "
+        "[Justification: NOT_SET] [Rescored: 8.1] "
+        "[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H] ---\nReachable in v2."
+    )
+    item, payloads, details, applied = _conflict_repair(
+        [("NOT_AFFECTED", _FORMER), ("EXPLOITABLE", exploitable)]
+    )
+
+    assert item["repairs"][0]["label"].endswith(
+        "sources disagree, pending review, TeamB, TeamC still to assess"
+    )
+    assert {payload["state"] for _, payload in payloads} == {"EXPLOITABLE"}
+    assert "[Team: General] [State: EXPLOITABLE]" in details and "[Rescored: 8.1]" in details
+    assert "[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H]" in details
+    assert "Not reachable." in details and "Reachable in v2." in details
+    assert "See global assessment." not in details
+    assert details.endswith("[Status: Pending Review]")
+    assert applied["list_metadata"]["lifecycle"] == "INCOMPLETE"
+    assert applied["list_metadata"]["is_pending"] is True
+
+
+def test_repair_keeps_previously_pending_conflict_pending():
+    _, _, details, _ = _conflict_repair(
+        [("NOT_AFFECTED", f"{_FORMER}\n\n[Status: Pending Review]"),
+         ("NOT_AFFECTED", _FORMER.replace("Not reachable.", "Other wording."))]
+    )
+    assert "See global assessment." not in details
+    assert details.endswith("[Status: Pending Review]")

@@ -8,7 +8,6 @@ from ..assessment_restore_services import (
     restore_rescoring_tags_in_details,
     update_component_restore_metadata,
 )
-from .base import BulkWorkflowContext, BulkWorkflowPlugin
 
 
 def selected_groups(
@@ -148,15 +147,3 @@ def build_assessment_restore_payloads(
         payloads.append((component, payload))
     return payloads, skipped
 
-
-def create_assessment_restore_workflow() -> BulkWorkflowPlugin:
-    return BulkWorkflowPlugin(
-        id="assessment-restore",
-        label="Restore CVSS",
-        description="Restore missing rescored vectors from Dependency-Track audit history.",
-        preview_builder=lambda context: build_assessment_restore_preview(context.groups),
-        payload_builder=lambda context, ids: build_assessment_restore_payloads(
-            context.groups, ids
-        ),
-        selection_predicate=lambda item: int(item.get("recoverable_finding_count") or 0) > 0,
-    )

@@ -331,7 +331,7 @@ export interface TaskVulnGroupListQuery {
 export type BulkWorkflowFilters = Omit<
     TaskVulnGroupListQuery,
     'sort' | 'order' | 'offset' | 'cursor' | 'limit' | 'include_counts' | 'generation'
-> & { takeover_from?: string; takeover_to?: string; takeover_components?: string[] };
+>;
 
 export interface BulkWorkflowMetadata {
     id: string;
@@ -351,7 +351,6 @@ export interface BulkWorkflowSummaryItem extends BulkWorkflowMetadata {
 export interface BulkWorkflowSummaryResponse {
     task_id: string;
     workflows: BulkWorkflowSummaryItem[];
-    team_takeover_component_options?: string[];
 }
 
 export interface BulkWorkflowPreviewItem extends Record<string, any> {
@@ -367,6 +366,8 @@ export interface BulkWorkflowPreviewResponse {
     selectable_group_ids: string[];
     items: BulkWorkflowPreviewItem[];
     summary: Record<string, number>;
+    /** Stages the workflow had to leave out, with the reason. */
+    notes?: string[];
 }
 
 export interface BulkWorkflowApplyResponse {
