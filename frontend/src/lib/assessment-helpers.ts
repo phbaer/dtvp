@@ -847,6 +847,11 @@ const getGroupLifecycleFromSummary = (
         return 'NEEDS_APPROVAL';
     }
 
+    // Finding coverage comes before every assessed classification: a legacy
+    // or reviewer-approved General assessment that never reached some finding
+    // instances (for example another project version) is still incomplete.
+    if (hasMissingComponent && hasAnyAssessment) return 'INCOMPLETE';
+
     // If there are no structured assessment blocks but the system has a technical
     // state (analysis_state) set, it was likely assessed via a legacy workflow.
     // These are still considered "assessed" but are distinguished from ones
@@ -866,9 +871,9 @@ const getGroupLifecycleFromSummary = (
         return 'ASSESSED_LEGACY';
     }
 
-    // A reviewer-approved General assessment is terminal. It may have been
-    // approved before every team-specific block was recorded, but it still
-    // means the vulnerability is done rather than incomplete.
+    // A reviewer-approved General assessment that covers every finding is
+    // terminal. It may have been approved before every team-specific block was
+    // recorded, but it still means the vulnerability is done.
     if (hasGlobal) return 'ASSESSED';
 
     // Without an approved General result, every required team must have an
@@ -894,17 +899,6 @@ const getGroupLifecycleFromSummary = (
     const uniqueNonEmpty = new Set(nonEmptyStates);
 
     if (uniqueNonEmpty.size > 1 || versionStates.includes('INCONSISTENT_VERSION')) return 'INCONSISTENT';
-
-    // Stricter Incomplete: Also check if ANY individual component is NOT_SET
-    // when others in the same group have an assessment.
-    if (hasMissingComponent && hasAnyAssessment) {
-        // We have some assessments but not all components are covered.
-        // Check if the existing ones are at least consistent.
-        if (uniqueNonEmpty.size <= 1) {
-            return 'INCOMPLETE';
-        }
-        return 'INCONSISTENT';
-    }
 
     // Complete, consistent team coverage does not require a General block.
     return hasAnyAssessment ? 'ASSESSED' : 'OPEN';

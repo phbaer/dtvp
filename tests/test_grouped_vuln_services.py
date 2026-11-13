@@ -979,3 +979,46 @@ def test_task_group_query_rejects_invalid_cursor():
         assert str(exc) == "Invalid task group cursor"
     else:
         raise AssertionError("Invalid cursors should be rejected")
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        "--- [Team: General] [State: NOT_AFFECTED] ---",
+        (
+            "--- [Team: General] [State: NOT_AFFECTED] ---\n"
+            "--- [Team: TeamA] [State: NOT_AFFECTED] ---"
+        ),
+        "Legacy analyst assessment",
+        "",
+    ],
+)
+def test_unassessed_version_keeps_assessed_group_incomplete(details):
+    assessed_versions = [
+        {
+            "project_version": version,
+            "components": [{
+                "analysis_state": "NOT_AFFECTED",
+                "analysis_details": details,
+            }],
+        }
+        for version in ["b", "c", "d"]
+    ]
+    group = {
+        "id": "CVE-MISSING-VERSION",
+        "tags": ["TeamA"],
+        "affected_versions": [
+            {
+                "project_version": "a",
+                "components": [{"analysis_state": "NOT_SET", "analysis_details": ""}],
+            },
+            *assessed_versions,
+        ],
+    }
+    metadata = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    assert metadata["lifecycle"] == "INCOMPLETE"
+    assert metadata["is_assessed"] is False
+
+    group["affected_versions"] = assessed_versions
+    metadata = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    assert metadata["lifecycle"] in {"ASSESSED", "ASSESSED_LEGACY"}
