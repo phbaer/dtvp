@@ -1480,7 +1480,7 @@ test.describe('Capture README screenshots', () => {
         const sidebar = page.getByTestId('stats-sidebar')
         const resultsPanel = page.getByTestId('stats-sidebar-results')
         await expect(resultsPanel).toBeVisible({ timeout: 5000 })
-        await expect(resultsPanel.getByText('7 Vulnerabilities')).toBeVisible({ timeout: 5000 })
+        await expect(resultsPanel.getByText('7 Vulnerabilities', { exact: true })).toBeVisible({ timeout: 5000 })
         await expect(resultsPanel.getByText('Per Team')).toBeVisible({ timeout: 5000 })
         await expect(resultsPanel.getByText('Cache Status')).toBeVisible({ timeout: 5000 })
 
@@ -1513,7 +1513,8 @@ test.describe('Capture README screenshots', () => {
         await expect(autoCard.locator('[data-testid="automatic-assessment-badge"]')).toBeVisible({ timeout: 10000 })
 
         const sidebar = page.getByTestId('stats-sidebar')
-        await expect(sidebar.getByText('Automatic Assessment')).toBeVisible({ timeout: 10000 })
+        await sidebar.getByText('More filters', { exact: true }).click()
+        await expect(sidebar.getByText('Automatic Assessment', { exact: true })).toBeVisible({ timeout: 10000 })
 
         const automaticAssessmentFilters = sidebar
             .getByText('Automatic Assessment', { exact: true })
@@ -1540,7 +1541,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForTimeout(2000)
 
         // Should show the conflicting team blocks (PlatformTeam: IN_TRIAGE vs EdgeTeam: NOT_AFFECTED)
-        await expect(page.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
 
         await captureWithPadding(card, '../docs/screenshots/inconsistent-assessment.png')
     })
@@ -1571,9 +1572,9 @@ test.describe('Capture README screenshots', () => {
 
     test('capture bulk sync modal screenshot', async ({ page }) => {
         const workflow = {
-            id: 'incomplete-sync',
-            label: 'Sync Incomplete Assessments',
-            description: 'Copy the existing consistent assessment to findings where it is missing.',
+            id: 'assessment-repair',
+            label: 'Repair Assessments',
+            description: 'Synchronize partial assessments, move assessments of former teams into the global assessment, restore lost CVSS vectors, and repair rule-based rescoring.',
             supports_apply: true,
             supports_document: false,
             version: 1,
@@ -1586,7 +1587,7 @@ test.describe('Capture README screenshots', () => {
                 workflows: [{ ...workflow, candidate_count: 1, summary: { groups: 1 } }],
             }),
         }))
-        await page.route('**/api/bulk-workflows/incomplete-sync/preview-task', route => route.fulfill({
+        await page.route('**/api/bulk-workflows/assessment-repair/preview-task', route => route.fulfill({
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({ task_id: 'docs-bulk-preview' }),
@@ -1603,7 +1604,18 @@ test.describe('Capture README screenshots', () => {
                     workflow,
                     preview_token: 'docs-preview-token',
                     selectable_group_ids: ['CVE-2024-4002'],
-                    items: [{ group_id: 'CVE-2024-4002', finding_count: 2, block_count: 1 }],
+                    items: [{
+                        group_id: 'CVE-2024-4002',
+                        title: 'Prototype pollution in request parser',
+                        finding_count: 2,
+                        repairable: true,
+                        repairs: [
+                            { id: 'sync_findings', label: 'Synchronize assessment to 1 finding' },
+                            { id: 'former_teams', label: 'Move former team assessment to global notes: Platform' },
+                        ],
+                        review: [],
+                        rescore_findings: [],
+                    }],
                     summary: { groups: 1, findings: 2 },
                 },
             }),
@@ -1616,8 +1628,8 @@ test.describe('Capture README screenshots', () => {
         await page.getByRole('button', { name: 'Bulk Changes' }).click()
         const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Bulk Changes' }).first()
         await expect(modal).toBeVisible({ timeout: 10000 })
-        await modal.getByTestId('bulk-workflow-incomplete-sync').click()
-        await expect(modal.getByRole('heading', { name: 'Sync Incomplete Assessments' })).toBeVisible({ timeout: 10000 })
+        await modal.getByTestId('bulk-workflow-assessment-repair').click()
+        await expect(modal.getByRole('heading', { name: 'Repair Assessments' })).toBeVisible({ timeout: 10000 })
 
         await captureWithPadding(modal, '../docs/screenshots/bulk-sync-modal.png')
     })
