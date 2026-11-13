@@ -657,6 +657,10 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         expect(wrapper.text()).toContain('CVSS & SSVC')
+        const rescoring = wrapper.get('[data-testid="global-cvss-rescoring"]')
+        const cvssScore = rescoring.get('#cvss-score-input').element
+        const ssvc = rescoring.getComponent(SsvcCalculator).element
+        expect(cvssScore.compareDocumentPosition(ssvc) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(wrapper.text()).toContain('Threat Model Proposal')
         expect(wrapper.text()).toContain('Use Proposal Draft')
         expect(wrapper.text()).toContain('Threat model reduces exposure for the reviewed deployment.')

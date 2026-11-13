@@ -3331,10 +3331,6 @@ const teamBlockStateColor = (state?: string): string => {
                                 <span class="text-[10px] text-gray-500">Applied with the global assessment</span>
                             </div>
 
-                            <SsvcCalculator :model-value="pendingSsvc" :summary="savedSsvc" :disabled="updating || loadingDetails"
-                                :cves="[group.id, ...(group.aliases || [])]" :active="activeDetailTab === 'review'"
-                                :allow-autofill="!ssvcTouched && savedSsvc.status === 'UNASSESSED'" @update:model-value="changeSsvc" />
-
                             <div class="rounded border border-gray-700 bg-gray-800 p-3">
                                 <h6 class="mb-2 flex items-center gap-2 text-xs font-bold text-gray-300">
                                     <Calculator :size="12" />
@@ -3471,6 +3467,10 @@ const teamBlockStateColor = (state?: string): string => {
                                     </div>
                                 </div>
                             </section>
+
+                            <SsvcCalculator :model-value="pendingSsvc" :summary="savedSsvc" :disabled="updating || loadingDetails"
+                                :cves="[group.id, ...(group.aliases || [])]" :active="activeDetailTab === 'review'"
+                                :allow-autofill="!ssvcTouched && savedSsvc.status === 'UNASSESSED'" @update:model-value="changeSsvc" />
                         </section>
 
                         <!-- Assessment Section (Reviewer Global or Team Selected) -->
