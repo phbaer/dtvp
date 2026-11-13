@@ -213,12 +213,17 @@ label per applicable repair and count only the findings that change.
 | Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
 | Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks |
 | Move former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
+| Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset |
 | Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |
 | Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
 
 A former team's assessment is never discarded. Its block is removed and its
-decision, justification, assessor, and rationale are recorded once
-(deduplicated across teams) as a note in the global assessment:
+decision, justification, assessor, and rationale are recorded as a note in the
+global assessment. Notes are deduplicated, ignoring case and whitespace: a
+rationale shared by several teams or decisions is written once with every
+decision listed, a rationale the global assessment already contains is
+referenced instead of repeated, and a decision that is already recorded adds
+nothing. Who decided what is always kept:
 
 - When every current team has its own assessment, the note is informational:
   the global state stays unset and the current teams keep deciding.

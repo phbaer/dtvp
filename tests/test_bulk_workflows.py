@@ -2054,3 +2054,91 @@ def test_repair_keeps_previously_pending_conflict_pending():
     )
     assert "See global assessment." not in details
     assert details.endswith("[Status: Pending Review]")
+
+
+def test_repair_deduplicates_rationale_moved_to_the_global_assessment():
+    shared = "Parser is   only used at build time."
+    general = f"--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: NOT_SET] ---\nGlobal view.\n\n{shared}"
+    same_as_global = f"--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: NOT_SET] ---\nparser is only used at build time."
+    other = "--- [Team: TeamX] [State: NOT_AFFECTED] [Assessed By: xavier] [Justification: NOT_SET] ---\nNot deployed."
+    different_state = "--- [Team: TeamY] [State: EXPLOITABLE] [Assessed By: yara] [Justification: NOT_SET] ---\nNot  deployed."
+    bare = "--- [Team: TeamZ] [State: NOT_AFFECTED] [Assessed By: zoe] [Justification: NOT_SET] ---"
+    details = "\n\n".join([general, same_as_global, other, different_state, bare])
+    group = _repair_group([("NOT_AFFECTED", details)] * 2, tags=["TeamB"])
+
+    _, payloads, _ = _repair(group)
+    result = payloads[0][1]["details"]
+
+    # A rationale the global assessment already holds is not repeated.
+    assert result.casefold().count("only used at build time") == 1
+    assert "Former team assessment (TeamA; NOT_AFFECTED; assessed by alice): rationale already part of this assessment." in result
+    # One text shared by different decisions is written once, with both decisions.
+    assert result.count("Not deployed.") + result.count("Not  deployed.") == 1
+    assert (
+        "Former team assessment (TeamX; NOT_AFFECTED; assessed by xavier | "
+        "TeamY; EXPLOITABLE; assessed by yara):\nNot deployed."
+    ) in result
+    assert "Former team assessment (TeamZ; NOT_AFFECTED; assessed by zoe)." in result
+    for team in ("TeamA", "TeamX", "TeamY", "TeamZ"):
+        assert f"[Team: {team}]" not in result
+
+    # Moving the same assessments again adds nothing.
+    again = _repair_group(
+        [("NOT_AFFECTED", "\n\n".join([result, same_as_global, other]))] * 2, tags=["TeamB"],
+    )
+    repeated = _repair(again)[1][0][1]["details"]
+    assert repeated.count("Former team assessment (") == result.count("Former team assessment (")
+    assert repeated.count("Not deployed.") == 1
+
+
+_GLOBAL = "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: CODE_NOT_PRESENT] ---\nApproved globally."
+
+
+def test_repair_refers_unassessed_teams_to_an_approved_global_assessment():
+    group = _repair_group([("NOT_AFFECTED", _GLOBAL)] * 2, tags=["TeamB", "TeamC"])
+    assert group["list_metadata"]["lifecycle"] == "ASSESSED"
+    assert group["list_metadata"]["assessed_teams"] == []
+
+    preview, payloads, _ = _repair(group)
+
+    assert _labels(preview) == ["refer_teams"]
+    assert preview["items"][0]["repairs"][0]["label"] == (
+        "Refer TeamB, TeamC to the approved global assessment"
+    )
+    assert preview["summary"]["refer_teams_groups"] == 1
+    details = payloads[0][1]["details"]
+    assert "[Team: General] [State: NOT_AFFECTED] [Assessed By: rev]" in details
+    assert "Approved globally." in details and "Former team assessment" not in details
+    for team in ("TeamB", "TeamC"):
+        assert (
+            f"--- [Team: {team}] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
+        )
+    assert details.count("[Justification: CODE_NOT_PRESENT]") == 3
+    assert details.count("See global assessment.") == 2
+
+    applied = _repair_group([("NOT_AFFECTED", details)] * 2, tags=["TeamB", "TeamC"])
+    assert applied["list_metadata"]["lifecycle"] == "ASSESSED"
+    assert applied["list_metadata"]["assessed_teams"] == ["TeamB", "TeamC"]
+    assert _repair(applied)[0]["items"] == []
+
+
+def test_repair_refers_only_teams_without_their_own_assessment():
+    group = _repair_group([("NOT_AFFECTED", f"{_GLOBAL}\n\n{_CURRENT}")] * 2, tags=["TeamB", "TeamC"])
+
+    preview, payloads, _ = _repair(group)
+
+    assert preview["items"][0]["repairs"][0]["label"] == "Refer TeamC to the approved global assessment"
+    details = payloads[0][1]["details"]
+    assert "[Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob]" in details and "Not shipped." in details
+    assert details.count("See global assessment.") == 1
+
+
+def test_repair_does_not_refer_teams_to_a_pending_or_missing_global_assessment():
+    pending = _repair_group(
+        [("NOT_AFFECTED", f"{_GLOBAL}\n\n[Status: Pending Review]")] * 2, tags=["TeamB"],
+    )
+    assert _repair(pending)[0]["items"] == []
+    unset = _GLOBAL.replace("[State: NOT_AFFECTED]", "[State: NOT_SET]")
+    assert _repair(_repair_group([("NOT_SET", unset)] * 2, tags=["TeamB"]))[0]["items"] == []
+    # Unknown ownership: there is no team to refer.
+    assert _repair(_repair_group([("NOT_AFFECTED", _GLOBAL)] * 2, tags=[]))[0]["items"] == []

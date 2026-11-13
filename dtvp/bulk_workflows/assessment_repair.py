@@ -47,6 +47,7 @@ Payload = tuple[dict[str, Any], dict[str, Any]]
 REPAIR_RESTORE_CVSS = "restore_cvss"
 REPAIR_SYNC_FINDINGS = "sync_findings"
 REPAIR_FORMER_TEAMS = "former_teams"
+REPAIR_REFER_TEAMS = "refer_teams"
 REPAIR_COMBINE_CONFLICT = "combine_conflict"
 REPAIR_RESCORING = "rescoring"
 
@@ -88,27 +89,55 @@ def _current_teams(group: dict[str, Any], team_mapping: dict[str, Any]) -> dict[
     }
 
 
-def _former_team_note(blocks: list[dict[str, Any]]) -> str:
-    """Deduplicated record of the removed blocks, kept as plain text."""
-    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+def _normalized(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _former_team_note(blocks: list[dict[str, Any]], existing: str = "") -> str:
+    """Deduplicated record of the removed blocks, kept as plain text.
+
+    A rationale is written once however many teams or decisions share it, and
+    not at all when the global assessment (`existing`) already contains it;
+    who decided what is always kept.
+    """
+    by_text: dict[str, dict[str, Any]] = {}
     for block in blocks:
         tags = block["tags"]
         text = strip_ssvc_details(block["details"]).strip()
-        key = (tags.get("State", ""), tags.get("Justification", ""), " ".join(text.split()))
-        entry = merged.setdefault(key, {"teams": [], "assessors": [], "text": text})
+        entry = by_text.setdefault(_normalized(text), {"text": text, "decisions": {}})
+        decision = entry["decisions"].setdefault(
+            (tags.get("State", ""), tags.get("Justification", "")),
+            {"teams": [], "assessors": []},
+        )
         for target, value in (("teams", block["team"]), ("assessors", tags.get("Assessed By"))):
             value = _header_value(value)
-            if value and value not in entry[target]:
-                entry[target].append(value)
+            if value and value not in decision[target]:
+                decision[target].append(value)
+
+    known = _normalized(strip_ssvc_details(existing))
     notes = []
-    for (state, justification, _), entry in merged.items():
-        facts = [", ".join(entry["teams"]), state]
-        if justification and justification != "NOT_SET":
-            facts.append(f"justification {justification}")
-        if entry["assessors"]:
-            facts.append(f"assessed by {', '.join(entry['assessors'])}")
-        note = f"{FORMER_TEAM_NOTE} ({'; '.join(facts)})"
-        notes.append(f"{note}:\n{entry['text']}" if entry["text"] else f"{note}.")
+    for key, entry in by_text.items():
+        decisions = []
+        for (state, justification), decision in entry["decisions"].items():
+            facts = [", ".join(decision["teams"]), state]
+            if justification and justification != "NOT_SET":
+                facts.append(f"justification {justification}")
+            if decision["assessors"]:
+                facts.append(f"assessed by {', '.join(decision['assessors'])}")
+            decisions.append("; ".join(facts))
+        if key in known and all(_normalized(decision) in known for decision in decisions):
+            # Both the rationale and who decided it are recorded already.
+            continue
+        note = f"{FORMER_TEAM_NOTE} ({' | '.join(decisions)})"
+        if not key:
+            note += "."
+        elif key in known:
+            note += ": rationale already part of this assessment."
+        else:
+            note += f":\n{entry['text']}"
+        if _normalized(note) not in known:
+            notes.append(note)
+            known += " " + _normalized(note)
     return "\n\n".join(notes)
 
 
@@ -126,7 +155,8 @@ def _repair_former_teams(
     The former teams' text is always preserved in the global assessment. It
     only becomes the global *decision* when a current team has no assessment
     of its own; otherwise the current teams' decisions keep deciding. Teams
-    without an assessment refer to the global one once that is approved.
+    without an assessment refer to the global one once that is approved,
+    also when there is no former team at all.
     """
     if not current:
         # Unknown ownership is not the same as no ownership.
@@ -143,9 +173,6 @@ def _repair_former_teams(
         for block in blocks
         if not is_general(block) and _is_assessed(block) and canonical_key(block["team"]) not in current
     ]
-    if not former:
-        return blocks, None
-
     former_ids = {id(block) for block in former}
     remaining = [block for block in blocks if id(block) not in former_ids]
     covered = {
@@ -156,6 +183,15 @@ def _repair_former_teams(
     uncovered = [team for key, team in current.items() if key not in covered]
 
     general = next((block for block in remaining if is_general(block)), None)
+    if not former and (
+        pending
+        or not uncovered
+        or general is None
+        or general["tags"].get("State", "NOT_SET") == "NOT_SET"
+    ):
+        # Without former teams the only repair is pointing teams that have no
+        # assessment at a global decision that is already approved.
+        return blocks, None
     if general is None:
         general = {
             "team": "General",
@@ -183,8 +219,9 @@ def _repair_former_teams(
             if decisive["tags"].get(tag) and not general["tags"].get(tag):
                 general["tags"][tag] = decisive["tags"][tag]
         promoted = True
+    existing = str(general.get("details") or "").strip()
     general["details"] = "\n\n".join(
-        part for part in (str(general.get("details") or "").strip(), _former_team_note(former)) if part
+        part for part in (existing, _former_team_note(former, existing)) if part
     )
 
     referred: list[str] = []
@@ -287,11 +324,15 @@ def _combine_conflict(
     for block in generals:
         text = strip_ssvc_details(block["details"]).strip()
         if text:
-            texts.setdefault(" ".join(text.split()), text)
+            texts.setdefault(_normalized(text), text)
     general = {
         "team": "General",
         "tags": tags,
-        "details": "\n\n".join(part for part in (*texts.values(), _former_team_note(former)) if part),
+        "details": "\n\n".join(
+            part
+            for part in (*texts.values(), _former_team_note(former, "\n\n".join(texts.values())))
+            if part
+        ),
     }
 
     referred = [] if pending else list(current.values())
@@ -523,6 +564,8 @@ def _plural(count: int, noun: str) -> str:
 
 
 def _former_team_label(former: dict[str, Any]) -> str:
+    if not former["former_teams"]:
+        return f"Refer {', '.join(former['referred_teams'])} to the approved global assessment"
     teams = ", ".join(former["former_teams"])
     label = (
         f"Make former team assessment the global decision: {teams}"
@@ -578,7 +621,10 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
             "label": f"Synchronize assessment to {_plural(team['synchronized'], 'finding')}",
         })
     if team.get("former"):
-        repairs.append({"id": REPAIR_FORMER_TEAMS, "label": _former_team_label(team["former"])})
+        repairs.append({
+            "id": REPAIR_FORMER_TEAMS if team["former"]["former_teams"] else REPAIR_REFER_TEAMS,
+            "label": _former_team_label(team["former"]),
+        })
     if team.get("conflict"):
         repairs.append({"id": REPAIR_COMBINE_CONFLICT, "label": _conflict_label(team["conflict"])})
 
@@ -637,6 +683,7 @@ def build_assessment_repair_preview(
         REPAIR_RESTORE_CVSS,
         REPAIR_SYNC_FINDINGS,
         REPAIR_FORMER_TEAMS,
+        REPAIR_REFER_TEAMS,
         REPAIR_COMBINE_CONFLICT,
         REPAIR_RESCORING,
     ):
