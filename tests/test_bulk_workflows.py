@@ -36,6 +36,12 @@ from dtvp.task_group_query_services import (
 )
 
 
+_HUMAN_REVIEW_PREFIX = (
+    "HUMAN REVIEW REQUIRED: Read and manually verify this assessment; "
+    "a human must approve it before use.\n\n"
+)
+
+
 def _group(group_id: str, lifecycle: str, state: str = "NOT_SET"):
     return {
         "id": group_id,
@@ -772,7 +778,8 @@ def test_automatic_assessment_workflow_applies_selected_rescore_to_vulnerability
     )
     details = payloads[0][1]["details"]
     assert details.startswith(
-        "[Rescored: 3.7] "
+        _HUMAN_REVIEW_PREFIX
+        + "[Rescored: 3.7] "
         f"[Rescored Vector: {group['cvss_vector']}/CR:L/IR:L/AR:L]"
     )
     assert details.count("[Rescored:") == 1
@@ -800,7 +807,7 @@ def test_automatic_assessment_workflow_applies_selected_rescore_to_vulnerability
         == f"{group['cvss_vector']}/CR:L/IR:L/AR:L"
     )
     assert all(
-        component["analysis_details"].startswith("[Rescored: 3.7]")
+        component["analysis_details"].startswith(_HUMAN_REVIEW_PREFIX + "[Rescored: 3.7]")
         for version in refreshed["affected_versions"]
         for component in version["components"]
     )
@@ -860,7 +867,8 @@ def test_automatic_assessment_workflow_writes_one_block_per_owning_team():
     # Global block: worst state plus the worst assessment's CVSS, no evidence text.
     assert payloads[0][1]["state"] == "EXPLOITABLE"
     assert details.startswith(
-        "[Rescored: 7.5] "
+        _HUMAN_REVIEW_PREFIX
+        + "[Rescored: 7.5] "
         "[Rescored Vector: CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N]"
     )
     assert (
@@ -973,7 +981,8 @@ def test_automatic_assessment_rescore_follows_the_worst_verdict():
 
     payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
     assert payloads[0][1]["details"].startswith(
-        "[Rescored: 5.0] "
+        _HUMAN_REVIEW_PREFIX
+        + "[Rescored: 5.0] "
         "[Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:N/A:N]"
     )
 
@@ -1026,7 +1035,8 @@ def test_automatic_assessment_applies_configured_rescore_rules_to_the_global_sta
     payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
     details = payloads[0][1]["details"]
     assert details.startswith(
-        f"[Rescored: 0.0] [Rescored Vector: {item['rescore']['proposed_vector']}]"
+        _HUMAN_REVIEW_PREFIX
+        + f"[Rescored: 0.0] [Rescored Vector: {item['rescore']['proposed_vector']}]"
     )
 
     # The applied result must satisfy Repair Rescoring Definitions right away.

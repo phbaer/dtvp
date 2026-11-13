@@ -38,6 +38,7 @@ class AnalysisQueueItem(BaseModel):
     position: int = 0
     job_id: Optional[str] = None
     error: Optional[str] = None
+    error_details: Optional[dict[str, Any]] = None
     result: Optional[dict] = None
     finished_at: Optional[str] = None
     progress: Optional[dict] = None

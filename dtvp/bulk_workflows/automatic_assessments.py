@@ -554,6 +554,13 @@ def _append_inline_list(
     lines.extend(["", rendered])
 
 
+def _compact_analyzer_details(assessment: dict[str, Any]) -> str:
+    details = str(assessment.get("details") or "").strip()
+    if details.startswith("HUMAN REVIEW REQUIRED:") and re.search(r"^VERDICT: .+", details, re.MULTILINE):
+        return details
+    return ""
+
+
 def _is_generated_report(value: Any) -> bool:
     return "VULNERABILITY ASSESSMENT REPORT" in _text(value).upper()
 
@@ -594,6 +601,8 @@ def _assessment_content_lines(
     assessment: dict[str, Any],
     seen_values: set[str],
 ) -> list[str]:
+    if details := _compact_analyzer_details(assessment):
+        return details.splitlines()
     lines: list[str] = []
     executive_summary = assessment.get("executive_summary")
     if isinstance(executive_summary, dict):
@@ -929,7 +938,7 @@ def _assessment_record_lines(
         or _text(target.get("component_name"))
         or "Unknown"
     )
-    compact = _has_executive_summary(assessment)
+    compact = _has_executive_summary(assessment) or bool(_compact_analyzer_details(assessment))
     if compact:
         lines = [
             f"[Automatic Assessment: {run_id}]",
@@ -1142,7 +1151,11 @@ def _assessment_details(
     team_entries = team_entries if team_entries is not None else []
     unowned_entries = unowned_entries if unowned_entries is not None else list(entries)
 
-    lines: list[str] = []
+    lines: list[str] = [
+        "HUMAN REVIEW REQUIRED: Read and manually verify this assessment; "
+        "a human must approve it before use.",
+        "",
+    ]
     if rescore:
         rescore_tags: list[str] = []
         if rescore["proposed_score"] is not None:

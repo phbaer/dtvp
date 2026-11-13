@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CodeAnalysisReport from './CodeAnalysisReport.vue'
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { Zap, X, Loader2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, AlertTriangle, Activity, RefreshCw } from '@lucide/vue'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
@@ -473,7 +474,8 @@ watch(open, async (isOpen) => {
                                 </span>
                             </div>
                             <!-- Executive summary -->
-                            <div v-if="expandedResult.assessment.executive_summary" class="space-y-1.5">
+                            <CodeAnalysisReport v-if="expandedResult.assessment.report_markdown?.trim()" :markdown="expandedResult.assessment.report_markdown" />
+                            <div v-else-if="expandedResult.assessment.executive_summary" class="space-y-1.5">
                                 <div>
                                     <div class="text-[9px] font-semibold uppercase text-gray-500">Vulnerability</div>
                                     <div class="text-[10px] text-gray-300 leading-relaxed">{{ expandedResult.assessment.executive_summary.vulnerability }}</div>

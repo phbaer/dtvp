@@ -187,6 +187,16 @@ const appendInlineList = (
     lines.push('', rendered)
 }
 
+const HUMAN_REVIEW_NOTICE = 'HUMAN REVIEW REQUIRED: Read and manually verify this assessment; a human must approve it before use.'
+
+// The analyzer owns presentation. Keep verbose evidence in the saved payload.
+const compactAnalyzerDetails = (assessment: CodeAnalysisAssessResponse['assessment']): string => {
+    const details = normalizedText(assessment.details)
+    return details.startsWith('HUMAN REVIEW REQUIRED:') && /^VERDICT: .+/m.test(details)
+        ? details
+        : ''
+}
+
 const generatedReport = (value: unknown): boolean => (
     normalizedText(value).toLocaleUpperCase().includes('VULNERABILITY ASSESSMENT REPORT')
 )
@@ -459,6 +469,8 @@ const buildComponentSection = (
     componentResult: CodeAnalysisComponentResult,
     seenValues: Set<string>,
 ): string[] => {
+    const analyzerDetails = compactAnalyzerDetails(componentResult.assessment)
+    if (analyzerDetails) return [`Component: ${componentResult.component}`, analyzerDetails]
     const versionsChecked = [...new Set((componentResult.versions_checked || []).filter(Boolean))]
     const lines = [
         `[Component: ${componentResult.component}]`,
@@ -505,6 +517,21 @@ export const buildCodeAnalysisDetails = (
     const componentResults = allComponentResults
         .filter(componentResult => requestedComponents.size === 0 || requestedComponents.has(componentResult.component.toLowerCase()))
     const scopedToComponents = requestedComponents.size > 0 && allComponentResults.length > 0
+    const analyzerDetails = compactAnalyzerDetails(result.assessment)
+    if (!scopedToComponents && analyzerDetails) return analyzerDetails
+    if (scopedToComponents && componentResults.length
+        && componentResults.every(item => compactAnalyzerDetails(item.assessment))) {
+        return [
+            HUMAN_REVIEW_NOTICE,
+            '',
+            `Scope: ${componentResults.map(item => item.component).join(', ')}`,
+            ...componentResults.flatMap(item => [
+                '',
+                `Component: ${item.component}`,
+                compactAnalyzerDetails(item.assessment).replace(/^HUMAN REVIEW REQUIRED:[^\n]*\n*/, ''),
+            ]),
+        ].join('\n')
+    }
     const justificationLine = justification === 'NOT_SET' ? [] : [`VEX justification: ${justification}`]
     const executiveSummary = result.assessment.executive_summary
     const compact = hasExecutiveSummary(result.assessment)
@@ -528,6 +555,8 @@ export const buildCodeAnalysisDetails = (
         }
     }
     const lines = [
+        HUMAN_REVIEW_NOTICE,
+        '',
         '[Code Analysis]',
         ...(scopedToComponents ? [`Scope: ${componentResults.map(item => item.component).join(', ') || 'Selected components'}`] : []),
         `Overall Verdict: ${result.assessment.verdict}`,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CodeAnalysisReport from './CodeAnalysisReport.vue'
 import { AlertTriangle, CheckCircle, Loader2, Send, X } from '@lucide/vue'
 import type { CodeAnalysisAssessResponse } from '../lib/api'
 
@@ -48,7 +49,8 @@ const emit = defineEmits<{
                         <span class="text-[9px] font-black uppercase tracking-[0.16em] text-gray-500">Run outcome</span>
                         <span class="text-sm font-bold" :class="verdictClass">{{ result.assessment.verdict }}</span>
                     </div>
-                    <div v-if="result.assessment.executive_summary" class="mt-2 max-w-4xl space-y-1.5">
+                    <CodeAnalysisReport v-if="result.assessment.report_markdown?.trim()" :markdown="result.assessment.report_markdown" />
+                    <div v-else-if="result.assessment.executive_summary" class="mt-2 max-w-4xl space-y-1.5">
                         <div>
                             <div class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Vulnerability</div>
                             <p class="mt-0.5 text-xs leading-relaxed text-gray-300">{{ result.assessment.executive_summary.vulnerability }}</p>
@@ -69,7 +71,7 @@ const emit = defineEmits<{
                         </div>
                     </div>
                     <p v-else class="mt-1 max-w-4xl text-xs leading-relaxed text-gray-300">{{ result.assessment.summary }}</p>
-                    <div v-if="result.assessment.reasoning && !result.assessment.executive_summary" class="mt-2 max-w-5xl">
+                    <div v-if="!result.assessment.report_markdown?.trim() && result.assessment.reasoning && !result.assessment.executive_summary" class="mt-2 max-w-5xl">
                         <div class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Rationale</div>
                         <p class="mt-0.5 text-xs leading-relaxed text-gray-400">{{ result.assessment.reasoning }}</p>
                     </div>

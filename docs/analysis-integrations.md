@@ -60,31 +60,19 @@ confirmed. A generic dependency-usage reachability result does not override a
 later full-source analysis that affirmatively excludes the
 vulnerability-specific path. Static guidance is never evidence by itself.
 
-Each completed assessment also carries a compact `executive_summary` with two
-separate statements: `vulnerability` briefly describes the advisory and its
-affected dependency, while `assessment` states the final repository-specific
-verdict, confidence, exposure, audit state, key basis, and at most one next
-action. The assessment uses formal disposition, confidence, exposure, basis,
-required-action, and audit-assurance language. A structured `why` list is
-rendered as the **Decision rationale** and retains the complete deciding facts
-from advisory applicability, dependency presence, current and product-release
-versions, direct reachability, deep exploitability, transitive paths, and audit
-caveats. Path
-claims are explicitly scoped to the current workspace; a missing path remains
-"not confirmed" unless affirmative evidence supports "not reachable". This
-gives Affected, Not Affected, and Inconclusive results an audit-ready evidence
-record without restoring the old raw report in the primary view. Compactness
-comes from separating these evidence categories; the assessment payload and
-human-facing statements never cut them at a character or item-count limit. It is
-assembled after the deterministic audit guardrails, retained in lightweight
-result metadata and shown in assessment drafts and run outcomes. The separate
-follow-up prompt context remains bounded to the model's input budget.
-Human-facing assessment text also lists every covered product version from the
-repository intersection on one comma-separated `Product versions covered:`
-line; dependency/component versions remain separately labeled evidence. The
-complete summary, reasoning, role views, version
-inventory, audit checks, and pipeline evidence remain available in the saved
-run payload.
+Code-analysis proposals prefer the analyzer's compact `assessment.details` when
+it begins with `HUMAN REVIEW REQUIRED:` and contains a `VERDICT:` line. The UI
+uses this text directly instead of rebuilding it from `executive_summary.why`,
+role views, and evidence. The notice stays first; accepting the proposal supplies
+human approval, with no additional approval footer. Selected-component/team drafts
+use only the matching component reports; an overall report is never substituted
+for a narrower scope. Mixed or older responses retain the existing scoped fallback
+and start with the human review notice. Archived proposal text is not rewritten.
+
+Automatic/bulk proposals also prefer compact analyzer details for each run, keeping
+existing run/team/state/rescore metadata. Their human review notice precedes those
+blocks. Summary, reasoning, version inventory, role views, and audit evidence remain
+in the saved response for inspection; they are not appended to compact proposals.
 
 When the latest results for several targets are combined, the Code Evidence
 view renders the vulnerability and worst-case decision once, followed by one
@@ -310,3 +298,55 @@ when the analyzer host and model backend support parallel scans. Agentyzer
 serializes shared-cache Git mutations with per-repository filesystem locks and
 analyzes configured repositories in detached per-run worktrees, so concurrent
 components mapped to the same repository do not share mutable scan files.
+
+### Investigating analyzer failures
+
+The Code Analysis dashboard and vulnerability analysis panel show the analyzer
+job ID, **Copy ID**, and **Download debug JSON** for assigned jobs. Saved analysis
+history includes the same controls. The dashboard also shows the configured
+provider/model and backend health; check these when jobs fail immediately.
+
+Downloads use authenticated `GET /api/code-analysis/jobs/{job_id}/diagnostics`
+through DTVP, keeping the analyzer URL out of browser requests. The analyzer must
+support `GET /jobs/{job_id}/diagnostics`. Downloads contain allowlisted job state,
+timestamps and structured failure metadata, excluding requests, prompts, responses,
+credentials, free-text errors and logs. A 404 explains that the job may have expired,
+been deleted, belong to another instance, or the endpoint may be unsupported.
+
+When polling observes a failed job, DTVP saves sanitized failure details before
+finishing the queue item. These remain downloadable if the remote job disappears
+or is unreachable. They are stored beside `DTVP_CODE_ANALYSIS_RESULTS_PATH` with
+`.diagnostics.sqlite` appended, and use `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS`
+and `DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS` limits. Queue error details remain
+visible in the current dashboard/panel; after a restart, a previously copied job ID
+can still address the download endpoint. Failures predating this feature cannot
+be reconstructed. Explicit vulnerability cleanup can delete external analyzer jobs;
+ordinary failed-job polling does not delete them.
+
+The main vulnerability list shows active analysis progress per component: current
+activity, completed-step percentage, and a progress bar when available. Queued
+jobs show their queue position instead. CVE/GHSA aliases are matched; multiple
+active component scans remain visible. Progress uses the shared queue polling
+(approximately every five seconds during activity), without per-row requests.
+Percentages describe completed steps, not estimated time remaining.
+
+### Full assessment report
+
+Completed jobs and saved history offer **Download assessment (.md)** beside job
+and debug controls. The document includes advisory sources, dependency paths,
+version/ref/commit evidence, limitations and CVSS rationale. New Agentyzer versions
+supply `assessment.report_markdown`; DTVP preserves it in saved results and prefers
+that copy so it remains downloadable after analyzer job retention. History rows
+load the full saved result on demand rather than adding report bodies to list polls.
+Otherwise, authenticated `GET /api/code-analysis/jobs/{job_id}/report` proxies the
+configured analyzer's report download. Missing, expired, incomplete or older
+reports produce an explanation; DTVP does not invent a replacement report.
+Downloads contain assessment evidence and are distinct from sanitized debug JSON.
+They do not apply or approve the assessment. Older analyzers remain usable for
+ordinary scans and proposals; generating Markdown reports requires updated Agentyzer.
+
+When a report is present, run outcomes, per-component/target results, and expanded
+queue results show **Full assessment** in place of Decision rationale. Older
+results retain the existing rationale view. Markdown is rendered through an HTML
+allowlist: scripts, embedded content, images, event handlers and unsafe links are
+removed. This display change does not change draft/application approval rules.

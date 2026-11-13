@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import VulnRowCompact from '../VulnRowCompact.vue'
 import { buildVulnListItem } from '../../lib/vulnListIndex'
 import { analysisQueueStore } from '../../lib/analysisQueueStore'
@@ -135,6 +136,36 @@ describe('VulnRowCompact', () => {
         const wrapper = mount(VulnRowCompact, { props: { item } })
 
         expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Analysis running')
+    })
+
+    it('updates component progress and clears it when analysis finishes', async () => {
+        const wrapper = mount(VulnRowCompact, { props: { item: buildVulnListItem(group, {}) } })
+        const queued = {
+            queue_id: 'q1', vuln_id: group.id, component_name: 'library-a',
+            submitted_by: 'analyst', submitted_at: '2026-10-29T10:00:00Z',
+            status: 'queued' as const, position: 2,
+        }
+        analysisQueueStore.items.value = [queued]
+        await nextTick()
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Analysis queued')
+        expect(wrapper.get('[data-testid="analysis-progress"]').text()).toContain('library-a: Queued · position 2')
+        expect(wrapper.find('[role="progressbar"]').exists()).toBe(false)
+
+        analysisQueueStore.items.value = [{
+            ...queued, status: 'running',
+            progress: { completed_steps: 4, total_steps: 10, percent: 40, current_title: 'Code Scan' },
+        }, { ...queued, queue_id: 'q2', component_name: 'library-b' },
+        { ...queued, queue_id: 'unrelated', vuln_id: 'CVE-OTHER', component_name: 'unrelated' }]
+        await nextTick()
+        expect(wrapper.get('[data-testid="analysis-progress"]').text()).toContain('library-a: Code Scan')
+        expect(wrapper.get('[data-testid="analysis-progress"]').text()).toContain('40%')
+        expect(wrapper.get('[data-testid="analysis-progress"]').text()).toContain('library-b: Queued')
+        expect(wrapper.get('[data-testid="analysis-progress"]').text()).not.toContain('unrelated')
+        expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('40')
+
+        analysisQueueStore.items.value = [{ ...queued, status: 'completed' }]
+        await nextTick()
+        expect(wrapper.find('[data-testid="analysis-progress"]').exists()).toBe(false)
     })
 
     it('shows unavailable tmrescore and code-assessment status icons', () => {
