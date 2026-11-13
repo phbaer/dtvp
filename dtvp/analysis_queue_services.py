@@ -1,3 +1,4 @@
+import logging
 import asyncio
 import re
 from contextlib import suppress
@@ -495,6 +496,12 @@ async def process_analysis_queue_item(
                 finish_item(item, status="completed", result=result)
                 return
             if service_status == "failed":
+                from .code_analysis_diagnostics import safe_error_details, save_failure_snapshot
+                item.error_details = safe_error_details(status.get("error_details"))
+                try:
+                    await asyncio.to_thread(save_failure_snapshot, item.job_id, status)
+                except Exception:
+                    logging.getLogger(__name__).warning("Unable to save analyzer failure diagnostics")
                 finish_item(
                     item,
                     status="failed",
