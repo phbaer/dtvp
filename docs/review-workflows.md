@@ -211,7 +211,7 @@ label per applicable repair and count only the findings that change.
 | Repair | Applies to | Result |
 | :--- | :--- | :--- |
 | Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
-| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks |
+| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one |
 | Move former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
 | Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset |
 | Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |

@@ -20,6 +20,7 @@ from dtvp.bulk_workflows.automatic_assessments import (
     build_automatic_assessment_preview,
 )
 from dtvp.bulk_workflows.assessment_repair import (
+    _apply_payloads,
     build_assessment_repair_payloads,
     build_assessment_repair_preview,
     create_assessment_repair_workflow,
@@ -2184,3 +2185,60 @@ def test_repair_marks_cross_version_rescoring_for_review_first():
     assert item["review"] == []
     assert all("CVSS:3.1" not in payload["details"] for _, payload in payloads)
     assert all("[Rescored: 0.0]" in payload["details"] for _, payload in payloads)
+
+
+_RESCORED_TEAMS = (
+    "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_PRESENT] ---\n\n"
+    "Not shipped.\n\n"
+    "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\n\n"
+    "Version not used"
+)
+
+
+def _apply_repair(group, payloads):
+    updated = _apply_payloads([group], payloads, {})[0]
+    updated["list_metadata"] = summarize_grouped_vulnerabilities([updated], {})[0]["list_metadata"]
+    return updated
+
+
+def test_repair_settles_when_the_rescoring_precedes_the_team_assessments():
+    rules = json.loads(Path("data/rescore_rules.json").read_text())
+    group = _repair_group(
+        [("NOT_AFFECTED", f"[Rescored: 0.0]\n\n{_RESCORED_TEAMS}")] * 2,
+        tags=["TeamA", "TeamB", "TeamC"],
+        lifecycle="INCOMPLETE",
+    )
+    group["cvss_vector"] = "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+    for version in group["affected_versions"]:
+        version["components"][0]["cvss_vector"] = group["cvss_vector"]
+
+    preview, payloads, _ = _repair(group, rules=rules)
+
+    # Nothing is missing on a finding: only the rescoring needs repair.
+    assert _labels(preview) == ["rescoring"]
+    details = payloads[0][1]["details"]
+    assert details.startswith("[Rescored: 0.0] [Rescored Vector: CVSS:3.1/")
+    assert "[Team: TeamA]" in details and "[Team: TeamB]" in details
+
+    repaired = _apply_repair(group, payloads)
+    repaired["list_metadata"]["lifecycle"] = "INCOMPLETE"
+    again, payloads, _ = _repair(repaired, rules=rules)
+    assert again["items"] == [] and payloads == []
+
+
+def test_repair_synchronization_keeps_and_copies_a_manual_rescoring():
+    rescoring = "[Rescored: 6.5] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:L]"
+    teams = _RESCORED_TEAMS.replace("NOT_AFFECTED", "EXPLOITABLE").replace("CODE_NOT_PRESENT", "NOT_SET")
+    group = _repair_group(
+        [("EXPLOITABLE", f"{rescoring}\n\n{teams}"), ("NOT_SET", "")],
+        tags=["TeamA", "TeamB"],
+        lifecycle="INCOMPLETE",
+    )
+
+    preview, payloads, _ = _repair(group)
+
+    assert _labels(preview) == ["sync_findings"]
+    assert preview["items"][0]["repairs"][0]["label"] == "Synchronize assessment to 1 finding"
+    assert [instance["finding_uuid"] for instance, _ in payloads] == ["finding-2"]
+    assert payloads[0][1]["details"].startswith(f"{rescoring}\n\n--- [Team: TeamA]")
+    assert payloads[0][1]["state"] == "EXPLOITABLE"
