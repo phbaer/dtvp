@@ -24,9 +24,10 @@ def test_pipeline_publishes_only_the_free_threaded_dtvp_image():
     )
 
     assert "Build and Push DTVP (free-threaded)" in workflow
-    assert "file: Dockerfile.free-threaded" in workflow
+    assert "--file Dockerfile.free-threaded" in workflow
+    assert workflow.count("buildah build") == 1
     assert "Build and Push DTVP (GIL fallback)" not in workflow
-    assert "file: Dockerfile\n" not in workflow
+    assert "--file Dockerfile " not in workflow
     assert "-freethreaded" not in workflow
     assert "-gil" not in workflow
 

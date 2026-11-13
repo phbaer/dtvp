@@ -28,6 +28,21 @@ The CI end-to-end job uses the Playwright container image in
 resolved `@playwright/test` version in `frontend/package-lock.json`; update both
 in the same change. The regular, manual, and real-stack Playwright
 configurations cover Chromium, Firefox, and WebKit desktop browsers.
+With `CI` set, the regular configuration builds the frontend and serves it
+with `vite preview` instead of the dev server, which exhausted runner memory;
+local runs keep using (and reusing) the dev server on port 5173.
+
+Each test job appends a Markdown job summary through `scripts/ci-summary.mjs`:
+pass/fail totals, failing or flaky tests with their first error, coverage
+totals, and runner resources (memory, swap, container limit, and OOM-kill
+count). Summaries are displayed by Forgejo 17 with Forgejo Runner 13.2 or
+newer; on older versions the same Markdown is printed to the step log. JUnit
+XML, the Playwright JSON report, traces, and HTML reports are uploaded as
+artifacts. The script only reads reports, and a missing report is noted in the
+summary rather than failing the job. Jobs that need `git`, `curl`, `jq`, or
+Buildah install them, so the runner image only has to provide Node.js and `apt`; see
+[Deployment](deployment.md#python-runtime-images) for the image build's runner
+requirements.
 Mocked E2E project fixtures provide lifecycle metadata for non-open groups;
 list tests explicitly select the statuses they exercise. Separate browser
 coverage verifies reviewer approval-ready defaults, incomplete pending work,
