@@ -40,7 +40,7 @@ def test_image_publication_waits_for_all_test_suites_and_avoids_redundant_setup(
     assert "needs: [test-backend, test-frontend, test-e2e]" in workflow
     assert "test-agentyzer:" not in workflow
     assert workflow.count("uses: actions/setup-node@v6") == 3
-    assert workflow.count("node-version: 24") == 3
+    assert workflow.count("node-version: 26") == 3
     assert "docker/setup-qemu-action" not in workflow
     assert "docker-buildx-plugin" not in workflow
     assert "docker-compose-plugin" not in workflow

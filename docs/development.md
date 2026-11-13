@@ -39,8 +39,8 @@ count). Summaries are displayed by Forgejo 17 with Forgejo Runner 13.2 or
 newer; on older versions the same Markdown is printed to the step log. JUnit
 XML, the Playwright JSON report, traces, and HTML reports are uploaded as
 artifacts. The script only reads reports, and a missing report is noted in the
-summary rather than failing the job. Jobs that need `git`, `curl`, `jq`, or
-Buildah install them, so the runner image only has to provide Node.js and `apt`; see
+summary rather than failing the job. Jobs that need `git`, `curl`, `jq`,
+Buildah, or the `libatomic1` library that Node.js 26 links install them, so the runner image only has to provide Node.js and `apt`; see
 [Deployment](deployment.md#python-runtime-images) for the image build's runner
 requirements.
 Mocked E2E project fixtures provide lifecycle metadata for non-open groups;
@@ -53,10 +53,10 @@ workers so jsdom-heavy component tests do not contend past their per-test
 timeouts; validate config changes with
 `cd frontend && npx vitest --run --configLoader native`.
 Frontend dependencies track stable releases compatible with the build and test
-toolchain. The September 2026 refresh uses Vue 3.5.43, Vite 8.3.0, and Vitest
-5.0.1. Icons use the maintained `@lucide/vue` package instead of the deprecated
+toolchain. The November 2026 refresh uses Vue 3.5.45, Vite 8.3.8, Vitest 5.1.0,
+and jsdom 31. Icons use the maintained `@lucide/vue` package instead of the deprecated
 `lucide-vue-next`; component imports and test mocks must use the new package name.
-TypeScript stays on 6.0.3: the current `vue-tsc` 3.3.11 loads
+TypeScript stays on 6.0.3: the current `vue-tsc` 3.3.14 loads
 `typescript/lib/tsc`, which TypeScript 7's native compiler no longer exports.
 Revisit that constraint when Vue's type checker supports the native compiler;
 do not bypass Vue component type checking to upgrade TypeScript.
@@ -66,7 +66,7 @@ uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
 argument to a versioned tag or digest when a reproducible external build needs
 an explicit override. Pull-request runs cancel superseded workflow executions,
 and image publication waits for DTVP Python, frontend, and
-browser tests. Frontend jobs select Node.js 24 and reuse npm's download cache.
+browser tests. Frontend jobs select Node.js 26 and reuse npm's download cache.
 The single-platform image builds reuse inline cache metadata from the `dev`
 images and exclude CI virtual environments from their build contexts. SBOM
 generation is reproducible and consumes frozen dependency state without
