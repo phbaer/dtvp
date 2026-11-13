@@ -1,3 +1,5 @@
+"""Synchronization of partial assessments; a stage of the combined repair."""
+
 from __future__ import annotations
 
 import re
@@ -6,7 +8,6 @@ from typing import Any
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..logic import STATE_PRIORITY, calculate_aggregated_state
 from .assessment_restore import selected_groups
-from .base import BulkWorkflowContext, BulkWorkflowPlugin
 
 
 HEADER_RE = re.compile(r"---\s*(?P<header>(?:\[[^\]]+\]\s*)+)---")
@@ -181,15 +182,3 @@ def build_incomplete_sync_payloads(
             )
     return payloads, skipped
 
-
-def create_incomplete_sync_workflow() -> BulkWorkflowPlugin:
-    return BulkWorkflowPlugin(
-        id="incomplete-sync",
-        label="Synchronize Incomplete",
-        description="Synchronize consistent partial assessments across all matching findings.",
-        preview_builder=lambda context: build_incomplete_sync_preview(context.groups),
-        payload_builder=lambda context, ids: build_incomplete_sync_payloads(
-            context.groups, ids
-        ),
-        version=2,
-    )

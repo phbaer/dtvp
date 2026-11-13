@@ -323,7 +323,7 @@ def test_bulk_workflow_preview_runs_as_polled_background_task(client):
     try:
         with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
             response = client.post(
-                "/api/bulk-workflows/assessment-restore/preview-task",
+                "/api/bulk-workflows/assessment-repair/preview-task",
                 json={"task_id": task_id, "filters": {}},
             )
             assert response.status_code == 200
@@ -403,7 +403,7 @@ def test_incomplete_bulk_workflow_preview_hydrates_summary_lifecycle(client):
     try:
         with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
             response = client.post(
-                "/api/bulk-workflows/incomplete-sync/preview",
+                "/api/bulk-workflows/assessment-repair/preview",
                 json={
                     "task_id": task_id,
                     "filters": {"lifecycle": ["INCOMPLETE"]},
@@ -415,7 +415,10 @@ def test_incomplete_bulk_workflow_preview_hydrates_summary_lifecycle(client):
     assert response.status_code == 200
     preview = response.json()
     assert preview["selectable_group_ids"] == [group["id"]]
-    assert preview["summary"] == {"groups": 1, "findings": 2}
+    assert preview["summary"]["groups"] == 1
+    # Only the finding that lacks the assessment is written.
+    assert preview["summary"]["findings"] == 1
+    assert preview["summary"]["sync_findings_groups"] == 1
 
 
 def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_client):
@@ -447,14 +450,14 @@ def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_clie
             patch("dtvp.main.DTClient", BackgroundDTClient),
         ):
             preview_response = client.post(
-                "/api/bulk-workflows/assessment-restore/preview",
+                "/api/bulk-workflows/assessment-repair/preview",
                 json={"task_id": task_id, "filters": {}},
             )
             assert preview_response.status_code == 200
             preview = preview_response.json()
 
             response = client.post(
-                "/api/bulk-workflows/assessment-restore/apply-task",
+                "/api/bulk-workflows/assessment-repair/apply-task",
                 json={
                     "task_id": task_id,
                     "filters": {},

@@ -189,7 +189,7 @@ def _rescore_rule_rescore(
 
     States with a configured transition (such as `NOT_AFFECTED` and
     `FALSE_POSITIVE`) must end up with exactly the vector the rules define,
-    otherwise `Repair Rescoring Definitions` reports the finding right after it
+    otherwise the rescoring repair reports the finding right after it
     was applied. Analyzer metrics are kept by layering the rule on top of the
     proposed vector whenever both use the same CVSS version.
     """

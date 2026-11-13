@@ -90,7 +90,7 @@ const goToThreatModel = () => {
                 class="inline-flex h-9 min-h-9 items-center justify-center leading-none gap-2 px-4 rounded-full text-[11px] font-semibold uppercase tracking-widest transition-all border border-white/10 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
             >
                 <Layers :size="14" />
-                Bulk Sync ({{ incompleteCount }})
+                Repair Assessments ({{ incompleteCount }})
             </button>
 
             <button
@@ -100,7 +100,7 @@ const goToThreatModel = () => {
                 class="inline-flex h-9 min-h-9 items-center justify-center leading-none gap-2 px-4 rounded-full text-[11px] font-semibold uppercase tracking-widest transition-all border border-white/10 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
             >
                 <Calculator :size="14" />
-                Restore CVSS ({{ assessmentRestoreCount }})
+                Repair CVSS ({{ assessmentRestoreCount }})
             </button>
         </div>
     </div>

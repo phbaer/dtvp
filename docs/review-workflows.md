@@ -202,30 +202,73 @@ The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time:
 | Workflow | Candidates and action |
 | :--- | :--- |
 | Apply Automatic Assessments | Usable, unapplied analyzer assessments; writes one assessment per owning team plus a global assessment with the worst verdict and its CVSS rescore |
-| Sync Incomplete Assessments | Groups whose otherwise consistent assessment is missing from some findings |
-| Take over team assessments | Copy a former team's consistent assessment for selected components into missing current-team blocks using a source → target mapping |
-| Restore Rescored CVSS | Assessed findings with one unambiguous current vector recoverable from audit comments |
-| Repair Rescoring Definitions | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect; repairs every safely actionable finding |
+| Repair Assessments | Every safe, rule-based repair in one operation; each vulnerability lists the repairs that apply |
 
-**Take over team assessments** requires previous and current team names plus one
-or more components chosen by exact name. The component selection applies across
-project versions. Preview uses the active project filters and shows ready
-findings and skip reasons. It requires the target to own the finding now, the source to no
-longer own the vulnerability, an unambiguous source decision, and no saved
-target decision or approved global result. Conflicting source decisions across
-versions are left for manual review. Apply creates pending target assessments,
-preserves source blocks as history, and leaves existing target assessments
-untouched. Preview tokens recheck the mapping and task assessment snapshot before apply.
-The bulk action is reviewer-only; analysts can use the single-assessment draft
-action for their selected team. Assessments no longer present in any current
-finding require separate audit or archive retrieval.
+**Repair Assessments** chains the following repairs. Each stage works on the
+result of the previous one, so a finding is written once. Preview rows carry a
+label per applicable repair and count only the findings that change.
 
-`Repair Rescoring Definitions` includes cases where a transition such as
-`NOT_AFFECTED` should produce a `0.0` score but no rescore was stored. Preview
-rows show why each finding is a mismatch and place the stored vector and score
-beside the fixed values that will be written. Findings with a matching
-transition but a missing or unsupported original CVSS vector remain listed for
-manual review instead of being silently omitted.
+| Repair | Applies to | Result |
+| :--- | :--- | :--- |
+| Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
+| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks |
+| Move former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
+| Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset |
+| Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |
+| Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
+
+A former team's assessment is never discarded. Its block is removed and its
+decision, justification, assessor, and rationale are recorded as a note in the
+global assessment. Notes are deduplicated, ignoring case and whitespace: a
+rationale shared by several teams or decisions is written once with every
+decision listed, a rationale the global assessment already contains is
+referenced instead of repeated, and a decision that is already recorded adds
+nothing. Who decided what is always kept:
+
+- When every current team has its own assessment, the note is informational:
+  the global state stays unset and the current teams keep deciding.
+- When a current team has no assessment, the former decision becomes the
+  global decision (the worst state when former teams differ), unless a global
+  decision already exists. If that result is approved, each team without an
+  assessment receives a block with the global state and the text
+  `See global assessment.`; while it is pending review those teams stay open
+  and the vulnerability remains Incomplete.
+
+A Conflicting group is combined only when no current team has an assessment,
+so nothing a responsible team decided is overruled. Its former-team and global
+assessments across all findings become one global assessment written to every
+finding: the worst state wins, distinct global texts are kept, and former-team
+decisions are recorded as notes. If the sources agree on the state and none
+was pending review, each current team receives a `See global assessment.`
+block and the vulnerability becomes Assessed. If the sources disagree, the
+combined decision is new: it is marked pending review and the current teams
+stay open. Conflicts that involve a current team's assessment still need a
+manual decision.
+
+Ownership comes from the current team mapping, including aliases. Groups with
+no mapped team and blocks already marked `[Historical: yes]` are left
+untouched. Because lifecycle metadata is read once per preview, a repair
+that changes the lifecycle (for example restoring a vector on a Conflicting
+group) can make further repairs available on the next preview.
+
+Vulnerabilities that need a human decision first start unselected and show
+`Review first`: a former team's decision would become the global decision,
+conflicting assessments would be combined, or part of the vulnerability
+cannot be repaired automatically. Selection buttons toggle all vulnerabilities
+of one repair topic, or everything that needs review, alongside Select all.
+
+The rescoring repair includes cases where a transition such as
+`NOT_AFFECTED` should produce a `0.0` score but no rescore was stored. Rows
+place the stored vector and score beside the fixed values that will be written.
+Findings that cannot be repaired automatically stay listed with an amber note
+and are not selectable: a matching transition with a missing or unsupported
+original CVSS vector, or a lost vector with ambiguous or no audit history. If
+the rescore rule configuration is invalid, the other repairs still run and the
+preview states why rescoring was skipped.
+
+The single-assessment editor keeps its own takeover draft action for copying a
+former team's decision into the selected team.
+
 `Apply Automatic Assessments` rows likewise show the current vulnerability
 CVSS and the automatic rescore that will be written to every eligible finding,
 together with the teams that receive an assessment and any analyzed component
@@ -246,7 +289,7 @@ first and prepares only the chosen preview. Preview tokens prevent applying a
 stale candidate set; prepared previews are reused while the dialog is open.
 Filtering uses compact task summaries, then carries their canonical lifecycle
 metadata onto the hydrated full groups used by workflows. This keeps lifecycle-
-specific workflows such as `Sync Incomplete Assessments` aligned with the
+specific repairs such as assessment synchronization aligned with the
 visible filtered list.
 
 The UI starts preview, apply, and document work as background operations and
@@ -297,7 +340,7 @@ target team as fallback. The global block carries the worst state across all
 runs, its justification, and the CVSS rescore of that worst run — a milder run
 never contributes the global vector or score, even when its proposed score is
 higher. When the global state has a configured rescore transition, that rule
-produces the written vector and score, so `Repair Rescoring Definitions` reports
+produces the written vector and score, so the rescoring repair reports
 nothing right after an apply. Components that no team owns keep their evidence
 in the global block and are listed in the preview row. Applied details retain
 every relevant run as a compact decision record: target, verdict, the two
