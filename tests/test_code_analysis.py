@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 import dtvp.agentizer_integration as agentizer
@@ -2022,6 +2023,69 @@ async def test_analysis_queue_worker_treats_analyzer_cancelled_as_terminal(monke
     assert completed["status"] == "cancelled"
     assert completed["error"] == "Cancelled by analyzer."
     assert any("Analyzer cancelled scan" in line for line in item.logs)
+
+
+def _poll_retry_setup(failures: int):
+    calls = {"count": 0}
+
+    class FakeClient:
+        def __init__(self, _settings):
+            self._settings = _settings
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+        async def start_assessment(self, **_kwargs):
+            return {"job_id": "job-flaky"}
+
+        async def get_job_status(self, _job_id):
+            calls["count"] += 1
+            if calls["count"] <= failures:
+                raise httpx.ReadError("connection reset")
+            return {"status": "cancelled", "error": "Cancelled by analyzer."}
+
+    class FakeSettings:
+        enabled = True
+
+    deps = AnalysisQueueServiceDeps(
+        get_code_analysis_settings_cls=lambda: FakeSettings,
+        get_code_analysis_client_cls=lambda: FakeClient,
+        code_analysis_not_configured_detail="not configured",
+        sleep=AsyncMock(),
+    )
+    item = main.analysis_queue.submit(
+        vuln_id=f"CVE-2026-FLAKY-{failures}",
+        component_name="libFlaky",
+        submitted_by="testuser",
+    )
+    return deps, item, calls
+
+
+@pytest.mark.asyncio
+async def test_analysis_queue_worker_retries_brief_status_poll_disconnects():
+    deps, item, calls = _poll_retry_setup(failures=4)
+    completed: dict[str, object] = {}
+
+    await process_analysis_queue_item(deps, item, lambda _item, **kwargs: completed.update(kwargs))
+
+    assert calls["count"] == 5
+    assert completed["status"] == "cancelled"
+    assert sum("status poll disconnected; retrying" in line for line in item.logs) == 4
+
+
+@pytest.mark.asyncio
+async def test_analysis_queue_worker_fails_after_persistent_status_poll_disconnects():
+    deps, item, calls = _poll_retry_setup(failures=5)
+
+    # The queue worker turns the raised error into a failed item.
+    with pytest.raises(httpx.ReadError):
+        await process_analysis_queue_item(deps, item, lambda _item, **_kwargs: None)
+
+    assert calls["count"] == 5
+    assert any("remained unreachable after 5 polls (ReadError)" in line for line in item.logs)
 
 
 def test_analysis_queue_prune_finished_removes_expired_terminal_items():
