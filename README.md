@@ -21,8 +21,8 @@ and applies consistent decisions across releases.
 
 ## Quick Start
 
-Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)
-or a newer supported Node.js release.
+Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 26 LTS or a newer
+supported Node.js release (24.15+ still works).
 DTVP's Python environment and test suite are independent of Agentyzer, which
 is accessed through the optional code-analysis HTTP integration.
 
