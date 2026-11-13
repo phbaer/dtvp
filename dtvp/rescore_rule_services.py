@@ -392,12 +392,22 @@ def _evaluate_component(
         return None
 
     finding["cvss_version"] = version
+    # A rescored vector keeps the CVSS version Dependency-Track supplies. One
+    # stored in another version cannot contribute its extra metrics, so the
+    # rule is applied to the base vector alone and the stored one is replaced.
+    stored_version: str | None = None
+    if current_vector:
+        try:
+            stored_version = _parse_vector(current_vector)[0]
+        except (RescoreRuleError, ValueError):
+            stored_version = None
+    cross_version = stored_version is not None and stored_version != version
     try:
         result = build_rescored_vector_for_state(
             config,
             state=state,
             base_vector=str(base_vector),
-            current_vector=current_vector,
+            current_vector=None if cross_version else current_vector,
             validate_config=False,
         )
         if result is None:
@@ -424,11 +434,16 @@ def _evaluate_component(
     reasons: list[str] = []
     if not current_vector:
         reasons.append("Missing rescored vector")
+    elif cross_version:
+        reasons.append(
+            f"Stored CVSS {stored_version} vector is replaced: "
+            f"Dependency-Track supplies CVSS {version}"
+        )
     elif not vector_matches:
         reasons.append("Vector does not match the configured rule")
 
     _current_version, _current_prefix, current_metrics = _parse_vector(
-        current_vector or str(base_vector)
+        str(base_vector) if cross_version or not current_vector else current_vector
     )
     _proposed_version, _proposed_prefix, proposed_metrics = _parse_vector(proposed_vector)
     requirement_keys = {
@@ -463,6 +478,7 @@ def _evaluate_component(
         "current_score": current_score,
         "proposed_vector": proposed_vector,
         "proposed_score": proposed_score,
+        "cross_version": cross_version,
     }
 
 

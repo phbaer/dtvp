@@ -244,10 +244,12 @@ def test_sync_preview_lists_matching_state_with_missing_base_vector_for_review(r
     assert skipped == {"review_required": 1, "unchanged": 0}
 
 
-def test_sync_preview_marks_cross_version_vectors_for_review(rules):
+def test_sync_replaces_cross_version_vector_with_the_rule_on_the_base_vector(rules):
+    base = "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+    stored = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N/CR:L/MC:N/MI:N/MA:N"
     group = {
-        "id": "CVE-2026-0002",
-        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "id": "CVE-2010-1766",
+        "cvss_vector": base,
         "affected_versions": [
             {
                 "components": [
@@ -257,8 +259,8 @@ def test_sync_preview_marks_cross_version_vectors_for_review(rules):
                         "vulnerability_uuid": "vulnerability-1",
                         "analysis_state": "NOT_AFFECTED",
                         "analysis_details": (
-                            "[Rescored: 8.0] "
-                            "[Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N]"
+                            "--- [Team: General] [State: NOT_AFFECTED] [Rescored: 0.0] "
+                            f"[Rescored Vector: {stored}] ---\nNot used."
                         ),
                     }
                 ]
@@ -269,8 +271,27 @@ def test_sync_preview_marks_cross_version_vectors_for_review(rules):
     preview = build_rescore_rule_sync_preview([group], rules)
 
     finding = preview["items"][0]["findings"][0]
-    assert finding["status"] == "review"
-    assert "does not match base" in finding["reasons"][0]
+    assert finding["status"] == "ready"
+    assert finding["issue_type"] == "incorrect_rescore"
+    assert finding["cross_version"] is True
+    assert finding["cvss_version"] == "2.0"
+    assert finding["current_vector"] == stored
+    assert finding["reasons"][0] == (
+        "Stored CVSS 3.1 vector is replaced: Dependency-Track supplies CVSS 2.0"
+    )
+    proposed = finding["proposed_vector"]
+    assert proposed.startswith(base) and not proposed.startswith("CVSS:3")
+    assert finding["proposed_score"] == 0.0
+
+    payloads, skipped = build_rescore_rule_sync_payloads([group], rules)
+    assert skipped == {"review_required": 0, "unchanged": 0}
+    details = payloads[0][1]["details"]
+    assert f"[Rescored Vector: {proposed}]" in details and "CVSS:3.1" not in details
+    assert "[Rescored: 0.0]" in details
+
+    # The repaired finding is compliant: nothing is proposed a second time.
+    group["affected_versions"][0]["components"][0]["analysis_details"] = details
+    assert build_rescore_rule_sync_preview([group], rules)["items"] == []
 
 
 def test_config_validation_requires_metric_rules(rules):
