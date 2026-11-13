@@ -105,6 +105,26 @@ Manifest ranges such as `^1.2.3` and `>=2.0` remain unresolved constraints
 unless a lock file or artifact supplies a concrete version, so range boundaries
 are not presented as installed affected versions.
 
+### Analyzer Result Validity
+
+Applying an Agentyzer result requires `assessment.application_eligible=true`;
+copying its CVSS additionally requires `rescoring_eligible=true`. A missing
+field counts as not eligible, so DTVP needs an Agentyzer release that emits
+both fields. DTVP enforces eligibility in individual and combined drafts,
+saved-result reuse, bulk workflows, and assessment writes that carry analyzer
+run IDs; such a write is rejected with HTTP 422. A combined result is eligible
+only when every component result is.
+
+Unverified historical results stay readable but must be rerun before they can
+be applied. Metadata indexes are rebuilt to exclude them from automatic
+proposals, and they do not suppress new automatic scans. Failed runs leave
+existing scores and assessment states untouched, including state-driven
+rescoring. The local mock analyzer emits the same eligibility fields.
+
+Agentyzer reports a failed required LLM call as HTTP 502 for synchronous
+requests, or as a failed job with a string `error` and structured
+`error_details`.
+
 ### Results, Dedupe, And Follow-Ups
 
 Completed results are stored in SQLite at `DTVP_CODE_ANALYSIS_RESULTS_PATH`.

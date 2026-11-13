@@ -13,29 +13,13 @@ and applies consistent decisions across releases.
 - Code-analysis proposals use Agentyzer's compact `assessment.details`, with the
   human review notice first. Detailed rationale stays in the saved run payload;
   older responses retain the legacy formatter.
+- Analyzer results are applied only when Agentyzer marks them eligible; see
+  [Analysis integrations](docs/analysis-integrations.md#analyzer-result-validity).
 - Mock services for local development and testing.
 
 [Quick start](#quick-start) · [Deployment](#docker-deployment) ·
 [Commands](#command-reference) · [Review workflow](#review-workflow) ·
 [Architecture](#repository-and-architecture) · [Documentation](#documentation)
-
-## Analyzer result validity
-
-Applying Agentyzer results requires explicit `assessment.application_eligible=true`.
-Copying analyzer CVSS additionally requires `rescoring_eligible=true`. DTVP enforces
-eligibility in individual and combined drafts, saved-result reuse, bulk workflows,
-and assessment writes carrying analyzer run IDs. Unverified historical results
-remain readable but must be rerun before application. Metadata indexes are rebuilt
-to exclude them from automatic proposals; unverified results do not suppress new
-automatic scans. Combined results require every component to be eligible. The local
-mock analyzer emits the same eligibility fields. Failed runs preserve existing
-scores and assessment states, including state-driven rescoring rules.
-Queued analysis retries brief Agentyzer status-poll disconnects before failing.
-
-Agentyzer reports required LLM failures as HTTP 502 for synchronous requests or
-failed async jobs with a string `error` and structured `error_details`. Deploy the
-updated standalone analyzer together with this client contract. Configure
-`AGENTYZER_IMAGE` for Compose to use an image with these eligibility checks.
 
 ## Quick Start
 
