@@ -2165,3 +2165,22 @@ def test_repair_flags_decisions_and_partial_repairs_for_review_first():
     combined, _, _ = _repair(conflict)
     assert [topic["id"] for topic in combined["topics"]] == ["combine_conflict"]
     assert combined["items"][0]["requires_review"] is True
+
+
+def test_repair_marks_cross_version_rescoring_for_review_first():
+    stored = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N/CR:L/MC:N/MI:N/MA:N"
+    details = _GLOBAL.replace("] ---", f"] [Rescored: 0.0] [Rescored Vector: {stored}] ---")
+    group = _repair_group([("NOT_AFFECTED", details)] * 2, tags=[])
+    group["cvss_vector"] = "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+
+    preview, payloads, _ = _repair(group, rules=_rescore_rules())
+
+    item = preview["items"][0]
+    assert _labels(preview) == ["rescoring"]
+    assert item["repairs"][0]["label"] == (
+        "Repair rescoring on 2 findings; replaces a stored vector of another CVSS version on 2"
+    )
+    assert item["requires_review"] is True and item["repairable"] is True
+    assert item["review"] == []
+    assert all("CVSS:3.1" not in payload["details"] for _, payload in payloads)
+    assert all("[Rescored: 0.0]" in payload["details"] for _, payload in payloads)

@@ -73,9 +73,13 @@ aggregate state follows these rules:
 CVSS rescoring is data-driven through `RESCORE_RULES_PATH` (default
 `data/rescore_rules.json`). The shipped `NOT_AFFECTED` and `FALSE_POSITIVE`
 transitions support CVSS 2.0, 3.0, 3.1, and 4.0 and produce exactly `0.0`.
-Vectors preserve their original CVSS version and base metrics. Cross-version,
-malformed, or incomplete vectors stay visible for manual review rather than
-being rewritten speculatively.
+Vectors preserve their original CVSS version and base metrics. A rescored
+vector stored in a different CVSS version than Dependency-Track supplies (for
+example a CVSS 3.1 rescore of a vulnerability that only has a CVSS 2.0 vector)
+cannot contribute its extra metrics: the rescoring repair proposes the rule
+applied to the original vector, shows both, and leaves the vulnerability
+unselected for review first. Malformed or incomplete original vectors stay
+visible for manual review rather than being rewritten speculatively.
 
 A configured transition owns the vector of the state it covers. Whenever a
 state with a rule is written — by the reviewer, by a code-analysis draft, or by

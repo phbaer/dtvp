@@ -648,9 +648,18 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
     if rescore:
         syncable = int(rescore.get("syncable_finding_count") or 0)
         if syncable:
+            converted = sum(
+                finding.get("status") == "ready" and bool(finding.get("cross_version"))
+                for finding in rescore.get("findings") or []
+            )
+            label = f"Repair rescoring on {_plural(syncable, 'finding')}"
+            if converted:
+                label += f"; replaces a stored vector of another CVSS version on {converted}"
             repairs.append({
                 "id": REPAIR_RESCORING,
-                "label": f"Repair rescoring on {_plural(syncable, 'finding')}",
+                "label": label,
+                # Discards metrics someone recorded in the other CVSS version.
+                "needs_review": bool(converted),
             })
         manual = int(rescore.get("review_finding_count") or 0)
         if manual:
