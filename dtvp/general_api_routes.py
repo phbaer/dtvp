@@ -42,8 +42,8 @@ from .assessment_snapshot_services import (
 from .bulk_workflows.assessment_restore import (
     build_assessment_restore_payloads as workflow_assessment_restore_payloads,
     build_assessment_restore_preview as workflow_assessment_restore_preview,
-    create_assessment_restore_workflow,
 )
+from .bulk_workflows.assessment_repair import create_assessment_repair_workflow
 from .bulk_workflows.automatic_assessments import (
     automatic_assessment_filter_facets,
     create_automatic_assessment_workflow,
@@ -53,12 +53,6 @@ from .bulk_workflows.base import (
     BulkWorkflowRegistry,
     build_preview_token,
 )
-from .bulk_workflows.incomplete_sync import create_incomplete_sync_workflow
-from .bulk_workflows.team_takeover import (
-    create_team_takeover_workflow,
-    team_takeover_component_options,
-)
-from .bulk_workflows.rescore_rule_sync import create_rescore_rule_sync_workflow
 from .code_analysis_assessment_services import (
     assessment_status_for_group,
     build_assessment_match_index,
@@ -132,9 +126,6 @@ class BulkWorkflowFilters(BaseModel):
     team: str = ""
     teams: list[str] = Field(default_factory=list)
     team_assessment: Literal["ANY", "MISSING", "DOCUMENTED"] = "ANY"
-    takeover_from: str = ""
-    takeover_to: str = ""
-    takeover_components: list[str] = Field(default_factory=list)
     id: str = ""
     component: str = ""
     assignee: str = ""
@@ -1697,10 +1688,7 @@ def _bulk_workflow_registry(
     return BulkWorkflowRegistry(
         [
             create_automatic_assessment_workflow(),
-            create_incomplete_sync_workflow(),
-            create_team_takeover_workflow(),
-            create_assessment_restore_workflow(),
-            create_rescore_rule_sync_workflow(load_rescore_rules_or_raise),
+            create_assessment_repair_workflow(load_rescore_rules_or_raise),
         ]
     )
 
@@ -1736,9 +1724,6 @@ def _bulk_workflow_context(
             assessment_records,
         ),
         user=user,
-        takeover_from=req.filters.takeover_from,
-        takeover_to=req.filters.takeover_to,
-        takeover_components=req.filters.takeover_components,
         team_mapping=deps.load_team_mapping(),
         rescore_rules=_configured_rescore_rules(deps),
         result_store=deps.code_analysis_result_store,
@@ -2181,7 +2166,8 @@ def _register_bulk_workflow_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         require_reviewer(user)
-        groups = _completed_task_full_groups(deps, req.task_id, user)
+        # Resolving the task also rejects unknown or unfinished ones.
+        _completed_task_full_groups(deps, req.task_id, user)
         workflows = [
             {
                 **plugin.metadata(),
@@ -2193,7 +2179,6 @@ def _register_bulk_workflow_routes(
         return {
             "task_id": req.task_id,
             "workflows": workflows,
-            "team_takeover_component_options": team_takeover_component_options(groups),
         }
 
     @router.post("/bulk-workflows/{workflow_id}/preview")

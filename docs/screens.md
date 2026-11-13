@@ -102,11 +102,11 @@ The Global subview of Assessment contains the vector editor, visual calculator e
 
 The CVSS modal provides an interactive vector editor for contextual score adjustments.
 
-### Bulk Sync Modal
+### Bulk Changes Dialog
 
-![Bulk sync modal](screenshots/bulk-sync-modal.png)
+![Bulk Changes dialog](screenshots/bulk-sync-modal.png)
 
-Reviewer bulk sync summarizes incomplete assessments before applying consistent state and details in one action.
+The Bulk Changes dialog previews the selected workflow before applying it in one action. Repair Assessments labels each applicable repair per vulnerability.
 
 ### Conflict Resolution
 

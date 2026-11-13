@@ -151,18 +151,18 @@ describe('api.ts', () => {
         const filters = { q: 'openssl', component: 'runtime' }
 
         await getBulkWorkflowSummary('task-1', filters)
-        await previewBulkWorkflow('incomplete-sync', 'task-1', filters)
-        await applyBulkWorkflow('incomplete-sync', 'task-1', filters, ['CVE-1'], 'token-1')
+        await previewBulkWorkflow('assessment-repair', 'task-1', filters)
+        await applyBulkWorkflow('assessment-repair', 'task-1', filters, ['CVE-1'], 'token-1')
         await buildBulkWorkflowDocument('automatic-assessments', 'task-1', filters, ['CVE-1'], 'token-2')
 
         expect(mocks.post).toHaveBeenNthCalledWith(1, '/bulk-workflows/summary', {
             task_id: 'task-1', filters,
         })
-        expect(mocks.post).toHaveBeenNthCalledWith(2, '/bulk-workflows/incomplete-sync/preview-task', {
+        expect(mocks.post).toHaveBeenNthCalledWith(2, '/bulk-workflows/assessment-repair/preview-task', {
             task_id: 'task-1', filters,
         })
         expect(mocks.get).toHaveBeenNthCalledWith(1, '/bulk-workflows/tasks/operation-preview')
-        expect(mocks.post).toHaveBeenNthCalledWith(3, '/bulk-workflows/incomplete-sync/apply-task', {
+        expect(mocks.post).toHaveBeenNthCalledWith(3, '/bulk-workflows/assessment-repair/apply-task', {
             task_id: 'task-1',
             filters,
             group_ids: ['CVE-1'],

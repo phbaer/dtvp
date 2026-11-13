@@ -25,7 +25,7 @@ vi.mock('../../lib/env', () => ({
 }))
 
 const workflow = {
-    id: 'incomplete-sync',
+    id: 'assessment-repair',
     label: 'Complete assessments',
     description: 'Apply assessment blocks to incomplete findings.',
     supports_apply: true,
@@ -57,65 +57,6 @@ describe('BulkWorkflowModal', () => {
         mocks.buildBulkWorkflowDocument.mockResolvedValue('# Ticket drafts\n')
     })
 
-    it('requires a source-to-target mapping before previewing team takeover', async () => {
-        const takeover = {
-            ...workflow,
-            id: 'team-takeover',
-            label: 'Take over team assessments',
-        }
-        mocks.getBulkWorkflowSummary.mockResolvedValue({
-            task_id: 'task-1',
-            workflows: [{ ...takeover, candidate_count: null, summary: {} }],
-            team_takeover_component_options: ['@gehc/nest-back-pack'],
-        })
-        mocks.previewBulkWorkflow.mockResolvedValue({
-            task_id: 'task-1',
-            workflow: takeover,
-            preview_token: 'takeover-preview',
-            selectable_group_ids: ['CVE-2026-1'],
-            items: [{
-                group_id: 'CVE-2026-1',
-                finding_count: 2,
-                eligible_finding_count: 1,
-                skipped: { target_exists: 1 },
-            }],
-            summary: { groups: 1, eligible_findings: 1 },
-        })
-        const wrapper = mount(BulkWorkflowModal, {
-            props: { show: false, taskId: 'task-1', query: { teams: ['TeamB'] } },
-        })
-        await wrapper.setProps({ show: true })
-        await flushPromises()
-        await wrapper.get('[data-testid="bulk-workflow-team-takeover"]').trigger('click')
-        expect(mocks.previewBulkWorkflow).not.toHaveBeenCalled()
-        expect((wrapper.get('[data-testid="team-takeover-to"]').element as HTMLInputElement).value).toBe('TeamB')
-        await wrapper.get('[data-testid="team-takeover-from"]').setValue('TeamA')
-        expect(wrapper.get('[data-testid="team-takeover-preview"]').attributes('disabled')).toBeDefined()
-        expect(wrapper.text()).toContain('Mapped owner components')
-        expect(wrapper.text()).not.toContain('library-a')
-        await wrapper.get('[data-testid="team-takeover-component-@gehc/nest-back-pack"]').setValue(true)
-        await wrapper.get('[data-testid="team-takeover-preview"]').trigger('click')
-        await flushPromises()
-        expect(mocks.previewBulkWorkflow).toHaveBeenCalledWith(
-            'team-takeover',
-            'task-1',
-            { teams: ['TeamB'], takeover_from: 'TeamA', takeover_to: 'TeamB', takeover_components: ['@gehc/nest-back-pack'] },
-            expect.any(Function),
-        )
-        expect(wrapper.text()).toContain('1 ready of 2 findings')
-        await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
-        await flushPromises()
-        expect(mocks.applyBulkWorkflow).toHaveBeenCalledWith(
-            'team-takeover',
-            'task-1',
-            { teams: ['TeamB'], takeover_from: 'TeamA', takeover_to: 'TeamB', takeover_components: ['@gehc/nest-back-pack'] },
-            ['CVE-2026-1'],
-            'takeover-preview',
-            expect.any(Function),
-        )
-        wrapper.unmount()
-    })
-
     it('freezes active filters, previews one workflow, and applies its selection', async () => {
         const wrapper = mount(BulkWorkflowModal, {
             props: {
@@ -133,11 +74,11 @@ describe('BulkWorkflowModal', () => {
         expect(mocks.previewBulkWorkflow).not.toHaveBeenCalled()
         expect(wrapper.text()).toContain('Select a bulk workflow')
 
-        await wrapper.get('[data-testid="bulk-workflow-incomplete-sync"]').trigger('click')
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
         await flushPromises()
 
         expect(mocks.previewBulkWorkflow).toHaveBeenCalledWith(
-            'incomplete-sync',
+            'assessment-repair',
             'task-1',
             filters,
             expect.any(Function),
@@ -148,7 +89,7 @@ describe('BulkWorkflowModal', () => {
         await flushPromises()
 
         expect(mocks.applyBulkWorkflow).toHaveBeenCalledWith(
-            'incomplete-sync',
+            'assessment-repair',
             'task-1',
             filters,
             ['CVE-2026-1'],
@@ -179,7 +120,7 @@ describe('BulkWorkflowModal', () => {
         await wrapper.setProps({ show: true })
         await flushPromises()
 
-        await wrapper.get('[data-testid="bulk-workflow-incomplete-sync"]').trigger('click')
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
         await flushPromises()
 
         expect(wrapper.text()).toContain('No matching changes')
@@ -355,26 +296,33 @@ describe('BulkWorkflowModal', () => {
             .toContain('1 matched result(s)')
     })
 
-    it('shows the original and fixed CVSS vector and score for rule sync candidates', async () => {
-        const rescoreWorkflow = {
+    it('labels each repair and shows the original and fixed CVSS vector', async () => {
+        const repairWorkflow = {
             ...workflow,
-            id: 'rescore-rule-sync',
-            label: 'Repair Rescoring Definitions',
+            id: 'assessment-repair',
+            label: 'Repair Assessments',
         }
         mocks.getBulkWorkflowSummary.mockResolvedValue({
             task_id: 'task-1',
-            workflows: [{ ...rescoreWorkflow, candidate_count: 1, summary: { groups: 1 } }],
+            workflows: [{ ...repairWorkflow, candidate_count: null, summary: {} }],
         })
         mocks.previewBulkWorkflow.mockResolvedValue({
             task_id: 'task-1',
-            workflow: rescoreWorkflow,
-            preview_token: 'preview-rescore',
+            workflow: repairWorkflow,
+            preview_token: 'preview-repair',
             selectable_group_ids: ['CVE-2026-RULE'],
+            notes: ['Rescoring repair skipped: invalid rule'],
             items: [{
                 group_id: 'CVE-2026-RULE',
-                syncable_finding_count: 1,
-                review_finding_count: 0,
-                findings: [{
+                finding_count: 3,
+                repairable: true,
+                repairs: [
+                    { id: 'sync_findings', label: 'Synchronize assessment to 1 finding' },
+                    { id: 'former_teams', label: 'Move former team assessment to global notes: TeamA' },
+                    { id: 'rescoring', label: 'Repair rescoring on 1 finding' },
+                ],
+                review: ['CVSS vector not recoverable on 1 finding'],
+                rescore_findings: [{
                     state: 'NOT_AFFECTED',
                     cvss_version: '3.1',
                     status: 'ready',
@@ -384,8 +332,15 @@ describe('BulkWorkflowModal', () => {
                     current_vector: 'CVSS:3.1/AV:N/MC:N',
                     proposed_vector: 'CVSS:3.1/AV:N/CR:L/IR:L/AR:L/MC:N',
                 }],
+            }, {
+                group_id: 'CVE-2026-MANUAL',
+                finding_count: 0,
+                repairable: false,
+                repairs: [],
+                review: ['Rescoring needs manual review on 2 findings'],
+                rescore_findings: [],
             }],
-            summary: { groups: 1 },
+            summary: { groups: 2 },
         })
         const wrapper = mount(BulkWorkflowModal, {
             props: { show: false, taskId: 'task-1' },
@@ -393,8 +348,23 @@ describe('BulkWorkflowModal', () => {
 
         await wrapper.setProps({ show: true })
         await flushPromises()
-        await wrapper.get('[data-testid="bulk-workflow-rescore-rule-sync"]').trigger('click')
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
         await flushPromises()
+
+        const labels = wrapper.get('[data-testid="repair-labels-CVE-2026-RULE"]').text()
+        expect(labels).toContain('Synchronize assessment to 1 finding')
+        expect(labels).toContain('Move former team assessment to global notes: TeamA')
+        expect(labels).toContain('Repair rescoring on 1 finding')
+        expect(labels).toContain('CVSS vector not recoverable on 1 finding')
+        const repairable = wrapper.get('[data-testid="bulk-workflow-item-CVE-2026-RULE"]').text()
+        expect(repairable).toContain('3 findings will be updated')
+        expect(repairable).toContain('Ready')
+        const manual = wrapper.get('[data-testid="bulk-workflow-item-CVE-2026-MANUAL"]').text()
+        expect(manual).toContain('Rescoring needs manual review on 2 findings')
+        expect(manual).toContain('No automatic repair available')
+        expect(wrapper.find('[data-testid="rescore-rule-change-CVE-2026-MANUAL"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="bulk-workflow-note"]').text())
+            .toContain('Rescoring repair skipped: invalid rule')
 
         const change = wrapper.get('[data-testid="rescore-rule-change-CVE-2026-RULE"]')
         expect(change.text()).toContain('Original')
@@ -407,8 +377,66 @@ describe('BulkWorkflowModal', () => {
             .toContain('Missing requirements: AR, CR, IR')
     })
 
+    it('leaves review-first repairs unselected and toggles selection by topic', async () => {
+        const repairWorkflow = { ...workflow, id: 'assessment-repair', label: 'Repair Assessments' }
+        const item = (group_id: string, repairId: string, requires_review: boolean) => ({
+            group_id,
+            finding_count: 1,
+            repairable: true,
+            requires_review,
+            repairs: [{ id: repairId, label: repairId }],
+            review: [],
+            rescore_findings: [],
+        })
+        mocks.getBulkWorkflowSummary.mockResolvedValue({
+            task_id: 'task-1',
+            workflows: [{ ...repairWorkflow, candidate_count: null, summary: {} }],
+        })
+        mocks.previewBulkWorkflow.mockResolvedValue({
+            task_id: 'task-1',
+            workflow: repairWorkflow,
+            preview_token: 'preview-repair',
+            selectable_group_ids: ['CVE-SYNC-1', 'CVE-SYNC-2', 'CVE-CONFLICT'],
+            topics: [
+                { id: 'sync_findings', label: 'Synchronize', groups: 2 },
+                { id: 'combine_conflict', label: 'Combine conflicts', groups: 1 },
+            ],
+            items: [
+                item('CVE-SYNC-1', 'sync_findings', false),
+                item('CVE-SYNC-2', 'sync_findings', false),
+                item('CVE-CONFLICT', 'combine_conflict', true),
+            ],
+            summary: { groups: 3 },
+        })
+        mocks.applyBulkWorkflow.mockResolvedValue({
+            task_id: 'task-1', workflow: repairWorkflow, summary: { succeeded: 1 }, results: [],
+        })
+        const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+        await wrapper.setProps({ show: true })
+        await flushPromises()
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+        await flushPromises()
+
+        const button = (id: string) => wrapper.get(`[data-testid="bulk-workflow-select-${id}"]`)
+        expect(button('sync_findings').text()).toContain('Synchronize · 2/2')
+        expect(button('combine_conflict').text()).toContain('Combine conflicts · 0/1')
+        expect(button('review-first').text()).toContain('Needs review · 0/1')
+        expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-CONFLICT"]').text()).toContain('Review first')
+        expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-SYNC-1"]').text()).toContain('Ready')
+
+        await button('review-first').trigger('click')
+        expect(button('review-first').text()).toContain('1/1')
+        expect(button('combine_conflict').text()).toContain('1/1')
+        await button('sync_findings').trigger('click')
+        expect(button('sync_findings').text()).toContain('0/2')
+
+        await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+        await flushPromises()
+        expect(mocks.applyBulkWorkflow.mock.calls[0][3]).toEqual(['CVE-CONFLICT'])
+    })
+
     it('reuses a prepared preview when returning to a workflow', async () => {
-        const secondWorkflow = { ...workflow, id: 'assessment-restore', label: 'Restore CVSS' }
+        const secondWorkflow = { ...workflow, id: 'automatic-assessments', label: 'Restore CVSS' }
         mocks.getBulkWorkflowSummary.mockResolvedValue({
             task_id: 'task-1',
             workflows: [
@@ -430,11 +458,11 @@ describe('BulkWorkflowModal', () => {
         await wrapper.setProps({ show: true })
         await flushPromises()
 
-        await wrapper.get('[data-testid="bulk-workflow-incomplete-sync"]').trigger('click')
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
         await flushPromises()
-        await wrapper.get('[data-testid="bulk-workflow-assessment-restore"]').trigger('click')
+        await wrapper.get('[data-testid="bulk-workflow-automatic-assessments"]').trigger('click')
         await flushPromises()
-        await wrapper.get('[data-testid="bulk-workflow-incomplete-sync"]').trigger('click')
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
         await flushPromises()
 
         expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(2)

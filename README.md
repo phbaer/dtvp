@@ -101,8 +101,9 @@ constraints, and CI conventions.
 3. Record team assessments, optionally using earlier team assessments,
    threat-model or code-analysis proposals. Reviewers approve global decisions
    and adjust CVSS scores.
-4. Use **Bulk Changes** for repeated updates, repairs, or team takeovers
-   scoped to mapped owner components; use archives to export and restore project data.
+4. Use **Bulk Changes** to apply automatic assessments or run the combined
+   repair (synchronization, former-team cleanup, CVSS restore, rescoring);
+   use archives to export and restore project data.
 
 | Lifecycle | Meaning |
 | :--- | :--- |
