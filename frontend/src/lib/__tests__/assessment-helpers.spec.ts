@@ -81,6 +81,28 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
         });
 
+        it.each([
+            '--- [Team: General] [State: NOT_AFFECTED] ---',
+            '--- [Team: General] [State: NOT_AFFECTED] ---\n--- [Team: team-a] [State: NOT_AFFECTED] ---',
+            'Legacy analyst assessment',
+            '',
+        ])('should stay INCOMPLETE while a version has no assessment (%j)', (details) => {
+            const assessedVersions = ['b', 'c', 'd'].map(version => ({
+                project_version: version,
+                components: [{ analysis_state: 'NOT_AFFECTED', analysis_details: details }],
+            }));
+            const group: any = {
+                id: 'CVE-MISSING-VERSION',
+                tags: ['team-a'],
+                affected_versions: [
+                    { project_version: 'a', components: [{ analysis_state: 'NOT_SET', analysis_details: '' }] },
+                    ...assessedVersions,
+                ],
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
+        });
+
         it('should treat an approved General assessment as terminal', () => {
             const group: any = {
                 id: 'CVE-GLOBAL-BEFORE-TEAMS',

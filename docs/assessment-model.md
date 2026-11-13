@@ -19,7 +19,10 @@ aggregate state follows these rules:
   the worst team state using the priority in `dtvp/logic.py`.
 - A reviewer-approved, non-pending General assessment is terminal and makes
   the vulnerability `ASSESSED`, even if team-specific blocks were not all
-  recorded before approval. Without an approved General result, the
+  recorded before approval. It must still cover every finding instance: while
+  any instance (for example another project version) has no analysis state,
+  the vulnerability stays `INCOMPLETE`, as do partially applied legacy
+  assessments. Without an approved General result, the
   `ASSESSED` lifecycle requires a non-`NOT_SET` assessment block for every
   normalized team tag and consistent coverage across all finding instances;
   a General block is not required. Cached summaries from the previous
