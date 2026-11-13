@@ -27,9 +27,14 @@ export default defineConfig({
             use: { ...devices['Desktop Safari'] },
         },
     ],
+    // CI serves a production build: the dev server's memory grows with every
+    // module it transforms and was OOM-killed on the runner mid-suite.
     webServer: {
-        command: 'npm run dev',
+        command: process.env.CI
+            ? 'npm run build && npm run preview -- --port 5173 --strictPort'
+            : 'npm run dev',
         url: 'http://localhost:5173',
-        reuseExistingServer: true,
+        reuseExistingServer: !process.env.CI,
+        timeout: 180000,
     },
 });

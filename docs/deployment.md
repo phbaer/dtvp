@@ -111,6 +111,16 @@ DTVP's packaged version before the container is published. The workflow
 publishes version tags and `latest` for the `dtvp` container package only.
 External code-analysis services have their own releases and dependency state.
 
+The pipeline builds the image with Buildah inside the job container, so the
+runner needs neither a mounted Docker socket nor privileged job containers.
+Buildah runs build steps in a user namespace, which Docker's default seccomp
+profile blocks: start job containers with `--security-opt seccomp=unconfined`
+(for Forgejo Runner, `container.options` in its configuration), and also
+`--security-opt apparmor=unconfined` on hosts where AppArmor restricts
+unprivileged user namespaces. The job checks this up front and fails with a
+pointer to this section. It uses the `vfs` storage driver, chroot isolation,
+and host networking, and builds without a layer cache.
+
 Archive imports require read, BOM upload, and vulnerability-analysis update
 permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
 are controlled by the [archive variables](configuration.md#project-archives). The optional
