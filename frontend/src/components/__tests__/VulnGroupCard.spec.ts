@@ -994,6 +994,37 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
     }
 
+    it('keeps the rescored score when switching between assessment tabs', async () => {
+        const rescoredVector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N'
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    tags: ['Security'],
+                    cvss_score: 9.8,
+                    rescored_cvss: null,
+                    rescored_vector: rescoredVector,
+                },
+            },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) }, stubs: { teleport: true } },
+        })
+        await openReviewTab(wrapper)
+        const vm = wrapper.vm as any
+        expect(vm.pendingScore).toBe(0)
+        expect(vm.formTouched).toBe(false)
+
+        vm.selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
+        expect(vm.pendingVector).toBe(rescoredVector)
+        expect(vm.pendingScore).toBe(0)
+
+        vm.selectedTeam = ''
+        await wrapper.vm.$nextTick()
+        expect(vm.pendingScore).toBe(0)
+        expect(vm.formTouched).toBe(false)
+        wrapper.unmount()
+    })
+
     it('tracks SSVC-only edits and sends an explicit global selection', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: { ...mockGroup, tags: ['Security'] } },

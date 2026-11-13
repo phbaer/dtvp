@@ -1438,8 +1438,14 @@ const updateFormFromGroup = (force = true) => {
 
     isInternalUpdate.value = true
     try {
-        pendingScore.value = props.group.rescored_cvss ?? props.group.cvss_score ?? props.group.cvss ?? null
-        pendingVector.value = props.group.rescored_vector || props.group.cvss_vector || ''
+        // A rescored vector can be stored without its score. Derive it here:
+        // the vector watcher only runs when the vector changes, so it does
+        // not recover the score when this form is rebuilt for another tab.
+        const storedRescoredVector = props.group.rescored_vector || ''
+        pendingScore.value = props.group.rescored_cvss
+            ?? (storedRescoredVector ? calculateScoreFromVector(storedRescoredVector) : null)
+            ?? props.group.cvss_score ?? props.group.cvss ?? null
+        pendingVector.value = storedRescoredVector || props.group.cvss_vector || ''
         // Keep activeVersion in sync with the actual vector version
         const pv = pendingVector.value
         if (pv.startsWith('CVSS:4.0')) activeVersion.value = '4.0'
