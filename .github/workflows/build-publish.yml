@@ -118,7 +118,7 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: node
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
     steps:
       - uses: actions/checkout@v7
       - name: Set up Node.js LTS
