@@ -13,6 +13,8 @@ and applies consistent decisions across releases.
 - Code-analysis proposals use Agentyzer's compact `assessment.details`, with the
   human review notice first. Detailed rationale stays in the saved run payload;
   older responses retain the legacy formatter.
+- Analyzer results are applied only when Agentyzer marks them eligible; see
+  [Analysis integrations](docs/analysis-integrations.md#analyzer-result-validity).
 - Mock services for local development and testing.
 
 [Quick start](#quick-start) · [Deployment](#docker-deployment) ·
@@ -171,7 +173,6 @@ Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
 | :--- | :--- |
 | `dtvp/` | Backend routes, domain logic, integrations, and migrations |
 | `frontend/` | Vue pages, components, API client, and browser tests |
-| `agentyzer/` | Legacy service checkout; independent of DTVP's Python environment |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `tests/` | Backend tests |
 | `data/` | Local mappings, rules, caches, and archives |

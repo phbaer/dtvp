@@ -12,7 +12,7 @@ import {
 } from '../lib/api'
 import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisBenchmarkComparison, CodeAnalysisBenchmarkFinding, CodeAnalysisComponentResult, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
-import { codeAnalysisAssessmentState, isCodeAnalysisResultWorse, prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
+import { isCodeAnalysisApplicable, codeAnalysisAssessmentState, isCodeAnalysisResultWorse, prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
 import type { CodeAnalysisComponentRun } from '../lib/codeAnalysisResult'
 import { getRuntimeConfig } from '../lib/env'
 import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
@@ -170,20 +170,14 @@ const hasExistingAssessment = computed(() => {
 })
 
 const latestPersistedResult = computed(() => persistedResults.value[0] || null)
-const latestReusableResult = computed(() => persistedResults.value.find(record => (
-    record.source !== 'benchmark'
-    && (!record.status || record.status === 'completed')
-)) || null)
+const latestReusableResult = computed(() => persistedResults.value.find(isReusableRecord) || null)
 const hasReusableAnalysis = computed(() => Boolean(
-    latestReusableResult.value || completedQueueItems.value.length > 0,
+    latestReusableResult.value || transientCompletedRecords.value.some(isReusableRecord),
 ))
 const effectiveAssessmentStatus = computed<AutomaticAssessmentStatus | null>(() => {
     if (!teamScopeKey.value) return props.assessmentStatus || null
     if (!historyLoaded.value) return null
-    const reusableRecords = persistedResults.value.filter(record => (
-        record.source !== 'benchmark'
-        && (!record.status || record.status === 'completed')
-    ))
+    const reusableRecords = persistedResults.value.filter(isReusableRecord)
     if (reusableRecords.length === 0) return null
 
     const coveredComponents = new Set(
@@ -309,6 +303,7 @@ const historyRecordCount = computed(() => persistedResults.value.filter(record =
 const isReusableRecord = (record: CodeAnalysisResultRecord) => (
     record.source !== 'benchmark'
     && (!record.status || record.status === 'completed')
+    && (record.result ? isCodeAnalysisApplicable(record.result) : record.summary?.application_eligible === true)
 )
 
 const toggleComponentHistory = (component: string) => {
@@ -394,7 +389,7 @@ const draftTaggedComponents = computed(() =>
 )
 
 const assessmentDraftPreview = computed(() => {
-    if (!result.value) return null
+    if (!result.value || !isCodeAnalysisApplicable(result.value)) return null
     const prepared = prepareCodeAnalysisResult(
         result.value,
         draftPreviewComponents.value,
@@ -759,6 +754,8 @@ function mergeResults(results: { component: string; response: CodeAnalysisAssess
         : ''
     worstAssessment = {
         ...worstAssessment,
+        application_eligible: results.every(({ response }) => isCodeAnalysisApplicable(response)),
+        rescoring_eligible: results.every(({ response }) => response.assessment.rescoring_eligible === true),
         ...(vulnerabilitySummary ? {
             executive_summary: {
                 vulnerability: vulnerabilitySummary,
@@ -963,6 +960,10 @@ const loadPersistedResults = async (options: LoadPersistedResultsOptions = {}) =
 }
 
 const applyResult = () => {
+    if (!isCodeAnalysisApplicable(result.value)) {
+        error.value = "Analyzer result is unverified or ineligible; rerun analysis before applying it."
+        return
+    }
     if (result.value) {
         const persistedTeam = String(selectedPersistedResult.value?.context_summary?.target_team || '').trim()
         const mappedTeam = analyzedComponents.value
@@ -1042,7 +1043,7 @@ const applyAllCandidates = computed(() => {
     const candidates: { component: string, team: string, record: CodeAnalysisResultRecord }[] = []
 
     const eligibleRecords = [...persistedResults.value, ...transientCompletedRecords.value]
-        .filter(record => record.source !== 'benchmark' && (!record.status || record.status === 'completed'))
+        .filter(isReusableRecord)
         .sort((left, right) => {
             const leftTime = Date.parse(left.finished_at || left.recorded_at || left.submitted_at || '') || 0
             const rightTime = Date.parse(right.finished_at || right.recorded_at || right.submitted_at || '') || 0
@@ -1217,6 +1218,9 @@ const applyAllResults = async () => {
             return
         }
 
+        if (!runs.every(run => isCodeAnalysisApplicable(run.result))) {
+            throw new Error("Some analyzer results are unverified or ineligible; rerun analysis.")
+        }
         emit('apply-all-results', runs)
     } catch (err: any) {
         error.value = err?.response?.data?.detail || err?.message || 'Failed to load the saved analysis results.'

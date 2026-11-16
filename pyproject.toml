@@ -39,7 +39,6 @@ addopts = "--import-mode=importlib --cov=. --cov-report=term-missing --cov-repor
 [tool.coverage.run]
 omit = [
     "tests/*",
-    "agentyzer/*",
     "reproduce_issue.py",
     "debug_finding.py",
 ]
