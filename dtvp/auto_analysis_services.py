@@ -740,6 +740,7 @@ def _has_fresh_persisted_result(
                 vuln_id=vuln_id,
                 component_name=target.component_name,
                 context_fingerprint=context_fingerprint,
+                applicable_only=True,
             )
         )
     except Exception:

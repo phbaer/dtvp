@@ -3,7 +3,10 @@ import sqlite3
 from contextlib import closing
 from types import SimpleNamespace
 
+import pytest
+
 import dtvp.code_analysis_result_services as result_services
+from dtvp.code_analysis_assessment_services import record_application_eligible
 from dtvp.code_analysis_result_services import CodeAnalysisResultStore
 
 
@@ -101,6 +104,8 @@ def test_code_analysis_result_store_lists_assessments_from_dedicated_metadata(
         item,
         {
             "assessment": {
+                "application_eligible": True,
+                "rescoring_eligible": True,
                 "affected": True,
                 "verdict": "Affected",
                 "analysis": "Reachable vulnerable call",
@@ -144,6 +149,8 @@ def test_code_analysis_result_store_lists_assessments_from_dedicated_metadata(
     assert record["component_names"] == ["owned-api"]
     assert record["source_kind"] == "auto"
     assert record["assessment"] == {
+        "application_eligible": True,
+        "rescoring_eligible": True,
         "affected": True,
         "analysis": "Reachable vulnerable call",
         "confidence": "high",
@@ -263,6 +270,8 @@ def test_code_analysis_result_store_backfills_rescore_metadata_version(tmp_path)
         ),
         {
             "assessment": {
+                "application_eligible": True,
+                "rescoring_eligible": True,
                 "affected": True,
                 "verdict": "Affected",
                 "adjusted_cvss": {
@@ -367,6 +376,8 @@ def test_assessment_metadata_reads_are_cached_and_invalidated(tmp_path, monkeypa
             ),
             {
                 "assessment": {
+                    "application_eligible": True,
+                    "rescoring_eligible": True,
                     "affected": True,
                     "verdict": "Affected",
                 }
@@ -425,3 +436,101 @@ def test_code_analysis_result_store_summarizes_legacy_results_for_compact_lists(
         "Only stored in the legacy result payload"
     )
     assert "result" not in records[0]
+
+
+def test_unverified_history_remains_readable_but_not_applicable(tmp_path):
+    store = CodeAnalysisResultStore(path_provider=lambda: str(tmp_path / "results.sqlite"))
+    store.record_queue_item_result(
+        SimpleNamespace(
+            queue_id="legacy", project_name="ExampleApp", vuln_id="CVE-test",
+            component_name="api", source="automatic", result=None,
+        ),
+        {"assessment": {"verdict": "Not Affected", "adjusted_cvss": {"adjusted_score": 0.0}}},
+    )
+    metadata = store.list_assessment_metadata()
+    assert metadata["usable_assessment_results"] == 0
+    history = store.list_result_metadata()
+    assert history[0]["summary"]["verdict"] == "Not Affected"
+    assert store.get("legacy")["result"]["assessment"]["adjusted_cvss"]["adjusted_score"] == 0.0
+
+
+@pytest.mark.parametrize("invalid_kind", ["legacy", "failed", "component", "benchmark"])
+def test_ineligible_results_remain_history_but_cannot_be_reused(tmp_path, invalid_kind):
+    store = CodeAnalysisResultStore(path_provider=lambda: str(tmp_path / "results.sqlite"))
+    result = {"assessment": {
+        "application_eligible": True,
+        "rescoring_eligible": True,
+        "verdict": "Not Affected",
+    }}
+    if invalid_kind == "legacy":
+        result["assessment"].pop("application_eligible")
+    if invalid_kind == "component":
+        result["component_results"] = [{"component": "api", "assessment": {"verdict": "Affected"}}]
+    status = "failed" if invalid_kind == "failed" else "completed"
+    store.record_queue_item_result(
+        SimpleNamespace(
+            queue_id="invalid", project_name="ExampleApp", vuln_id="CVE-test",
+            component_name="api", result=None, status=status,
+            source="benchmark" if invalid_kind == "benchmark" else "automatic",
+        ),
+        result,
+    )
+
+    assert store.get("invalid")["result"] == result
+    assert store.list_assessment_metadata()["usable_assessment_results"] == 0
+    history = store.list_result_metadata()[0]
+    assert history["status"] == status
+    assert history["summary"]["application_eligible"] is False
+    assert history["summary"]["rescoring_eligible"] is False
+    assert not record_application_eligible(history)
+    assert store.find_latest(applicable_only=True) is None
+    assert store.find_latest()["analysis_run_id"] == "invalid"
+
+
+def test_summary_cannot_authorize_unverified_full_result():
+    record = {
+        "summary": {"verdict": "Not Affected", "application_eligible": True},
+        "result": {"assessment": {"verdict": "Not Affected"}},
+    }
+    assert not record_application_eligible(record)
+
+
+def test_find_latest_applicable_keeps_valid_result_reusable(tmp_path):
+    store = CodeAnalysisResultStore(path_provider=lambda: str(tmp_path / "results.sqlite"))
+    store.record_queue_item_result(
+        SimpleNamespace(queue_id="valid", project_name="ExampleApp", result=None),
+        {"assessment": {"application_eligible": True, "verdict": "Affected"}},
+    )
+    record = store.find_latest(applicable_only=True)
+    assert record["analysis_run_id"] == "valid"
+    assert "result" not in record
+
+
+def test_combined_summary_requires_every_component_to_be_eligible():
+    summary = result_services.summarize_code_analysis_result({
+        "assessment": {"application_eligible": True, "rescoring_eligible": True},
+        "component_results": [{"assessment": {"application_eligible": False}}],
+    })
+    assert summary["application_eligible"] is False
+    assert summary["rescoring_eligible"] is False
+
+
+def test_metadata_upgrade_removes_unverified_assessments(tmp_path):
+    database_path = tmp_path / "results.sqlite"
+    store = CodeAnalysisResultStore(path_provider=lambda: str(database_path))
+    store.record_queue_item_result(
+        SimpleNamespace(queue_id="legacy", project_name="ExampleApp", result=None),
+        {"assessment": {"verdict": "Not Affected"}},
+    )
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            connection.execute(
+                "UPDATE code_analysis_assessment_metadata "
+                "SET metadata_version = 5, has_assessment = 1, assessment_data_json = ?",
+                (json.dumps({"verdict": "Not Affected", "application_eligible": True}),),
+            )
+
+    reloaded = CodeAnalysisResultStore(path_provider=lambda: str(database_path))
+    assert reloaded.list_assessment_metadata()["usable_assessment_results"] == 0
+    assert reloaded.list_result_metadata()[0]["summary"]["application_eligible"] is False
+    assert reloaded.get("legacy") is not None

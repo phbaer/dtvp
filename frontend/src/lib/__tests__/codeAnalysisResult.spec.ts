@@ -6,6 +6,8 @@ import type { CodeAnalysisAssessResponse } from '../api'
 describe('codeAnalysisResult', () => {
     const createResponse = (): CodeAnalysisAssessResponse => ({
         assessment: {
+            application_eligible: true,
+            rescoring_eligible: true,
             affected: false,
             verdict: 'not affected',
             confidence: 'high',
@@ -45,6 +47,27 @@ describe('codeAnalysisResult', () => {
                 evidence: ['No call chain reaches the vulnerable method'],
             },
         ],
+    })
+
+    it.each([undefined, false])('rejects unverified or invalid results (%s)', eligible => {
+        const response = createResponse()
+        response.assessment.application_eligible = eligible
+        expect(() => prepareCodeAnalysisResult(response, ['api'], [{ name: 'api', tag: 'API' }], [])).toThrow(/rerun analysis/)
+        expect(() => prepareCodeAnalysisResults([{ component: 'api', result: response }], [], [])).toThrow(/rerun analysis/)
+    })
+
+    it('does not copy an adjustment without rescoring eligibility', () => {
+        const response = createResponse()
+        response.assessment.rescoring_eligible = false
+        const draft = prepareCodeAnalysisResult(response, ['api'], [], [])
+        expect(draft.adjustedScore).toBeUndefined()
+        expect(draft.adjustedVector).toBeUndefined()
+    })
+
+    it('rejects a combined result containing an invalid component', () => {
+        const response = createResponse()
+        response.component_results = [{ component: 'api', assessment: { ...response.assessment, application_eligible: false } }]
+        expect(() => prepareCodeAnalysisResult(response, ['api'], [], [])).toThrow(/rerun analysis/)
     })
 
     it('uses the executive summary as a compact assessment record', () => {

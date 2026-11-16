@@ -1625,6 +1625,8 @@ export interface CodeAnalysisVersionAnalysis extends Record<string, any> {
 }
 
 export interface CodeAnalysisAssessment {
+    application_eligible?: boolean;
+    rescoring_eligible?: boolean;
     affected: boolean;
     verdict: string;
     confidence: string;
@@ -1714,6 +1716,8 @@ export interface CodeAnalysisResultSummary {
     cvss_vector?: string | null;
     original_cvss_score?: number | null;
     original_cvss_vector?: string | null;
+    application_eligible?: boolean;
+    rescoring_eligible?: boolean;
     adjusted_cvss_score?: number | null;
     adjusted_cvss_vector?: string | null;
     cvss_summary?: string;
