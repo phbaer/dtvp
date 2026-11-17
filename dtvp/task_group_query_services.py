@@ -297,6 +297,10 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "technical_state": str(metadata.get("technical_state") or "NOT_SET"),
         "dependency_relationship": _dependency_relationship_for_group(group),
         "cvss_version_mismatch": bool(metadata.get("cvss_version_mismatch")),
+        "not_rescored": (
+            group.get("rescored_cvss") is None
+            and not str(group.get("rescored_vector") or "").strip()
+        ),
         "attributed_on_ms_values": _attributed_on_ms_values(group),
         "base_score": _score_value(base_score),
         "rescored_score": _score_value(rescored_score),
@@ -479,6 +483,7 @@ def _matches_task_group_fields(
     dependency: set[str],
     versions: set[str],
     cvss_mismatch: bool,
+    not_rescored: bool = False,
     attributed_before_days: int | None,
     attribution_mode: str,
     tmrescore: set[str],
@@ -538,6 +543,8 @@ def _matches_task_group_fields(
         if not _selected_group_teams({"tags": version_tags}, scope, team_aliases or {}):
             return False
     if cvss_mismatch and not fields["cvss_version_mismatch"]:
+        return False
+    if not_rescored and not fields["not_rescored"]:
         return False
     if not _matches_attribution_age(
         fields,
@@ -795,6 +802,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     assignees: dict[str, int] = {}
     components: dict[str, int] = {}
     cvss_version_mismatch = 0
+    not_rescored = 0
     assessment_restore_counts = _empty_assessment_restore_counts()
     inconsistency_reason_counts = _empty_inconsistency_reason_counts()
 
@@ -822,6 +830,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             dependency_counts[relationship_key] += 1
         if fields["cvss_version_mismatch"]:
             cvss_version_mismatch += 1
+        if fields["not_rescored"]:
+            not_rescored += 1
         if fields["assessment_restore_count"] > 0:
             assessment_restore_counts["WITH_RESTORE"] += 1
             status = str(fields.get("assessment_restore_status") or "").upper()
@@ -859,6 +869,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "analysis": analysis_counts,
         "dependency_relationship": dependency_counts,
         "cvss_version_mismatch": cvss_version_mismatch,
+        "not_rescored": not_rescored,
         "ids": ids,
         "versions": versions,
         "tags": tags,
@@ -1190,6 +1201,7 @@ def _query_cache_key(
     dependency: list[str],
     versions: list[str],
     cvss_mismatch: bool,
+    not_rescored: bool = False,
     attributed_before_days: int | None,
     attribution_mode: str,
     tmrescore: list[str],
@@ -1239,6 +1251,7 @@ def _query_cache_key(
         _normalized_upper_tuple(dependency),
         _normalized_lower_tuple(versions),
         bool(cvss_mismatch),
+        bool(not_rescored),
         attributed_before_days,
         attribution_mode,
         attribution_day_bucket,
@@ -1434,6 +1447,7 @@ def query_task_groups(
     dependency: list[str],
     versions: list[str],
     cvss_mismatch: bool,
+    not_rescored: bool = False,
     attributed_before_days: int | None,
     attribution_mode: str,
     tmrescore: list[str],
@@ -1487,6 +1501,7 @@ def query_task_groups(
         dependency=dependency,
         versions=versions,
         cvss_mismatch=cvss_mismatch,
+        not_rescored=not_rescored,
         attributed_before_days=attributed_before_days,
         attribution_mode=normalized_mode,
         tmrescore=tmrescore,
@@ -1583,6 +1598,7 @@ def query_task_groups(
                 or dependency_set
                 or version_set
                 or cvss_mismatch
+                or not_rescored
                 or attributed_before_days is not None
                 or tmrescore_set
                 or automatic_assessment_set
@@ -1607,6 +1623,7 @@ def query_task_groups(
                 dependency=dependency_set,
                 versions=version_set,
                 cvss_mismatch=cvss_mismatch,
+                not_rescored=not_rescored,
                 attributed_before_days=attributed_before_days,
                 attribution_mode=normalized_mode,
                 tmrescore=tmrescore_set,
@@ -1726,6 +1743,7 @@ def query_task_groups(
                     "automatic_assessment_outcome": ("automatic_assessment_outcome", set()),
                     "automatic_assessment_rescore": ("automatic_assessment_rescore", set()),
                     "cvss_version_mismatch": ("cvss_mismatch", False),
+                    "not_rescored": ("not_rescored", False),
                     "attribution_age": ("attributed_before_days", None),
                     "evidence": (None, None),
                 }

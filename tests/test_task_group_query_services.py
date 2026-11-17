@@ -783,3 +783,29 @@ def test_facet_counts_exclude_own_filter_and_preserve_other_filters():
     assert facets["lifecycle"]["INCOMPLETE"] == 0
     assert facets["team_assessment"] == {"MISSING": 0, "DOCUMENTED": 1}
     assert facets["dependency_relationship"]["direct"] == 0
+
+
+def test_not_rescored_filter_matches_groups_without_rescored_score_or_vector():
+    groups = [_group(index) for index in range(4)]
+    groups[1]["rescored_cvss"] = 0.0
+    groups[2]["rescored_vector"] = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MAV:L"
+    groups[3]["rescored_cvss"] = None
+    groups[3]["rescored_vector"] = "  "
+    groups[3]["list_metadata"]["lifecycle"] = "ASSESSED"
+    index = query_services.build_task_group_query_index(groups)
+
+    unfiltered = _query(index)
+    assert unfiltered["counts"]["all"]["not_rescored"] == 2
+
+    result = _query(index, not_rescored=True)
+    assert [item["id"] for item in result["items"]] == [
+        "CVE-2026-0000",
+        "CVE-2026-0003",
+    ]
+    assert result["counts"]["filtered"]["not_rescored"] == 2
+
+    combined = _query(index, not_rescored=True, lifecycle=["ASSESSED"])
+    assert [item["id"] for item in combined["items"]] == ["CVE-2026-0003"]
+    # The facet count ignores its own restriction but keeps the lifecycle one.
+    assert combined["counts"]["facets"]["not_rescored"] == 1
+    assert _query(index, lifecycle=["OPEN"])["counts"]["filtered"]["not_rescored"] == 1

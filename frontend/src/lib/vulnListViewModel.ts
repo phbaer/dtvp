@@ -57,6 +57,7 @@ export interface VulnListViewFilters {
     inconsistencyReasonFilter?: InconsistencyReason[]
     versionFilterList: readonly string[]
     cvssVersionMismatchOnly: boolean
+    notRescoredOnly?: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
     lifecycleFilters: string[]
@@ -160,6 +161,7 @@ export const deriveVulnListResultCounts = (
         analysis: createAnalysisCounts(),
         dependency_relationship: createRelationshipCounts(),
         cvss_version_mismatch: 0,
+        not_rescored: 0,
         ids: {},
         versions: {},
         tags: {},
@@ -195,6 +197,7 @@ export const deriveVulnListResultCounts = (
         incrementResultCount(counts.ssvc!, item.group.ssvc_summary?.status || 'UNASSESSED')
         incrementUniqueResultCounts(counts.evidence!, evidenceSources(item.group))
         if (item.cvssVersionMismatch) counts.cvss_version_mismatch++
+        if (item.notRescored) counts.not_rescored = (counts.not_rescored || 0) + 1
 
         incrementUniqueResultCounts(counts.ids!, [item.id, ...(item.group.aliases || [])])
         incrementUniqueResultCounts(counts.versions, item.versions)
@@ -550,6 +553,7 @@ export const deriveVulnListFilterModel = (
         inconsistencyReasonFilter: filters.inconsistencyReasonFilter,
         versionFilterList: filters.versionFilterList,
         cvssVersionMismatchOnly: filters.cvssVersionMismatchOnly,
+        notRescoredOnly: filters.notRescoredOnly,
         attributionAgeDays: filters.attributionAgeDays,
         attributionAgeMode: filters.attributionAgeMode,
     })
@@ -663,12 +667,14 @@ export const deriveVulnListFacetCounts = (
         ['automatic_assessment_outcome', { automaticAssessmentOutcomeFilter: AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS.map(option => option.value) }],
         ['automatic_assessment_rescore', { automaticAssessmentRescoreFilter: AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS.map(option => option.value) }],
         ['cvss_version_mismatch', { cvssVersionMismatchOnly: false }],
+        ['not_rescored', { notRescoredOnly: false }],
     ]
     const parsed = typeof filters.smartSearch === 'string' ? parseVulnSearchQuery(filters.smartSearch) : filters.smartSearch
     const searchOverrides: Partial<Record<keyof TaskVulnGroupListCounts, Partial<ParsedVulnSearchQuery>>> = {
         lifecycle: { lifecycleTerms: [] }, analysis: { analysisTerms: [] },
         dependency_relationship: { dependencyTerms: [] }, tmrescore: { tmrescoreTerms: [] },
         cvss_version_mismatch: { cvssMismatchOnly: false },
+        not_rescored: { notRescoredOnly: false },
     }
     for (const [field, overrides] of facets) {
         const smartSearch = parsed ? { ...parsed, ...searchOverrides[field] } : undefined

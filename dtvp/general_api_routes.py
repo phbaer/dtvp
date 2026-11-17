@@ -133,6 +133,7 @@ class BulkWorkflowFilters(BaseModel):
     dependency: list[str] = Field(default_factory=list)
     versions: list[str] = Field(default_factory=list)
     cvss_mismatch: bool = False
+    not_rescored: bool = False
     attributed_before_days: Optional[int] = None
     attribution_mode: str = "older"
     tmrescore: list[str] = Field(default_factory=list)
@@ -919,6 +920,7 @@ def _register_task_routes(
         dependency: list[str] | None = Query(default=None),
         versions: list[str] | None = Query(default=None),
         cvss_mismatch: bool = False,
+        not_rescored: bool = False,
         attributed_before_days: int | None = Query(default=None, ge=1),
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
@@ -972,6 +974,7 @@ def _register_task_routes(
                     "dependency": split_query_values(dependency),
                     "versions": split_query_values(versions),
                     "cvss_mismatch": cvss_mismatch,
+                    "not_rescored": not_rescored,
                     "attributed_before_days": attributed_before_days,
                     "attribution_mode": attribution_mode,
                     "tmrescore": split_query_values(tmrescore),
@@ -1051,6 +1054,7 @@ def _register_task_routes(
         dependency: list[str] | None = Query(default=None),
         versions: list[str] | None = Query(default=None),
         cvss_mismatch: bool = False,
+        not_rescored: bool = False,
         attributed_before_days: int | None = Query(default=None, ge=1),
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
@@ -1099,6 +1103,7 @@ def _register_task_routes(
                     "dependency": split_query_values(dependency),
                     "versions": split_query_values(versions),
                     "cvss_mismatch": cvss_mismatch,
+                    "not_rescored": not_rescored,
                     "attributed_before_days": attributed_before_days,
                     "attribution_mode": attribution_mode,
                     "tmrescore": split_query_values(tmrescore),
@@ -1550,6 +1555,7 @@ def _filter_bulk_workflow_groups(
         dependency=filters.dependency,
         versions=filters.versions,
         cvss_mismatch=filters.cvss_mismatch,
+        not_rescored=filters.not_rescored,
         attributed_before_days=filters.attributed_before_days,
         attribution_mode=filters.attribution_mode,
         tmrescore=filters.tmrescore,

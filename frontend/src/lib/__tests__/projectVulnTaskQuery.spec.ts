@@ -67,6 +67,13 @@ describe('projectVulnTaskQuery', () => {
     it('passes original severity and SSVC through to server and bulk queries', () => {
         expect(buildTaskVulnGroupListQuery(baseInput({ originalSeverityFilters: ['CRITICAL'], ssvcFilters: ['IMMEDIATE', 'MIXED'] }))).toMatchObject({ original_severity: ['CRITICAL'], ssvc: ['IMMEDIATE', 'MIXED'] })
     })
+    it('requests only unrescored vulnerabilities from the sidebar toggle or a search token', () => {
+        expect(buildTaskVulnGroupListQuery(baseInput()).not_rescored).toBeFalsy()
+        expect(buildTaskVulnGroupListQuery(baseInput({ notRescoredOnly: true })).not_rescored).toBe(true)
+        expect(buildTaskVulnGroupListQuery(baseInput({
+            parsedSearch: parseVulnSearchQuery('has:no_rescore'),
+        })).not_rescored).toBe(true)
+    })
     it('combines sidebar filters and smart-search tokens into a backend task-window query', () => {
         const query = buildTaskVulnGroupListQuery(baseInput({
             parsedSearch: parseVulnSearchQuery('urgent lifecycle:open analysis:resolved team:platform id:CVE-2026-9999 component:spring assignee:alice version:2.0.0 dependency:direct tm:with has:cvss_mismatch'),

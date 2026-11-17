@@ -66,6 +66,7 @@ export interface VulnListItem {
     automaticAssessmentOutcome: AutomaticAssessmentOutcome | null
     automaticAssessmentRescore: AutomaticAssessmentRescoreState | null
     cvssVersionMismatch: boolean
+    notRescored?: boolean
     assessmentRestoreCount: number
     assessmentRestoreRecoverableCount: number
     assessmentRestoreStatus: string
@@ -110,6 +111,7 @@ export interface VulnListFilterInput {
     inconsistencyReasonFilter?: FilterSelection<InconsistencyReason>
     versionFilterList?: readonly string[]
     cvssVersionMismatchOnly?: boolean
+    notRescoredOnly?: boolean
     attributionAgeDays?: number | string | null
     attributionAgeMode?: 'older' | 'younger'
 }
@@ -141,6 +143,7 @@ export interface CompiledVulnListFilters {
     versionFilterSet: Set<string>
     versionSearchTerms: readonly string[]
     cvssVersionMismatchOnly: boolean
+    notRescoredOnly?: boolean
     attributionAgeActive: boolean
     attributionAgeCutoffMs: number | null
     attributionAgeMode: 'older' | 'younger'
@@ -304,6 +307,7 @@ export interface ParsedVulnSearchQuery {
     dependencyTerms: DependencyRelationship[]
     tmrescoreTerms: TMRescoreProposalFilter[]
     cvssMismatchOnly: boolean
+    notRescoredOnly?: boolean
 }
 
 const emptyParsedSearch = (raw = ''): ParsedVulnSearchQuery => ({
@@ -320,6 +324,7 @@ const emptyParsedSearch = (raw = ''): ParsedVulnSearchQuery => ({
     dependencyTerms: [],
     tmrescoreTerms: [],
     cvssMismatchOnly: false,
+    notRescoredOnly: false,
 })
 
 const tokenizeSearchQuery = (query: string): string[] => {
@@ -502,6 +507,9 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 } else if (['CVSS_MISMATCH', 'MISMATCH'].includes(normalized)) {
                     parsed.cvssMismatchOnly = true
                     addChip('cvss', 'Has: CVSS mismatch', 'mismatch')
+                } else if (['NO_RESCORE', 'NO_RESCORING', 'NOT_RESCORED'].includes(normalized)) {
+                    parsed.notRescoredOnly = true
+                    addChip('cvss', 'Has: no rescore', 'not-rescored')
                 }
                 break
             }
@@ -509,6 +517,9 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 if (['mismatch', 'version-mismatch', 'version_mismatch'].includes(value)) {
                     parsed.cvssMismatchOnly = true
                     addChip('cvss', 'CVSS: mismatch', 'mismatch')
+                } else if (['not-rescored', 'not_rescored', 'unrescored'].includes(value)) {
+                    parsed.notRescoredOnly = true
+                    addChip('cvss', 'CVSS: not rescored', 'not-rescored')
                 }
                 break
             default:
@@ -800,6 +811,7 @@ export function buildVulnListItem(
         cvssVersionMismatch: typeof metadata?.cvss_version_mismatch === 'boolean'
             ? metadata.cvss_version_mismatch
             : hasCvssVersionMismatch(group),
+        notRescored: group.rescored_cvss == null && !String(group.rescored_vector || '').trim(),
         assessmentRestoreCount,
         assessmentRestoreRecoverableCount,
         assessmentRestoreStatus,
@@ -922,6 +934,7 @@ export function compileVulnListFilters(
         versionFilterSet: new Set((filters.versionFilterList || []).map(lower)),
         versionSearchTerms: parsedSearch?.versionTerms || [],
         cvssVersionMismatchOnly: !!filters.cvssVersionMismatchOnly,
+        notRescoredOnly: !!filters.notRescoredOnly,
         attributionAgeActive: filters.attributionAgeDays != null,
         attributionAgeCutoffMs: normalizedAgeDays == null ? null : nowMs - normalizedAgeDays * DAY_MS,
         attributionAgeMode: filters.attributionAgeMode || 'older',
@@ -1049,6 +1062,9 @@ export function matchesSmartSearch(
     if (parsed.cvssMismatchOnly && !item.cvssVersionMismatch) {
         return false
     }
+    if (parsed.notRescoredOnly && !item.notRescored) {
+        return false
+    }
 
     return true
 }
@@ -1126,6 +1142,10 @@ export function matchesCompiledListFilters(
     }
 
     if (filters.cvssVersionMismatchOnly && !item.cvssVersionMismatch) {
+        return false
+    }
+
+    if (filters.notRescoredOnly && !item.notRescored) {
         return false
     }
 
