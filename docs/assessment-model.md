@@ -95,7 +95,7 @@ not a numerical severity or an automatic analysis-state transition. The initial
 model is CERT/CC **Deployer Patch Application Priority 1.0.0**, with Defer,
 Scheduled, Out-of-Cycle, and Immediate outcomes (not CISA's distinct tree).
 
-Reviewers use the embedded SSVC calculator beside CVSS in the global
+Reviewers use the embedded SSVC calculator below the CVSS block in the global
 assessment's Decision & rationale section. Questions, definitions, and the
 live result come from the bundled model; links open the official documentation
 and calculator. Save through the existing assessment action; clear explicitly
