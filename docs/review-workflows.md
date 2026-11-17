@@ -13,6 +13,7 @@ Paths and commands refer to the repository root unless stated otherwise.
 The project view searches and filters grouped vulnerabilities by lifecycle,
 inconsistency reason, analysis state, dependency relationship, component,
 version, team, assignee, attribution age, tmrescore proposal, CVSS mismatch,
+missing rescoring,
 code-assessment availability, automatic-analysis outcome, and proposed
 automatic CVSS severity. Outcome choices (`Affected`, `Probably affected`,
 `Not affected`, and `Uncertain`) and rescore choices (`Critical` through
@@ -21,6 +22,13 @@ AND semantics across facets. They are server-side task-window filters, so URL
 state, counts, pagination, and Bulk Changes all operate on the same candidate
 set. The Open selection matches the displayed `OPEN` lifecycle category, and
 vulnerability-ID searches are combined with all active filters.
+
+The **Not rescored** toggle under **More filters** lists vulnerabilities that
+have neither a rescored CVSS score nor a rescored vector on any finding. It
+ignores lifecycle, so combine it with an overall status such as Assessed to
+find decisions that still lack a rescoring. The same filter is available as the
+`has:no_rescore` or `cvss:not-rescored` search token and the `not_rescored=true`
+URL and API parameter, and it also narrows Bulk Changes candidates.
 
 The Filters sidebar provides a searchable checkbox list of canonical **Teams**
 from the complete task. Multiple selections match vulnerabilities owned by any

@@ -505,6 +505,7 @@ const {
     dependencyFilter,
     tmrescoreProposalFilter,
     cvssVersionMismatchOnly,
+    notRescoredOnly,
     attributionAgeDays,
     attributionAgeMode,
     lifecycleFilters,
@@ -611,6 +612,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     dependencyFilters: selectedDependencyFilters.value,
     versionFilters: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+    notRescoredOnly: notRescoredOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
     tmrescoreFilters: selectedTMRescoreProposalFilters.value,
@@ -737,6 +739,7 @@ const listFilterOptions = computed(() => ({
     evidenceFilters: evidenceFilters.value,
     versionFilterList: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+    notRescoredOnly: notRescoredOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
     lifecycleFilters: lifecycleFilters.value,
@@ -1238,6 +1241,7 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     automaticAssessmentRescoreFilters: selectedAutomaticAssessmentRescoreFilters.value,
     automaticAssessmentRescoreOptions: AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+    notRescoredOnly: notRescoredOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
 }))
@@ -1293,6 +1297,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'cvss':
             cvssVersionMismatchOnly.value = false
             break
+        case 'notRescored':
+            notRescoredOnly.value = false
+            break
         case 'attributionAge':
             attributionAgeDays.value = null
             attributionAgeMode.value = 'older'
@@ -1312,6 +1319,7 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     assigneeFilter: assigneeFilter.value,
     versionFilters: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+    notRescoredOnly: notRescoredOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,

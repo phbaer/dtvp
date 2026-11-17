@@ -548,6 +548,24 @@ describe('vulnListIndex', () => {
         expect(matchesAttributionAgeFilter(recentOnlyItem, 14, 'older', nowMs)).toBe(false)
     })
 
+    it('flags and filters vulnerabilities without a rescored score or vector', () => {
+        const unrescored = buildVulnListItem(makeGroup({ rescored_cvss: null, rescored_vector: null }), {})
+        const scored = buildVulnListItem(makeGroup({ rescored_cvss: 0, rescored_vector: null }), {})
+        const vectorOnly = buildVulnListItem(makeGroup({
+            rescored_cvss: null,
+            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MAV:L',
+        }), {})
+
+        expect(unrescored.notRescored).toBe(true)
+        expect(scored.notRescored).toBe(false)
+        expect(vectorOnly.notRescored).toBe(false)
+        expect(parseVulnSearchQuery('has:no_rescore').notRescoredOnly).toBe(true)
+        expect(parseVulnSearchQuery('cvss:not-rescored').notRescoredOnly).toBe(true)
+        expect(parseVulnSearchQuery('cvss:mismatch').notRescoredOnly).toBeFalsy()
+        expect(matchesSmartSearch(unrescored, 'has:no_rescore')).toBe(true)
+        expect(matchesSmartSearch(scored, 'cvss:not-rescored')).toBe(false)
+    })
+
     it('parses broad smart search terms and typed filter tokens', () => {
         const parsed = parseVulnSearchQuery('log4j team:platform state:open dep:direct has:tmrescore cvss:mismatch')
 

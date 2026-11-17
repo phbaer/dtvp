@@ -31,6 +31,7 @@ export interface FilterState {
     inconsistencyReasonFilters?: InconsistencyReason[]
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
+    notRescoredOnly?: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
 }

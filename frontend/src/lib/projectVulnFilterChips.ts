@@ -25,6 +25,7 @@ export type ActiveFilterChipKey =
     | 'automaticAssessmentOutcome'
     | 'automaticAssessmentRescore'
     | 'cvss'
+    | 'notRescored'
     | 'attributionAge'
 
 export interface ActiveFilterChip {
@@ -65,6 +66,7 @@ export interface BuildActiveFilterChipsInput {
     automaticAssessmentRescoreFilters: readonly AutomaticAssessmentRescoreState[]
     automaticAssessmentRescoreOptions: readonly ProjectVulnFilterOption[]
     cvssVersionMismatchOnly: boolean
+    notRescoredOnly?: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
 }
@@ -82,6 +84,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     assigneeFilter: string
     versionFilters: readonly string[]
     cvssVersionMismatchOnly: boolean
+    notRescoredOnly?: boolean
     attributionAgeDays: number | null
     sortBy: string
     sortOrder: 'asc' | 'desc'
@@ -161,6 +164,7 @@ export function buildActiveFilterChips({
     automaticAssessmentRescoreFilters,
     automaticAssessmentRescoreOptions,
     cvssVersionMismatchOnly,
+    notRescoredOnly,
     attributionAgeDays,
     attributionAgeMode,
 }: BuildActiveFilterChipsInput): ActiveFilterChip[] {
@@ -214,6 +218,7 @@ export function buildActiveFilterChips({
         })
     }
     if (cvssVersionMismatchOnly) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
+    if (notRescoredOnly) chips.push({ key: 'notRescored', label: 'Not rescored' })
     if (attributionAgeDays != null) {
         const verb = attributionAgeMode === 'younger' ? 'younger' : 'older'
         chips.push({ key: 'attributionAge', label: `Attributed ${verb} than ${attributionAgeDays}d` })
@@ -234,6 +239,7 @@ export function hasCustomProjectVulnFilterState({
     assigneeFilter,
     versionFilters,
     cvssVersionMismatchOnly,
+    notRescoredOnly,
     attributionAgeDays,
     sortBy,
     sortOrder,
@@ -266,6 +272,7 @@ export function hasCustomProjectVulnFilterState({
         || !!assigneeFilter
         || versionFilters.length > 0
         || cvssVersionMismatchOnly
+        || notRescoredOnly
         || attributionAgeDays != null
         || sortBy !== 'rescored-severity'
         || sortOrder !== 'desc'
