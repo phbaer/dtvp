@@ -65,6 +65,8 @@ SEE_GLOBAL_ASSESSMENT = "See global assessment."
 FORMER_TEAM_NOTE = "Former team assessment"
 _PENDING_RE = re.compile(r"\[Status: Pending Review\]", re.I)
 _IDENTITY_KEYS = ("project_uuid", "component_uuid", "vulnerability_uuid")
+_RESCORED_RE = re.compile(r"\[Rescored:\s*([\d.]+)\]")
+_RESCORED_VECTOR_RE = re.compile(r"\[Rescored Vector:\s*[^\]]+\]")
 
 
 def _details(instance: dict[str, Any]) -> str:
@@ -371,6 +373,47 @@ def _combine_conflict(
     }
 
 
+def _differs(details: str, old: str) -> bool:
+    """Whether a rebuilt assessment changes more than its whitespace."""
+    return details.split() != old.split()
+
+
+def _rescoring_preamble(details: str) -> str:
+    """Rescoring tags stored ahead of the first block, outside any block."""
+    header = HEADER_RE.search(details)
+    lead = details[: header.start()] if header else details
+    tags = [
+        match.group(0)
+        for match in (_RESCORED_RE.search(lead), _RESCORED_VECTOR_RE.search(lead))
+        if match
+    ]
+    return " ".join(tags)
+
+
+def _with_rescoring(merged: str, instances: list[dict[str, Any]]) -> Callable[[str], str]:
+    """Keep the rescoring a rebuilt assessment would otherwise lose.
+
+    Rebuilding from blocks drops tags stored ahead of them. A finding keeps
+    its own; one without takes the group's most severe complete rescoring,
+    as a synchronized finding takes the rest of the assessment.
+    """
+    if _RESCORED_RE.search(merged) or _RESCORED_VECTOR_RE.search(merged):
+        return lambda _old: merged
+
+    def rank(preamble: str) -> tuple[bool, float]:
+        score = _RESCORED_RE.search(preamble)
+        return bool(_RESCORED_VECTOR_RE.search(preamble)), float(score.group(1)) if score else -1.0
+
+    preambles = [preamble for instance in instances if (preamble := _rescoring_preamble(_details(instance)))]
+    shared = max(preambles, key=rank, default="")
+
+    def apply(old: str) -> str:
+        preamble = _rescoring_preamble(old) or shared
+        return f"{preamble}\n\n{merged}" if preamble and merged else merged or preamble
+
+    return apply
+
+
 def _render(blocks: list[dict[str, Any]], *, preamble: str = "", pending: bool) -> str:
     parts = [preamble.strip(), *(_render_block(block) for block in blocks)]
     if pending:
@@ -419,10 +462,11 @@ def _team_stage(
             if combined is None:
                 continue
             merged, conflict = combined
+            rescored = _with_rescoring(merged, instances)
             for instance in instances:
                 old = _details(instance)
-                details = preserve_ssvc_record(merged, old)
-                if details != old or calculate_aggregated_state(details) != _state(instance):
+                details = preserve_ssvc_record(rescored(old), old)
+                if _differs(details, old) or calculate_aggregated_state(details) != _state(instance):
                     targets.append((instance, details))
             if not targets:
                 continue
@@ -438,14 +482,15 @@ def _team_stage(
                 pending=pending,
                 now_ms=now_ms,
             )
-            merged = _render(blocks, pending=pending)
+            rescored = _with_rescoring(_render(blocks, pending=pending), instances)
+            rescored_sync = _with_rescoring(sync_only, instances)
             for instance in instances:
                 old = _details(instance)
-                details = preserve_ssvc_record(merged, old)
-                if details != old or calculate_aggregated_state(details) != _state(instance):
+                details = preserve_ssvc_record(rescored(old), old)
+                if _differs(details, old) or calculate_aggregated_state(details) != _state(instance):
                     targets.append((instance, details))
-                synced = preserve_ssvc_record(sync_only, old)
-                if synced != old or calculate_aggregated_state(synced) != _state(instance):
+                synced = preserve_ssvc_record(rescored_sync(old), old)
+                if _differs(synced, old) or calculate_aggregated_state(synced) != _state(instance):
                     synchronized += 1
         else:
             for instance in instances:
