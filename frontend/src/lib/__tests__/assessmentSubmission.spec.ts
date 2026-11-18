@@ -77,6 +77,35 @@ describe('assessmentSubmission', () => {
         expect(prepared.reviewText).toContain('[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H]')
         expect(prepared.payload.team).toBe('TeamA')
         expect(prepared.payload).not.toHaveProperty('comment')
+        // The assessment is sent as fields; no composed text leaves the browser.
+        expect(prepared.payload).not.toHaveProperty('details')
+        expect(prepared.payload).not.toHaveProperty('comparison_mode')
+        expect(prepared.payload.fields).toEqual(expect.objectContaining({
+            free_text: null, // not edited in the form: the server keeps it
+            pending_review: true,
+            rescored_score: 9.8,
+            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+        }))
+        expect(prepared.payload.fields?.teams.map(team => team.team)).toEqual(['General', 'TeamA', 'TeamB'])
+        expect(prepared.payload.fields?.teams.find(team => team.team === 'TeamA')).toEqual(expect.objectContaining({
+            state: 'EXPLOITABLE',
+            justification: null,
+            assessed_by: 'reviewer',
+            assessed_at_ms: expect.any(Number),
+            assigned: ['alice'],
+            ticket: 'SEC-1234',
+            evidence_reviewed: 'yes',
+            version_coverage: 'yes',
+            details: 'Current team details',
+        }))
+        expect(prepared.payload.fields?.teams.find(team => team.team === 'TeamB')).toEqual(expect.objectContaining({
+            state: 'NOT_AFFECTED',
+            justification: 'CODE_NOT_PRESENT',
+            ticket: 'APP-9',
+            evidence_reviewed: null,
+            version_coverage: 'yes',
+            details: 'Other team details',
+        }))
         // No reload happened: the value shown in the view is what the edit
         // was based on, and the server checks it against Dependency-Track.
         expect(prepared.payload.original_analysis).toEqual({
@@ -164,6 +193,13 @@ describe('assessmentSubmission', () => {
         expect(prepared.payload.original_analysis).toEqual({})
         expect(prepared.payload.suppressed).toBe(true)
         expect(prepared.payload.team).toBeUndefined()
+        expect(prepared.payload.fields).toEqual(expect.objectContaining({
+            pending_review: false,
+            teams: [expect.objectContaining({
+                team: 'General', state: 'NOT_AFFECTED', assessed_by: 'reviewer',
+                justification: 'CODE_NOT_PRESENT', details: 'Raw details',
+            })],
+        }))
     })
 
     it('builds emitted assessment data and next local score state after a successful save', () => {

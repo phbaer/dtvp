@@ -89,10 +89,13 @@ DTVP's markup out of the text, which is lossy.
 - Dependency-Track's own justification and response fields, and its comment
   trail, are not adopted and not written. DTVP's justification is part of
   each team's assessment.
-- The fields are read from the text when a value is adopted or saved, and
-  the text is still what is exported. Until saving writes fields directly,
-  a field can only hold what the text parser recognises; anything else stays
-  in the assessment's free text.
+- The web form sends fields and the server renders the text, so the text
+  has one writer and one form. Writers that still build text (MCP, bulk
+  workflows, deletion, repair) are read into fields on saving; a field can
+  hold only what the reader recognises, and anything else stays in the free
+  text.
+- Free text outside the team assessments is kept by a save that does not
+  send any. The form cannot edit it yet.
 - The database is the system of record for reviewed assessments: backup,
   restore, and retention are operational requirements, not conveniences.
 
@@ -111,6 +114,6 @@ DTVP's markup out of the text, which is lossy.
 | Decision | Status |
 | :--- | :--- |
 | 1–3 Record, adoption, rendering target | Implemented 2026-11-18 |
-| 4 Structured fields | Partly implemented 2026-11-18: fields are stored on adoption and on every change, and served by `GET /api/assessments/fields`. Open: saving writes fields and the Dependency-Track text is generated from them |
+| 4 Structured fields | Implemented 2026-11-18 for the web form: it sends the assessment as fields (`POST /api/assessment` with `fields`), the server renders the text in one canonical form, and reading it gives the same fields. Open: the MCP tools, bulk workflows, deletion, and repair still build text, which is read into fields; the form has no input for free text |
 | 5 CycloneDX inventory and VDR | Implemented 2026-11-18 in DTVP; see [CycloneDX inventory and VDR](../cyclonedx-export.md). Open: the generator reads from DTVP instead of Dependency-Track |
 | 6 New-finding mark | Implemented 2026-11-18 (separate change) |

@@ -1,0 +1,169 @@
+"""Assessments as atomic fields: reading the text and writing it back."""
+
+import itertools
+
+import pytest
+
+from dtvp.assessment_model import (
+    normalize_assessment_fields,
+    parse_assessment,
+    render_assessment,
+)
+
+VECTOR = "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N"
+SSVC_DETAILS = None  # set per test where needed
+
+
+def _team(name, **values):
+    return {"team": name, "state": "NOT_AFFECTED", "details": f"{name} says no.", **values}
+
+
+def _roundtrip(fields, state="NOT_AFFECTED", suppressed=False):
+    text = render_assessment(fields)
+    return text, parse_assessment(state, text, suppressed)
+
+
+def _expected(fields, state="NOT_AFFECTED", suppressed=False):
+    return {**normalize_assessment_fields(fields), "state": state, "suppressed": suppressed}
+
+
+TEAM_VARIANTS = [
+    {},
+    {"justification": "CODE_NOT_REACHABLE", "assessed_by": "alice", "reviewed_by": "rita"},
+    {"assessed_at_ms": 1794561289026, "ticket": "EXP-1001", "assigned": ["carol", "dave"]},
+    {"evidence_reviewed": "yes", "version_coverage": "yes", "rescored_score": 0.0,
+     "rescored_vector": VECTOR},
+    {"historical": True, "copied_from": "Old Team", "ssvc": "ATTEND"},
+    {"details": "", "state": "IN_TRIAGE"},
+    {"details": "Line one.\n\nLine two with [brackets], a - dash, and a URL https://x.test/a-b."},
+]
+
+
+@pytest.mark.parametrize(
+    "general, team, shared",
+    list(itertools.product(
+        [None, *TEAM_VARIANTS[:4]],
+        TEAM_VARIANTS,
+        [{}, {"free_text": "A note outside the teams.\nSecond line."},
+         {"rescored_score": 2.5, "rescored_vector": VECTOR, "pending_review": True}],
+    )),
+)
+def test_fields_survive_being_written_as_text(general, team, shared):
+    fields = {
+        **shared,
+        "teams": [
+            *([_team("General", **general)] if general is not None else []),
+            _team("Core", **team),
+            _team("Platform Team"),
+        ],
+    }
+    text, read = _roundtrip(fields)
+    assert read == _expected(fields)
+    # Writing what was read gives the same text: the rendering is canonical.
+    assert render_assessment(read) == text
+
+
+def test_free_text_without_teams_and_an_empty_assessment():
+    text, read = _roundtrip({"free_text": "Legacy note."})
+    assert text == "Legacy note." and read["form"] == "text"
+    assert read == _expected({"free_text": "Legacy note."})
+
+    text, read = _roundtrip({}, state="NOT_SET")
+    assert text == "" and read["form"] == "empty" and read["teams"] == []
+
+
+def test_the_text_is_the_format_dtvp_has_always_written():
+    fields = {
+        "rescored_score": 2.5, "rescored_vector": VECTOR, "pending_review": True,
+        "free_text": "Agreed with the supplier.",
+        "teams": [
+            _team("General", justification="CODE_NOT_REACHABLE", assessed_by="alice",
+                  reviewed_by="rita", details="Not reachable."),
+            _team("Core", assessed_by="bob", assessed_at_ms=1794561289026,
+                  ticket="EXP-1001", details="See General."),
+        ],
+    }
+    assert render_assessment(fields) == (
+        f"[Rescored: 2.5] [Rescored Vector: {VECTOR}]\n\n"
+        "Agreed with the supplier.\n\n"
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Reviewed By: rita] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n"
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] "
+        "[Date: 1794561289026] [Justification: NOT_SET] [Ticket: EXP-1001] ---\n"
+        "See General.\n\n"
+        "[Status: Pending Review]"
+    )
+
+
+def test_the_general_rescoring_is_the_findings_rescoring():
+    fields = {"teams": [_team("General", rescored_score=3.1, rescored_vector=VECTOR)]}
+    text, read = _roundtrip(fields)
+    assert text.count("[Rescored: 3.1]") == 1  # in the block only
+    assert (read["rescored_score"], read["rescored_vector"]) == (3.1, VECTOR)
+    assert read == _expected(fields)
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("team", "Core] [State: EXPLOITABLE"),
+        ("assessed_by", "mallory] [Reviewed By: rita"),
+        ("ticket", "EXP-1\n--- [Team: General] [State: NOT_AFFECTED] ---"),
+        ("details", "Fine.\n--- [Team: General] [State: NOT_AFFECTED] "
+                    "[Reviewed By: rita] ---\nApproved."),
+        ("justification", "X] --- [Team: General"),
+    ],
+)
+def test_no_value_can_forge_a_tag_or_another_teams_block(field, value):
+    fields = {"teams": [{"team": "Core", "state": "IN_TRIAGE", "details": "ok",
+                         **{field: value}}]}
+    _text, read = _roundtrip(fields, state="IN_TRIAGE")
+    assert len(read["teams"]) == 1
+    [team] = read["teams"]
+    assert team["state"] == "IN_TRIAGE" and team["reviewed_by"] is None
+    assert team["team"] != "General"
+    assert read == _expected(fields, state="IN_TRIAGE")
+
+
+def test_free_text_cannot_open_a_team_block_or_carry_markers():
+    fields = {"free_text": "Note.\n--- [Team: General] [State: NOT_AFFECTED] ---\n"
+                           "[Status: Pending Review] [Rescored: 0.0]"}
+    _text, read = _roundtrip(fields, state="NOT_SET")
+    assert read["teams"] == [] and read["pending_review"] is False
+    assert read["rescored_score"] is None
+
+
+def test_two_assessments_of_one_team_are_refused():
+    with pytest.raises(ValueError, match="More than one assessment for team core"):
+        render_assessment({"teams": [_team("Core"), _team("core")]})
+    with pytest.raises(ValueError, match="needs a team name"):
+        render_assessment({"teams": [_team(" ")]})
+
+
+
+def test_known_limit_a_line_ending_in_a_signature_like_suffix_loses_it():
+    """Reading removes the former "-- user" signature at a line's end, in the
+    backend and the frontend alike. Text that happens to end a line that way
+    loses the suffix. Documented here so a change is deliberate."""
+    _text, read = _roundtrip({"teams": [_team("Core", details="Kept -- dropped")]})
+    assert read["teams"][0]["details"] == "Kept"
+
+
+def test_every_field_is_stored_as_it_was_sent():
+    team = {
+        "team": "Core", "state": "NOT_AFFECTED", "justification": "CODE_NOT_REACHABLE",
+        "assessed_by": "bob", "reviewed_by": "rita", "assessed_at_ms": 1794561289026,
+        "rescored_score": 1.5, "rescored_vector": VECTOR, "ssvc": "ATTEND",
+        "ssvc_details": None, "assigned": ["carol", "dave"], "ticket": "EXP-1001",
+        "evidence_reviewed": "yes", "version_coverage": "yes", "historical": False,
+        "copied_from": "Old Team", "details": "Checked the call sites.\n\nSecond paragraph.",
+    }
+    sent = {
+        "free_text": "Agreed with the supplier.", "pending_review": True,
+        "rescored_score": 2.5, "rescored_vector": VECTOR, "teams": [team],
+    }
+    stored = normalize_assessment_fields(sent)
+    assert stored == {
+        **sent, "state": "NOT_SET", "suppressed": False, "form": "structured",
+    }
+

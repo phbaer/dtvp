@@ -6,7 +6,7 @@
 | :--- | :--- |
 | Status | Implemented |
 | Decision | [ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md), decision 5 |
-| Verified | 2026-11-18 against `tests/test_cyclonedx_export.py` and `tests/test_export.py`, a run against the mock Dependency-Track in Chromium, and by reading a generated VDR with the security documentation generator's CycloneDX reader (`from_cyclonedx` and `read_cyclonedx_fields` at its commit `6646bb8`). Not validated against the CycloneDX JSON schema. |
+| Verified | 2026-11-18 against `tests/test_cyclonedx_export.py` and `tests/test_export.py`, a run against the mock Dependency-Track in Chromium, and by reading a generated VDR with the security documentation generator's CycloneDX reader (`from_cyclonedx` and `read_cyclonedx_fields` at its commit `6646bb8`). The inventory and the VDR are validated against the official CycloneDX 1.5 JSON schema (strict) in `tests/test_cyclonedx_export.py`. |
 
 DTVP serves two CycloneDX documents for each project version:
 

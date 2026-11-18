@@ -6,12 +6,15 @@ import CodeAnalysisPanel from '../CodeAnalysisPanel.vue'
 import defaultRescoreRules from '../../../../data/rescore_rules.json'
 import type { CodeAnalysisAssessResponse } from '../../lib/api'
 
-vi.mock('../../lib/api', () => ({
+vi.mock('../../lib/api', async () => {
+    // The server renders the stored text from the fields a save sends.
+    const { renderAssessmentFields } = await import('../../lib/__tests__/assessmentFieldsText')
+    return {
     updateAssessment: vi.fn((payload: any) => Promise.resolve(payload.instances.map((instance: any) => ({
         status: 'success',
         uuid: instance.finding_uuid,
         new_state: payload.state,
-        new_details: payload.details,
+        new_details: renderAssessmentFields(payload.fields),
     })))),
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
     getKnownUsers: vi.fn(() => Promise.resolve([])),
@@ -20,9 +23,11 @@ vi.mock('../../lib/api', () => ({
     codeAnalysisGetPrompts: vi.fn(() => Promise.resolve({ bundles: [] })),
     codeAnalysisGetResult: vi.fn(),
     codeAnalysisListVulnerabilityResults: vi.fn(() => Promise.resolve([])),
-}))
+    }
+})
 
 import { updateAssessment } from '../../lib/api'
+import { renderAssessmentFields } from '../../lib/__tests__/assessmentFieldsText'
 
 const makeResult = (component: string, verdict: string, adjusted?: { score: number, vector: string }): CodeAnalysisAssessResponse => ({
     assessment: {
@@ -200,15 +205,15 @@ describe('VulnGroupCard apply-all analyzer assessments', () => {
 
         expect(payload.state).toBe('EXPLOITABLE')
         expect(payload.analysis_run_ids).toEqual(['run-a', 'run-b'])
-        expect(payload.details).toMatch(/\[Team: General\] \[State: EXPLOITABLE\]/)
-        expect(payload.details).toMatch(/\[Team: TEAM-A\] \[State: NOT_AFFECTED\]/)
-        expect(payload.details).toMatch(/\[Team: TEAM-B\] \[State: EXPLOITABLE\]/)
-        expect(payload.details.match(/\[Team: General\]/g)).toHaveLength(1)
-        expect(payload.details).toContain('[Rescored: 8.1]')
-        expect(payload.details).toContain('[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H]')
-        expect(payload.details).toContain('Summary for lib-a.')
-        expect(payload.details).toContain('Summary for lib-b.')
-        const globalBlock = payload.details.split('--- [Team: TEAM-A]')[0]
+        expect(renderAssessmentFields(payload.fields)).toMatch(/\[Team: General\] \[State: EXPLOITABLE\]/)
+        expect(renderAssessmentFields(payload.fields)).toMatch(/\[Team: TEAM-A\] \[State: NOT_AFFECTED\]/)
+        expect(renderAssessmentFields(payload.fields)).toMatch(/\[Team: TEAM-B\] \[State: EXPLOITABLE\]/)
+        expect(renderAssessmentFields(payload.fields).match(/\[Team: General\]/g)).toHaveLength(1)
+        expect(renderAssessmentFields(payload.fields)).toContain('[Rescored: 8.1]')
+        expect(renderAssessmentFields(payload.fields)).toContain('[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H]')
+        expect(renderAssessmentFields(payload.fields)).toContain('Summary for lib-a.')
+        expect(renderAssessmentFields(payload.fields)).toContain('Summary for lib-b.')
+        const globalBlock = renderAssessmentFields(payload.fields).split('--- [Team: TEAM-A]')[0]
         expect(globalBlock).toContain('Assessed Teams: TEAM-A, TEAM-B')
         expect(globalBlock).not.toContain('Summary for lib-a.')
         expect(globalBlock).not.toContain('Summary for lib-b.')
@@ -239,10 +244,10 @@ describe('VulnGroupCard apply-all analyzer assessments', () => {
         await flushPromises()
 
         const payload = vi.mocked(updateAssessment).mock.calls[0]?.[0] as any
-        expect(payload.details.match(/\[Team: General\]/g)).toHaveLength(1)
-        expect(payload.details).toContain('Independent global policy decision.')
-        expect(payload.details).toContain('Summary for lib-a.')
-        expect(payload.details).toContain('Summary for lib-b.')
+        expect(renderAssessmentFields(payload.fields).match(/\[Team: General\]/g)).toHaveLength(1)
+        expect(renderAssessmentFields(payload.fields)).toContain('Independent global policy decision.')
+        expect(renderAssessmentFields(payload.fields)).toContain('Summary for lib-a.')
+        expect(renderAssessmentFields(payload.fields)).toContain('Summary for lib-b.')
     })
 
     it('reports analyzed components without a team mapping', async () => {
@@ -284,8 +289,8 @@ describe('VulnGroupCard apply-all analyzer assessments', () => {
         await flushPromises()
 
         const payload = vi.mocked(updateAssessment).mock.calls[0]?.[0] as any
-        expect(payload.details).toContain('[Rescored: 0.0]')
-        expect(payload.details).toContain(`[Rescored Vector: ${vm.pendingVector}]`)
+        expect(renderAssessmentFields(payload.fields)).toContain('[Rescored: 0.0]')
+        expect(renderAssessmentFields(payload.fields)).toContain(`[Rescored Vector: ${vm.pendingVector}]`)
     })
 
     it('keeps the analyzer rescore for states without a configured rule', async () => {

@@ -373,6 +373,10 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+json-validation = [
+    { name = "jsonschema", extra = ["format-nongpl"] },
+    { name = "referencing" },
+]
 validation = [
     { name = "jsonschema", extra = ["format-nongpl"] },
     { name = "lxml" },
@@ -409,6 +413,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "cyclonedx-bom" },
+    { name = "cyclonedx-python-lib", extra = ["json-validation"] },
     { name = "git-cliff" },
     { name = "httpx" },
     { name = "pytest" },
@@ -435,6 +440,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "cyclonedx-bom", specifier = ">=7.2.2" },
+    { name = "cyclonedx-python-lib", extras = ["json-validation"], specifier = ">=11.12.0" },
     { name = "git-cliff", specifier = ">=2.7.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=9.0.2" },

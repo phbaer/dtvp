@@ -251,3 +251,49 @@ the same host (the benchmark itself has no third-party dependencies):
 uv run python scripts/benchmark_group_queries.py
 uv run --no-project --python 3.14t python scripts/benchmark_group_queries.py
 ```
+
+### Assessment Record
+
+DTVP keeps a record of every assessed finding, held in memory and in the
+database ([ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md)). The
+numbers below are from 2026-11-18 on a 20-CPU development host with CPython
+3.15 and synthetic assessments (three to four team blocks each):
+
+```bash
+uv run python scripts/benchmark_assessment_store.py --assessments 50000 200000
+```
+
+| | 50,000 assessments | 200,000 assessments |
+| :--- | ---: | ---: |
+| Adopting on import | 9.9 s (5,000 per second) | 40.8 s |
+| Later import of a 1,000-finding project, nothing changed | 1.6 ms | 1.9 ms |
+| Same, every assessment lost in Dependency-Track (all queued again) | 109 ms | 108 ms |
+| Start with an existing database | 0.4 s | 2.4 s |
+| One-off read of existing assessments into fields | 5.8 s | 27.7 s |
+| Database, 2.3 KB texts | 618 MiB | 2,468 MiB |
+
+Time does not grow with the number of records already stored; memory and disk
+grow linearly with the number of assessments and the length of their texts.
+
+- **Memory:** a record holds its text once plus about 1.2 KB. With 50,000
+  assessments that is 174 MiB at 2.5 KB per text and 103 MiB at 1 KB
+  (measured with `tracemalloc`). Process memory after a restart with 50,000
+  assessments of 2.3 KB was 224 MiB above an empty process.
+- **Disk:** the text is stored four times (the record, the value last agreed
+  with Dependency-Track, the first history entry, and the team fields), about
+  12.9 KB per assessment at 2.5 KB per text and 5.6 KB at 1 KB. The imported
+  finding adds one more copy.
+- **Sizing example:** about 51,000 assessed findings with texts around 1 KB
+  need roughly 110 MiB of memory for the records and 400 MiB of database
+  (measured with 52,050 synthetic findings in 347 projects).
+- **Through the application** (`CacheManager`, mock source): the first import
+  of a 1,000-finding project took about 200 ms, a re-import without changes
+  68 ms, a CycloneDX VDR of 1,000 findings 104 ms, and listing 1,000 queued
+  exports 217 ms (5.4 MiB of JSON, because the list carries both texts of
+  every entry).
+
+Not measured: the HTTP layer, grouping tasks, concurrent users, and a real
+Dependency-Track. Known ways to reduce the disk use (not implemented): do not
+store the text again in the history entry of an adopted assessment, and do
+not store the agreed value when it equals the record.
+

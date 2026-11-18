@@ -195,3 +195,75 @@ def test_a_component_only_a_finding_names_is_added_to_both_documents():
     )
     assert len(BOM["components"]) == 2  # the stored BOM is not changed
 
+
+# -- schema validation --------------------------------------------------------
+
+
+def _schema_errors(document, version="1.5"):
+    """Errors of the official CycloneDX JSON schema (strict), or None."""
+    import json
+
+    from cyclonedx.schema import SchemaVersion
+    from cyclonedx.validation.json import JsonStrictValidator
+
+    validator = JsonStrictValidator(SchemaVersion.from_version(version))
+    return validator.validate_str(json.dumps(document))
+
+
+SCHEMA_BOM = {
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.5",
+    "version": 1,
+    "metadata": {"component": {"type": "application", "name": "App", "version": "1.0"}},
+    "components": [
+        {"type": "library", "bom-ref": "c1", "name": "lib-a", "version": "1.0",
+         "purl": "pkg:npm/lib-a@1.0"},
+        {"type": "library", "bom-ref": "ref-b", "name": "lib-b", "version": "2.0",
+         "purl": "pkg:npm/lib-b@2.0"},
+    ],
+}
+
+
+def test_the_documents_are_valid_cyclonedx():
+    stray = {"uuid": "c9", "name": "lib-z", "version": "3.1", "purl": "pkg:npm/lib-z@3.1"}
+    findings = [
+        _finding(C1),
+        _finding(C2),
+        _finding(C1, "CVE-2026-2", "v2", aliases=[], severity="UNASSIGNED",
+                 cvssV3BaseScore=None, cvssV3Vector=None),
+        _finding(stray, "GHSA-aaaa-bbbb-cccc", "v3", source="GITHUB",
+                 cvssV4BaseScore=8.7,
+                 cvssV4Vector="CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"),
+    ]
+    assessments = [
+        parse_assessment("NOT_AFFECTED", ASSESSED, True),
+        parse_assessment("EXPLOITABLE", "Reachable here.", False),
+        parse_assessment("NOT_SET", "", False),
+        parse_assessment("IN_TRIAGE", "Side note.\n\n--- [Team: General] "
+                         "[State: IN_TRIAGE] [SSVC: ATTEND] ---\nLooking.", False),
+    ]
+
+    inventory = build_inventory(SCHEMA_BOM, findings)
+    vdr = build_vdr(
+        SCHEMA_BOM, findings, assessments,
+        assessment_source="ACME PSIRT", property_prefix="acme",
+        generated_at=NOW, tool_version="2.0.0",
+    )
+
+    assert _schema_errors(inventory) is None
+    assert _schema_errors(vdr) is None
+    # The validator does reject what the schema forbids.
+    broken = {**vdr, "annotations": [{**vdr["annotations"][0], "annotator": {
+        "organization": {"name": "Core"}, "individual": {"name": "bob"},
+    }}]}
+    assert _schema_errors(broken) is not None
+
+
+def test_a_bom_of_an_older_specification_becomes_a_valid_1_5_document():
+    old = {**SCHEMA_BOM, "specVersion": "1.4"}
+    vdr = build_vdr(
+        old, [_finding(C1)], [parse_assessment("NOT_AFFECTED", ASSESSED, False)],
+        generated_at=NOW,
+    )
+    assert vdr["specVersion"] == "1.5" and _schema_errors(vdr) is None
+

@@ -90,6 +90,119 @@ async def test_save_persists_locally_and_reports_the_revision(deps):
     ]
 
 
+async def test_an_assessment_sent_as_fields_is_rendered_and_stored_as_those_fields(deps):
+    fields = {
+        "free_text": "Agreed with the supplier.",
+        "pending_review": True,
+        "teams": [
+            {"team": "Team A", "state": "NOT_AFFECTED", "assessed_by": "alice",
+             "justification": "CODE_NOT_REACHABLE", "ticket": "EXP-7",
+             "assessed_at_ms": 1794561289026, "details": "Not reachable."},
+        ],
+    }
+    results = await save_assessment(
+        deps,
+        # Whatever text a client still sends is ignored once fields are given.
+        _request(state="NOT_AFFECTED", details="--- [Team: General] ---", fields=fields),
+        user="alice", client=None,
+    )
+
+    assert [r["status"] for r in results] == ["success"]
+    stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+    assert stored["analysisState"] == "NOT_AFFECTED"
+    assert stored["analysisDetails"] == (
+        "Agreed with the supplier.\n\n"
+        "--- [Team: Team A] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Date: 1794561289026] [Justification: CODE_NOT_REACHABLE] [Ticket: EXP-7] ---\n"
+        "Not reachable.\n\n[Status: Pending Review]"
+    )
+    record = dt_cache.cache_manager.get_assessment_fields("p1", "c1", "v1")
+    assert (record["free_text"], record["pending_review"]) == (
+        "Agreed with the supplier.", True
+    )
+    [team] = record["teams"]
+    assert (team["team"], team["ticket"], team["justification"], team["details"]) == (
+        "Team A", "EXP-7", "CODE_NOT_REACHABLE", "Not reachable."
+    )
+
+
+async def test_free_text_is_kept_unless_the_save_sends_one(deps):
+    team = {"team": "Team A", "state": "IN_TRIAGE", "details": "First."}
+    await save_assessment(
+        deps,
+        _request(fields={"free_text": "Agreed with the supplier.", "teams": [team]}),
+        user="alice", client=None,
+    )
+
+    # A save from the form: fields without free text.
+    await save_assessment(
+        deps,
+        _request(fields={"teams": [{**team, "details": "Second."}]}),
+        user="alice", client=None,
+    )
+    record = dt_cache.cache_manager.get_assessment_fields("p1", "c1", "v1")
+    assert record["free_text"] == "Agreed with the supplier."
+    assert record["teams"][0]["details"] == "Second."
+
+    # An explicit empty string removes it.
+    await save_assessment(
+        deps, _request(fields={"free_text": "", "teams": [team]}),
+        user="alice", client=None,
+    )
+    assert dt_cache.cache_manager.get_assessment_fields("p1", "c1", "v1")["free_text"] == ""
+
+
+async def test_the_payload_the_web_form_sends_is_accepted(deps):
+    """The shape `assessmentTextToFields` produces in the frontend (see
+    frontend/src/lib/__tests__/assessmentSubmission.spec.ts)."""
+    payload = {
+        "instances": [dict(INSTANCE)],
+        "state": "EXPLOITABLE",
+        "fields": {
+            "free_text": None,
+            "pending_review": True,
+            "rescored_score": 9.8,
+            "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "teams": [{
+                "team": "Team A", "state": "EXPLOITABLE", "justification": None,
+                "assessed_by": "reviewer", "reviewed_by": None,
+                "assessed_at_ms": 1794561289026, "rescored_score": None,
+                "rescored_vector": None, "ssvc": None, "ssvc_details": None,
+                "assigned": ["alice"], "ticket": "SEC-1234",
+                "evidence_reviewed": "yes", "version_coverage": "yes",
+                "historical": False, "copied_from": None,
+                "details": "Current team details",
+            }],
+        },
+        "suppressed": False,
+        "team": "Team A",
+        "original_analysis": {},
+        "force": False,
+        "analysis_run_ids": [],
+    }
+    results = await save_assessment(
+        deps, AssessmentRequest(**payload), user="alice", client=None
+    )
+    assert [r["status"] for r in results] == ["success"]
+    record = dt_cache.cache_manager.get_assessment_fields("p1", "c1", "v1")
+    assert (record["state"], record["rescored_score"], record["pending_review"]) == (
+        "EXPLOITABLE", 9.8, True
+    )
+    [team] = record["teams"]
+    assert (team["ticket"], team["assigned"], team["evidence_reviewed"]) == (
+        "SEC-1234", ["alice"], "yes"
+    )
+
+
+async def test_fields_that_cannot_be_rendered_are_refused(deps):
+    duplicate = {"teams": [{"team": "Team A"}, {"team": "team a"}]}
+    with pytest.raises(AssessmentValidationError, match="More than one assessment"):
+        await save_assessment(
+            deps, _request(fields=duplicate), user="alice", client=None
+        )
+    assert dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1") is None
+
+
 async def test_explicit_role_overrides_the_configured_role(deps):
     deps.get_user_role = lambda _user: "REVIEWER"
 

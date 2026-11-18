@@ -1,6 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags, assessmentTextToFields, assessmentTextKey } from '../assessment-helpers';
+import { renderAssessmentFields } from './assessmentFieldsText';
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -662,5 +663,102 @@ My Policy Comment: track this carefully`
             expect(blocks[0].details).not.toContain('[Assigned')
             expect(blocks[0].details).toBe('Details.')
         })
+    });
+
+    describe('assessmentTextToFields', () => {
+        const VECTOR = 'CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N';
+        const text = [
+            `[Rescored: 2.5] [Rescored Vector: ${VECTOR}]`,
+            '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---',
+            'Not reachable.',
+            '--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794561289026] [Justification: CODE_NOT_REACHABLE] [Assigned: carol, dave] [Evidence Reviewed: yes] [Version Coverage: yes] [Ticket: EXP-1001] [Historical: yes] [Copied From: Old Team] ---',
+            'See General.',
+            '\n[Status: Pending Review]',
+        ].join('\n\n');
+
+        it('reads every field the form writes', () => {
+            expect(assessmentTextToFields(text)).toEqual({
+                free_text: null, // not edited in the form: the server keeps it
+                pending_review: true,
+                rescored_score: 2.5,
+                rescored_vector: VECTOR,
+                teams: [
+                    {
+                        team: 'General', state: 'NOT_AFFECTED', justification: 'CODE_NOT_REACHABLE',
+                        assessed_by: 'alice', reviewed_by: null, assessed_at_ms: null,
+                        rescored_score: null, rescored_vector: null, ssvc: null, ssvc_details: null,
+                        assigned: [], ticket: null, evidence_reviewed: null, version_coverage: null,
+                        historical: false, copied_from: null, details: 'Not reachable.',
+                    },
+                    {
+                        team: 'Core', state: 'NOT_AFFECTED', justification: 'CODE_NOT_REACHABLE',
+                        assessed_by: 'bob', reviewed_by: null, assessed_at_ms: 1794561289026,
+                        rescored_score: null, rescored_vector: null, ssvc: null, ssvc_details: null,
+                        assigned: ['carol', 'dave'], ticket: 'EXP-1001', evidence_reviewed: 'yes',
+                        version_coverage: 'yes', historical: true, copied_from: 'Old Team',
+                        details: 'See General.',
+                    },
+                ],
+            });
+        });
+
+        it('keeps tags of a header that the form does not edit', () => {
+            const fields = assessmentTextToFields(
+                `--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] [Reviewed By: rita] [Justification: NOT_SET] [Rescored: 1.5] [Rescored Vector: ${VECTOR}] ---\nok`,
+            );
+            expect(fields.teams[0]).toEqual(expect.objectContaining({
+                reviewed_by: 'rita', rescored_score: 1.5, rescored_vector: VECTOR, justification: null,
+            }));
+            // A rescoring inside a block is that team's, not the finding's.
+            expect(fields.rescored_score).toBeNull();
+        });
+
+        it('treats text without team blocks as free text, not as a General assessment', () => {
+            expect(assessmentTextToFields('Legacy note.\n[Status: Pending Review]')).toEqual({
+                free_text: 'Legacy note.', pending_review: true,
+                rescored_score: null, rescored_vector: null, teams: [],
+            });
+            expect(assessmentTextToFields('')).toEqual({
+                free_text: '', pending_review: false, rescored_score: null, rescored_vector: null, teams: [],
+            });
+        });
+
+        it('keeps text ahead of the blocks as free text beside a General assessment', () => {
+            const fields = assessmentTextToFields(
+                'Agreed with the supplier.\n\n--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] ---\nLooking.',
+            );
+            expect(fields.free_text).toBe('Agreed with the supplier.');
+            expect(fields.teams.map(team => [team.team, team.details])).toEqual([['General', 'Looking.']]);
+        });
+
+        it('sends one assessment per team and no unknown assessor', () => {
+            const fields = assessmentTextToFields([
+                '--- [Team: Core] [State: IN_TRIAGE] [Assessed By: bob] [Date: 1] ---\nOlder.',
+                '--- [Team: core] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 2] ---\nNewer.',
+                '--- [Team: general] [State: NOT_SET] ---\nNo assessor named.',
+            ].join('\n\n'));
+            expect(fields.teams.map(team => [team.team, team.details, team.assessed_by])).toEqual([
+                ['core', 'Newer.', 'bob'],
+                ['General', 'No assessor named.', null],
+            ]);
+        });
+
+        it('says the same after the server has rendered it', () => {
+            const sent = assessmentTextToFields(text);
+            const rendered = renderAssessmentFields(sent);
+            expect(rendered).not.toBe(text);
+            expect(assessmentTextToFields(rendered)).toEqual(sent);
+            expect(parseAssessmentBlocks(rendered)).toEqual(parseAssessmentBlocks(text));
+        });
+    });
+
+    describe('assessmentTextKey', () => {
+        it('ignores whitespace-only differences between writers', () => {
+            const fromUi = '--- [Team: Core] [State: EXPLOITABLE] [Assessed By: bob] ---\n\nReachable.\n\n\n[Status: Pending Review]';
+            const fromWorkflow = '--- [Team: Core] [State: EXPLOITABLE] [Assessed By: bob] ---\nReachable.\n\n[Status: Pending Review]';
+            expect(assessmentTextKey(fromUi)).toBe(assessmentTextKey(fromWorkflow));
+            expect(assessmentTextKey(fromUi)).not.toBe(assessmentTextKey(fromUi.replace('Reachable', 'Unreachable')));
+            expect(assessmentTextKey(undefined)).toBe('');
+        });
     });
 });

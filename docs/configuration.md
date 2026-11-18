@@ -22,7 +22,9 @@ means the integration or override is disabled.
 | `DEPENDENCY_TRACK_URL` / `DEPENDENCY_TRACK_API_KEY` | Deployment aliases | unset |
 | `DTVP_DT_CACHE_PATH` | Directory of the local database and the pending update queue. Persistent data, not a disposable cache | `data/dt_cache` |
 | `DTVP_DATABASE_PATH` | The local SQLite database: imported projects, findings, vulnerability details, BOMs, last known source assessments, local assessments with their export queue, and access tokens | `<DTVP_DT_CACHE_PATH>/dtvp.sqlite3` |
-| `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
+| `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval in whole seconds, at least 1; an unusable value falls back to the default | `60` |
+| `DTVP_SSVC_ENRICHMENT_ENABLED` | Fetch exploitation evidence for SSVC from the sources listed in `dtvp/resources/ssvc-sources.json` over the network. Off with anything but `true`, `1`, or `yes` | `true` |
+| `DTVP_SSVC_CACHE_PATH` | Cache of that evidence | `<DTVP_DT_CACHE_PATH>/ssvc_enrichment.sqlite3` |
 | `DTVP_DT_PROJECT_LIST_TTL_SECONDS` | Freshness window for serving the complete cached project list without an upstream request | `30` |
 | `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` | Idle window for periodic per-project background refresh | `900` |
 | `DTVP_DT_ACTIVE_PROJECT_LIMIT` | Most-recent projects eligible for periodic refresh | `8` |
@@ -69,20 +71,20 @@ See [AI and API access](ai-access.md) for behavior and limits.
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
-| `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
-| `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
+| `DTVP_OIDC_AUTHORITY` | OIDC authority URL; the older name `ISSUER_URL` is read when this is unset | unset |
+| `DTVP_OIDC_CLIENT_ID` | OIDC client ID; the older name `CLIENT_ID` is read when this is unset | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | Optional OIDC client secret for confidential clients | unset |
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback | derived from frontend URL/context path |
 | `DTVP_SESSION_SECRET_KEY` | Session signing key | `change_me` |
 | `DTVP_DEV_DISABLE_AUTH` | Resolve local requests as `devuser` | `false` |
-| `DTVP_FRONTEND_URL` | Public frontend base URL | `http://localhost:8000` |
+| `DTVP_FRONTEND_URL` | Public frontend base URL | `http://localhost:8000`; Compose: `http://localhost/dtvp` |
 | `DTVP_CONTEXT_PATH` | Application mount path | app `/`; Compose `/dtvp` |
 | `DTVP_HTTP_PORT` | Compose nginx host port | `80` |
 | `DTVP_UVICORN_KEEP_ALIVE_SECONDS` | Backend upstream keep-alive timeout | `30` |
 | `DTVP_REQUIRE_FREE_THREADED` | Fail startup unless CPython supports free threading and its GIL is actually disabled | local Python: `false`; Compose: `true` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
-| `DTVP_CORS_ORIGINS` | Additional comma-separated CORS origins | unset |
-| `DTVP_API_URL` | Frontend API base override; Vite alias `VITE_DTVP_API_URL` | empty |
+| `DTVP_CORS_ORIGINS` | Comma-separated CORS origins. A set value replaces the built-in list (the localhost development origins, `DTVP_FRONTEND_URL`, and the host name) for the application; the startup page shown while DTVP loads adds it to that list instead | unset |
+| `VITE_DTVP_API_URL` | Frontend API base override, read by the Vite dev server and at frontend build time only. Setting `DTVP_API_URL` on the container has no effect | empty |
 | `DTVP_DEFAULT_PROJECT_FILTER` | Dashboard default project filter | empty |
 | `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` | Attribution-age presets | `7d,14d,28d` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |

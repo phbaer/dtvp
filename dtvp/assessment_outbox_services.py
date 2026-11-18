@@ -236,12 +236,26 @@ class AssessmentOutboxStore:
                 self._import_legacy_file(connection)
                 self._seed_missing_revisions(connection)
                 self._sync_fields(connection, None)
-                state_rows = connection.execute(
-                    """
-                    SELECT *
-                    FROM assessment_state
-                    """
-                ).fetchall()
+                # Row by row, and without the base text where it equals the
+                # local one: loading every row at once with both copies made
+                # the start need about twice the memory the records hold.
+                self._states = {
+                    self._row_key(row): self._state_record(row)
+                    for row in connection.execute(
+                        """
+                        SELECT project_uuid, component_uuid, vulnerability_uuid,
+                               revision, analysis_state, analysis_details,
+                               suppressed, sync_status, update_id, last_error,
+                               updated_at, export_rejections,
+                               base_state, base_suppressed,
+                               base_details IS analysis_details AS base_same,
+                               CASE WHEN base_details IS analysis_details
+                                    THEN NULL ELSE base_details END AS base_details,
+                               remote_state, remote_details, remote_suppressed
+                        FROM assessment_state
+                        """
+                    )
+                }
                 pending_rows = connection.execute(
                     """
                     SELECT *
@@ -249,10 +263,6 @@ class AssessmentOutboxStore:
                     ORDER BY created_at, update_id
                     """
                 ).fetchall()
-            self._states = {
-                self._row_key(row): self._state_record(row)
-                for row in state_rows
-            }
             self._pending = {
                 self._row_key(row): self._pending_record(row)
                 for row in pending_rows
@@ -367,7 +377,10 @@ class AssessmentOutboxStore:
                     # Usually the same text as the local value; share it
                     # instead of holding every assessment in memory twice.
                     row["analysis_details"]
-                    if row["base_details"] == row["analysis_details"]
+                    if (
+                        ("base_same" in row.keys() and row["base_same"])
+                        or row["base_details"] == row["analysis_details"]
+                    )
                     else row["base_details"],
                     row["base_suppressed"],
                 )
