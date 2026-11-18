@@ -15,6 +15,11 @@ and applies consistent decisions across releases.
   older responses retain the legacy formatter.
 - Analyzer results are applied only when Agentyzer marks them eligible; see
   [Analysis integrations](docs/analysis-integrations.md#analyzer-result-validity).
+- Optional access for AI agents: personal access tokens and an MCP endpoint to
+  read vulnerabilities and draft team assessments that stay pending review.
+- Local-first: DTVP imports from Dependency-Track, works on its own database,
+  and exports assessments back automatically or on request. Changes made on
+  both sides become a visible conflict instead of one overwriting the other.
 - Mock services for local development and testing.
 
 [Quick start](#quick-start) · [Deployment](#docker-deployment) ·
@@ -111,7 +116,7 @@ constraints, and CI conventions.
 | :--- | :--- |
 | **Open** | No assessment started |
 | **Incomplete** | Required team or finding coverage is missing |
-| **Conflicting** | Assessment data disagrees or needs repair |
+| **Conflicting** | Assessment data disagrees, needs repair, or was changed both here and in Dependency-Track |
 | **Ready for approval** | Complete, consistent assessments await reviewer sign-off |
 | **Assessed** | Complete with no pending approval; includes legacy assessments |
 
@@ -165,8 +170,9 @@ filtering, editing, bulk operations, and archives; or the
 ## Repository And Architecture
 
 ```text
-Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
+Browser → Vue SPA → FastAPI → Dependency-Track + local database/outbox
                            → optional tmrescore and code-analysis services
+AI agent → MCP endpoint (access token) ┘ same assessment rules as the browser
 ```
 
 | Path | Purpose |
@@ -175,14 +181,14 @@ Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
 | `frontend/` | Vue pages, components, API client, and browser tests |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `tests/` | Backend tests |
-| `data/` | Local mappings, rules, caches, and archives |
+| `data/` | Local mappings, rules, database, and archives |
 | `openapi/` | Integration API specifications |
 | `docs/` | Detailed guides, references, diagrams, and screenshots |
 | `skills/` | Agent entry points that route back to this README |
 
 Grouped tasks serve filtered summary windows and hydrate full details on demand.
-Assessment saves commit to a local SQLite outbox before background synchronization
-with Dependency-Track. Task registries are process-local: the supplied deployment
+Assessment saves commit to the local SQLite database first and are exported to
+Dependency-Track in the background, or on request in manual export mode. Task registries are process-local: the supplied deployment
 uses one backend worker; horizontal scaling requires shared task storage.
 
 [Runtime and capacity](docs/runtime.md) documents the key modules, caching,
@@ -201,7 +207,10 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Configuration](docs/configuration.md) | Environment variables and defaults |
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
+| [Import and export](docs/import-export.md) | The local database, how imports merge assessments, automatic and manual export, conflicts, vanished findings, and history |
+| [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
+| [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |
 
 OpenAPI specifications: [tmrescore](openapi/tmrescore-openapi.json) and
 [code analysis](openapi/code-analysis-openapi.json).

@@ -86,6 +86,39 @@ describe('Settings.vue', () => {
         })
     })
 
+    it('gives analysts their access tokens and nothing else', async () => {
+        const analyst = ref({ role: 'ANALYST' })
+        const wrapper = mount(Settings, {
+            global: {
+                provide: { user: analyst, realRole: computed(() => analyst.value.role) },
+                stubs: { 'router-link': true, AccessTokensPanel: { template: '<div data-testid="tokens-stub" />' } },
+            },
+        })
+        await flushPromises()
+
+        const tabs = wrapper.findAll('.border-b-2').map((tab) => tab.text())
+        expect(tabs).toEqual(['Access Tokens'])
+        expect(wrapper.find('[data-testid="tokens-stub"]').exists()).toBe(true)
+        expect(wrapper.text()).not.toContain('Team Mapping Configuration')
+        expect(api.getTeamMapping).not.toHaveBeenCalled()
+        expect(api.getRoles).not.toHaveBeenCalled()
+    })
+
+    it('keeps Team Mapping as the reviewer default and offers the tokens tab', async () => {
+        const wrapper = mount(Settings, {
+            global: {
+                provide: { user: mockUser, realRole: computed(() => mockUser.value.role) },
+                stubs: { 'router-link': true, AccessTokensPanel: { template: '<div data-testid="tokens-stub" />' } },
+            },
+        })
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="tokens-stub"]').exists()).toBe(false)
+        const tokensTab = wrapper.findAll('button').find((button) => button.text() === 'Access Tokens')!
+        await tokensTab.trigger('click')
+        expect(wrapper.find('[data-testid="tokens-stub"]').exists()).toBe(true)
+    })
+
     it('shows Rescore Rules tab for reviewers', async () => {
         const wrapper = mount(Settings, {
             global: {

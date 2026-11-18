@@ -20,14 +20,17 @@ means the integration or override is disabled.
 | `DTVP_DT_API_KEY` | Dependency-Track API key | `change_me` |
 | `DTVP_DT_API_KEY_FILE` | API-key file used when the direct value is unset | unset |
 | `DEPENDENCY_TRACK_URL` / `DEPENDENCY_TRACK_API_KEY` | Deployment aliases | unset |
-| `DTVP_DT_CACHE_PATH` | Dependency-Track cache and pending update queue | `data/dt_cache` |
+| `DTVP_DT_CACHE_PATH` | Directory of the local database and the pending update queue. Persistent data, not a disposable cache | `data/dt_cache` |
+| `DTVP_DATABASE_PATH` | The local SQLite database: imported projects, findings, vulnerability details, BOMs, last known source assessments, local assessments with their export queue, and access tokens | `<DTVP_DT_CACHE_PATH>/dtvp.sqlite3` |
 | `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
 | `DTVP_DT_PROJECT_LIST_TTL_SECONDS` | Freshness window for serving the complete cached project list without an upstream request | `30` |
 | `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` | Idle window for periodic per-project background refresh | `900` |
 | `DTVP_DT_ACTIVE_PROJECT_LIMIT` | Most-recent projects eligible for periodic refresh | `8` |
-| `DTVP_DT_MEMORY_CACHE_MAX_ENTRIES` | Process-local LRU file-object cache entries; disk files remain persistent | `256` |
+| `DTVP_DT_MEMORY_CACHE_MAX_ENTRIES` | Process-local LRU of decoded documents; the database remains the persistent copy | `256` |
 | `DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES` | Process-local named-project query LRU entries | `128` |
-| `DTVP_ASSESSMENT_OUTBOX_PATH` | Transactional assessment overlay and synchronization outbox | `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` |
+| `DTVP_ASSESSMENT_OUTBOX_PATH` | Separate file for local assessments and the export queue. Leave unset to keep them in the database; a former `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` is copied in once | `DTVP_DATABASE_PATH` |
+| `DTVP_EXPORT_MODE` | `auto` exports assessments in the background as they are saved; `manual` keeps them local until a reviewer exports them. See [Import and export](import-export.md) | `auto` |
+| `DTVP_EXPORT_VERIFY_SOURCE` | Read a finding's assessment from Dependency-Track immediately before exporting, and hold the export as a conflict if it changed | `true` |
 | `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
 | `DTVP_ASSESSMENT_STRICT_DT_CONFLICTS` | Perform live Dependency-Track conflict reads before accepting assessment saves | `false` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |
@@ -51,6 +54,15 @@ means the integration or override is disabled.
 | `TEAM_GROUPS_PATH` | Nested team-group definitions | `data/team_groups.json` |
 | `USER_ROLES_PATH` | User-to-role mapping | `data/user_roles.json` |
 | `RESCORE_RULES_PATH` | CVSS transition rules | `data/rescore_rules.json` |
+
+## Access Tokens And MCP
+
+See [AI and API access](ai-access.md) for behavior and limits.
+
+| Variable | Purpose | Default |
+| :--- | :--- | :--- |
+| `DTVP_ACCESS_TOKENS_ENABLED` | Accept personal access tokens on `/api` (read-only) and serve the MCP endpoint at `<context path>/mcp` | `false` |
+| `DTVP_ACCESS_TOKENS_PATH` | Separate file for token digests and the token audit log. Leave unset to keep them in the database | `DTVP_DATABASE_PATH` |
 
 ## Authentication, Runtime, And Frontend
 

@@ -284,6 +284,52 @@ async def test_finding_exists_rejects_unverifiable_response(dt_client, respx_moc
 
 
 @pytest.mark.asyncio
+async def test_finding_exists_is_false_when_the_whole_project_was_deleted(
+    dt_client, respx_mock
+):
+    """Seen in production: exports to a deleted project were retried for
+    weeks because the check itself answered 404 and was taken as unverifiable."""
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/p1").respond(404)
+    respx_mock.get("http://dt.example.com/api/v1/project/p1").respond(404)
+    respx_mock.get("http://dt.example.com/api/version").respond(
+        json={"application": "Dependency-Track", "version": "4.14.2"}
+    )
+
+    assert await dt_client.finding_exists("p1", "c1", "v1") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("project_status", "version_status", "version_body"),
+    [
+        (200, 200, {"version": "4.14.2"}),  # the project exists after all
+        (403, 200, {"version": "4.14.2"}),  # no access is not absence
+        (404, 404, None),  # every path answers 404: wrong URL or proxy
+        (404, 502, None),  # the API is not healthy
+        (404, 200, "<html>login</html>"),  # not Dependency-Track answering
+    ],
+)
+async def test_a_404_alone_does_not_prove_the_project_is_gone(
+    dt_client, respx_mock, project_status, version_status, version_body
+):
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/p1").respond(404)
+    respx_mock.get("http://dt.example.com/api/v1/project/p1").respond(
+        project_status, json={} if project_status == 200 else None
+    )
+    if isinstance(version_body, dict):
+        respx_mock.get("http://dt.example.com/api/version").respond(
+            version_status, json=version_body
+        )
+    else:
+        respx_mock.get("http://dt.example.com/api/version").respond(
+            version_status, text=version_body or ""
+        )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await dt_client.finding_exists("p1", "c1", "v1")
+
+
+@pytest.mark.asyncio
 async def test_get_project_versions():
     async with DTClient("http://url", "key") as client:
         res = await client.get_project_versions("uuid")

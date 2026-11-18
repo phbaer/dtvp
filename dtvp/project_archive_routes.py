@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .access_token_services import forwardable_bearer
 from .dt_client import DTClient
 from .project_archive_services import (
     ARCHIVE_FILE_SUFFIX,
@@ -144,10 +145,7 @@ def _client_context_from_request(
     request: Request,
 ) -> tuple[Any, str | None, dict[str, str]]:
     settings = deps.dt_settings_cls()
-    token = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]
+    token = forwardable_bearer(request.headers.get("Authorization"))
     return settings, token, dict(request.cookies)
 
 

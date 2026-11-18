@@ -90,15 +90,25 @@ def test_identical_concurrent_queries_share_one_computation(monkeypatch):
     original_matcher = query_services._matches_task_group_fields
     call_count = 0
     count_lock = threading.Lock()
+    query_threads: set[int] = set()
 
     def counting_matcher(*args, **kwargs):
         nonlocal call_count
+        # The matcher is patched module-wide. Worker threads left over from
+        # earlier tests in the same process may still run queries of their
+        # own; only the two queries issued here are counted.
+        if threading.get_ident() not in query_threads:
+            return original_matcher(*args, **kwargs)
         with count_lock:
             call_count += 1
             first_call = call_count == 1
         if first_call:
             time.sleep(0.05)
         return original_matcher(*args, **kwargs)
+
+    def tracked_query(index):
+        query_threads.add(threading.get_ident())
+        return _query(index)
 
     monkeypatch.setattr(
         query_services,
@@ -107,8 +117,8 @@ def test_identical_concurrent_queries_share_one_computation(monkeypatch):
     )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        first = executor.submit(_query, query_index)
-        second = executor.submit(_query, query_index)
+        first = executor.submit(tracked_query, query_index)
+        second = executor.submit(tracked_query, query_index)
         first_result = first.result()
         second_result = second.result()
 

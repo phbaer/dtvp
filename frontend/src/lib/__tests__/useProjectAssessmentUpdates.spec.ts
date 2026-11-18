@@ -248,3 +248,59 @@ describe('useProjectAssessmentUpdates', () => {
         wrapper.unmount()
     })
 })
+
+describe('changes that are not saves', () => {
+    it('applies per-finding results and leaves what they do not mention alone', () => {
+        const group = makeGroup({ rescored_cvss: 4.2, rescored_vector: 'CVSS:3.1/AV:N' } as any)
+        const first = group.affected_versions[0]!.components[0]!
+        Object.assign(first, {
+            is_suppressed: true,
+            justification: 'CODE_NOT_PRESENT',
+            sync_status: 'diverged',
+            source_assessment: { analysisState: 'EXPLOITABLE', analysisDetails: 'Theirs', isSuppressed: false },
+        })
+        group.affected_versions[0]!.components.push({ ...first, finding_uuid: 'finding-2' })
+
+        // A settled conflict on the first finding only, as the card reports it.
+        const updated = applyAssessmentDataToGroup(group, {
+            dtvp_results: [{
+                uuid: 'finding-1',
+                new_state: 'EXPLOITABLE',
+                new_details: 'Theirs',
+                suppressed: false,
+                revision: 2,
+                sync_status: 'synced',
+                source_assessment: null,
+            }],
+        })
+
+        const [settled, untouched] = updated.affected_versions[0]!.components
+        expect(settled).toMatchObject({
+            analysis_state: 'EXPLOITABLE',
+            analysis_details: 'Theirs',
+            is_suppressed: false,
+            justification: 'CODE_NOT_PRESENT',
+            dtvp_revision: 2,
+            sync_status: 'synced',
+            source_assessment: null,
+        })
+        expect(untouched).toMatchObject({ sync_status: 'diverged', is_suppressed: true })
+        expect(untouched!.source_assessment).toEqual(first.source_assessment)
+        expect(updated.rescored_cvss).toBe(4.2)
+        expect(updated.rescored_vector).toBe('CVSS:3.1/AV:N')
+    })
+
+    it('still clears rescoring when a save says so', () => {
+        const group = makeGroup({ rescored_cvss: 4.2, rescored_vector: 'CVSS:3.1/AV:N' } as any)
+        group.affected_versions[0]!.components[0]!.justification = 'CODE_NOT_PRESENT'
+        // A save that carries no rescoring and no justification clears them.
+        const updated = applyAssessmentDataToGroup(group, {
+            analysis_state: 'NOT_SET',
+            analysis_details: '',
+            is_suppressed: false,
+        })
+        expect(updated.rescored_cvss).toBeUndefined()
+        expect(updated.rescored_vector).toBeUndefined()
+        expect(updated.affected_versions[0]!.components[0]!.justification).toBeUndefined()
+    })
+})

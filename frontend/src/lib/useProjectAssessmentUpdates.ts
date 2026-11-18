@@ -22,10 +22,15 @@ interface UseProjectAssessmentUpdatesOptions {
 }
 
 export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): GroupedVuln => {
+    // A save describes one new value for every finding it touched, and what
+    // it leaves out is cleared. Other changes (a deletion, a settled
+    // conflict) differ per finding and only carry `dtvp_results`; what they
+    // do not mention stays as it is.
+    const isSave = 'analysis_state' in data || 'analysis_details' in data
     const updated: GroupedVuln = {
         ...group,
-        rescored_cvss: data.rescored_cvss,
-        rescored_vector: data.rescored_vector,
+        rescored_cvss: isSave ? data.rescored_cvss : group.rescored_cvss,
+        rescored_vector: isSave ? data.rescored_vector : group.rescored_vector,
         assignees: data.assignees !== undefined ? data.assignees : group.assignees,
         affected_versions: group.affected_versions.map(version => ({
             ...version,
@@ -38,13 +43,20 @@ export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): Group
                     ...instance,
                     analysis_state: persistenceResult?.new_state ?? data.analysis_state,
                     analysis_details: persistenceResult?.new_details ?? data.analysis_details,
-                    is_suppressed: data.is_suppressed,
-                    justification: data.justification,
+                    is_suppressed: isSave
+                        ? data.is_suppressed
+                        : persistenceResult?.suppressed ?? instance.is_suppressed,
+                    justification: isSave ? data.justification : instance.justification,
                     dtvp_revision: persistenceResult?.revision ?? instance.dtvp_revision,
                     dtvp_sync_status: persistenceResult?.sync_status
                         || (persistenceResult?.queued ? 'pending' : instance.dtvp_sync_status),
                     dtvp_update_id: persistenceResult?.update_id ?? instance.dtvp_update_id,
                     dtvp_sync_error: persistenceResult ? null : instance.dtvp_sync_error,
+                    sync_status: persistenceResult?.sync_status
+                        || (persistenceResult?.queued ? 'pending' : instance.sync_status),
+                    source_assessment: persistenceResult
+                        ? persistenceResult.source_assessment ?? null
+                        : instance.source_assessment,
                 }
             }),
         })),

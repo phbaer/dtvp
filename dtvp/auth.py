@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from functools import lru_cache
 from typing import Optional
@@ -12,7 +13,19 @@ from joserfc.errors import JoseError
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .access_token_services import (
+    SCOPE_READ,
+    AccessToken,
+    access_token_store,
+    access_tokens_enabled,
+    looks_like_access_token,
+)
 from .logic import get_user_role
+
+# POST routes that only read. Everything else a token may call is GET/HEAD.
+# POST /api/assessments/details is deliberately absent: it rewrites the
+# shared task snapshots from caller-supplied finding identities.
+ACCESS_TOKEN_READ_ONLY_POST_ROUTES = ("/api/tasks/group-vulns",)
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +221,7 @@ async def logout(response: Response):
     return response
 
 
-async def get_current_user(request: Request):
+def _session_user(request: Request) -> str:
     if auth_settings.DEV_DISABLE_AUTH:
         return "devuser"
 
@@ -224,6 +237,77 @@ async def get_current_user(request: Request):
             pass
 
     raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+def _bearer_access_token(request: Request) -> str | None:
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    value = value.strip()
+    if scheme.lower() == "bearer" and looks_like_access_token(value):
+        return value
+    return None
+
+
+def _access_token_may_call(request: Request) -> bool:
+    """Access tokens may read through the REST API; they cannot change data.
+
+    Writes by machine clients go through the MCP tools, which apply the
+    review and provenance rules. See docs/adr/0001.
+    """
+    if request.method in {"GET", "HEAD"}:
+        return True
+    # Neither route has path parameters, so the request path identifies it;
+    # the suffix match tolerates a deployment context path.
+    path = str(request.scope.get("path") or "").rstrip("/")
+    return request.method == "POST" and path.endswith(
+        ACCESS_TOKEN_READ_ONLY_POST_ROUTES
+    )
+
+
+async def authenticate_access_token(plain: str) -> AccessToken:
+    """Resolve a plain access token or raise 401."""
+    record = (
+        await asyncio.to_thread(access_token_store.verify, plain)
+        if access_tokens_enabled()
+        else None
+    )
+    if record is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid, expired, or revoked access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return record
+
+
+async def get_session_user(request: Request):
+    """Authenticate an interactive browser session only.
+
+    Used where a machine client must never act, such as managing tokens.
+    """
+    if _bearer_access_token(request) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="This operation requires an interactive session",
+        )
+    return _session_user(request)
+
+
+async def get_current_user(request: Request):
+    plain = _bearer_access_token(request)
+    if plain is None:
+        return _session_user(request)
+
+    record = await authenticate_access_token(plain)
+    if not record.has_scope(SCOPE_READ) or not _access_token_may_call(request):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Access tokens can only read through this API; "
+                "use the MCP tools to change assessments"
+            ),
+        )
+    request.state.access_token = record
+    return record.username
 
 
 @router.get("/me")

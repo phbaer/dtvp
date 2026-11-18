@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, inject, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Archive, Download, RefreshCw, Upload, X } from '@lucide/vue'
 import {
     applyProjectArchiveImport,
@@ -26,6 +27,8 @@ import {
     getRescoreRules,
 } from '../lib/api'
 import type { TeamGroupConfig } from '../lib/api'
+import AccessTokensPanel from '../components/AccessTokensPanel.vue'
+import ExportQueuePanel from '../components/ExportQueuePanel.vue'
 import type {
     BackendPerformanceStatus,
     ProjectArchiveApplyResult,
@@ -36,7 +39,15 @@ import type {
 
 const user = inject<any>('user', { role: 'ANALYST' })
 const realRole = inject<any>('realRole', ref('ANALYST'))
-const activeTab = ref('mapping')
+const route = useRoute()
+// The header's export warning links straight to the queue.
+const activeTab = ref(route?.query?.tab === 'export' ? 'export' : 'mapping')
+watch(() => route?.query?.tab, (tab) => {
+    if (tab === 'export') activeTab.value = 'export'
+})
+// Access tokens are the only setting every user manages for themselves; the
+// other tabs configure the workspace and stay reviewer-only.
+const showTokens = computed(() => activeTab.value === 'tokens' || realRole?.value !== 'REVIEWER')
 
 // Runtime diagnostics state
 const runtimeStatus = ref<BackendPerformanceStatus | null>(null)
@@ -765,7 +776,7 @@ watch(() => activeTab.value, (newTab) => {
 </script>
 
 <template>
-  <div v-if="realRole === 'REVIEWER'" class="w-full">
+  <div class="w-full">
     <div class="mb-8 flex flex-col gap-2">
         <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
             &larr; Back to Dashboard
@@ -776,6 +787,7 @@ watch(() => activeTab.value, (newTab) => {
     <!-- Tabs -->
     <div class="mb-6 flex flex-wrap border-b border-gray-700">
         <button 
+            v-if="realRole === 'REVIEWER'"
             @click="activeTab = 'mapping'"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'mapping' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
@@ -819,12 +831,32 @@ watch(() => activeTab.value, (newTab) => {
         </button>
         <button
             v-if="user?.role === 'REVIEWER'"
+            @click="activeTab = 'export'"
+            :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'export' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
+        >
+            Export
+        </button>
+        <button
+            @click="activeTab = 'tokens'"
+            :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', showTokens ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
+        >
+            Access Tokens
+        </button>
+        <button
+            v-if="user?.role === 'REVIEWER'"
             @click="activeTab = 'runtime'"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'runtime' ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Runtime
         </button>
     </div>
+
+    <ExportQueuePanel v-if="activeTab === 'export' && user?.role === 'REVIEWER'" />
+
+    <AccessTokensPanel
+        v-if="showTokens"
+        :is-reviewer="realRole === 'REVIEWER'"
+    />
 
     <div
         v-if="activeTab === 'runtime' && user?.role === 'REVIEWER'"
@@ -959,7 +991,7 @@ watch(() => activeTab.value, (newTab) => {
         </template>
     </div>
 
-    <div v-if="activeTab === 'mapping'" class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
+    <div v-if="activeTab === 'mapping' && realRole === 'REVIEWER'" class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
         <h3 class="text-xl font-bold mb-4 text-gray-200">Team Mapping Configuration</h3>
         
         <div class="mb-6">
@@ -1569,10 +1601,5 @@ watch(() => activeTab.value, (newTab) => {
             </div>
         </section>
     </div>
-  </div>
-  <div v-else class="text-center py-20">
-    <h2 class="text-2xl font-bold text-red-400 mb-4">Access Denied</h2>
-    <p class="text-gray-400">You do not have permission to access this page.</p>
-    <router-link to="/" class="text-blue-400 hover:text-blue-300 mt-4 inline-block">&larr; Back to Dashboard</router-link>
   </div>
 </template>

@@ -7,13 +7,13 @@
             <slot name="icon">
               <!-- fallback icon if needed -->
             </slot>
-            Conflict Detected
+            {{ title }}
           </h3>
           <button @click="$emit('close')" class="text-gray-400 hover:text-white text-xl font-bold">✕</button>
         </div>
 
         <div class="p-4 bg-red-900/20 border-b border-red-900/50 text-red-200 text-sm">
-          The analysis data on the server has changed since you started editing. Please review the differences below and choose how to proceed.
+          {{ intro }}
         </div>
 
         <div class="flex-1 overflow-y-auto p-4 bg-gray-800 space-y-4">
@@ -24,7 +24,7 @@
 
             <div class="grid grid-cols-2 gap-4">
               <div class="space-y-2">
-                <h4 class="text-xs font-bold uppercase text-gray-500">Server State (New)</h4>
+                <h4 class="text-xs font-bold uppercase text-gray-500">{{ serverHeading }}</h4>
                 <div class="text-sm">
                   <span class="text-gray-400">State:</span>
                   <span class="font-mono text-blue-300">{{ conflict.current.analysisState }}</span>
@@ -39,7 +39,7 @@
               </div>
 
               <div class="space-y-2">
-                <h4 class="text-xs font-bold uppercase text-gray-500">Your Changes</h4>
+                <h4 class="text-xs font-bold uppercase text-gray-500">{{ localHeading }}</h4>
                 <div class="text-sm">
                   <span class="text-gray-400">State:</span>
                   <span class="font-mono text-green-300">{{ conflict.your_change.analysisState }}</span>
@@ -59,15 +59,19 @@
         <div class="p-4 border-t border-gray-700 bg-gray-850 flex justify-end gap-4">
           <button
             @click="$emit('use-server-state')"
-            class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-bold transition-colors"
+            :disabled="busy"
+            data-testid="conflict-use-server"
+            class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-bold transition-colors disabled:opacity-50"
           >
-            Discard My Changes (Use Server)
+            {{ useServerLabel }}
           </button>
           <button
             @click="$emit('force-overwrite')"
+            :disabled="busy"
+            data-testid="conflict-overwrite"
             class="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-bold transition-colors disabled:opacity-50"
           >
-            Force Overwrite
+            {{ overwriteLabel }}
           </button>
         </div>
       </div>
@@ -77,12 +81,27 @@
 
 <script setup lang="ts">
 
-const props = defineProps<{
+withDefaults(defineProps<{
   show: boolean
   conflictData: Array<any> | null
-}>()
+  title?: string
+  intro?: string
+  serverHeading?: string
+  localHeading?: string
+  useServerLabel?: string
+  overwriteLabel?: string
+  busy?: boolean
+}>(), {
+  title: 'Conflict Detected',
+  intro: 'The analysis data on the server has changed since you started editing. Please review the differences below and choose how to proceed.',
+  serverHeading: 'Server State (New)',
+  localHeading: 'Your Changes',
+  useServerLabel: 'Discard My Changes (Use Server)',
+  overwriteLabel: 'Force Overwrite',
+  busy: false,
+})
 
-const emit = defineEmits<{
+defineEmits<{
   (e: 'close'): void
   (e: 'use-server-state'): void
   (e: 'force-overwrite'): void

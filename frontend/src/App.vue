@@ -13,6 +13,7 @@ import {
 } from './lib/authSession'
 import ChangelogModal from './components/ChangelogModal.vue'
 import AnalysisQueueIndicator from './components/AnalysisQueueIndicator.vue'
+import ExportIssuesIndicator from './components/ExportIssuesIndicator.vue'
 import type { PythonRuntimeStatus } from './types'
 
 const version = ref('')
@@ -406,7 +407,6 @@ const reloadForUpdate = () => {
                         Vuln List
                     </button>
                     <button
-                        v-if="realRole === 'REVIEWER'"
                         type="button"
                         @click="goTo('/settings')"
                         :class="[headerButtonBase, isActive('/settings') ? headerButtonActive : headerButtonDefault]"
@@ -415,6 +415,7 @@ const reloadForUpdate = () => {
                     </button>
 
                     <AnalysisQueueIndicator />
+                    <ExportIssuesIndicator v-if="realRole === 'REVIEWER'" @open="router.push({ path: '/settings', query: { tab: 'export' } })" />
 
                     <template v-if="showProjectHeaderButtons">
                         <span class="h-10 w-px bg-white/10"></span>

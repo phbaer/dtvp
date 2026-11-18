@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component } from 'vue'
-import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/api'
+import { updateAssessment, getAssessmentDetails, getKnownUsers, resolveAssessmentConflicts, deleteAssessment } from '../lib/api'
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot, Trash2 } from '@lucide/vue'
 
 import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
@@ -26,6 +26,8 @@ import CalculatorModal from './CalculatorModal.vue'
 import SsvcCalculator from './SsvcCalculator.vue'
 import { summarizeSsvc, ssvcReviewText, stripSsvcDocumentation, type SsvcSelection } from '../lib/ssvc'
 import ConflictResolutionModal from './ConflictResolutionModal.vue'
+import DeleteAssessmentModal from './DeleteAssessmentModal.vue'
+import AssessmentHistory from './AssessmentHistory.vue'
 import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
 import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
@@ -175,8 +177,133 @@ const showCalculatorModal = ref(false)
 const showConflictModal = ref(false)
 const conflictData = ref<any>(null)
 const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Analysis Object
+const syncStatusOf = (analysis: any): string =>
+    String(analysis?.dtvpSyncStatus || analysis?.dtvp_sync_status || '').toLowerCase()
+
+// Findings changed both here and in Dependency-Track. Their export waits
+// until someone chooses which version to keep.
+const sourceConflicts = computed(() => allInstances.value
+    .map((instance: any) => {
+        // A reload or save gives the freshest state; until then the state
+        // that came with the vulnerability detail is what we know.
+        const analysis = originalAnalysis.value[instance.finding_uuid] ?? {
+            analysisState: instance.analysis_state,
+            analysisDetails: instance.analysis_details,
+            isSuppressed: instance.is_suppressed,
+            dtvpSyncStatus: instance.sync_status || instance.dtvp_sync_status,
+            dtvpRemote: instance.source_assessment,
+        }
+        const remote = analysis?.dtvpRemote
+        if (syncStatusOf(analysis) !== 'diverged' || !remote) return null
+        return {
+            finding_uuid: instance.finding_uuid,
+            project_name: instance.project_name,
+            project_version: instance.project_version,
+            component_name: instance.component_name,
+            component_version: instance.component_version,
+            current: remote,
+            your_change: analysis,
+            instance,
+        }
+    })
+    .filter((conflict: any) => conflict !== null))
+const showSourceConflictModal = ref(false)
+const resolvingSourceConflict = ref(false)
+const sourceConflictError = ref('')
+
+// Tell the list about a change that did not come from the save form, the
+// way a save does. `update` would mean "ownership changed" and makes the
+// project view run the whole project query again and rebuild this card.
+const emitRefreshedAssessment = () => {
+    emit('update:assessment', {
+        dtvp_results: allInstances.value.map((instance: any) => ({
+            status: 'success',
+            uuid: instance.finding_uuid,
+            new_state: instance.analysis_state,
+            new_details: instance.analysis_details,
+            suppressed: instance.is_suppressed,
+            revision: instance.dtvp_revision,
+            sync_status: instance.dtvp_sync_status,
+            update_id: instance.dtvp_update_id,
+            source_assessment: instance.source_assessment ?? null,
+        })),
+    })
+}
+
+const resolveSourceConflicts = async (resolution: 'local' | 'remote') => {
+    if (resolvingSourceConflict.value || sourceConflicts.value.length === 0) return
+    resolvingSourceConflict.value = true
+    sourceConflictError.value = ''
+    try {
+        await resolveAssessmentConflicts(
+            sourceConflicts.value.map((conflict: any) => conflict.instance),
+            resolution,
+        )
+        showSourceConflictModal.value = false
+        await refreshDetails()
+        historyRefreshKey.value += 1
+        emitRefreshedAssessment()
+    } catch (err: any) {
+        sourceConflictError.value = err?.response?.data?.detail
+            || err?.message
+            || 'The conflict could not be resolved.'
+    } finally {
+        resolvingSourceConflict.value = false
+    }
+}
+
+// Explicit deletion of one team's assessment or the whole assessment.
+const showDeleteModal = ref(false)
+const deletingAssessment = ref(false)
+const deleteAssessmentError = ref('')
+const historyRefreshKey = ref(0)
+const assessedTeamNames = computed(() => {
+    const names = new Map<string, string>()
+    for (const instance of allInstances.value) {
+        const details = originalAnalysis.value[instance.finding_uuid]?.analysisDetails
+            ?? instance.analysis_details
+            ?? ''
+        for (const block of parseAssessmentBlocks(details)) {
+            if (block.historical) continue
+            names.set(block.team.toLocaleLowerCase(), block.team)
+        }
+    }
+    return Array.from(names.values())
+})
+
+const openDeleteModal = () => {
+    deleteAssessmentError.value = ''
+    showDeleteModal.value = true
+}
+
+const confirmDeleteAssessment = async (team: string | null) => {
+    if (deletingAssessment.value) return
+    deletingAssessment.value = true
+    deleteAssessmentError.value = ''
+    try {
+        await deleteAssessment(allInstances.value, team)
+        showDeleteModal.value = false
+        await refreshDetails()
+        historyRefreshKey.value += 1
+        emitRefreshedAssessment()
+    } catch (err: any) {
+        deleteAssessmentError.value = err?.response?.status === 409
+            ? 'The assessment changed while this dialog was open. Reload and try again.'
+            : err?.response?.data?.detail || err?.message || 'The assessment could not be deleted.'
+    } finally {
+        deletingAssessment.value = false
+    }
+}
+
 const assessmentPersistenceStatus = computed(() => {
     const analyses = Object.values(originalAnalysis.value)
+    if (sourceConflicts.value.length > 0) {
+        return {
+            kind: 'conflict',
+            label: 'Changed here and in Dependency-Track — choose a version',
+            detail: 'Nothing is exported for this vulnerability until you decide.',
+        }
+    }
     const failed = analyses.find(analysis =>
         ['error', 'failed'].includes(
             String(analysis?.dtvpSyncStatus || analysis?.dtvp_sync_status || '').toLowerCase(),
@@ -1760,6 +1887,8 @@ const refreshDetails = async () => {
                              c.justification = item.analysis.analysisJustification || item.analysis.justification || parseJustificationFromText(item.analysis.analysisDetails || item.analysis.analysis_details || '') || 'NOT_SET'
                              c.dtvp_revision = item.analysis.dtvpRevision ?? item.analysis.dtvp_revision
                              c.dtvp_sync_status = item.analysis.dtvpSyncStatus || item.analysis.dtvp_sync_status
+                             c.sync_status = c.dtvp_sync_status
+                             c.source_assessment = item.analysis.dtvpRemote || null
                              c.dtvp_update_id = item.analysis.dtvpUpdateId || item.analysis.dtvp_update_id
                              c.dtvp_sync_error = item.analysis.dtvpSyncError || item.analysis.dtvp_sync_error
                              const comments = item.analysis.analysisComments || item.analysis.analysis_comments
@@ -2621,6 +2750,7 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
 }
 
 const handleAssessmentUpdateResults = async (results: any[], finalState: string, finalText: string) => {
+    historyRefreshKey.value += 1
     const errors = results.filter((r: any) => r.status === 'error')
     if (errors.length > 0) {
         console.error('Update completed with errors:', errors)
@@ -2813,8 +2943,19 @@ const teamBlockStateColor = (state?: string): string => {
                         </span>
                     </button>
                 </div>
+                <button
+                    v-if="assessmentPersistenceStatus?.kind === 'conflict'"
+                    type="button"
+                    data-testid="assessment-source-conflict"
+                    class="my-1.5 inline-flex shrink-0 items-center gap-1.5 rounded border border-red-700 bg-red-950/60 px-2 py-1 text-[10px] font-semibold text-red-200 hover:bg-red-900/60"
+                    :title="assessmentPersistenceStatus.detail"
+                    @click="showSourceConflictModal = true"
+                >
+                    <AlertTriangle :size="12" aria-hidden="true" />
+                    {{ assessmentPersistenceStatus.label }}
+                </button>
                 <div
-                    v-if="assessmentPersistenceStatus"
+                    v-else-if="assessmentPersistenceStatus"
                     data-testid="assessment-persistence-status"
                     class="my-1.5 inline-flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 text-[10px] font-semibold"
                     :class="assessmentPersistenceStatus.kind === 'error'
@@ -3272,6 +3413,17 @@ const teamBlockStateColor = (state?: string): string => {
                             >
                                 <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
                             </button>
+                            <button
+                                type="button"
+                                @click="openDeleteModal"
+                                :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
+                                class="rounded border border-red-900 bg-gray-800 px-3 py-2 text-red-300 transition-colors hover:bg-red-950/60 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                                title="Delete this assessment"
+                                aria-label="Delete assessment"
+                                data-testid="assessment-delete-button"
+                            >
+                                <Trash2 :size="14" />
+                            </button>
                         </div>
                     </template>
                     <div
@@ -3702,6 +3854,15 @@ const teamBlockStateColor = (state?: string): string => {
                         </button>
                     </div>
                     </DetailSection>
+
+                    <DetailSection
+                        step="Assessment · 3"
+                        title="History"
+                        description="Every version of this assessment recorded in DTVP: who changed it, when, and how, including deletions and values adopted from Dependency-Track."
+                        data-testid="assessment-history-section"
+                    >
+                        <AssessmentHistory :instances="allInstances" :refresh-key="historyRefreshKey" />
+                    </DetailSection>
             </div>
         </section>
 
@@ -3760,6 +3921,34 @@ const teamBlockStateColor = (state?: string): string => {
       @close="showConflictModal = false"
       @use-server-state="handleUseServerState"
       @force-overwrite="() => handleUpdate(true)"
+    />
+
+    <!-- Changed both here and in Dependency-Track -->
+    <ConflictResolutionModal
+      :show="showSourceConflictModal"
+      :conflictData="sourceConflicts"
+      :busy="resolvingSourceConflict"
+      title="Changed here and in Dependency-Track"
+      :intro="sourceConflictError || 'This assessment was changed in DTVP and, independently, in Dependency-Track. Nothing is exported until you choose which version to keep. The other version stays in the history.'"
+      server-heading="Dependency-Track"
+      local-heading="DTVP (not exported)"
+      use-server-label="Use the Dependency-Track version"
+      overwrite-label="Keep the DTVP version and export it"
+      @close="showSourceConflictModal = false"
+      @use-server-state="() => resolveSourceConflicts('remote')"
+      @force-overwrite="() => resolveSourceConflicts('local')"
+    />
+
+    <DeleteAssessmentModal
+      :show="showDeleteModal"
+      :team="selectedTeam"
+      :assessed-teams="assessedTeamNames"
+      :is-reviewer="isReviewer"
+      :finding-count="allInstances.length"
+      :busy="deletingAssessment"
+      :error="deleteAssessmentError"
+      @close="showDeleteModal = false"
+      @confirm="confirmDeleteAssessment"
     />
 
     <GenericModal

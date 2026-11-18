@@ -1,10 +1,19 @@
+import os
+import tempfile
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dtvp import dt_cache, main
-from dtvp.dt_client import DTClient
+# Importing dtvp opens the local database at the configured path and imports
+# an existing JSON cache into it. Point it at a throwaway directory first so
+# a test run never touches the developer's real data directory.
+_IMPORT_TIME_DATA = tempfile.TemporaryDirectory(prefix="dtvp-test-import-")
+os.environ["DTVP_DT_CACHE_PATH"] = os.path.join(_IMPORT_TIME_DATA.name, "dt_cache")
+
+from dtvp import dt_cache, main  # noqa: E402
+from dtvp.access_token_services import access_token_store  # noqa: E402
+from dtvp.dt_client import DTClient  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -14,6 +23,11 @@ def reset_cache_manager(tmp_path, monkeypatch):
     analysis_results_path = tmp_path / "code_analysis_results.json"
     monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
     monkeypatch.setenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", str(analysis_results_path))
+    monkeypatch.setenv(
+        "DTVP_ACCESS_TOKENS_PATH", str(tmp_path / "access_tokens.sqlite")
+    )
+    monkeypatch.delenv("DTVP_ACCESS_TOKENS_ENABLED", raising=False)
+    access_token_store.reset()
     dt_cache.cache_manager.reset(str(cache_dir))
     main.code_analysis_result_store.reset()
     yield
