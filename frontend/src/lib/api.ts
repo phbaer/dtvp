@@ -1086,6 +1086,53 @@ export const updateAssessment = async (payload: AssessmentPayload) => {
     return res.data;
 };
 
+/**
+ * Settle findings changed both in DTVP and in Dependency-Track: keep the
+ * DTVP value (`local`, exported over the other) or take Dependency-Track's
+ * (`remote`).
+ */
+export const resolveAssessmentConflicts = async (
+    instances: any[],
+    resolution: 'local' | 'remote',
+): Promise<Array<{ finding_uuid: string | null; analysis: any }>> => {
+    const res = await api.post('/assessments/conflicts/resolve', { instances, resolution });
+    return res.data;
+};
+
+/**
+ * Delete one team's assessment of the given findings (`"General"` for the
+ * global one), or with `null` the whole assessment. Exported like a save.
+ */
+export const deleteAssessment = async (instances: any[], team: string | null) => {
+    const res = await api.post('/assessment/delete', { instances, team });
+    return res.data;
+};
+
+export interface AssessmentRevision {
+    revision: number;
+    analysisState: string;
+    analysisDetails: string;
+    isSuppressed: boolean;
+    origin: string;
+    author: string | null;
+    created_at: string;
+}
+
+export const getAssessmentHistory = async (instance: {
+    project_uuid: string;
+    component_uuid: string;
+    vulnerability_uuid: string;
+}): Promise<AssessmentRevision[]> => {
+    const res = await api.get('/assessments/history', {
+        params: {
+            project_uuid: instance.project_uuid,
+            component_uuid: instance.component_uuid,
+            vulnerability_uuid: instance.vulnerability_uuid,
+        },
+    });
+    return res.data;
+};
+
 
 export const getDependencyChains = async (
     project_uuid: string,
@@ -2173,5 +2220,125 @@ export const analysisQueueClear = async (statuses?: string[]): Promise<{ status:
 
 export const analysisQueueCancelQueued = async (): Promise<{ status: string; cancelled: number }> => {
     const res = await api.post('/analysis-queue/cancel-queued');
+    return res.data;
+};
+
+export interface AccessTokenInfo {
+    id: string;
+    name: string;
+    scopes: string[];
+    created_at: string;
+    expires_at: string;
+    last_used_at: string | null;
+    revoked_at: string | null;
+}
+
+export interface AccessTokenListing {
+    enabled: boolean;
+    scopes: string[];
+    default_expiry_days: number;
+    max_expiry_days: number;
+    tokens: AccessTokenInfo[];
+}
+
+export interface AccessTokenAuditEntry {
+    id: number;
+    occurred_at: string;
+    username: string;
+    token_id: string;
+    agent: string;
+    action: string;
+    outcome: string;
+    target: Record<string, unknown>;
+    detail: string;
+}
+
+/** URL an MCP client connects to with an access token. */
+export const getMcpEndpointUrl = (): string =>
+    new URL(`${BASE_WITH_CONTEXT}/mcp`, window.location.origin).toString();
+
+export const listAccessTokens = async (): Promise<AccessTokenListing> => {
+    const res = await api.get('/settings/tokens');
+    return res.data;
+};
+
+/** The returned `token` is the only time the secret value is available. */
+export const createAccessToken = async (request: {
+    name: string;
+    scopes: string[];
+    expires_in_days: number;
+}): Promise<AccessTokenInfo & { token: string }> => {
+    const res = await api.post('/settings/tokens', request);
+    return res.data;
+};
+
+export const revokeAccessToken = async (tokenId: string): Promise<void> => {
+    await api.delete(`/settings/tokens/${encodeURIComponent(tokenId)}`);
+};
+
+export const listAccessTokenAudit = async (limit = 50): Promise<AccessTokenAuditEntry[]> => {
+    const res = await api.get('/settings/tokens/audit', { params: { limit } });
+    return res.data;
+};
+
+export interface ExportQueueItem {
+    update_id: string;
+    project_uuid: string;
+    component_uuid: string;
+    vulnerability_uuid: string;
+    /** False when the project is no longer in Dependency-Track's project list. */
+    project_known: boolean;
+    /** When Dependency-Track last listed a project it no longer has. */
+    project_last_seen_at?: string | null;
+    project_name: string | null;
+    project_version: string | null;
+    component_name: string | null;
+    component_version: string | null;
+    vulnerability_id: string | null;
+    revision: number;
+    status: string;
+    queued_at: string;
+    updated_at: string;
+    attempts: number;
+    last_error: string | null;
+    author: string | null;
+    origin: string | null;
+    local: { analysisState: string; analysisDetails: string; isSuppressed: boolean };
+    source: { analysisState: string; analysisDetails: string; isSuppressed: boolean } | null;
+}
+
+export interface ExportQueue {
+    mode: 'auto' | 'manual';
+    pending: ExportQueueItem[];
+    conflicts: number;
+}
+
+export interface ExportResult {
+    exported: number;
+    /** The finding no longer exists in Dependency-Track; its assessment is kept. */
+    dropped: number;
+    remaining: number;
+    conflicts: number;
+    failed: Array<{ update_id: string; status: string; error: string | null }>;
+}
+
+/** Local assessments that have not reached Dependency-Track yet. */
+export const getExportQueue = async (): Promise<ExportQueue> => {
+    const res = await api.get('/export');
+    return res.data;
+};
+
+/**
+ * Drop queued exports so they are never sent. Where the value last agreed
+ * with Dependency-Track is known, the assessment goes back to it.
+ */
+export const discardExports = async (updateIds: string[]): Promise<{ discarded: number; remaining: number }> => {
+    const res = await api.post('/export/discard', { update_ids: updateIds });
+    return res.data;
+};
+
+/** Export everything that is due, or only the given queue entries. */
+export const exportAssessments = async (updateIds?: string[]): Promise<ExportResult> => {
+    const res = await api.post('/export', updateIds ? { update_ids: updateIds } : {});
     return res.data;
 };

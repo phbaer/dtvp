@@ -45,6 +45,7 @@ module.exports = {
                 DTVP_FRONTEND_URL: "http://localhost:5173",
                 DTVP_TMRESCORE_URL: "http://127.0.0.1:8090",
                 DTVP_CODE_ANALYSIS_URL: "http://127.0.0.1:8095",
+                DTVP_ACCESS_TOKENS_ENABLED: "true",
                 PYTHONUNBUFFERED: "1"
             }
         },

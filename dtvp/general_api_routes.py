@@ -3,7 +3,6 @@ import copy
 import hashlib
 import inspect
 import json
-import os
 import threading
 import uuid
 from dataclasses import dataclass
@@ -15,19 +14,23 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .ssvc_services import (
-    SsvcInput,
-    evaluate as evaluate_ssvc,
     get_models as get_ssvc_models,
-    preserve_record as preserve_ssvc_record,
     summarize_group as summarize_ssvc_group,
-    validate_evidence as validate_ssvc_evidence,
 )
 from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
 from .evidence_services import evidence_sources
 
-from .assessment_outbox_services import (
-    AssessmentRevisionConflictError,
-    assessment_key,
+from .access_token_services import forwardable_bearer
+from .assessment_outbox_services import AssessmentNotDivergedError, assessment_key
+from .assessment_use_cases import (
+    AssessmentConflictError,
+    AssessmentPermissionError,
+    AssessmentRequest,
+    AssessmentValidationError,
+    accepted_assessment_results as _accepted_assessment_results,
+    delete_assessment,
+    record_code_analysis_applications as _record_code_analysis_applications,
+    save_assessment,
 )
 from .assessment_restore_services import (
     refresh_group_restore_metadata,
@@ -57,10 +60,10 @@ from .code_analysis_assessment_services import (
     assessment_status_for_group,
     build_assessment_match_index,
     discover_assessment_metadata,
-    record_application_eligible,
     records_for_group,
     record_vulnerability_id,
 )
+from .dt_cache import get_export_mode
 from .dt_client import DTClient
 from .grouped_vuln_services import (
     build_grouped_vuln_statistics_rollup,
@@ -90,24 +93,28 @@ from .team_group_services import (
 )
 
 
-class AssessmentRequest(BaseModel):
-    instances: list[dict]
-    state: str
-    details: str
-    comment: Optional[str] = None
-    justification: Optional[str] = None
-    suppressed: bool = False
-    team: Optional[str] = None
-    assigned: Optional[list[str]] = None
-    original_analysis: Optional[dict[str, dict[str, Any]]] = None
-    force: bool = False
-    comparison_mode: Optional[str] = "MERGE"
-    analysis_run_ids: list[str] = Field(default_factory=list)
-    ssvc: SsvcInput | None = None
-
-
 class AssessmentDetailsRequest(BaseModel):
     instances: list[dict]
+
+
+class AssessmentConflictResolutionRequest(BaseModel):
+    instances: list[dict]
+    resolution: Literal["local", "remote"]
+
+
+class ExportDiscardRequest(BaseModel):
+    update_ids: list[str]
+
+
+class AssessmentDeletionRequest(BaseModel):
+    instances: list[dict]
+    # A team name, "General", or omitted/null for the whole assessment.
+    team: Optional[str] = None
+
+
+class ExportRequest(BaseModel):
+    # Omit to export everything that is due.
+    update_ids: Optional[list[str]] = None
 
 
 class AssessmentRestoreRequest(BaseModel):
@@ -346,16 +353,20 @@ def _assessment_identity_key(source: dict[str, Any]) -> tuple[str, str, str] | N
 
 def _build_assessment_payload_lookup(
     payloads: list[tuple[dict, dict]],
-) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str, str], dict[str, Any]]]:
-    by_finding_uuid: dict[str, dict[str, Any]] = {}
+) -> tuple[
+    dict[str, tuple[dict[str, Any], tuple[str, str, str] | None]],
+    dict[tuple[str, str, str], dict[str, Any]],
+]:
+    by_finding_uuid: dict[
+        str, tuple[dict[str, Any], tuple[str, str, str] | None]
+    ] = {}
     by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     for instance, payload in payloads:
+        identity = _assessment_identity_key(instance)
         finding_uuid = instance.get("finding_uuid")
         if finding_uuid:
-            by_finding_uuid[str(finding_uuid)] = payload
-
-        identity = _assessment_identity_key(instance)
+            by_finding_uuid[str(finding_uuid)] = (payload, identity)
         if identity is not None:
             by_identity[identity] = payload
 
@@ -364,14 +375,19 @@ def _build_assessment_payload_lookup(
 
 def _assessment_payload_for_component(
     component: dict[str, Any],
-    by_finding_uuid: dict[str, dict[str, Any]],
+    by_finding_uuid: dict[str, tuple[dict[str, Any], tuple[str, str, str] | None]],
     by_identity: dict[tuple[str, str, str], dict[str, Any]],
 ) -> dict[str, Any] | None:
+    identity = _assessment_identity_key(component)
     finding_uuid = component.get("finding_uuid")
     if finding_uuid and str(finding_uuid) in by_finding_uuid:
-        return by_finding_uuid[str(finding_uuid)]
+        payload, payload_identity = by_finding_uuid[str(finding_uuid)]
+        # The finding UUID comes from the caller. When both sides name a
+        # project/component/vulnerability they must agree, or one finding's
+        # assessment could be painted onto another in the shared snapshot.
+        if payload_identity is None or identity is None or payload_identity == identity:
+            return payload
 
-    identity = _assessment_identity_key(component)
     if identity is None:
         return None
     return by_identity.get(identity)
@@ -383,7 +399,7 @@ def _assessment_payload_from_analysis(analysis: dict[str, Any]) -> dict[str, Any
         if "isSuppressed" in analysis
         else analysis.get("is_suppressed", False)
     )
-    return {
+    payload = {
         "state": analysis.get("analysisState")
         or analysis.get("analysis_state")
         or "NOT_SET",
@@ -395,6 +411,10 @@ def _assessment_payload_from_analysis(analysis: dict[str, Any]) -> dict[str, Any
         or analysis.get("justification")
         or "NOT_SET",
     }
+    if analysis.get("dtvpSyncStatus"):
+        payload["sync_status"] = analysis["dtvpSyncStatus"]
+        payload["source_assessment"] = analysis.get("dtvpRemote")
+    return payload
 
 
 def _apply_assessment_payload_to_group(
@@ -418,6 +438,12 @@ def _apply_assessment_payload_to_group(
             component["is_suppressed"] = bool(payload.get("suppressed", False))
             if "justification" in payload:
                 component["justification"] = payload.get("justification")
+            if "sync_status" in payload:
+                component["sync_status"] = payload["sync_status"]
+                if payload.get("source_assessment"):
+                    component["source_assessment"] = payload["source_assessment"]
+                else:
+                    component.pop("source_assessment", None)
             update_component_restore_metadata(component)
             changed = True
     if changed:
@@ -717,6 +743,206 @@ def _refresh_grouped_vuln_task_snapshots_locked(
     return refreshed
 
 
+def start_grouped_vuln_task(
+    deps: GeneralApiRouteDeps,
+    *,
+    name: str,
+    cve: Optional[str],
+    response_mode: str,
+    user: str,
+    token: str | None = None,
+    cookies: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Start the grouped-vulnerability computation for a project, or join a
+    matching one. Returns ``{"task_id", "reused"}``."""
+    task_key = _grouped_vuln_task_key(
+        deps,
+        name=name,
+        cve=cve,
+        response_mode=response_mode,
+    )
+    reusable_task = _claim_reusable_grouped_vuln_task(
+        deps,
+        task_key=task_key,
+        user=user,
+    )
+    if reusable_task is not None:
+        return {"task_id": reusable_task["id"], "reused": True}
+
+    task_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    with _TASK_SNAPSHOT_REFRESH_LOCK:
+        # Recheck under the registry lock so simultaneous requests cannot
+        # create duplicate computations between the first lookup and insert.
+        reusable_task = _claim_reusable_grouped_vuln_task(
+            deps,
+            task_key=task_key,
+            user=user,
+        )
+        if reusable_task is not None:
+            return {"task_id": reusable_task["id"], "reused": True}
+        deps.tasks[task_id] = {
+            "id": task_id,
+            "_owner": user,
+            "_owners": {user},
+            "_project_name": name,
+            "_task_key": task_key,
+            "_task_key_finalized": False,
+            "_reuse_count": 0,
+            "status": "pending",
+            "message": "Starting...",
+            "progress": 0,
+            "created_at": now,
+            "updated_at": now,
+            "_last_accessed_at": now,
+            "result": None,
+            "log": ["Starting..."],
+        }
+
+    async def task_wrapper():
+        settings = deps.dt_settings_cls()
+        client_cls = deps.get_dt_client_cls()
+        async with client_cls(
+            settings.api_url,
+            api_key=settings.api_key,
+            token=token or "",
+            cookies=cookies or {},
+        ) as client:
+            await deps.process_grouped_vulns_task(
+                task_id,
+                name,
+                cve,
+                client,
+                response_mode,
+            )
+            _finalize_grouped_vuln_task_key(deps, task_id)
+
+    deps.create_tracked_task(task_wrapper())
+    return {"task_id": task_id, "reused": False}
+
+
+def refresh_grouped_vuln_task_snapshots(
+    tasks: dict[str, Any],
+    payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+    team_mapping: dict[str, Any],
+) -> int:
+    """Apply accepted assessment changes to the live task snapshots."""
+    return _refresh_grouped_vuln_task_snapshots(tasks, payloads, team_mapping)
+
+
+def refresh_task_snapshots_for_assessments(
+    deps: GeneralApiRouteDeps,
+    keys: list[tuple[str, str, str]],
+) -> int:
+    """Bring the live task snapshots up to date with the stored assessments
+    of the given findings, for changes that did not come through a save."""
+    payloads = []
+    for project_uuid, component_uuid, vulnerability_uuid in keys:
+        analysis = deps.cache_manager.get_assessment_overlay(
+            project_uuid, component_uuid, vulnerability_uuid
+        )
+        if analysis is None:
+            continue
+        payloads.append(
+            (
+                {
+                    "project_uuid": project_uuid,
+                    "component_uuid": component_uuid,
+                    "vulnerability_uuid": vulnerability_uuid,
+                },
+                _assessment_payload_from_analysis(analysis),
+            )
+        )
+    if not payloads:
+        return 0
+    return _refresh_grouped_vuln_task_snapshots(
+        deps.tasks, payloads, deps.load_team_mapping()
+    )
+
+
+def task_for_user(
+    deps: GeneralApiRouteDeps,
+    task_id: str,
+    user: str,
+) -> dict[str, Any] | None:
+    return _task_for_user(deps, task_id, user)
+
+
+def hydrate_task_group_detail(
+    deps: GeneralApiRouteDeps,
+    task: dict[str, Any],
+    group: dict[str, Any],
+) -> dict[str, Any]:
+    """Full detail for one group: evidence, dependency chains, analyzer status."""
+    hydrated = copy.deepcopy(group)
+    hydrated["evidence_sources"] = evidence_sources(
+        hydrated, get_ssvc_enrichment_service().filter_snapshot()
+    )
+    populate_group_dependency_chains(
+        hydrated,
+        task.get("_bom_cache_map") or {},
+    )
+    _, context = _task_group_query_context(deps, task)
+    _annotate_code_assessment_status([hydrated], context["assessment_records"])
+    return hydrated
+
+
+GROUP_QUERY_DEFAULTS: dict[str, Any] = {
+    "q": "",
+    "lifecycle": [],
+    "inconsistency_reason": [],
+    "original_severity": [],
+    "ssvc": [],
+    "evidence": [],
+    "analysis": [],
+    "tag": "",
+    "team": "",
+    "teams": [],
+    "team_assessment": "ANY",
+    "vuln_id": "",
+    "component": "",
+    "assignee": "",
+    "dependency": [],
+    "versions": [],
+    "cvss_mismatch": False,
+    "not_rescored": False,
+    "attributed_before_days": None,
+    "attribution_mode": "older",
+    "tmrescore": [],
+    "tmrescore_proposal_ids": [],
+    "automatic_assessment": [],
+    "automatic_assessment_ids": [],
+    "automatic_assessment_outcome": [],
+    "automatic_assessment_rescore": [],
+    "sort_by": "rescored-severity",
+    "sort_order": "desc",
+    "offset": 0,
+    "limit": 100,
+    "cursor": "",
+    "include_counts": True,
+}
+
+
+def query_task_group_window(
+    deps: GeneralApiRouteDeps,
+    task: dict[str, Any],
+    **filters: Any,
+) -> dict[str, Any]:
+    """Filter, sort, and page a completed task's groups.
+
+    Accepts the same filters as ``GET /tasks/{task_id}/groups``; anything
+    omitted takes the route's default.
+    """
+    unknown = sorted(set(filters) - set(GROUP_QUERY_DEFAULTS))
+    if unknown:
+        raise ValueError(f"Unknown group filter: {', '.join(unknown)}")
+    return _query_task_group_window(
+        deps,
+        task,
+        {**copy.deepcopy(GROUP_QUERY_DEFAULTS), **filters},
+    )
+
+
 def _register_project_routes(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
@@ -754,76 +980,16 @@ def _register_task_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        task_key = _grouped_vuln_task_key(
+        token = forwardable_bearer(request.headers.get("Authorization"))
+        return start_grouped_vuln_task(
             deps,
             name=name,
             cve=cve,
             response_mode=response_mode,
-        )
-        reusable_task = _claim_reusable_grouped_vuln_task(
-            deps,
-            task_key=task_key,
             user=user,
+            token=token,
+            cookies=dict(request.cookies),
         )
-        if reusable_task is not None:
-            return {"task_id": reusable_task["id"], "reused": True}
-
-        task_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
-        with _TASK_SNAPSHOT_REFRESH_LOCK:
-            # Recheck under the registry lock so simultaneous requests cannot
-            # create duplicate computations between the first lookup and insert.
-            reusable_task = _claim_reusable_grouped_vuln_task(
-                deps,
-                task_key=task_key,
-                user=user,
-            )
-            if reusable_task is not None:
-                return {"task_id": reusable_task["id"], "reused": True}
-            deps.tasks[task_id] = {
-                "id": task_id,
-                "_owner": user,
-                "_owners": {user},
-                "_project_name": name,
-                "_task_key": task_key,
-                "_task_key_finalized": False,
-                "_reuse_count": 0,
-                "status": "pending",
-                "message": "Starting...",
-                "progress": 0,
-                "created_at": now,
-                "updated_at": now,
-                "_last_accessed_at": now,
-                "result": None,
-                "log": ["Starting..."],
-            }
-
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        cookies = dict(request.cookies)
-
-        async def task_wrapper():
-            settings = deps.dt_settings_cls()
-            client_cls = deps.get_dt_client_cls()
-            async with client_cls(
-                settings.api_url,
-                api_key=settings.api_key,
-                token=token or "",
-                cookies=cookies,
-            ) as client:
-                await deps.process_grouped_vulns_task(
-                    task_id,
-                    name,
-                    cve,
-                    client,
-                    response_mode,
-                )
-                _finalize_grouped_vuln_task_key(deps, task_id)
-
-        deps.create_tracked_task(task_wrapper())
-        return {"task_id": task_id, "reused": False}
 
     @router.get("/tasks/{task_id}")
     async def get_task_status(
@@ -1175,16 +1341,7 @@ def _register_task_routes(
             raise HTTPException(status_code=404, detail="Vulnerability group not found")
 
         def hydrate_group_detail() -> dict[str, Any]:
-            hydrated = copy.deepcopy(group)
-            hydrated["evidence_sources"] = evidence_sources(hydrated, get_ssvc_enrichment_service().filter_snapshot())
-            populate_group_dependency_chains(
-                hydrated,
-                task.get("_bom_cache_map") or {},
-            )
-            _, context = _task_group_query_context(deps, task)
-            assessment_records = context["assessment_records"]
-            _annotate_code_assessment_status([hydrated], assessment_records)
-            return hydrated
+            return hydrate_task_group_detail(deps, task, group)
 
         if deps.detail_executor is None:
             return await asyncio.to_thread(hydrate_group_detail)
@@ -1739,70 +1896,6 @@ def _bulk_workflow_context(
     )
 
 
-def _record_code_analysis_applications(
-    deps: GeneralApiRouteDeps,
-    *,
-    payloads: list[tuple[dict[str, Any], dict[str, Any]]],
-    finalized: list[dict[str, Any]],
-    user: str,
-    workflow_id: str,
-    fallback_run_ids: list[str] | None = None,
-) -> None:
-    store = deps.code_analysis_result_store
-    if store is None:
-        return
-    results_by_uuid = {
-        str(result.get("uuid") or ""): result
-        for result in finalized
-        if result.get("uuid")
-    }
-    try:
-        for instance, payload in payloads:
-            finding_uuid = str(instance.get("finding_uuid") or "").strip()
-            if not finding_uuid:
-                continue
-            run_ids = list(
-                dict.fromkeys(
-                    str(run_id).strip()
-                    for run_id in (
-                        instance.get("analysis_run_ids") or fallback_run_ids or []
-                    )
-                    if str(run_id).strip()
-                )
-            )
-            if not run_ids:
-                continue
-            result = results_by_uuid.get(finding_uuid) or {}
-            status = (
-                "queued"
-                if result.get("queued")
-                else "applied"
-                if result.get("status") == "success"
-                else "failed"
-            )
-            fingerprint = hashlib.sha256(
-                json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-            ).hexdigest()
-            group_id = str(
-                instance.get("bulk_workflow_group_id")
-                or instance.get("vuln_id")
-                or instance.get("vulnerability_id")
-                or ""
-            )
-            for run_id in run_ids:
-                store.record_application(
-                    analysis_run_id=run_id,
-                    finding_uuid=finding_uuid,
-                    group_id=group_id,
-                    status=status,
-                    applied_by=user,
-                    workflow_id=workflow_id,
-                    payload_fingerprint=fingerprint,
-                )
-    except Exception:
-        deps.logger.exception("Failed to persist code-analysis application provenance")
-
-
 async def _apply_bulk_workflow_payloads(
     deps: GeneralApiRouteDeps,
     client: DTClient,
@@ -1843,7 +1936,7 @@ async def _persist_local_assessment_payloads(
     raw_payloads = [payload for _instance, payload in payloads]
     persist = getattr(deps.cache_manager, "persist_assessment_updates", None)
     if callable(persist):
-        return await persist(raw_payloads, replace=True)
+        return await persist(raw_payloads, replace=True, origin="bulk-workflow")
 
     bulk_queue = getattr(deps.cache_manager, "queue_analysis_updates", None)
     if callable(bulk_queue):
@@ -1857,100 +1950,6 @@ async def _persist_local_assessment_payloads(
             for update_id, payload in zip(update_ids, raw_payloads)
         ]
     raise RuntimeError("Assessment cache does not support durable updates")
-
-
-def _accepted_assessment_results(
-    payloads: list[tuple[dict[str, Any], dict[str, Any]]],
-    persisted: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    records_by_key = {
-        assessment_key(record.get("payload") or {}): record
-        for record in persisted
-    }
-    results: list[dict[str, Any]] = []
-    for instance, payload in payloads:
-        record = records_by_key.get(assessment_key(payload)) or {}
-        results.append(
-            {
-                "status": "success",
-                "uuid": instance.get("finding_uuid"),
-                "new_state": payload.get("state"),
-                "new_details": payload.get("details"),
-                "queued": True,
-                "sync_status": "pending",
-                "update_id": record.get("id"),
-                "revision": int(record.get("revision") or 0),
-            }
-        )
-    return results
-
-
-def _strict_dt_assessment_conflicts_enabled() -> bool:
-    return os.getenv(
-        "DTVP_ASSESSMENT_STRICT_DT_CONFLICTS",
-        "false",
-    ).strip().lower() in {"1", "true", "yes", "on", "enabled"}
-
-
-def _expected_assessment_revisions(
-    req: AssessmentRequest,
-) -> dict[tuple[str, str, str], int]:
-    if req.force or not req.original_analysis:
-        return {}
-    expected: dict[tuple[str, str, str], int] = {}
-    for instance in req.instances:
-        finding_uuid = instance.get("finding_uuid")
-        original = (
-            req.original_analysis.get(finding_uuid)
-            if isinstance(finding_uuid, str)
-            else None
-        )
-        if not isinstance(original, dict) or "dtvpRevision" not in original:
-            continue
-        key = assessment_key(instance)
-        if key is None:
-            continue
-        try:
-            expected[key] = max(0, int(original.get("dtvpRevision") or 0))
-        except (TypeError, ValueError):
-            continue
-    return expected
-
-
-def _local_assessment_conflict(
-    deps: GeneralApiRouteDeps,
-    req: AssessmentRequest,
-    exc: AssessmentRevisionConflictError,
-) -> dict[str, Any]:
-    instance = next(
-        (
-            candidate
-            for candidate in req.instances
-            if assessment_key(candidate) == exc.key
-        ),
-        {},
-    )
-    finding_uuid = instance.get("finding_uuid")
-    original = (
-        req.original_analysis.get(finding_uuid)
-        if req.original_analysis and isinstance(finding_uuid, str)
-        else None
-    )
-    current = deps.cache_manager.get_assessment_overlay(*exc.key) or {}
-    return {
-        "finding_uuid": finding_uuid,
-        "project_name": instance.get("project_name"),
-        "project_version": instance.get("project_version"),
-        "component_name": instance.get("component_name"),
-        "component_version": instance.get("component_version"),
-        "current": current,
-        "original": original or {},
-        "your_change": {
-            "analysisState": req.state,
-            "analysisDetails": req.details,
-            "isSuppressed": req.suppressed,
-        },
-    }
 
 
 def _create_bulk_workflow_task(
@@ -2318,10 +2317,7 @@ def _register_bulk_workflow_routes(
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
         _completed_task_full_groups(deps, req.task_id, user)
         settings = deps.dt_settings_cls()
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]
+        token = forwardable_bearer(request.headers.get("Authorization"))
         cookies = dict(request.cookies)
         operation = _create_bulk_workflow_task(
             deps,
@@ -2550,6 +2546,223 @@ def _register_assessment_routes(
 
         return results
 
+    @router.post("/assessments/conflicts/resolve")
+    async def resolve_assessment_conflicts(
+        req: AssessmentConflictResolutionRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Settle findings whose local assessment and source value were both
+        changed: keep the local value (exported over the source's) or accept
+        the source's value."""
+        keys = [assessment_key(instance) for instance in req.instances]
+        if not keys or any(key is None for key in keys):
+            raise HTTPException(
+                status_code=422,
+                detail="Each instance needs project_uuid, component_uuid, "
+                "and vulnerability_uuid",
+            )
+        try:
+            analyses = await deps.cache_manager.resolve_assessment_conflicts(
+                keys, req.resolution, author=user
+            )
+        except AssessmentNotDivergedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        deps.logger.info(
+            "%s resolved %d assessment conflict(s) for the %s value",
+            user,
+            len(keys),
+            req.resolution,
+        )
+        try:
+            await asyncio.to_thread(
+                _refresh_grouped_vuln_task_snapshots,
+                deps.tasks,
+                [
+                    (instance, _assessment_payload_from_analysis(analysis))
+                    for instance, analysis in zip(req.instances, analyses)
+                ],
+                deps.load_team_mapping(),
+            )
+        except Exception:
+            deps.logger.exception(
+                "Failed to refresh task snapshots after conflict resolution"
+            )
+        return [
+            {"finding_uuid": instance.get("finding_uuid"), "analysis": analysis}
+            for instance, analysis in zip(req.instances, analyses)
+        ]
+
+    @router.post("/assessment/delete")
+    async def delete_assessment_route(
+        req: AssessmentDeletionRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Delete one team's assessment of the given findings, or all of it.
+        The deletion is exported like any other change."""
+
+        async def refresh_task_snapshots(
+            payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+        ) -> None:
+            try:
+                await asyncio.to_thread(
+                    _refresh_grouped_vuln_task_snapshots,
+                    deps.tasks,
+                    payloads,
+                    deps.load_team_mapping(),
+                )
+            except Exception:
+                deps.logger.exception(
+                    "Failed to refresh task snapshots after assessment deletion"
+                )
+
+        try:
+            results = await delete_assessment(
+                deps,
+                req.instances,
+                team=req.team,
+                user=user,
+                after_persist=refresh_task_snapshots,
+            )
+        except AssessmentConflictError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "conflict", "conflicts": exc.conflicts},
+            )
+        except AssessmentPermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except AssessmentValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        deps.logger.info(
+            "%s deleted %s for %d finding(s)",
+            user,
+            "the whole assessment" if req.team is None else f"the {req.team} assessment",
+            len(results),
+        )
+        return results
+
+    @router.get("/export")
+    async def get_export_queue(
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Local assessments waiting for export, for review."""
+        queue = await asyncio.to_thread(deps.cache_manager.list_export_queue)
+        return {
+            "mode": get_export_mode(),
+            "pending": queue,
+            "conflicts": sum(1 for item in queue if item["status"] == "diverged"),
+        }
+
+    @router.post("/export")
+    async def export_assessments(
+        req: ExportRequest,
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Export queued assessments now: all of them, or the chosen ones.
+        Conflicting findings are skipped until they are resolved."""
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(
+                status_code=403, detail="Only reviewers can export assessments"
+            )
+        before = await asyncio.to_thread(deps.cache_manager.list_export_queue)
+        requested = (
+            None if req.update_ids is None else {str(value) for value in req.update_ids}
+        )
+        deps.logger.info(
+            "%s requested an export of %s queued assessment(s)",
+            user,
+            "all" if requested is None else len(requested),
+        )
+
+        def considered(queue: list[dict], chosen: set[str] | None) -> list[dict]:
+            return [
+                item for item in queue if chosen is None or item["update_id"] in chosen
+            ]
+
+        await deps.cache_manager.flush_pending_updates(client, update_ids=requested)
+        after = await asyncio.to_thread(deps.cache_manager.list_export_queue)
+        exported = dropped = 0
+        for item in considered(before, requested):
+            overlay = deps.cache_manager.get_assessment_overlay(
+                item["project_uuid"],
+                item["component_uuid"],
+                item["vulnerability_uuid"],
+            ) or {}
+            if overlay.get("dtvpRevision") != item["revision"]:
+                continue  # changed again meanwhile; still in the queue
+            if overlay.get("dtvpSyncStatus") == "synced":
+                exported += 1
+            elif overlay.get("dtvpSyncStatus") == "inactive":
+                dropped += 1
+        return {
+            # The source now holds the value.
+            "exported": exported,
+            # The source no longer has the finding; the assessment is kept.
+            "dropped": dropped,
+            "remaining": len(after),
+            "conflicts": sum(1 for item in after if item["status"] == "diverged"),
+            "failed": [
+                {
+                    "update_id": item["update_id"],
+                    "status": item["status"],
+                    "error": item["last_error"],
+                }
+                for item in considered(after, requested)
+                if item["status"] in ("error", "diverged")
+            ],
+        }
+
+    @router.post("/export/discard")
+    async def discard_exports(
+        req: ExportDiscardRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Drop queued exports so they are never sent, for example for a
+        project that no longer exists in the source."""
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(
+                status_code=403, detail="Only reviewers can discard exports"
+            )
+        if not req.update_ids:
+            raise HTTPException(status_code=422, detail="Name the exports to discard")
+        keys = await deps.cache_manager.discard_exports(
+            [str(value) for value in req.update_ids], author=user
+        )
+        deps.logger.info(
+            "%s discarded %d of %d requested queued export(s)",
+            user,
+            len(keys),
+            len(req.update_ids),
+        )
+        return {
+            "discarded": len(keys),
+            "remaining": len(
+                await asyncio.to_thread(deps.cache_manager.list_export_queue)
+            ),
+        }
+
+    @router.get("/assessments/history")
+    async def get_assessment_history(
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+        limit: int = Query(50, ge=1, le=500),
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Every local value a finding's assessment has had, newest first."""
+        return await asyncio.to_thread(
+            deps.cache_manager.get_assessment_history,
+            project_uuid,
+            component_uuid,
+            vulnerability_uuid,
+            limit=limit,
+        )
+
     @router.post("/assessments/restore-preview")
     async def preview_assessment_restore(
         req: AssessmentRestoreRequest,
@@ -2665,103 +2878,45 @@ def _register_assessment_routes(
             bool(req.original_analysis),
         )
 
-        if (
-            _strict_dt_assessment_conflicts_enabled()
-            and not req.force
-            and req.original_analysis
-        ):
-            current_analyses = await deps.fetch_current_assessment_analyses(req, client)
-            conflicts = deps.collect_assessment_conflicts(req, current_analyses)
-            if conflicts:
-                return JSONResponse(
-                    status_code=409,
-                    content={"status": "conflict", "conflicts": conflicts},
+        async def refresh_task_snapshots(
+            payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+        ) -> None:
+            try:
+                refreshed_tasks = await asyncio.to_thread(
+                    _refresh_grouped_vuln_task_snapshots,
+                    deps.tasks,
+                    payloads,
+                    deps.load_team_mapping(),
+                )
+                if refreshed_tasks:
+                    deps.logger.info(
+                        "Refreshed %d grouped vulnerability task snapshot(s) "
+                        "after assessment update",
+                        refreshed_tasks,
+                    )
+            except Exception:
+                deps.logger.exception(
+                    "Failed to refresh grouped vulnerability task snapshots "
+                    "after assessment update"
                 )
 
-        role = deps.get_user_role(user)
-        if "ssvc" in req.model_fields_set:
-            if role.upper() != "REVIEWER" or (
-                req.team and req.team.casefold() != "general"
-            ):
-                raise HTTPException(
-                    status_code=403,
-                    detail="SSVC changes require a reviewer Global assessment",
-                )
-            if req.ssvc is not None:
-                try:
-                    evaluate_ssvc(req.ssvc)
-                    validate_ssvc_evidence(req.ssvc)
-                except ValueError as exc:
-                    raise HTTPException(status_code=422, detail=str(exc)) from exc
-        run_ids = set(req.analysis_run_ids)
-        for instance in req.instances:
-            instance_run_ids = instance.get("analysis_run_ids") or []
-            if not isinstance(instance_run_ids, list) or any(
-                not isinstance(run_id, str) for run_id in instance_run_ids
-            ):
-                raise HTTPException(status_code=422, detail="analysis_run_ids must be a list of strings")
-            run_ids.update(instance_run_ids)
-        for run_id in run_ids:
-            store = deps.code_analysis_result_store
-            record = store.get(run_id) if store is not None else None
-            if not record or not record_application_eligible(record):
-                raise HTTPException(
-                    status_code=422,
-                    detail="Analyzer result is unverified or ineligible; rerun analysis before applying it.",
-                )
-        payloads = deps.build_assessment_payloads(req, user, role)
-        if "ssvc" not in req.model_fields_set:
-            # Never trust client-supplied original_analysis/headers as authority
-            # for reviewer-only SSVC. Preserve each finding's stored record.
-            stored_details = await asyncio.to_thread(
-                deps.cache_manager.get_cached_assessment_details, req.instances
-            )
-            for (_instance, payload), existing in zip(payloads, stored_details):
-                payload["details"] = preserve_ssvc_record(payload["details"], existing)
-        raw_payloads = [payload for _instance, payload in payloads]
         try:
-            persisted = await deps.cache_manager.persist_assessment_updates(
-                raw_payloads,
-                replace=True,
-                expected_revisions=_expected_assessment_revisions(req),
+            return await save_assessment(
+                deps,
+                req,
+                user=user,
+                client=client,
+                after_persist=refresh_task_snapshots,
             )
-        except AssessmentRevisionConflictError as exc:
+        except AssessmentConflictError as exc:
             return JSONResponse(
                 status_code=409,
-                content={
-                    "status": "conflict",
-                    "conflicts": [_local_assessment_conflict(deps, req, exc)],
-                },
+                content={"status": "conflict", "conflicts": exc.conflicts},
             )
-        try:
-            refreshed_tasks = await asyncio.to_thread(
-                _refresh_grouped_vuln_task_snapshots,
-                deps.tasks,
-                payloads,
-                deps.load_team_mapping(),
-            )
-            if refreshed_tasks:
-                deps.logger.info(
-                    "Refreshed %d grouped vulnerability task snapshot(s) "
-                    "after assessment update",
-                    refreshed_tasks,
-                )
-        except Exception:
-            deps.logger.exception(
-                "Failed to refresh grouped vulnerability task snapshots "
-                "after assessment update"
-            )
-
-        finalized = _accepted_assessment_results(payloads, persisted)
-        _record_code_analysis_applications(
-            deps,
-            payloads=payloads,
-            finalized=finalized,
-            user=user,
-            workflow_id="individual-assessment",
-            fallback_run_ids=req.analysis_run_ids,
-        )
-        return finalized
+        except AssessmentPermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except AssessmentValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _register_dependency_route(

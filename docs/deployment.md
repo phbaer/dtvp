@@ -24,8 +24,11 @@ DTVP_FRONTEND_URL=http://host.example:8083/dtvp
 
 Deployment rules:
 
-- `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
-  archives survive container restarts.
+- `./data` mounts at `/app/data`; mappings, roles, rules, the local database,
+  proposals, and archives survive container restarts. `data/dt_cache` holds
+  the database (`dtvp.sqlite3`), which includes local assessments not yet
+  exported: back it up, and do not clear it as if it were a cache. Copy `dtvp.sqlite3` together with its
+  `-wal` and `-shm` files, or while the backend is stopped.
 - Code analysis is an optional external service. Deploy Agentyzer separately,
   configure its repository mappings there, and set `DTVP_CODE_ANALYSIS_URL` to
   an endpoint reachable from the DTVP container. An empty URL disables the

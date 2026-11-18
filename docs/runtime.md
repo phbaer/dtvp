@@ -14,7 +14,7 @@ Paths and commands refer to the repository root unless stated otherwise.
 Browser
   -> Vue SPA (Vite in development, FastAPI/nginx in production)
   -> FastAPI backend
-  -> Dependency-Track API + local cache
+  -> Dependency-Track API + local database
   -> optional tmrescore and code-analysis services
 ```
 
@@ -29,9 +29,13 @@ Important backend components:
 | `dtvp/task_group_query_services.py` | Backend filtering, sorting, facets, pagination, and task-window queries |
 | `dtvp/logic.py` | Grouping, ownership, assessment parsing, CVSS, statistics, and dependency analysis |
 | `dtvp/assessment_*` and `rescore_rule_services.py` | Assessment writes, conflict handling, metadata recovery, and CVSS rules |
-| `dtvp/assessment_outbox_services.py` | Transactional assessment overlays, revisions, and pending Dependency-Track synchronization |
+| `dtvp/assessment_use_cases.py` | Transport-independent assessment save rules shared by the REST route and the MCP tools |
+| `dtvp/access_token_*` and `mcp_server.py` | Personal access tokens, their audit log, and the MCP endpoint for AI agents |
+| `dtvp/assessment_outbox_services.py` | Local assessments with their base value and history, the export queue, the merge with source values, and conflict resolution |
 | `dtvp/bulk_workflows/` | Registry-backed bulk-change plug-ins |
-| `dtvp/dt_client.py` and `dt_cache.py` | Dependency-Track access, cached data, overlays, and pending writes |
+| `dtvp/dt_client.py` and `dt_cache.py` | Dependency-Track access, in-memory document cache, overlays, and pending writes |
+| `dtvp/local_store.py` | SQLite database for imported source data and the one-time JSON cache import |
+| `dtvp/ports.py` | The source and sink interfaces the cache manager is written against; Dependency-Track implements both |
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
 | `dtvp/tmrescore_*` | Threat-model integration, inventory, cache, execution, and task state |
 | `dtvp/code_analysis_*` and `analysis_queue_*` | Analyzer integration, result store, queue, and automatic scans |
@@ -107,9 +111,18 @@ Important frontend components:
   Follow-up pages and full-result drains omit facet counts they do not consume;
   a Team-filter request renders its card window without facet counts, then
   refreshes complete task-wide and filtered counts in the background.
-- The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
-  vulnerability details, BOMs, local overlays, and pending writes. Stale cached
-  data remains readable while Dependency-Track is unavailable. Concurrent
+- The local database (`DTVP_DATABASE_PATH`, by default
+  `<DTVP_DT_CACHE_PATH>/dtvp.sqlite3`) stores projects, findings,
+  vulnerability details, BOMs, and the last known source assessment of each
+  finding in typed SQLite tables; every source document is kept losslessly
+  beside its lookup columns. Local assessments, the export queue, and access
+  tokens are tables in the same file; a former stand-alone outbox file is
+  copied in once. Projects are remembered after Dependency-Track stops
+  listing them, so stored findings and queued exports keep their product and
+  version. Stored data remains readable while Dependency-Track is
+  unavailable. An existing JSON cache in `DTVP_DT_CACHE_PATH` is imported once
+  on first start, in one transaction; its files are left in place, are no
+  longer read, and can be deleted after the database has been verified. Concurrent
   misses for the same resource share one Dependency-Track request, the complete
   project list has a short freshness TTL across clients, and API-key requests
   reuse one application-lifetime HTTP connection pool. The background cache
@@ -118,9 +131,11 @@ Important frontend components:
   Dependency-Track's Finding Packaging Format export so assessment state and
   details arrive in one request instead of issuing one analysis request per
   finding. Older Dependency-Track versions fall back to the legacy endpoint.
-  Cache JSON is encoded and atomically replaced by one ordered writer thread;
-  async operations await durability without holding the event loop or cache
-  lock. Cache writes whose JSON content did not change are skipped. Grouped
+  Documents are encoded and written by one ordered writer thread, each
+  collection in one transaction; async operations await durability without
+  holding the event loop or cache lock. Writes whose content did not change
+  are skipped. Per-finding assessment lookups of a project load are answered
+  by one query. Grouped
   snapshots use project-scoped revisions plus the selected version metadata,
   so a background refresh or activity in another project does not invalidate
   an otherwise reusable result. Summaries created during a cold fill are saved
@@ -131,9 +146,14 @@ Important frontend components:
   synchronization without multiplying write concurrency per client. When a
   finding disappears before synchronization, a Dependency-Track 404 triggers
   a live findings-API check. Only a valid response confirming that the exact
-  project/component/vulnerability tuple is absent drops the queued revision
-  and its unsynced overlay; failed checks and findings that still exist keep
-  retrying. Legacy
+  project/component/vulnerability tuple is absent removes the queued export.
+  A deleted project counts as such a response when the project lookup answers
+  404 too while the API's version endpoint answers normally;
+  the assessment itself is kept and marked inactive. Failed checks and
+  findings that still exist keep retrying. Assessments read from
+  Dependency-Track are merged with local ones rather than replacing or being
+  shadowed by them, and each export first reads the value it would replace;
+  see [Import and export](import-export.md). Legacy
   `pending_updates.json` entries import once on first use. Interactive and bulk
   assessment requests return after the outbox transaction commits instead of
   waiting for Dependency-Track. Per-finding local revisions reject stale DTVP

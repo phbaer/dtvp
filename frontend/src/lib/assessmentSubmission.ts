@@ -118,6 +118,34 @@ const collectRescoredTags = (detailsToParse: string, allTags: Set<string>) => {
     }
 }
 
+/**
+ * What each finding's assessment was when this edit started. The server
+ * compares it with Dependency-Track before exporting, so an edit made on an
+ * outdated view becomes a conflict instead of overwriting a newer value.
+ *
+ * A reload or save records the exact server state; for findings without
+ * one, the value shown in the open view is what the edit was based on.
+ * Findings whose text is not loaded (list rows) are left out.
+ */
+export const seenAnalysis = (
+    instances: Instance[],
+    originalAnalysis: Record<string, any>,
+): Record<string, any> => {
+    const seen: Record<string, any> = { ...originalAnalysis }
+    for (const instance of instances) {
+        const findingId = instance.finding_uuid
+        if (!findingId || seen[findingId]) continue
+        const details = instance.analysis_details ?? (instance as any).analysisDetails
+        if (typeof details !== 'string') continue
+        seen[findingId] = {
+            analysisState: instance.analysis_state || (instance as any).analysisState || 'NOT_SET',
+            analysisDetails: details,
+            isSuppressed: Boolean(instance.is_suppressed),
+        }
+    }
+    return seen
+}
+
 const getInstanceAssessmentDetails = (instance: Instance, originalAnalysis: Record<string, any>): string => {
     if (instance.finding_uuid && originalAnalysis[instance.finding_uuid]) {
         const original = originalAnalysis[instance.finding_uuid]
@@ -289,7 +317,7 @@ export const prepareAssessmentSubmission = (
             suppressed: input.suppressed,
             team: input.selectedTeam || undefined,
             comparison_mode: 'REPLACE',
-            original_analysis: input.force ? {} : { ...input.originalAnalysis },
+            original_analysis: input.force ? {} : seenAnalysis(input.allInstances, input.originalAnalysis),
             force: input.force,
         },
     }

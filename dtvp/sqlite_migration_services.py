@@ -134,6 +134,11 @@ def run_sqlite_migrations(
 
         statements = _iter_sql_statements(migration.sql)
         with connection:
+            # sqlite3 opens a transaction only before data changes, so
+            # leading schema statements would commit one by one and a crash
+            # between them would leave a migration half applied.
+            if not connection.in_transaction:
+                connection.execute("BEGIN")
             for statement in statements:
                 connection.execute(statement)
             connection.execute(

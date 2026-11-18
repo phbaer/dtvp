@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 import httpx
 
 from .dt_client import DTClient
-from .general_api_routes import AssessmentRequest
+from .assessment_use_cases import AssessmentRequest
 from .ssvc_services import new_record, preserve_record, write_record
 
 

@@ -25,6 +25,11 @@ export const INCONSISTENCY_REASON_OPTIONS: ReadonlyArray<{
         label: 'Assessment details differ',
         description: 'Assessed findings have different substantive assessment text.',
     },
+    {
+        value: 'SOURCE_CONFLICT',
+        label: 'Conflict with Dependency-Track',
+        description: 'The assessment was changed both here and in Dependency-Track. Open the finding and choose which version to keep.',
+    },
 ]
 
 const inconsistencyReasonSet = new Set<string>(

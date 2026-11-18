@@ -13,6 +13,7 @@ from .inconsistency import (
     INCONSISTENCY_REASON_ANALYSIS_STATE_MISMATCH,
     INCONSISTENCY_REASON_ASSESSMENT_DETAILS_MISMATCH,
     INCONSISTENCY_REASON_MISSING_RESCORING_VECTOR,
+    INCONSISTENCY_REASON_SOURCE_CONFLICT,
     INCONSISTENCY_REASON_TEAM_ASSESSMENT_MISMATCH,
 )
 from .grouped_vuln_summary_index_services import (
@@ -286,6 +287,14 @@ def _derive_group_inconsistency_reasons(
     if int(group.get("assessment_restore_count") or 0) > 0:
         reasons.append(INCONSISTENCY_REASON_MISSING_RESCORING_VECTOR)
 
+    if any(
+        component.get("sync_status") == "diverged"
+        for affected_version in group.get("affected_versions") or []
+        for component in affected_version.get("components") or []
+        if isinstance(component, dict)
+    ):
+        reasons.append(INCONSISTENCY_REASON_SOURCE_CONFLICT)
+
     distinct_non_missing = {state for state in component_states if state != "NOT_SET"}
     if len(distinct_non_missing) > 1:
         reasons.append(INCONSISTENCY_REASON_ANALYSIS_STATE_MISMATCH)
@@ -544,6 +553,18 @@ def _summarize_component(component: Dict[str, Any]) -> Dict[str, Any]:
         "tags": component.get("tags", []),
         "owner_mapping_keys": component.get("owner_mapping_keys", []),
         "assessment_restore": component.get("assessment_restore"),
+        **(
+            {"sync_status": component["sync_status"]}
+            if component.get("sync_status")
+            else {}
+        ),
+        # Only present while a finding is diverged, so list rows can offer
+        # the resolution without waiting for the full detail.
+        **(
+            {"source_assessment": component["source_assessment"]}
+            if component.get("source_assessment")
+            else {}
+        ),
     }
 
 

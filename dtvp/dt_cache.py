@@ -20,8 +20,23 @@ from .assessment_outbox_services import (
     AssessmentKey,
     assessment_key,
     get_assessment_outbox_path,
+    get_legacy_assessment_outbox_path,
 )
 from .dt_client import DTClient, DTSettings
+from .ports import AssessmentSink, VulnerabilitySource
+from .local_store import (
+    KIND_ANALYSIS,
+    KIND_BOM,
+    KIND_FINDINGS,
+    KIND_METADATA,
+    KIND_PROJECT_VULNERABILITIES,
+    KIND_PROJECTS,
+    MISSING,
+    DocumentRef,
+    LocalStore,
+    get_database_path,
+    safe_filename,
+)
 from .logic import RE_SCORE
 
 logger = logging.getLogger(__name__)
@@ -52,9 +67,7 @@ def _positive_int_env(name: str, default: int, *, minimum: int = 1) -> int:
 
 
 def _safe_filename(value: str) -> str:
-    if not value:
-        return ""
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+    return safe_filename(value)
 
 
 def _atomic_write(path: str, data: Any) -> None:
@@ -117,6 +130,78 @@ def _get_analysis_suppressed(analysis: Optional[Dict[str, Any]]) -> bool:
     if "isSuppressed" in analysis:
         return bool(analysis.get("isSuppressed"))
     return bool(analysis.get("is_suppressed", False))
+
+
+def export_retry_delay_seconds(attempts: int) -> int:
+    """How long to wait before retrying a failed export.
+
+    Doubles from one second to a minute, as before, to ride out a short
+    outage. An export that keeps failing after that is not going to be
+    fixed by the next minute either: it backs off further, to 15 minutes,
+    instead of asking the source twice a minute indefinitely.
+    """
+    if attempts <= 10:
+        return min(60, 2 ** min(max(attempts, 1) - 1, 6))
+    return min(900, 60 * 2 ** min(attempts - 10, 4))
+
+
+EXPORT_MODE_AUTO = "auto"
+EXPORT_MODE_MANUAL = "manual"
+
+
+def get_export_mode() -> str:
+    """``auto`` exports local assessments in the background as they are
+    saved; ``manual`` keeps them local until an export is requested."""
+    mode = os.getenv("DTVP_EXPORT_MODE", EXPORT_MODE_AUTO).strip().lower()
+    return EXPORT_MODE_MANUAL if mode == EXPORT_MODE_MANUAL else EXPORT_MODE_AUTO
+
+
+def _export_verification_enabled() -> bool:
+    return os.getenv("DTVP_EXPORT_VERIFY_SOURCE", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "enabled",
+    }
+
+
+def _is_incomplete_source_assessment(analysis: Any) -> bool:
+    """An assessed finding whose details could not be read.
+
+    The source always sends details for an assessed finding. A state without
+    the details field means the per-finding read failed; treating that as
+    "no details" would look like the source had emptied the assessment.
+    """
+    if not isinstance(analysis, dict):
+        return False
+    state = (
+        analysis.get("analysisState")
+        or analysis.get("analysis_state")
+        or analysis.get("state")
+        or "NOT_SET"
+    )
+    return state != "NOT_SET" and not any(
+        name in analysis for name in ("analysisDetails", "analysis_details", "detail")
+    )
+
+
+def _source_assessment_value(analysis: Any) -> Dict[str, Any]:
+    """State, details, and suppression of an assessment as the source sent it."""
+    if not isinstance(analysis, dict):
+        analysis = {}
+    return {
+        "state": str(
+            analysis.get("analysisState")
+            or analysis.get("analysis_state")
+            or analysis.get("state")
+            or "NOT_SET"
+        ),
+        "details": str(
+            analysis.get("analysisDetails") or analysis.get("analysis_details") or ""
+        ),
+        "suppressed": _get_analysis_suppressed(analysis),
+    }
 
 
 def _has_meaningful_assessment(analysis: Optional[Dict[str, Any]]) -> bool:
@@ -301,34 +386,90 @@ class CacheManager:
         self._cache_status_expires_at = 0.0
         self._assessment_sync_lock = asyncio.Lock()
         self._assessment_sync_wakeup = asyncio.Event()
+        self._assessment_change_listeners: List[
+            Callable[[List[AssessmentKey]], None]
+        ] = []
+        self._open_stores()
+
+    def _open_stores(self) -> None:
         self._ensure_directories()
+        self._document_refs: Dict[str, DocumentRef] = {}
+        self.store = LocalStore(get_database_path(self.base_path), logger=logger)
+        imported = self.store.import_legacy_json_cache(self.base_path)
+        # This runs at import time, before logging is configured; the result
+        # is reported when the application initialises the cache.
+        self._legacy_import_report = (
+            imported if imported is not None and any(imported.values()) else None
+        )
         self.assessment_outbox = AssessmentOutboxStore(
             get_assessment_outbox_path(self.base_path),
             logger=logger,
+            legacy_path=get_legacy_assessment_outbox_path(self.base_path),
         )
         self._import_legacy_pending_updates()
 
     def _ensure_directories(self) -> None:
         os.makedirs(self.base_path, exist_ok=True)
-        for name in ["findings", "project_vulnerabilities", "boms", "analysis"]:
-            os.makedirs(os.path.join(self.base_path, name), exist_ok=True)
+
+    # Documents keep their former file path as an opaque address. Each
+    # address maps to a typed location in the local database.
+
+    def _address(self, path: str, ref: DocumentRef) -> str:
+        self._document_refs[path] = ref
+        return path
+
+    def _read_document(self, path: str, default: Any = None) -> Any:
+        ref = self._document_refs.get(path)
+        if ref is None:
+            return _read_json(path, default)
+        try:
+            value = self.store.read(ref)
+        except Exception as exc:
+            logger.warning("Failed to read %s from the local database: %s", path, exc)
+            return default
+        return default if value is MISSING else value
+
+    def _persist_document(self, path: str, data: Any) -> None:
+        ref = self._document_refs.get(path)
+        if ref is None:
+            _atomic_write(path, data)
+        else:
+            self.store.write(ref, data)
+
+    def _document_exists(self, path: str) -> bool:
+        ref = self._document_refs.get(path)
+        if ref is None:
+            return os.path.exists(path)
+        return self.store.exists(ref)
 
     def _projects_path(self) -> str:
-        return os.path.join(self.base_path, "projects.json")
+        return self._address(
+            os.path.join(self.base_path, "projects.json"),
+            DocumentRef(KIND_PROJECTS),
+        )
 
     def _pending_path(self) -> str:
         return os.path.join(self.base_path, "pending_updates.json")
 
     def _active_projects_path(self) -> str:
-        return os.path.join(self.base_path, "active_projects.json")
+        return self._address(
+            os.path.join(self.base_path, "active_projects.json"),
+            DocumentRef(KIND_METADATA, name="active_projects"),
+        )
 
     def _findings_path(self, project_uuid: str) -> str:
-        return os.path.join(
-            self.base_path, "findings", f"{_safe_filename(project_uuid)}.json"
+        return self._address(
+            os.path.join(
+                self.base_path, "findings", f"{_safe_filename(project_uuid)}.json"
+            ),
+            DocumentRef(KIND_FINDINGS, project_uuid=project_uuid),
         )
 
     def _projects_meta_path(self) -> str:
-        return os.path.join(self.base_path, "projects_meta.json")
+        return self._address(
+            os.path.join(self.base_path, "projects_meta.json"),
+            DocumentRef(KIND_METADATA, name="projects_meta"),
+        )
 
     def _load_projects_meta(self) -> Dict[str, Any]:
         return self._load_cache_file(
@@ -360,9 +501,12 @@ class CacheManager:
         }
         pending = self._load_pending_updates()
         active = self._normalize_active_projects(
-            _read_json(self._active_projects_path(), {})
+            self._read_document(self._active_projects_path(), {})
         )
-        meta = _read_json(self._projects_meta_path(), meta_default) or meta_default
+        meta = (
+            self._read_document(self._projects_meta_path(), meta_default)
+            or meta_default
+        )
         return pending, active, meta
 
     def _remember_startup_cache_state(
@@ -397,25 +541,10 @@ class CacheManager:
             pending = self._load_pending_updates()
             active = list(self.active_project_uuids)
 
-            findings_dir = os.path.join(self.base_path, "findings")
-            boms_dir = os.path.join(self.base_path, "boms")
-            analysis_dir = os.path.join(self.base_path, "analysis")
-
-            cached_findings = (
-                len([f for f in os.listdir(findings_dir) if f.endswith(".json")])
-                if os.path.isdir(findings_dir)
-                else 0
-            )
-            cached_boms = (
-                len([f for f in os.listdir(boms_dir) if f.endswith(".json")])
-                if os.path.isdir(boms_dir)
-                else 0
-            )
-            cached_analyses = (
-                len([f for f in os.listdir(analysis_dir) if f.endswith(".json")])
-                if os.path.isdir(analysis_dir)
-                else 0
-            )
+            stored = self.store.counts()
+            cached_findings = stored["findings"]
+            cached_boms = stored["boms"]
+            cached_analyses = stored["analyses"]
 
             snapshot = {
                 "fully_cached": self.cache_meta.get("fully_cached", False),
@@ -426,6 +555,18 @@ class CacheManager:
                 "cached_boms": cached_boms,
                 "cached_analyses": cached_analyses,
                 "pending_updates": len(pending),
+                # Findings changed both here and in the source; their export
+                # waits for a decision.
+                "diverged_assessments": len(self.assessment_outbox.list_diverged()),
+                # Exports whose last attempt failed, and how long the oldest
+                # queued change has been waiting.
+                "failed_exports": sum(
+                    1 for entry in pending if entry.get("last_error")
+                ),
+                "oldest_pending_at": min(
+                    (str(entry.get("created_at")) for entry in pending if entry.get("created_at")),
+                    default=None,
+                ),
             }
             self._cache_status_snapshot = snapshot
             self._cache_status_expires_at = now + CACHE_STATUS_TTL_SECONDS
@@ -467,18 +608,13 @@ class CacheManager:
                     "version": "",
                 }
 
-        findings_dir = os.path.join(self.base_path, "findings")
-        if os.path.isdir(findings_dir):
-            for filename in os.listdir(findings_dir):
-                if not filename.endswith(".json"):
-                    continue
-                project_uuid = filename[:-5]
-                if project_uuid and project_uuid not in versions_by_uuid:
-                    versions_by_uuid[project_uuid] = {
-                        "uuid": project_uuid,
-                        "name": project_uuid,
-                        "version": "",
-                    }
+        for project_uuid in self.store.project_uuids_with_findings():
+            if project_uuid and project_uuid not in versions_by_uuid:
+                versions_by_uuid[project_uuid] = {
+                    "uuid": project_uuid,
+                    "name": project_uuid,
+                    "version": "",
+                }
 
         return list(versions_by_uuid.values())
 
@@ -614,14 +750,22 @@ class CacheManager:
             self._cache_status_expires_at = 0.0
 
     def _project_vulns_path(self, project_uuid: str) -> str:
-        return os.path.join(
-            self.base_path,
-            "project_vulnerabilities",
-            f"{_safe_filename(project_uuid)}.json",
+        return self._address(
+            os.path.join(
+                self.base_path,
+                "project_vulnerabilities",
+                f"{_safe_filename(project_uuid)}.json",
+            ),
+            DocumentRef(KIND_PROJECT_VULNERABILITIES, project_uuid=project_uuid),
         )
 
     def _bom_path(self, project_uuid: str) -> str:
-        return os.path.join(self.base_path, "boms", f"{_safe_filename(project_uuid)}.json")
+        return self._address(
+            os.path.join(
+                self.base_path, "boms", f"{_safe_filename(project_uuid)}.json"
+            ),
+            DocumentRef(KIND_BOM, project_uuid=project_uuid),
+        )
 
     def _analysis_path(
         self,
@@ -632,7 +776,15 @@ class CacheManager:
         key = "__".join(
             [_safe_filename(project_uuid), _safe_filename(component_uuid), _safe_filename(vulnerability_uuid)]
         )
-        return os.path.join(self.base_path, "analysis", f"{key}.json")
+        return self._address(
+            os.path.join(self.base_path, "analysis", f"{key}.json"),
+            DocumentRef(
+                KIND_ANALYSIS,
+                project_uuid=project_uuid,
+                component_uuid=component_uuid,
+                vulnerability_uuid=vulnerability_uuid,
+            ),
+        )
 
     def _load_pending_updates(self) -> List[Dict[str, Any]]:
         return self.assessment_outbox.list_pending()
@@ -703,6 +855,7 @@ class CacheManager:
 
     def reset(self, base_path: str = None) -> None:
         self._write_executor.shutdown(wait=True, cancel_futures=False)
+        self.store.close()
         if base_path:
             self.base_path = base_path
         self.lock = asyncio.Lock()
@@ -734,12 +887,7 @@ class CacheManager:
         self._cache_status_expires_at = 0.0
         self._assessment_sync_lock = asyncio.Lock()
         self._assessment_sync_wakeup = asyncio.Event()
-        self._ensure_directories()
-        self.assessment_outbox = AssessmentOutboxStore(
-            get_assessment_outbox_path(self.base_path),
-            logger=logger,
-        )
-        self._import_legacy_pending_updates()
+        self._open_stores()
 
     async def _singleflight_fetch(
         self,
@@ -775,6 +923,7 @@ class CacheManager:
                 self._inflight_fetches.pop(key, None)
 
     def load_persisted_runtime_state(self) -> None:
+        self._report_legacy_import()
         (
             pending_updates,
             active_project_uuids,
@@ -799,7 +948,7 @@ class CacheManager:
                 self._memory_cache.move_to_end(path)
                 return self._memory_cache[path]
 
-        data = _read_json(path, default)
+        data = self._read_document(path, default)
         self._cache_memory_value(path, data)
         return data
 
@@ -819,7 +968,7 @@ class CacheManager:
                 not force
                 and has_cached
                 and cached == data
-                and (write_pending or os.path.exists(path))
+                and (write_pending or self._document_exists(path))
             ):
                 self._memory_cache.move_to_end(path)
                 return False
@@ -865,7 +1014,7 @@ class CacheManager:
 
     def _submit_atomic_write(self, path: str, data: Any) -> Future[Any]:
         with self._write_state_lock:
-            future = self._write_executor.submit(_atomic_write, path, data)
+            future = self._write_executor.submit(self._persist_document, path, data)
             self._last_write_future = future
 
         def remember_error(completed: Future[Any]) -> None:
@@ -904,6 +1053,7 @@ class CacheManager:
     async def close(self) -> None:
         await self.flush_cache_writes()
         self._write_executor.shutdown(wait=True, cancel_futures=False)
+        self.store.close()
 
     def _save_project_cache(
         self,
@@ -928,6 +1078,9 @@ class CacheManager:
         return changed
 
     def _project_uuid_for_cache_path(self, path: str) -> str | None:
+        ref = self._document_refs.get(path)
+        if ref is not None:
+            return ref.project_uuid or None
         try:
             relative_path = os.path.relpath(path, self.base_path)
         except ValueError:
@@ -951,7 +1104,62 @@ class CacheManager:
     def _load_project_cache(self, path: str, default: Any = None) -> Any:
         return self._load_cache_file(path, default)
 
+    def _project_analysis_reader(
+        self, project_uuid: str
+    ) -> Callable[..., Any]:
+        """Like ``_load_project_cache`` for the stored assessments of one
+        project, but fetching everything not yet in memory with one query
+        instead of one lookup per finding."""
+        stored: Dict[Tuple[str, str], Any] | None = None
+
+        def read(
+            component_uuid: str,
+            vulnerability_uuid: str,
+            default: Any = None,
+        ) -> Any:
+            nonlocal stored
+            path = self._analysis_path(
+                project_uuid, component_uuid, vulnerability_uuid
+            )
+            with self._memory_cache_lock:
+                if path in self._memory_cache:
+                    self._memory_cache.move_to_end(path)
+                    return self._memory_cache[path]
+            if stored is None:
+                try:
+                    stored = self.store.read_project_analyses(project_uuid)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to read stored assessments of %s: %s",
+                        project_uuid,
+                        exc,
+                    )
+                    stored = {}
+            value = stored.get((component_uuid, vulnerability_uuid), MISSING)
+            data = default if value is MISSING else value
+            self._cache_memory_value(path, data)
+            return data
+
+        return read
+
+    def _report_legacy_import(self) -> None:
+        outbox_report = self.assessment_outbox.legacy_import_report
+        if outbox_report:
+            self.assessment_outbox.legacy_import_report = None
+            logger.warning("%s", outbox_report)
+        imported, self._legacy_import_report = self._legacy_import_report, None
+        if imported:
+            logger.warning(
+                "Imported the JSON cache in %s into the local database %s: %s. "
+                "The JSON files are no longer read and can be removed once "
+                "the database is verified.",
+                self.base_path,
+                self.store.path,
+                ", ".join(f"{count} {name}" for name, count in imported.items()),
+            )
+
     async def initialize(self) -> None:
+        self._report_legacy_import()
         pending_updates, active_project_uuids, cache_meta = await asyncio.to_thread(
             self._read_startup_cache_state
         )
@@ -977,7 +1185,7 @@ class CacheManager:
             next_cache_refresh = 0.0
             while True:
                 try:
-                    await self.flush_pending_updates(client)
+                    await self.export_if_automatic(client)
                     now = time.monotonic()
                     if now >= next_cache_refresh:
                         await self._refresh_project_list(client)
@@ -1000,7 +1208,7 @@ class CacheManager:
                 except TimeoutError:
                     pass
 
-    async def _refresh_project_list(self, client: DTClient) -> None:
+    async def _refresh_project_list(self, client: VulnerabilitySource) -> None:
         try:
             projects = await client.get_projects("")
             async with self.lock:
@@ -1010,7 +1218,7 @@ class CacheManager:
         except Exception as exc:
             logger.debug("Failed to refresh project list: %s", exc)
 
-    async def _refresh_active_projects(self, client: DTClient) -> None:
+    async def _refresh_active_projects(self, client: VulnerabilitySource) -> None:
         async with self.lock:
             changed = self._prune_active_projects()
             active = list(self.active_project_uuids)
@@ -1024,7 +1232,7 @@ class CacheManager:
             except Exception as exc:
                 logger.debug("Failed to refresh project %s: %s", project_uuid, exc)
 
-    async def refresh_project(self, project_uuid: str, client: DTClient) -> None:
+    async def refresh_project(self, project_uuid: str, client: VulnerabilitySource) -> None:
         await self.get_vulnerabilities(client, project_uuid, refresh=True)
         await self.get_project_vulnerabilities(client, project_uuid, refresh=True)
         await self.get_bom(client, project_uuid, refresh=True)
@@ -1049,7 +1257,7 @@ class CacheManager:
                 self._save_active_projects(self._active_project_last_access)
 
     async def get_projects(
-        self, client: DTClient, name: Optional[str] = None
+        self, client: VulnerabilitySource, name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         async with self.lock:
             projects = self._load_project_cache(self._projects_path(), []) or []
@@ -1149,7 +1357,7 @@ class CacheManager:
 
     async def get_vulnerabilities(
         self,
-        client: DTClient,
+        client: VulnerabilitySource,
         project_uuid: str,
         cve: Optional[str] = None,
         refresh: bool = False,
@@ -1167,10 +1375,37 @@ class CacheManager:
             async def fetch_findings() -> List[Dict[str, Any]]:
                 async with self.lock:
                     cached_findings = self._load_project_cache(path, None)
+                fetch_started_at = datetime.now(timezone.utc)
                 fresh_findings = await client.get_vulnerabilities(
                     project_uuid,
                     cve=None,
                 )
+                source_analyses = {
+                    key: finding.get("analysis")
+                    for finding in fresh_findings or []
+                    if isinstance(finding, dict)
+                    and (key := self._finding_analysis_key(project_uuid, finding))
+                }
+                await self._merge_source_assessments(
+                    source_analyses,
+                    fetch_started_at,
+                )
+                if isinstance(fresh_findings, list):
+                    # Findings the source no longer reports keep their
+                    # assessments, marked inactive, in case they return.
+                    inactive = await asyncio.to_thread(
+                        self.assessment_outbox.mark_inactive,
+                        project_uuid,
+                        set(source_analyses),
+                        fetched_at=fetch_started_at,
+                    )
+                    if inactive:
+                        logger.info(
+                            "%d assessment(s) of %s kept for findings the "
+                            "source no longer reports",
+                            len(inactive),
+                            project_uuid,
+                        )
                 fresh_findings = self._restore_recreated_finding_assessments(
                     project_uuid,
                     fresh_findings,
@@ -1218,7 +1453,7 @@ class CacheManager:
 
     async def get_project_vulnerabilities(
         self,
-        client: DTClient,
+        client: VulnerabilitySource,
         project_uuid: str,
         refresh: bool = False,
     ) -> List[Dict[str, Any]]:
@@ -1247,7 +1482,7 @@ class CacheManager:
 
     async def get_bom(
         self,
-        client: DTClient,
+        client: VulnerabilitySource,
         project_uuid: str,
         refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
@@ -1277,7 +1512,7 @@ class CacheManager:
 
     async def get_analysis(
         self,
-        client: DTClient,
+        client: VulnerabilitySource,
         project_uuid: str,
         component_uuid: str,
         vulnerability_uuid: str,
@@ -1300,11 +1535,23 @@ class CacheManager:
             async def fetch_analysis() -> Optional[Dict[str, Any]]:
                 async with self.lock:
                     previous_analysis = self._load_project_cache(path, None)
+                fetch_started_at = datetime.now(timezone.utc)
                 fresh_analysis = await client.get_analysis(
                     project_uuid=project_uuid,
                     component_uuid=component_uuid,
                     vulnerability_uuid=vulnerability_uuid,
                 )
+                if isinstance(fresh_analysis, dict):
+                    await self._merge_source_assessments(
+                        {
+                            (
+                                project_uuid,
+                                component_uuid,
+                                vulnerability_uuid,
+                            ): fresh_analysis
+                        },
+                        fetch_started_at,
+                    )
                 fresh_analysis = self._merge_blank_source_analysis(
                     previous_analysis,
                     fresh_analysis,
@@ -1339,6 +1586,203 @@ class CacheManager:
             )
         return copy.deepcopy(analysis)
 
+    async def _merge_source_assessments(
+        self,
+        source_analyses: Dict[AssessmentKey, Any],
+        fetch_started_at: datetime,
+    ) -> None:
+        """Merge assessments just read from the source into local state.
+
+        A finding edited here used to shadow the source for good. Now a
+        change made only in the source is adopted, and a change on both
+        sides is recorded as a conflict instead of one side silently winning.
+        """
+        remote = {
+            key: _source_assessment_value(analysis)
+            for key, analysis in source_analyses.items()
+            if self.assessment_outbox.get_overlay(key) is not None
+            and not _is_incomplete_source_assessment(analysis)
+        }
+        if not remote:
+            return
+        outcomes = await asyncio.to_thread(
+            self.assessment_outbox.reconcile_remote,
+            remote,
+            fetched_at=fetch_started_at,
+        )
+        changed = {key for keys in outcomes.values() for key in keys}
+        if not changed:
+            return
+        logger.info(
+            "Merged source assessments: %s",
+            ", ".join(
+                f"{len(keys)} {name}" for name, keys in outcomes.items() if keys
+            ),
+        )
+        async with self.lock:
+            self.pending_updates = self._load_pending_updates()
+            self._invalidate_cache_status()
+            self._touch_cache_meta(project_uuids={key[0] for key in changed})
+        self._assessment_sync_wakeup.set()
+        await self._notify_assessments_changed(sorted(changed))
+
+    def add_assessment_change_listener(
+        self,
+        listener: Callable[[List[AssessmentKey]], None],
+    ) -> None:
+        """Be told when a merge changed local assessments outside a save, so
+        views built from them can follow. Called on a worker thread."""
+        self._assessment_change_listeners.append(listener)
+
+    async def _notify_assessments_changed(self, keys: List[AssessmentKey]) -> None:
+        for listener in list(self._assessment_change_listeners):
+            try:
+                await asyncio.to_thread(listener, keys)
+            except Exception:
+                logger.exception("Assessment change listener failed")
+
+    async def _source_changed_before_export(
+        self,
+        client: AssessmentSink,
+        key: AssessmentKey,
+    ) -> bool:
+        """Read the source's value just before writing over it.
+
+        Exports usually run within a second of a save, long before the next
+        refresh, so without this a change made in the source in the meantime
+        would be overwritten unseen. Returns True when the export must not
+        go ahead: the two sides diverged, or the source already holds the
+        local value. If the source cannot be read the export proceeds, as
+        it did before this check existed.
+        """
+        if not _export_verification_enabled():
+            return False
+        state = self.assessment_outbox.get_overlay(key)
+        if state is None or state.get("base") is None:
+            return False
+        fetch_started_at = datetime.now(timezone.utc)
+        try:
+            analysis = await client.get_analysis(
+                project_uuid=key[0],
+                component_uuid=key[1],
+                vulnerability_uuid=key[2],
+            )
+        except Exception as exc:
+            logger.debug("Could not read %s before export: %s", ":".join(key), exc)
+            return False
+        if analysis is not None and not isinstance(analysis, dict):
+            return False
+        await self._merge_source_assessments({key: analysis or {}}, fetch_started_at)
+        after = self.assessment_outbox.get_overlay(key)
+        return after is None or after.get("sync_status") not in ("pending", "error")
+
+    async def resolve_assessment_conflicts(
+        self,
+        keys: List[AssessmentKey],
+        choice: str,
+        *,
+        author: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Settle diverged findings; see ``AssessmentOutboxStore.resolve``.
+
+        All or nothing: raises without changing anything if any finding has
+        no open conflict.
+        """
+        keys = list(dict.fromkeys(keys))
+        await asyncio.to_thread(
+            self.assessment_outbox.resolve_many, keys, choice, author=author
+        )
+        async with self.lock:
+            self.pending_updates = self._load_pending_updates()
+            self._invalidate_cache_status()
+            self._touch_cache_meta(project_uuids={key[0] for key in keys})
+        self._assessment_sync_wakeup.set()
+        return [self.get_assessment_overlay(*key) or {} for key in keys]
+
+    def list_export_queue(self) -> List[Dict[str, Any]]:
+        """Local assessments not yet in the source, oldest first, with what
+        is needed to review them before exporting."""
+        projects = {
+            project.get("uuid"): project
+            for project in self._load_project_cache(self._projects_path(), []) or []
+            if isinstance(project, dict)
+        }
+        entries = self.assessment_outbox.list_pending()
+        keys = [assessment_key(entry.get("payload") or {}) for entry in entries]
+        described = self.store.describe_findings([key for key in keys if key])
+        # Projects the source no longer lists still have a name on record.
+        remembered = self.store.describe_projects(
+            key[0] for key in keys if key and key[0] not in projects
+        )
+        queue = []
+        for entry, key in zip(entries, keys):
+            if key is None:
+                continue
+            state = self.assessment_outbox.get_overlay(key) or {}
+            history = self.assessment_outbox.list_revisions(key, limit=1)
+            project = projects.get(key[0]) or remembered.get(key[0]) or {}
+            finding = described.get(key) or {}
+            base = state.get("base")
+            remote = state.get("remote")
+            queue.append(
+                {
+                    "update_id": entry.get("id"),
+                    "project_uuid": key[0],
+                    "component_uuid": key[1],
+                    "vulnerability_uuid": key[2],
+                    # False when the project is not in the source's project
+                    # list any more, the usual reason an export cannot land.
+                    "project_known": key[0] in projects,
+                    # When the source last listed a project it no longer has.
+                    "project_last_seen_at": (
+                        None
+                        if key[0] in projects
+                        else (remembered.get(key[0]) or {}).get("last_seen_at")
+                    ),
+                    "project_name": project.get("name"),
+                    "project_version": project.get("version"),
+                    "component_name": finding.get("component_name"),
+                    "component_version": finding.get("component_version"),
+                    "vulnerability_id": finding.get("vuln_id"),
+                    "revision": int(entry.get("revision") or 0),
+                    "status": state.get("sync_status") or "pending",
+                    "queued_at": entry.get("created_at"),
+                    "updated_at": entry.get("updated_at"),
+                    "attempts": int(entry.get("attempts") or 0),
+                    "last_error": entry.get("last_error"),
+                    "author": history[0]["author"] if history else None,
+                    "origin": history[0]["origin"] if history else None,
+                    "local": {
+                        "analysisState": state.get("analysisState"),
+                        "analysisDetails": state.get("analysisDetails"),
+                        "isSuppressed": state.get("isSuppressed"),
+                    },
+                    # What the export replaces, when known.
+                    "source": (
+                        None
+                        if (remote or base) is None
+                        else {
+                            "analysisState": (remote or base)["state"],
+                            "analysisDetails": (remote or base)["details"],
+                            "isSuppressed": (remote or base)["suppressed"],
+                        }
+                    ),
+                }
+            )
+        return queue
+
+    def get_assessment_history(
+        self,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+        *,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        return self.assessment_outbox.list_revisions(
+            (project_uuid, component_uuid, vulnerability_uuid), limit=limit
+        )
+
     def get_assessment_overlay(
         self,
         project_uuid: str,
@@ -1350,6 +1794,21 @@ class CacheManager:
         )
         if overlay is None:
             return None
+        remote = overlay.get("remote")
+        if remote is not None and overlay.get("sync_status") == "diverged":
+            return {
+                **self._overlay_fields(overlay),
+                # What the source holds while the two sides disagree.
+                "dtvpRemote": {
+                    "analysisState": remote["state"],
+                    "analysisDetails": remote["details"],
+                    "isSuppressed": remote["suppressed"],
+                },
+            }
+        return self._overlay_fields(overlay)
+
+    @staticmethod
+    def _overlay_fields(overlay: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "analysisState": overlay.get("analysisState") or "NOT_SET",
             "analysisDetails": overlay.get("analysisDetails") or "",
@@ -1360,9 +1819,17 @@ class CacheManager:
             "dtvpSyncError": overlay.get("last_error"),
         }
 
-    def get_cached_assessment_details(self, instances: List[Dict[str, Any]]) -> List[str]:
-        """Read trusted metadata without fetching Dependency-Track on the write path."""
+    def get_cached_assessments(
+        self, instances: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """The stored assessment of each finding, looked up by its
+        project/component/vulnerability identity only.
+
+        Reads local state without fetching Dependency-Track. Use this, never
+        caller-supplied text, as the base of a write.
+        """
         finding_analyses: dict[str, dict[tuple[str, str, str], dict]] = {}
+        readers: dict[str, Callable[..., Any]] = {}
         result = []
         for instance in instances:
             key = tuple(instance[name] for name in (
@@ -1370,7 +1837,9 @@ class CacheManager:
             ))
             analysis = self.get_assessment_overlay(*key)
             if analysis is None:
-                analysis = self._load_project_cache(self._analysis_path(*key), None)
+                if key[0] not in readers:
+                    readers[key[0]] = self._project_analysis_reader(key[0])
+                analysis = readers[key[0]](key[1], key[2], None)
             if analysis is None:
                 project_uuid = key[0]
                 if project_uuid not in finding_analyses:
@@ -1380,8 +1849,30 @@ class CacheManager:
                         for finding in findings
                     }
                 analysis = finding_analyses[project_uuid].get(key, {})
-            result.append(analysis.get("analysisDetails") or analysis.get("analysis_details") or "")
+            result.append(
+                {
+                    "state": str(
+                        analysis.get("analysisState")
+                        or analysis.get("analysis_state")
+                        or analysis.get("state")
+                        or "NOT_SET"
+                    ),
+                    "details": analysis.get("analysisDetails")
+                    or analysis.get("analysis_details")
+                    or "",
+                    "suppressed": _get_analysis_suppressed(analysis),
+                    "revision": int(analysis.get("dtvpRevision") or 0),
+                    "sync_status": analysis.get("dtvpSyncStatus") or "synced",
+                }
+            )
         return result
+
+    def get_cached_assessment_details(self, instances: List[Dict[str, Any]]) -> List[str]:
+        """Read trusted metadata without fetching Dependency-Track on the write path."""
+        return [
+            assessment["details"]
+            for assessment in self.get_cached_assessments(instances)
+        ]
 
     def _finding_cache_identity(
         self, finding: Dict[str, Any]
@@ -1430,6 +1921,7 @@ class CacheManager:
         previous_candidates: Dict[
             Tuple[str, Tuple[str, ...]], List[Tuple[Tuple[str, str, str], Dict[str, Any]]]
         ] = {}
+        read_analysis = self._project_analysis_reader(project_uuid)
 
         for previous_finding in previous_findings:
             identity = self._finding_cache_identity(previous_finding)
@@ -1437,8 +1929,9 @@ class CacheManager:
             if not identity or not analysis_key:
                 continue
 
-            previous_analysis = self._load_project_cache(
-                self._analysis_path(*analysis_key),
+            previous_analysis = read_analysis(
+                analysis_key[1],
+                analysis_key[2],
                 previous_finding.get("analysis"),
             )
             if not _has_meaningful_assessment(previous_analysis):
@@ -1456,7 +1949,9 @@ class CacheManager:
                 continue
 
             current_path = self._analysis_path(*analysis_key)
-            current_cached_analysis = self._load_project_cache(current_path, None)
+            current_cached_analysis = read_analysis(
+                analysis_key[1], analysis_key[2], None
+            )
 
             if _get_analysis_details(source_analysis):
                 previous_analysis = (
@@ -1517,15 +2012,14 @@ class CacheManager:
             return findings
 
         pending = self._load_pending_updates()
+        read_analysis = self._project_analysis_reader(project_uuid)
         for finding in findings:
             component = finding.get("component", {})
             vulnerability = finding.get("vulnerability", {})
             comp_uuid = component.get("uuid")
             vuln_uuid = vulnerability.get("uuid")
             if comp_uuid and vuln_uuid:
-                analysis = self._load_project_cache(
-                    self._analysis_path(project_uuid, comp_uuid, vuln_uuid), None
-                )
+                analysis = read_analysis(comp_uuid, vuln_uuid, None)
                 overlay = self.get_assessment_overlay(
                     project_uuid,
                     comp_uuid,
@@ -1566,15 +2060,28 @@ class CacheManager:
         *,
         replace: bool = True,
         expected_revisions: dict[AssessmentKey, int] | None = None,
+        author: str | None = None,
+        origin: str = "user",
+        seen: dict[AssessmentKey, Dict[str, Any]] | None = None,
     ) -> List[Dict[str, Any]]:
+        """Record local assessments and queue them for export.
+
+        ``seen`` is the value each change was made on top of, where the
+        caller knows it. It is the reference for conflict detection on a
+        first edit; without it the stored source value is used, which can be
+        newer than what the author was looking at.
+        """
         if not payloads:
             return []
         try:
             entries = await asyncio.to_thread(
-                self.assessment_outbox.enqueue_many,
+                self._enqueue_with_bases,
                 payloads,
+                seen or {},
                 replace=replace,
                 expected_revisions=expected_revisions,
+                author=author,
+                origin=origin,
             )
         except AssessmentOutboxConflictError as exc:
             raise PendingUpdateExistsError(str(exc)) from exc
@@ -1591,6 +2098,33 @@ class CacheManager:
         self._assessment_sync_wakeup.set()
         return entries
 
+    def _enqueue_with_bases(
+        self,
+        payloads: List[Dict[str, Any]],
+        seen: dict[AssessmentKey, Dict[str, Any]],
+        **options: Any,
+    ) -> List[Dict[str, Any]]:
+        """Queue local values, recording for each first-time edit what the
+        source was last known to hold. A later import compares against it."""
+        first_edits = [
+            payload
+            for payload in payloads
+            if (key := assessment_key(payload)) is not None
+            and self.assessment_outbox.get_overlay(key) is None
+        ]
+        bases = {
+            assessment_key(payload): {
+                "state": stored["state"],
+                "details": stored["details"],
+                "suppressed": stored["suppressed"],
+            }
+            for payload, stored in zip(
+                first_edits, self.get_cached_assessments(first_edits)
+            )
+        }
+        bases.update({key: value for key, value in seen.items() if key in bases})
+        return self.assessment_outbox.enqueue_many(payloads, bases=bases, **options)
+
     async def queue_analysis_updates(
         self,
         payloads: List[Dict[str, Any]],
@@ -1604,13 +2138,49 @@ class CacheManager:
         return [str(entry["id"]) for entry in persisted_entries]
 
     async def remove_pending_update(self, update_id: str) -> None:
-        await asyncio.to_thread(self.assessment_outbox.discard, update_id)
-        self.pending_updates = self._load_pending_updates()
-        self._invalidate_cache_status()
+        await self.discard_exports([update_id])
 
-    async def flush_pending_updates(self, client: DTClient) -> None:
+    async def discard_exports(
+        self,
+        update_ids: List[str],
+        *,
+        author: str | None = None,
+    ) -> List[AssessmentKey]:
+        """Drop queued exports so they are never sent; see
+        ``AssessmentOutboxStore.discard_many``."""
+        keys = await asyncio.to_thread(
+            self.assessment_outbox.discard_many, update_ids, author=author
+        )
+        if keys:
+            async with self.lock:
+                self.pending_updates = self._load_pending_updates()
+                self._invalidate_cache_status()
+                self._touch_cache_meta(project_uuids={key[0] for key in keys})
+            await self._notify_assessments_changed(keys)
+        return keys
+
+    async def export_if_automatic(self, client: AssessmentSink) -> bool:
+        """The background export step. In manual mode local changes wait
+        until someone exports them; importing continues either way."""
+        if get_export_mode() != EXPORT_MODE_AUTO:
+            return False
+        await self.flush_pending_updates(client)
+        return True
+
+    async def flush_pending_updates(
+        self,
+        client: AssessmentSink,
+        *,
+        update_ids: Set[str] | None = None,
+    ) -> None:
+        """Export due local assessments; ``update_ids`` limits it to a
+        chosen subset of the queue."""
         async with self._assessment_sync_lock:
             pending = await asyncio.to_thread(self.assessment_outbox.list_due)
+            if update_ids is not None:
+                pending = [
+                    entry for entry in pending if str(entry.get("id")) in update_ids
+                ]
             if not pending:
                 return
 
@@ -1631,6 +2201,12 @@ class CacheManager:
                     revision = int(entry.get("revision") or 0)
                     if key is None:
                         continue
+                    if await self._source_changed_before_export(client, key):
+                        continue
+                    if self.assessment_outbox.pending_revision(key) != revision:
+                        # Saved again since this batch was read: the newer
+                        # value is queued and goes out with the next batch.
+                        continue
                     try:
                         await client.update_analysis(**payload)
                         marked = await asyncio.to_thread(
@@ -1642,6 +2218,12 @@ class CacheManager:
                             async with self.lock:
                                 self._save_local_analysis(payload)
                                 saved_local = True
+                        else:
+                            # Saved again while the write was in flight. The
+                            # source now holds this older value of ours.
+                            await asyncio.to_thread(
+                                self.assessment_outbox.note_exported, key, payload
+                            )
                     except Exception as exc:
                         failure_message = str(exc)
                         if _is_missing_finding_error(exc):
@@ -1676,7 +2258,7 @@ class CacheManager:
                                     "reachable and the exact finding still exists"
                                 )
                         attempts = int(entry.get("attempts") or 0) + 1
-                        retry_delay = min(60, 2 ** min(attempts - 1, 6))
+                        retry_delay = export_retry_delay_seconds(attempts)
                         next_attempt_at = (
                             datetime.now(timezone.utc)
                             + timedelta(seconds=retry_delay)

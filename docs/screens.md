@@ -136,6 +136,14 @@ The project sidebar provides compact counts and filterable state summaries witho
 
 Settings provide structured and raw editors for team mapping, including deterministic selectors for component names, groups, package URLs, case-sensitive matches, and no-group matches.
 
+Every user can open Settings for the **Access Tokens** tab, which creates and revokes personal tokens for AI agents and scripts and lists the changes made with them; see [AI and API access](ai-access.md). The remaining tabs are reviewer-only, including **Export**, which lists the assessments that have not reached Dependency-Track, shows why an export is failing, and exports or discards entries on request; see [Import and export](import-export.md).
+
+### Settings Access Tokens
+
+![Settings access tokens](screenshots/settings-access-tokens.png)
+
+The tab shows the MCP endpoint URL, the form for a new token, the user's tokens with their access level and last use, and recent changes made with tokens.
+
 ### Settings Archives
 
 ![Settings archives](screenshots/settings-archives.png)

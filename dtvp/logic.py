@@ -1095,6 +1095,11 @@ def group_vulnerabilities(
                     if processor and hasattr(processor, "get_owner_mapping_keys") else []
                 ),
             }
+            if analysis.get("dtvpSyncStatus"):
+                # Present only for findings assessed in DTVP.
+                component_info["sync_status"] = analysis["dtvpSyncStatus"]
+                if analysis.get("dtvpRemote"):
+                    component_info["source_assessment"] = analysis["dtvpRemote"]
             restore_candidate = build_missing_rescoring_vector_restore_candidate(
                 {
                     "analysisState": component_info.get("analysis_state"),
@@ -1414,6 +1419,39 @@ def _deduplicate_assessment_blocks(
         ):
             unique[key] = (existing_index, candidate)
     return [block for _index, block in sorted(unique.values(), key=lambda item: item[0])]
+
+
+def remove_assessment_blocks(details: str, team: Optional[str] = None) -> str:
+    """Remove one team's block from stored assessment text, or everything.
+
+    ``team`` names the block to remove ("General" for the global one);
+    ``None`` removes the whole assessment. The text of the other blocks and
+    anything stored ahead of them is kept exactly as it was. The pending
+    review marker is dropped; the caller decides whether the result needs one.
+    """
+    if team is None or not details:
+        return ""
+    text = re.sub(r"\[Status: Pending Review\]", "", details, flags=re.IGNORECASE)
+    headers = list(re.finditer(r"---(?=\s*\[Team:)", mask_ssvc_details(text)))
+    if not headers:
+        return text.strip()
+    wanted = _assessment_team_key(team)
+    kept = [text[: headers[0].start()]]
+    for index, match in enumerate(headers):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        block = text[match.start():end]
+        header_end = block.find("---", 3)
+        header = block[3:header_end] if header_end != -1 else block[3:]
+        name = re.search(r"\[Team:\s*([^\]]+)\]", header)
+        if name and _assessment_team_key(name.group(1).strip()) == wanted:
+            continue
+        kept.append(block)
+    return "\n\n".join(part.strip() for part in kept if part.strip())
+
+
+def parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
+    """Split stored assessment text into unstructured text and team blocks."""
+    return _parse_assessment_blocks(details)
 
 
 def process_assessment_details(

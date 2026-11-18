@@ -362,6 +362,9 @@ class DTClient:
             f"{self.base_url}/api/v1/finding/project/{project_uuid}",
             params={"suppressed": "true"},
         )
+        if response.status_code == 404 and await self._project_is_gone(project_uuid):
+            # The whole project was deleted, and its findings with it.
+            return False
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, list):
@@ -388,6 +391,26 @@ class DTClient:
             ):
                 return True
         return False
+
+    async def _project_is_gone(self, project_uuid: str) -> bool:
+        """Whether Dependency-Track positively reports that a project does
+        not exist.
+
+        A 404 alone could also come from a wrong base URL or a proxy. It
+        only counts when the project lookup answers 404 as well while the
+        same API answers an unrelated request normally.
+        """
+        project = await self.client.get(f"{self.base_url}/api/v1/project/{project_uuid}")
+        if project.status_code != 404:
+            return False
+        control = await self.client.get(f"{self.base_url}/api/version")
+        if control.status_code != 200:
+            return False
+        try:
+            body = control.json()
+        except ValueError:
+            return False
+        return isinstance(body, dict) and "version" in body
 
     async def get_bom(self, project_uuid: str) -> Dict[str, Any]:
         """
@@ -533,12 +556,17 @@ class SharedDTClientProvider:
 _shared_dt_client_provider = SharedDTClientProvider()
 
 
-async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
+async def get_shared_client() -> DTClient:
+    """The application-lifetime API-key client, for callers without a request."""
     settings = DTSettings()
-    yield await _shared_dt_client_provider.get(
+    return await _shared_dt_client_provider.get(
         settings.api_url,
         settings.api_key,
     )
+
+
+async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
+    yield await get_shared_client()
 
 
 async def close_shared_dt_client() -> None:

@@ -70,7 +70,9 @@ from .app_wiring import (
     build_tmrescore_route_deps,
     build_tmrescore_task_service_deps,
 )
-from .auth import auth_settings, get_current_user
+from .access_token_routes import create_access_token_router
+from .access_token_services import access_token_store
+from .auth import auth_settings, get_current_user, get_session_user
 from .auth import router as auth_router
 from .auto_analysis_services import (
     AutoAnalysisSweepDeps,
@@ -90,6 +92,7 @@ from .dt_client import (
     DTSettings,
     close_shared_dt_client,
     get_client,
+    get_shared_client,
 )
 from .file_io_services import read_text as read_text_impl
 from .file_io_services import (
@@ -100,6 +103,7 @@ from .file_io_services import write_json as write_json_impl
 from .frontend_routes import register_frontend_routes
 from .general_api_routes import (
     create_general_api_router,
+    refresh_task_snapshots_for_assessments,
 )
 from .grouped_vuln_services import (
     collect_version_snapshots as collect_grouped_vuln_version_snapshots,
@@ -111,6 +115,8 @@ from .grouped_vuln_summary_index_services import (
     GroupedVulnSummaryIndex,
     get_grouped_vuln_summary_index_path,
 )
+from .mcp_server import McpEndpoint, McpServerDeps
+from starlette.routing import Route
 from .logic import (
     DEFAULT_DEPENDENCY_CHAIN_LIMIT,
     BOMAnalysisCache,
@@ -355,7 +361,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await asyncio.wait_for(asyncio.shield(_startup_task), timeout=0.25)
         except TimeoutError:
             pass
-        yield
+        async with mcp_endpoint.lifespan():
+            yield
     finally:
         if _startup_task and not _startup_task.done():
             _startup_task.cancel()
@@ -671,30 +678,38 @@ api_router.include_router(
 )
 
 
+general_api_route_deps = build_general_api_route_deps(
+    cache_manager=cache_manager,
+    logger=logger,
+    tasks=tasks,
+    background_tasks=background_tasks,
+    grouped_vuln_service_deps=grouped_vuln_service_deps,
+    assessment_service_deps=assessment_service_deps,
+    code_analysis_result_store=code_analysis_result_store,
+    dt_settings_cls=DTSettings,
+    get_dt_client_cls=lambda: DTClient,
+    get_user_role=lambda user: get_user_role(user),
+    load_rescore_rules=lambda: load_rescore_rules(),
+    load_team_groups=lambda: load_team_groups(),
+    get_bom_analysis_cache_cls=lambda: BOMAnalysisCache,
+    default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
+    service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
+    not_found_response=NOT_FOUND_RESPONSE,
+    get_grouped_vuln_cache_revision=cache_manager.get_grouped_cache_revision,
+    group_query_executor=group_query_executor,
+    detail_executor=detail_executor,
+    task_event_hub=task_event_hub,
+)
+
+# A merge with the source can change assessments without a save; keep the
+# snapshots users are looking at in step.
+cache_manager.add_assessment_change_listener(
+    lambda keys: refresh_task_snapshots_for_assessments(general_api_route_deps, keys)
+)
+
 api_router.include_router(
     create_general_api_router(
-        build_general_api_route_deps(
-            cache_manager=cache_manager,
-            logger=logger,
-            tasks=tasks,
-            background_tasks=background_tasks,
-            grouped_vuln_service_deps=grouped_vuln_service_deps,
-            assessment_service_deps=assessment_service_deps,
-            code_analysis_result_store=code_analysis_result_store,
-            dt_settings_cls=DTSettings,
-            get_dt_client_cls=lambda: DTClient,
-            get_user_role=lambda user: get_user_role(user),
-            load_rescore_rules=lambda: load_rescore_rules(),
-            load_team_groups=lambda: load_team_groups(),
-            get_bom_analysis_cache_cls=lambda: BOMAnalysisCache,
-            default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
-            service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
-            not_found_response=NOT_FOUND_RESPONSE,
-            get_grouped_vuln_cache_revision=cache_manager.get_grouped_cache_revision,
-            group_query_executor=group_query_executor,
-            detail_executor=detail_executor,
-            task_event_hub=task_event_hub,
-        ),
+        general_api_route_deps,
         current_user_dependency=get_current_user,
         client_dependency=get_client,
     )
@@ -1106,7 +1121,30 @@ api_router.include_router(
 )
 
 
+api_router.include_router(
+    create_access_token_router(
+        access_token_store,
+        session_user_dependency=get_session_user,
+        get_user_role=lambda user: get_user_role(user),
+    )
+)
+
+
 app.include_router(api_router, prefix=context_path)
+
+
+mcp_endpoint = McpEndpoint(
+    McpServerDeps(
+        route_deps=general_api_route_deps,
+        token_store=access_token_store,
+        get_dt_client=get_shared_client,
+        logger=logger,
+    )
+)
+# Registered before the frontend catch-all; answers 404 while tokens are
+# disabled. Exact paths only: MCP clients are configured with one URL.
+for _mcp_path in (f"{context_path}/mcp", f"{context_path}/mcp/"):
+    app.router.routes.append(Route(_mcp_path, endpoint=mcp_endpoint))
 
 register_frontend_routes(
     app,

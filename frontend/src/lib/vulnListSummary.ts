@@ -41,6 +41,9 @@ const summarizeComponent = (component: Instance): Instance => ({
     is_direct_dependency: component.is_direct_dependency,
     tags: component.tags ? [...component.tags] : undefined,
     assessment_restore: component.assessment_restore ? { ...component.assessment_restore } : undefined,
+    // Kept so a row can show and settle a conflict with Dependency-Track.
+    sync_status: component.sync_status,
+    source_assessment: component.source_assessment ? { ...component.source_assessment } : undefined,
 })
 
 const summarizeAffectedVersion = (version: AffectedVersion): AffectedVersion => ({

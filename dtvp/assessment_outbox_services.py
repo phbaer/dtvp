@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -9,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from .local_store import get_database_path
 from .sqlite_migration_services import run_sqlite_migrations
 
 
@@ -37,8 +39,29 @@ class AssessmentRevisionConflictError(Exception):
         )
 
 
+LEGACY_FILE_IMPORT_KEY = "legacy_outbox_file_imported"
+LEGACY_STATE_COLUMNS = (
+    "project_uuid, component_uuid, vulnerability_uuid, revision, "
+    "analysis_state, analysis_details, suppressed, sync_status, update_id, "
+    "last_error, updated_at"
+)
+LEGACY_OUTBOX_COLUMNS = (
+    "project_uuid, component_uuid, vulnerability_uuid, revision, update_id, "
+    "payload_json, attempts, next_attempt_at, last_error, created_at, updated_at"
+)
+
+
 def get_assessment_outbox_migrations_path() -> Path:
     return Path(__file__).resolve().parent / "migrations" / "assessment_outbox"
+
+
+def get_legacy_assessment_outbox_path(cache_path: str | None = None) -> str:
+    """Where the outbox lived as its own file before it joined the database."""
+    resolved_cache_path = cache_path or os.getenv(
+        "DTVP_DT_CACHE_PATH",
+        "data/dt_cache",
+    )
+    return str(Path(resolved_cache_path) / "assessment_outbox.sqlite")
 
 
 def get_assessment_outbox_path(cache_path: str | None = None) -> str:
@@ -49,7 +72,91 @@ def get_assessment_outbox_path(cache_path: str | None = None) -> str:
         "DTVP_DT_CACHE_PATH",
         "data/dt_cache",
     )
-    return str(Path(resolved_cache_path) / "assessment_outbox.sqlite")
+    return get_database_path(resolved_cache_path)
+
+
+SYNC_SYNCED = "synced"
+SYNC_PENDING = "pending"
+SYNC_ERROR = "error"
+SYNC_CANCELLED = "cancelled"
+SYNC_DIVERGED = "diverged"
+# The finding is no longer reported by the source; its assessment is kept.
+SYNC_INACTIVE = "inactive"
+
+ORIGIN_USER = "user"
+ORIGIN_IMPORT = "import"
+ORIGIN_RESOLUTION = "conflict-resolution"
+ORIGIN_DISCARD = "export-discarded"
+
+RESOLVE_KEEP_LOCAL = "local"
+RESOLVE_ACCEPT_REMOTE = "remote"
+
+
+class AssessmentNotDivergedError(Exception):
+    """A resolution was requested for a finding that has no open conflict."""
+
+
+def assessment_value(
+    state: Any,
+    details: Any,
+    suppressed: Any,
+) -> dict[str, Any]:
+    """An assessment as the three fields both sides exchange."""
+    return {
+        "state": str(state or "NOT_SET"),
+        "details": str(details or ""),
+        "suppressed": bool(suppressed),
+    }
+
+
+def same_assessment(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    """Whether two assessment values mean the same; surrounding whitespace in
+    the details is not a difference."""
+    if left is None or right is None:
+        return left is right
+    return (
+        str(left.get("state") or "NOT_SET") == str(right.get("state") or "NOT_SET")
+        and str(left.get("details") or "").strip()
+        == str(right.get("details") or "").strip()
+        and bool(left.get("suppressed")) == bool(right.get("suppressed"))
+    )
+
+
+_REVIEW_MARKER = re.compile(r"\s*\[Status: Pending Review\]", re.IGNORECASE)
+
+
+def source_matches_base(theirs: dict[str, Any], base: dict[str, Any] | None) -> bool:
+    """Whether the source still holds the value a local change started from.
+
+    DTVP can show an imported assessment with a pending-review marker it
+    added itself; the source's copy does not have it. That marker alone is
+    not a change made in the source.
+    """
+    if base is None:
+        return False
+    if same_assessment(theirs, base):
+        return True
+    return same_assessment(
+        {**theirs, "details": _REVIEW_MARKER.sub("", str(theirs.get("details") or ""))},
+        {**base, "details": _REVIEW_MARKER.sub("", str(base.get("details") or ""))},
+    )
+
+
+def is_blank_assessment(value: dict[str, Any] | None) -> bool:
+    """No state, no text, not suppressed: there is nothing to lose here."""
+    return value is not None and same_assessment(
+        value, {"state": "NOT_SET", "details": "", "suppressed": False}
+    )
+
+
+def _parse_time(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def assessment_key(payload: dict[str, Any]) -> AssessmentKey | None:
@@ -89,9 +196,17 @@ def _decode_payload(value: Any) -> dict[str, Any]:
 
 
 class AssessmentOutboxStore:
-    def __init__(self, path: str, logger: Any = None) -> None:
+    def __init__(
+        self,
+        path: str,
+        logger: Any = None,
+        *,
+        legacy_path: str | None = None,
+    ) -> None:
         self.path = path
         self.logger = logger
+        self.legacy_path = legacy_path
+        self.legacy_import_report: str | None = None
         self._lock = threading.RLock()
         self._initialized = False
         self._states: dict[AssessmentKey, dict[str, Any]] = {}
@@ -119,6 +234,8 @@ class AssessmentOutboxStore:
                     migrations_path=get_assessment_outbox_migrations_path(),
                     logger=self.logger,
                 )
+                self._import_legacy_file(connection)
+                self._seed_missing_revisions(connection)
                 state_rows = connection.execute(
                     """
                     SELECT *
@@ -142,6 +259,83 @@ class AssessmentOutboxStore:
             }
             self._initialized = True
 
+    def _import_legacy_file(self, connection: sqlite3.Connection) -> None:
+        """Copy the former stand-alone outbox file into this database once.
+
+        The copy and its marker commit together; the old file is left in
+        place and is not read again.
+        """
+        legacy_path = self.legacy_path
+        if (
+            not legacy_path
+            or not os.path.isfile(legacy_path)
+            or os.path.abspath(legacy_path) == os.path.abspath(self.path)
+        ):
+            return
+        marker = connection.execute(
+            "SELECT 1 FROM assessment_outbox_metadata WHERE key = ?",
+            (LEGACY_FILE_IMPORT_KEY,),
+        ).fetchone()
+        if marker is not None:
+            return
+        connection.execute("ATTACH DATABASE ? AS legacy_outbox", (legacy_path,))
+        try:
+            legacy_tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM legacy_outbox.sqlite_master WHERE type = 'table'"
+                )
+            }
+            copied = {"assessments": 0, "pending": 0}
+            with connection:
+                if "assessment_state" in legacy_tables:
+                    copied["assessments"] = connection.execute(
+                        f"""
+                        INSERT OR IGNORE INTO assessment_state ({LEGACY_STATE_COLUMNS})
+                        SELECT {LEGACY_STATE_COLUMNS}
+                        FROM legacy_outbox.assessment_state
+                        """
+                    ).rowcount
+                if "assessment_outbox" in legacy_tables:
+                    copied["pending"] = connection.execute(
+                        f"""
+                        INSERT OR IGNORE INTO assessment_outbox ({LEGACY_OUTBOX_COLUMNS})
+                        SELECT {LEGACY_OUTBOX_COLUMNS}
+                        FROM legacy_outbox.assessment_outbox
+                        """
+                    ).rowcount
+                if "assessment_outbox_metadata" in legacy_tables:
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO assessment_outbox_metadata (
+                            key, value, updated_at
+                        )
+                        SELECT key, value, updated_at
+                        FROM legacy_outbox.assessment_outbox_metadata
+                        """
+                    )
+                connection.execute(
+                    """
+                    INSERT INTO assessment_outbox_metadata (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (
+                        LEGACY_FILE_IMPORT_KEY,
+                        f"{copied['assessments']} assessments, "
+                        f"{copied['pending']} pending",
+                        _utc_now_iso(),
+                    ),
+                )
+        finally:
+            connection.execute("DETACH DATABASE legacy_outbox")
+        # Usually runs before logging is configured; the owner reports it.
+        self.legacy_import_report = (
+            f"Copied the assessment outbox {legacy_path} into the local "
+            f"database {self.path} ({copied['assessments']} assessments, "
+            f"{copied['pending']} pending exports). The old file is no "
+            "longer read."
+        )
+
     @staticmethod
     def _row_key(row: sqlite3.Row) -> AssessmentKey:
         return (
@@ -164,7 +358,93 @@ class AssessmentOutboxStore:
             "update_id": row["update_id"],
             "last_error": row["last_error"],
             "updated_at": str(row["updated_at"]),
+            "base": (
+                None
+                if row["base_state"] is None
+                else assessment_value(
+                    row["base_state"], row["base_details"], row["base_suppressed"]
+                )
+            ),
+            "remote": (
+                None
+                if row["remote_state"] is None
+                else assessment_value(
+                    row["remote_state"],
+                    row["remote_details"],
+                    row["remote_suppressed"],
+                )
+            ),
         }
+
+    @staticmethod
+    def _local_value(state: dict[str, Any]) -> dict[str, Any]:
+        return assessment_value(
+            state["analysisState"], state["analysisDetails"], state["isSuppressed"]
+        )
+
+    @staticmethod
+    def _append_revision(
+        connection: sqlite3.Connection,
+        key: AssessmentKey,
+        revision: int,
+        value: dict[str, Any],
+        *,
+        origin: str,
+        author: str | None,
+        now: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO assessment_revisions (
+                project_uuid, component_uuid, vulnerability_uuid, revision,
+                analysis_state, analysis_details, suppressed,
+                origin, author, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                *key,
+                revision,
+                value["state"],
+                value["details"],
+                int(value["suppressed"]),
+                origin,
+                author,
+                now,
+            ),
+        )
+
+    def _reload_keys(
+        self,
+        connection: sqlite3.Connection,
+        keys: Iterable[AssessmentKey],
+    ) -> None:
+        """Refresh the in-memory view of the given findings from the database."""
+        for key in keys:
+            state_row = connection.execute(
+                """
+                SELECT * FROM assessment_state
+                WHERE project_uuid = ? AND component_uuid = ?
+                  AND vulnerability_uuid = ?
+                """,
+                key,
+            ).fetchone()
+            if state_row is None:
+                self._states.pop(key, None)
+            else:
+                self._states[key] = self._state_record(state_row)
+            pending_row = connection.execute(
+                """
+                SELECT * FROM assessment_outbox
+                WHERE project_uuid = ? AND component_uuid = ?
+                  AND vulnerability_uuid = ?
+                """,
+                key,
+            ).fetchone()
+            if pending_row is None:
+                self._pending.pop(key, None)
+            else:
+                self._pending[key] = self._pending_record(pending_row)
 
     @staticmethod
     def _pending_record(row: sqlite3.Row) -> dict[str, Any]:
@@ -185,7 +465,16 @@ class AssessmentOutboxStore:
         *,
         replace: bool = True,
         expected_revisions: dict[AssessmentKey, int] | None = None,
+        origin: str = ORIGIN_USER,
+        author: str | None = None,
+        bases: dict[AssessmentKey, dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
+        """Record local assessment values and queue them for export.
+
+        ``bases`` gives, for findings without a local assessment yet, the
+        value the source is believed to hold. It becomes the reference an
+        import later compares the source against.
+        """
         self._ensure_initialized()
         deduplicated: dict[AssessmentKey, dict[str, Any]] = {}
         for payload in payloads:
@@ -199,14 +488,14 @@ class AssessmentOutboxStore:
             return []
 
         now = _utc_now_iso()
-        records: list[tuple[AssessmentKey, dict[str, Any], dict[str, Any]]] = []
+        records: list[tuple[AssessmentKey, dict[str, Any]]] = []
         with self._lock:
             with closing(self._connect()) as connection:
                 with connection:
                     for key, payload in deduplicated.items():
                         existing_state = connection.execute(
                             """
-                            SELECT revision
+                            SELECT *
                             FROM assessment_state
                             WHERE project_uuid = ?
                               AND component_uuid = ?
@@ -251,6 +540,22 @@ class AssessmentOutboxStore:
 
                         revision = current_revision + 1
                         update_id = str(uuid.uuid4())
+                        value = assessment_value(
+                            payload.get("state"),
+                            payload.get("details"),
+                            payload.get("suppressed", False),
+                        )
+                        sync_status = SYNC_PENDING
+                        if existing_state is None:
+                            base = (bases or {}).get(key)
+                        else:
+                            existing = self._state_record(existing_state)
+                            base = existing["base"]
+                            if existing["sync_status"] == SYNC_SYNCED and base is None:
+                                base = self._local_value(existing)
+                            if existing["sync_status"] == SYNC_DIVERGED:
+                                # A further edit does not settle the conflict.
+                                sync_status = SYNC_DIVERGED
                         created_at = (
                             str(existing_pending["created_at"])
                             if existing_pending is not None
@@ -269,9 +574,12 @@ class AssessmentOutboxStore:
                                 sync_status,
                                 update_id,
                                 last_error,
-                                updated_at
+                                updated_at,
+                                base_state,
+                                base_details,
+                                base_suppressed
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
                             ON CONFLICT (
                                 project_uuid,
                                 component_uuid,
@@ -284,17 +592,33 @@ class AssessmentOutboxStore:
                                 sync_status = excluded.sync_status,
                                 update_id = excluded.update_id,
                                 last_error = NULL,
-                                updated_at = excluded.updated_at
+                                updated_at = excluded.updated_at,
+                                base_state = excluded.base_state,
+                                base_details = excluded.base_details,
+                                base_suppressed = excluded.base_suppressed
                             """,
                             (
                                 *key,
                                 revision,
-                                str(payload.get("state") or "NOT_SET"),
-                                str(payload.get("details") or ""),
-                                int(bool(payload.get("suppressed", False))),
+                                value["state"],
+                                value["details"],
+                                int(value["suppressed"]),
+                                sync_status,
                                 update_id,
                                 now,
+                                None if base is None else str(base.get("state") or "NOT_SET"),
+                                None if base is None else str(base.get("details") or ""),
+                                None if base is None else int(bool(base.get("suppressed"))),
                             ),
+                        )
+                        self._append_revision(
+                            connection,
+                            key,
+                            revision,
+                            value,
+                            origin=origin,
+                            author=author,
+                            now=now,
                         )
                         connection.execute(
                             """
@@ -334,19 +658,6 @@ class AssessmentOutboxStore:
                                 now,
                             ),
                         )
-                        state = {
-                            "project_uuid": key[0],
-                            "component_uuid": key[1],
-                            "vulnerability_uuid": key[2],
-                            "revision": revision,
-                            "analysisState": str(payload.get("state") or "NOT_SET"),
-                            "analysisDetails": str(payload.get("details") or ""),
-                            "isSuppressed": bool(payload.get("suppressed", False)),
-                            "sync_status": "pending",
-                            "update_id": update_id,
-                            "last_error": None,
-                            "updated_at": now,
-                        }
                         pending = {
                             "id": update_id,
                             "created_at": created_at,
@@ -357,12 +668,10 @@ class AssessmentOutboxStore:
                             "last_error": None,
                             "payload": copy.deepcopy(payload),
                         }
-                        records.append((key, state, pending))
+                        records.append((key, pending))
+                self._reload_keys(connection, [key for key, _pending in records])
 
-            for key, state, pending in records:
-                self._states[key] = state
-                self._pending[key] = pending
-            return [copy.deepcopy(pending) for _key, _state, pending in records]
+            return [copy.deepcopy(pending) for _key, pending in records]
 
     def get_overlay(self, key: AssessmentKey) -> dict[str, Any] | None:
         self._ensure_initialized()
@@ -388,10 +697,19 @@ class AssessmentOutboxStore:
 
     def list_due(self, now: datetime | None = None) -> list[dict[str, Any]]:
         current = (now or datetime.now(UTC)).astimezone(UTC)
+        with self._lock:
+            # A diverged finding is not exported until someone decides which
+            # side wins; exporting would overwrite the source's change.
+            held = {
+                key
+                for key, state in self._states.items()
+                if state.get("sync_status") == SYNC_DIVERGED
+            }
         return [
             record
             for record in self.list_pending()
-            if self._is_due(record.get("next_attempt_at"), current)
+            if assessment_key(record.get("payload") or {}) not in held
+            and self._is_due(record.get("next_attempt_at"), current)
         ]
 
     @staticmethod
@@ -434,7 +752,13 @@ class AssessmentOutboxStore:
                         UPDATE assessment_state
                         SET sync_status = 'synced',
                             last_error = NULL,
-                            updated_at = ?
+                            updated_at = ?,
+                            base_state = analysis_state,
+                            base_details = analysis_details,
+                            base_suppressed = suppressed,
+                            remote_state = NULL,
+                            remote_details = NULL,
+                            remote_suppressed = NULL
                         WHERE project_uuid = ?
                           AND component_uuid = ?
                           AND vulnerability_uuid = ?
@@ -442,15 +766,495 @@ class AssessmentOutboxStore:
                         """,
                         (now, *key, revision),
                     )
-            pending = self._pending.get(key)
-            if pending is not None and int(pending.get("revision") or 0) == revision:
-                self._pending.pop(key, None)
-            state = self._states.get(key)
-            if state is not None and int(state.get("revision") or 0) == revision:
-                state["sync_status"] = "synced"
-                state["last_error"] = None
-                state["updated_at"] = now
+                self._reload_keys(connection, [key])
             return True
+
+    def reconcile_remote(
+        self,
+        remote: dict[AssessmentKey, dict[str, Any]],
+        *,
+        fetched_at: datetime,
+    ) -> dict[str, list[AssessmentKey]]:
+        """Merge assessment values just read from the source into local state.
+
+        Only findings with a local assessment are considered; the others have
+        no local value to protect. ``fetched_at`` is when the read started:
+        a local assessment changed after that is left alone, because the
+        source value may predate it. The outcomes, per finding:
+
+        - ``fast_forwarded``: only the source changed. Its value becomes a new
+          local revision.
+        - ``diverged``: both sides changed. Nothing is overwritten and the
+          export is held until ``resolve`` is called.
+        - ``settled``: the source now holds the local value; the pending
+          export or the open conflict is dropped.
+        - ``requeued``: the source lost an assessment it had received. The
+          local value is queued for export again.
+        """
+        self._ensure_initialized()
+        outcomes: dict[str, list[AssessmentKey]] = {
+            "fast_forwarded": [],
+            "diverged": [],
+            "settled": [],
+            "requeued": [],
+        }
+        fetched = fetched_at.astimezone(UTC)
+        now = _utc_now_iso()
+        with self._lock:
+            candidates = [key for key in remote if key in self._states]
+            if not candidates:
+                return outcomes
+            touched: list[AssessmentKey] = []
+            with closing(self._connect()) as connection:
+                with connection:
+                    for key in candidates:
+                        row = connection.execute(
+                            """
+                            SELECT * FROM assessment_state
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            key,
+                        ).fetchone()
+                        if row is None:
+                            continue
+                        state = self._state_record(row)
+                        updated_at = _parse_time(state["updated_at"])
+                        if updated_at is None or updated_at >= fetched:
+                            continue
+                        theirs = assessment_value(
+                            remote[key].get("state"),
+                            remote[key].get("details"),
+                            remote[key].get("suppressed"),
+                        )
+                        outcome = self._reconcile_one(
+                            connection, key, state, theirs, now
+                        )
+                        if outcome is not None:
+                            outcomes[outcome].append(key)
+                            touched.append(key)
+                self._reload_keys(connection, touched)
+        return outcomes
+
+    def _set_sync_fields(
+        self,
+        connection: sqlite3.Connection,
+        key: AssessmentKey,
+        *,
+        status: str,
+        base: dict[str, Any] | None,
+        remote: dict[str, Any] | None,
+        now: str,
+    ) -> None:
+        connection.execute(
+            """
+            UPDATE assessment_state
+            SET sync_status = ?,
+                last_error = NULL,
+                updated_at = ?,
+                base_state = ?, base_details = ?, base_suppressed = ?,
+                remote_state = ?, remote_details = ?, remote_suppressed = ?
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            (
+                status,
+                now,
+                None if base is None else base["state"],
+                None if base is None else base["details"],
+                None if base is None else int(base["suppressed"]),
+                None if remote is None else remote["state"],
+                None if remote is None else remote["details"],
+                None if remote is None else int(remote["suppressed"]),
+                *key,
+            ),
+        )
+
+    def _adopt_value(
+        self,
+        connection: sqlite3.Connection,
+        key: AssessmentKey,
+        state: dict[str, Any],
+        value: dict[str, Any],
+        *,
+        origin: str,
+        author: str | None,
+        now: str,
+    ) -> None:
+        """Make ``value`` the local assessment as a new, synchronized revision."""
+        revision = int(state["revision"]) + 1
+        connection.execute(
+            """
+            DELETE FROM assessment_outbox
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            key,
+        )
+        connection.execute(
+            """
+            UPDATE assessment_state
+            SET revision = ?,
+                analysis_state = ?, analysis_details = ?, suppressed = ?,
+                update_id = NULL
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            (
+                revision,
+                value["state"],
+                value["details"],
+                int(value["suppressed"]),
+                *key,
+            ),
+        )
+        self._set_sync_fields(
+            connection, key, status=SYNC_SYNCED, base=value, remote=None, now=now
+        )
+        self._append_revision(
+            connection, key, revision, value, origin=origin, author=author, now=now
+        )
+
+    def _queue_export(
+        self,
+        connection: sqlite3.Connection,
+        key: AssessmentKey,
+        state: dict[str, Any],
+        now: str,
+    ) -> None:
+        """Ensure the current local value is waiting for export."""
+        local = self._local_value(state)
+        update_id = str(uuid.uuid4())
+        payload = {
+            "project_uuid": key[0],
+            "component_uuid": key[1],
+            "vulnerability_uuid": key[2],
+            **local,
+        }
+        connection.execute(
+            """
+            INSERT INTO assessment_outbox (
+                project_uuid, component_uuid, vulnerability_uuid, revision,
+                update_id, payload_json, attempts, next_attempt_at,
+                last_error, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?)
+            ON CONFLICT (project_uuid, component_uuid, vulnerability_uuid)
+            DO UPDATE SET
+                attempts = 0,
+                next_attempt_at = NULL,
+                last_error = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (*key, int(state["revision"]), update_id, _payload_json(payload), now, now),
+        )
+        connection.execute(
+            """
+            UPDATE assessment_state
+            SET update_id = (
+                SELECT update_id FROM assessment_outbox
+                WHERE project_uuid = ? AND component_uuid = ?
+                  AND vulnerability_uuid = ?
+            )
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            (*key, *key),
+        )
+
+    def _reconcile_one(
+        self,
+        connection: sqlite3.Connection,
+        key: AssessmentKey,
+        state: dict[str, Any],
+        theirs: dict[str, Any],
+        now: str,
+    ) -> str | None:
+        ours = self._local_value(state)
+        base = state["base"]
+        status = state["sync_status"]
+
+        if (
+            status == SYNC_INACTIVE
+            and base is not None
+            and not same_assessment(ours, base)
+        ):
+            # The finding vanished while a local change was still waiting.
+            # That change was never exported, so it is handled like one.
+            self._queue_export(connection, key, state, now)
+            status = SYNC_PENDING
+
+        if status in (SYNC_SYNCED, SYNC_CANCELLED, SYNC_INACTIVE):
+            if same_assessment(theirs, ours):
+                # A finding that is reported again is active again.
+                if status in (SYNC_CANCELLED, SYNC_INACTIVE):
+                    self._set_sync_fields(
+                        connection, key,
+                        status=SYNC_SYNCED, base=ours, remote=None, now=now,
+                    )
+                    return "settled"
+                return None
+            if (
+                status in (SYNC_SYNCED, SYNC_INACTIVE)
+                and is_blank_assessment(theirs)
+                and ours["details"].strip()
+            ):
+                # The source had this assessment and now reports nothing at
+                # all, as happens when it recreates a finding. The local
+                # database is the record: send the assessment again instead
+                # of losing it. A source value that still carries a state or
+                # a suppression is a change someone made, and is adopted.
+                self._queue_export(connection, key, state, now)
+                self._set_sync_fields(
+                    connection, key,
+                    status=SYNC_PENDING, base=theirs, remote=None, now=now,
+                )
+                return "requeued"
+            self._adopt_value(
+                connection, key, state, theirs,
+                origin=ORIGIN_IMPORT, author=None, now=now,
+            )
+            return "fast_forwarded"
+
+        if status in (SYNC_PENDING, SYNC_ERROR):
+            if same_assessment(theirs, ours):
+                connection.execute(
+                    """
+                    DELETE FROM assessment_outbox
+                    WHERE project_uuid = ? AND component_uuid = ?
+                      AND vulnerability_uuid = ?
+                    """,
+                    key,
+                )
+                self._set_sync_fields(
+                    connection, key,
+                    status=SYNC_SYNCED, base=ours, remote=None, now=now,
+                )
+                return "settled"
+            if (
+                base is None
+                or source_matches_base(theirs, base)
+                or is_blank_assessment(theirs)
+            ):
+                # Unknown base: nothing to compare against, export as before.
+                # Blank source: the export overwrites nothing.
+                if state["sync_status"] == SYNC_INACTIVE:
+                    self._set_sync_fields(
+                        connection, key,
+                        status=SYNC_PENDING, base=base, remote=None, now=now,
+                    )
+                    return "requeued"
+                return None
+            self._set_sync_fields(
+                connection, key,
+                status=SYNC_DIVERGED, base=base, remote=theirs, now=now,
+            )
+            return "diverged"
+
+        if status == SYNC_DIVERGED:
+            if same_assessment(theirs, ours):
+                connection.execute(
+                    """
+                    DELETE FROM assessment_outbox
+                    WHERE project_uuid = ? AND component_uuid = ?
+                      AND vulnerability_uuid = ?
+                    """,
+                    key,
+                )
+                self._set_sync_fields(
+                    connection, key,
+                    status=SYNC_SYNCED, base=ours, remote=None, now=now,
+                )
+                return "settled"
+            if source_matches_base(theirs, base) or is_blank_assessment(theirs):
+                # The source went back to the common value, or holds nothing.
+                self._queue_export(connection, key, state, now)
+                self._set_sync_fields(
+                    connection, key,
+                    status=SYNC_PENDING, base=base, remote=None, now=now,
+                )
+                return "settled"
+            if not same_assessment(theirs, state["remote"]):
+                self._set_sync_fields(
+                    connection, key,
+                    status=SYNC_DIVERGED, base=base, remote=theirs, now=now,
+                )
+                return "diverged"
+        return None
+
+    def resolve(
+        self,
+        key: AssessmentKey,
+        choice: str,
+        *,
+        author: str | None = None,
+    ) -> dict[str, Any]:
+        """Settle one diverged finding; see ``resolve_many``."""
+        return self.resolve_many([key], choice, author=author)[0]
+
+    def resolve_many(
+        self,
+        keys: Iterable[AssessmentKey],
+        choice: str,
+        *,
+        author: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Settle diverged findings by keeping the local value (it is then
+        exported over the source's) or by accepting the source's value.
+
+        All or nothing: if any finding has no open conflict, none is changed.
+        """
+        if choice not in (RESOLVE_KEEP_LOCAL, RESOLVE_ACCEPT_REMOTE):
+            raise ValueError("Unknown conflict resolution")
+        unique = list(dict.fromkeys(keys))
+        self._ensure_initialized()
+        now = _utc_now_iso()
+        with self._lock:
+            with closing(self._connect()) as connection:
+                with connection:
+                    states = []
+                    for key in unique:
+                        row = connection.execute(
+                            """
+                            SELECT * FROM assessment_state
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            key,
+                        ).fetchone()
+                        state = self._state_record(row) if row is not None else None
+                        if (
+                            state is None
+                            or state["sync_status"] != SYNC_DIVERGED
+                            or state["remote"] is None
+                        ):
+                            raise AssessmentNotDivergedError(
+                                "No open conflict with the source for: "
+                                + ":".join(key)
+                            )
+                        states.append(state)
+                    for key, state in zip(unique, states):
+                        if choice == RESOLVE_ACCEPT_REMOTE:
+                            self._adopt_value(
+                                connection, key, state, state["remote"],
+                                origin=ORIGIN_RESOLUTION, author=author, now=now,
+                            )
+                        else:
+                            # The source's value becomes the base the export
+                            # knowingly replaces.
+                            self._queue_export(connection, key, state, now)
+                            self._set_sync_fields(
+                                connection, key,
+                                status=SYNC_PENDING,
+                                base=state["remote"],
+                                remote=None,
+                                now=now,
+                            )
+                self._reload_keys(connection, unique)
+            return [copy.deepcopy(self._states[key]) for key in unique]
+
+    def note_exported(self, key: AssessmentKey, payload: dict[str, Any]) -> None:
+        """Record what the source now holds after an export that a newer
+        local change has already superseded. Without this the next export
+        would mistake that value for someone else's change."""
+        self._ensure_initialized()
+        value = assessment_value(
+            payload.get("state"), payload.get("details"), payload.get("suppressed")
+        )
+        with self._lock:
+            with closing(self._connect()) as connection:
+                with connection:
+                    connection.execute(
+                        """
+                        UPDATE assessment_state
+                        SET base_state = ?, base_details = ?, base_suppressed = ?
+                        WHERE project_uuid = ? AND component_uuid = ?
+                          AND vulnerability_uuid = ?
+                          AND sync_status IN ('pending', 'error')
+                        """,
+                        (
+                            value["state"],
+                            value["details"],
+                            int(value["suppressed"]),
+                            *key,
+                        ),
+                    )
+                self._reload_keys(connection, [key])
+
+    def pending_revision(self, key: AssessmentKey) -> int | None:
+        """The revision currently queued for a finding, if any."""
+        self._ensure_initialized()
+        with self._lock:
+            pending = self._pending.get(key)
+            return int(pending["revision"]) if pending is not None else None
+
+    def _seed_missing_revisions(self, connection: sqlite3.Connection) -> None:
+        """Give assessments from before the history existed one entry, so
+        their value is not lost from view when it is first replaced."""
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO assessment_revisions (
+                    project_uuid, component_uuid, vulnerability_uuid, revision,
+                    analysis_state, analysis_details, suppressed,
+                    origin, author, created_at
+                )
+                SELECT s.project_uuid, s.component_uuid, s.vulnerability_uuid,
+                       s.revision, s.analysis_state, s.analysis_details,
+                       s.suppressed, 'before-history', NULL, s.updated_at
+                FROM assessment_state AS s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM assessment_revisions AS r
+                    WHERE r.project_uuid = s.project_uuid
+                      AND r.component_uuid = s.component_uuid
+                      AND r.vulnerability_uuid = s.vulnerability_uuid
+                )
+                """
+            )
+
+    def list_diverged(self) -> list[dict[str, Any]]:
+        self._ensure_initialized()
+        with self._lock:
+            return copy.deepcopy(
+                [
+                    state
+                    for state in self._states.values()
+                    if state.get("sync_status") == SYNC_DIVERGED
+                ]
+            )
+
+    def list_revisions(
+        self,
+        key: AssessmentKey,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """History of a finding's local assessment, newest first."""
+        self._ensure_initialized()
+        limit = max(1, min(int(limit), 500))
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM assessment_revisions
+                WHERE project_uuid = ? AND component_uuid = ?
+                  AND vulnerability_uuid = ?
+                ORDER BY revision_id DESC
+                LIMIT ?
+                """,
+                (*key, limit),
+            ).fetchall()
+        return [
+            {
+                "revision": int(row["revision"]),
+                "analysisState": str(row["analysis_state"]),
+                "analysisDetails": str(row["analysis_details"]),
+                "isSuppressed": bool(row["suppressed"]),
+                "origin": str(row["origin"]),
+                "author": row["author"],
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ]
 
     def mark_failed(
         self,
@@ -491,25 +1295,23 @@ class AssessmentOutboxStore:
                           AND component_uuid = ?
                           AND vulnerability_uuid = ?
                           AND revision = ?
+                          -- A conflict found while the write was in flight
+                          -- stays a conflict; it must not become retryable.
+                          AND sync_status != 'diverged'
                         """,
                         (error, now, *key, revision),
                     )
-            pending = self._pending.get(key)
-            if pending is not None and int(pending.get("revision") or 0) == revision:
-                pending["attempts"] = int(pending.get("attempts") or 0) + 1
-                pending["next_attempt_at"] = next_attempt_at
-                pending["last_error"] = error
-                pending["updated_at"] = now
-            state = self._states.get(key)
-            if state is not None and int(state.get("revision") or 0) == revision:
-                state["sync_status"] = "error"
-                state["last_error"] = error
-                state["updated_at"] = now
+                self._reload_keys(connection, [key])
             return True
 
     def drop_missing_finding(self, key: AssessmentKey, revision: int) -> bool:
-        """Remove an update and overlay when its Dependency-Track finding vanished."""
+        """Stop exporting to a finding the source no longer has.
+
+        The queued export is removed. The assessment itself is kept and
+        marked inactive, so it is there again should the finding return.
+        """
         self._ensure_initialized()
+        now = _utc_now_iso()
         with self._lock:
             with closing(self._connect()) as connection:
                 with connection:
@@ -527,65 +1329,139 @@ class AssessmentOutboxStore:
                         return False
                     connection.execute(
                         """
-                        DELETE FROM assessment_state
-                        WHERE project_uuid = ?
-                          AND component_uuid = ?
-                          AND vulnerability_uuid = ?
-                          AND revision = ?
-                        """,
-                        (*key, revision),
-                    )
-            pending = self._pending.get(key)
-            if pending is not None and int(pending.get("revision") or 0) == revision:
-                self._pending.pop(key, None)
-            state = self._states.get(key)
-            if state is not None and int(state.get("revision") or 0) == revision:
-                self._states.pop(key, None)
-            return True
-
-    def discard(self, update_id: str) -> bool:
-        self._ensure_initialized()
-        now = _utc_now_iso()
-        with self._lock:
-            pending_match = next(
-                (
-                    (key, record)
-                    for key, record in self._pending.items()
-                    if record.get("id") == update_id
-                ),
-                None,
-            )
-            if pending_match is None:
-                return False
-            key, pending = pending_match
-            revision = int(pending.get("revision") or 0)
-            with closing(self._connect()) as connection:
-                with connection:
-                    connection.execute(
-                        """
-                        DELETE FROM assessment_outbox
-                        WHERE update_id = ?
-                        """,
-                        (update_id,),
-                    )
-                    connection.execute(
-                        """
                         UPDATE assessment_state
-                        SET sync_status = 'cancelled',
+                        SET sync_status = ?,
+                            update_id = NULL,
+                            last_error = NULL,
                             updated_at = ?
                         WHERE project_uuid = ?
                           AND component_uuid = ?
                           AND vulnerability_uuid = ?
                           AND revision = ?
                         """,
-                        (now, *key, revision),
+                        (SYNC_INACTIVE, now, *key, revision),
                     )
-            self._pending.pop(key, None)
-            state = self._states.get(key)
-            if state is not None and int(state.get("revision") or 0) == revision:
-                state["sync_status"] = "cancelled"
-                state["updated_at"] = now
+                self._reload_keys(connection, [key])
             return True
+
+    def mark_inactive(
+        self,
+        project_uuid: str,
+        present: set[AssessmentKey],
+        *,
+        fetched_at: datetime,
+    ) -> list[AssessmentKey]:
+        """Mark the synchronized assessments of a project whose findings the
+        source no longer reports. ``present`` is every finding just read.
+
+        Assessments still waiting for export are left alone: the export
+        finds out for itself whether the finding is gone.
+        """
+        self._ensure_initialized()
+        fetched = fetched_at.astimezone(UTC)
+        now = _utc_now_iso()
+        with self._lock:
+            candidates = []
+            for key, state in self._states.items():
+                if key[0] != project_uuid or key in present:
+                    continue
+                if state.get("sync_status") != SYNC_SYNCED:
+                    continue
+                updated_at = _parse_time(state.get("updated_at"))
+                if updated_at is not None and updated_at < fetched:
+                    candidates.append(key)
+            if not candidates:
+                return []
+            with closing(self._connect()) as connection:
+                with connection:
+                    for key in candidates:
+                        connection.execute(
+                            """
+                            UPDATE assessment_state
+                            SET sync_status = ?, updated_at = ?
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            (SYNC_INACTIVE, now, *key),
+                        )
+                self._reload_keys(connection, candidates)
+            return candidates
+
+    def discard(self, update_id: str, *, author: str | None = None) -> bool:
+        """Drop a queued export; see ``discard_many``."""
+        return bool(self.discard_many([update_id], author=author))
+
+    def discard_many(
+        self,
+        update_ids: Iterable[str],
+        *,
+        author: str | None = None,
+    ) -> list[AssessmentKey]:
+        """Drop queued exports: the changes will not be sent to the source.
+
+        Where the value last agreed with the source is known, the local
+        assessment goes back to it as a new revision, so both sides match
+        again and the discarded value stays in the history. Where it is not
+        known (changes queued before bases were recorded) the local value
+        is kept and marked cancelled; the next import replaces it.
+
+        Returns the findings whose export was dropped. Unknown ids are
+        ignored.
+        """
+        wanted = {str(update_id) for update_id in update_ids}
+        self._ensure_initialized()
+        now = _utc_now_iso()
+        with self._lock:
+            targets = [
+                key
+                for key, record in self._pending.items()
+                if str(record.get("id")) in wanted
+            ]
+            if not targets:
+                return []
+            with closing(self._connect()) as connection:
+                with connection:
+                    for key in targets:
+                        row = connection.execute(
+                            """
+                            SELECT * FROM assessment_state
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            key,
+                        ).fetchone()
+                        state = self._state_record(row) if row is not None else None
+                        if state is not None and state["base"] is not None:
+                            self._adopt_value(
+                                connection, key, state, state["base"],
+                                origin=ORIGIN_DISCARD, author=author, now=now,
+                            )
+                            continue
+                        connection.execute(
+                            """
+                            DELETE FROM assessment_outbox
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            key,
+                        )
+                        connection.execute(
+                            """
+                            UPDATE assessment_state
+                            SET sync_status = ?,
+                                update_id = NULL,
+                                last_error = NULL,
+                                remote_state = NULL,
+                                remote_details = NULL,
+                                remote_suppressed = NULL,
+                                updated_at = ?
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            (SYNC_CANCELLED, now, *key),
+                        )
+                self._reload_keys(connection, targets)
+            return targets
 
     def import_legacy(self, entries: Iterable[dict[str, Any]]) -> int:
         self._ensure_initialized()

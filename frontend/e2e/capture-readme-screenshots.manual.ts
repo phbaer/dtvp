@@ -1385,6 +1385,77 @@ test.describe('Capture README screenshots', () => {
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/settings-archives.png')
     })
 
+    test('capture settings access tokens screenshot', async ({ page }) => {
+        await page.route('**/api/settings/tokens', route => route.fulfill({
+            json: {
+                enabled: true,
+                scopes: ['read', 'write'],
+                default_expiry_days: 90,
+                max_expiry_days: 365,
+                tokens: [
+                    {
+                        id: 'docs-token-1',
+                        name: 'triage agent',
+                        scopes: ['read', 'write'],
+                        created_at: '2026-11-02T08:15:00+00:00',
+                        expires_at: '2027-01-31T08:15:00+00:00',
+                        last_used_at: '2026-11-16T14:42:00+00:00',
+                        revoked_at: null,
+                    },
+                    {
+                        id: 'docs-token-2',
+                        name: 'reporting script',
+                        scopes: ['read'],
+                        created_at: '2026-10-20T09:00:00+00:00',
+                        expires_at: '2027-01-18T09:00:00+00:00',
+                        last_used_at: null,
+                        revoked_at: null,
+                    },
+                ],
+            },
+        }))
+        await page.route('**/api/settings/tokens/audit**', route => route.fulfill({
+            json: [
+                {
+                    id: 2,
+                    occurred_at: '2026-11-16T14:42:00+00:00',
+                    username: 'reviewer',
+                    token_id: 'docs-token-1',
+                    agent: 'triage agent',
+                    action: 'save_assessment',
+                    outcome: 'success',
+                    target: { project: 'TestProject', vulnerability: 'CVE-2026-0001', team: 'Team Alpha' },
+                    detail: '',
+                },
+                {
+                    id: 1,
+                    occurred_at: '2026-11-16T14:40:00+00:00',
+                    username: 'reviewer',
+                    token_id: 'docs-token-1',
+                    agent: 'triage agent',
+                    action: 'save_assessment',
+                    outcome: 'conflict',
+                    target: { project: 'TestProject', vulnerability: 'CVE-2026-0002', team: 'Team Alpha' },
+                    detail: 'stale revisions',
+                },
+            ],
+        }))
+        await page.goto('/settings')
+        await page.waitForLoadState('networkidle')
+
+        await page.getByRole('button', { name: 'Access Tokens' }).click()
+        await expect(page.getByTestId('mcp-url')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('token-row')).toHaveCount(2)
+        await expect(page.getByTestId('audit-row')).toHaveCount(2)
+        await page.getByTestId('token-name').fill('triage agent on my laptop')
+        // The URL follows the capture host; show a representative deployment.
+        await page.getByTestId('mcp-url').evaluate((element) => {
+            element.textContent = 'https://dtvp.example.com/dtvp/mcp'
+        })
+
+        await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/settings-access-tokens.png')
+    })
+
     test('capture threat-model rescoring screenshot', async ({ page }) => {
         await page.setViewportSize({ width: 2200, height: 1800 })
         await page.goto('/project/TestProject/tmrescore')

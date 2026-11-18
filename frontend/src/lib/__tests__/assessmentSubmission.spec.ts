@@ -77,7 +77,15 @@ describe('assessmentSubmission', () => {
         expect(prepared.reviewText).toContain('[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H]')
         expect(prepared.payload.team).toBe('TeamA')
         expect(prepared.payload).not.toHaveProperty('comment')
-        expect(prepared.payload.original_analysis).toEqual({})
+        // No reload happened: the value shown in the view is what the edit
+        // was based on, and the server checks it against Dependency-Track.
+        expect(prepared.payload.original_analysis).toEqual({
+            'finding-1': {
+                analysisState: 'NOT_SET',
+                analysisDetails: '--- [Team: General] [State: NOT_SET] [Assessed By: system] ---\nBaseline details',
+                isSuppressed: false,
+            },
+        })
     })
 
     it('copies a previous team into a pending target draft and retires the source', () => {

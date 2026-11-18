@@ -1010,6 +1010,14 @@ const handleCopy = () => {
                                 <span class="text-gray-500">Pending</span>
                                 <span :class="['font-medium tabular-nums', props.cacheStatusDetail.pending_updates > 0 ? 'text-amber-300' : 'text-gray-300']">{{ props.cacheStatusDetail.pending_updates }}</span>
                             </div>
+                            <div v-if="(props.cacheStatusDetail.failed_exports ?? 0) > 0" class="flex justify-between" title="Exports to Dependency-Track whose last attempt failed. Reviewers can inspect them under Settings → Export.">
+                                <span class="text-gray-500">Failing</span>
+                                <span class="font-medium tabular-nums text-red-300">{{ props.cacheStatusDetail.failed_exports }}</span>
+                            </div>
+                            <div v-if="(props.cacheStatusDetail.diverged_assessments ?? 0) > 0" class="flex justify-between" title="Assessments changed both here and in Dependency-Track; their export waits for a decision.">
+                                <span class="text-gray-500">Conflicts</span>
+                                <span class="font-medium tabular-nums text-amber-300">{{ props.cacheStatusDetail.diverged_assessments }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>

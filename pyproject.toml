@@ -17,6 +17,7 @@ dependencies = [
     "cvss>=3.6",
     "authlib>=1.8.0,<2",
     "itsdangerous>=2.2,<3",
+    "mcp>=2.3,<3",
 ]
 
 [dependency-groups]
