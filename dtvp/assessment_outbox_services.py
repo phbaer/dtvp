@@ -236,9 +236,8 @@ class AssessmentOutboxStore:
                 self._import_legacy_file(connection)
                 self._seed_missing_revisions(connection)
                 self._sync_fields(connection, None)
-                # Row by row, and without the base text where it equals the
-                # local one: loading every row at once with both copies made
-                # the start need about twice the memory the records hold.
+                # Row by row: loading every row at once made the start need
+                # about twice the memory the records hold.
                 self._states = {
                     self._row_key(row): self._state_record(row)
                     for row in connection.execute(
@@ -248,9 +247,7 @@ class AssessmentOutboxStore:
                                suppressed, sync_status, update_id, last_error,
                                updated_at, export_rejections,
                                base_state, base_suppressed,
-                               base_details IS analysis_details AS base_same,
-                               CASE WHEN base_details IS analysis_details
-                                    THEN NULL ELSE base_details END AS base_details,
+                               base_same, base_details,
                                remote_state, remote_details, remote_suppressed
                         FROM assessment_state
                         """
@@ -374,13 +371,11 @@ class AssessmentOutboxStore:
                 if row["base_state"] is None
                 else assessment_value(
                     row["base_state"],
-                    # Usually the same text as the local value; share it
-                    # instead of holding every assessment in memory twice.
+                    # Usually the record's own text: then it is not stored
+                    # again (base_same) and not held in memory twice.
                     row["analysis_details"]
-                    if (
-                        ("base_same" in row.keys() and row["base_same"])
-                        or row["base_details"] == row["analysis_details"]
-                    )
+                    if row["base_details"] is None
+                    or row["base_details"] == row["analysis_details"]
                     else row["base_details"],
                     row["base_suppressed"],
                 )
@@ -505,6 +500,32 @@ class AssessmentOutboxStore:
                 ).fetchone()
                 if row is not None:
                     rows.append(row)
+        if wanted is not None:
+            with connection:
+                for key in wanted:
+                    # The agreed value equals the record: store it once.
+                    connection.execute(
+                        """
+                        UPDATE assessment_state
+                        SET base_details = NULL, base_same = 1
+                        WHERE project_uuid = ? AND component_uuid = ?
+                          AND vulnerability_uuid = ?
+                          AND base_state IS NOT NULL
+                          AND base_details IS analysis_details
+                        """,
+                        key,
+                    )
+                    # A writer that stored a differing agreed value did not
+                    # touch the marker; keep it truthful.
+                    connection.execute(
+                        """
+                        UPDATE assessment_state SET base_same = 0
+                        WHERE project_uuid = ? AND component_uuid = ?
+                          AND vulnerability_uuid = ?
+                          AND base_same = 1 AND base_details IS NOT NULL
+                        """,
+                        key,
+                    )
         written = 0
         # Reading every existing assessment once takes a while on a large
         # installation; say so on the console and the start page.
@@ -1093,21 +1114,32 @@ class AssessmentOutboxStore:
                 project_uuid, component_uuid, vulnerability_uuid, revision,
                 analysis_state, analysis_details, suppressed, sync_status,
                 update_id, last_error, updated_at,
-                base_state, base_details, base_suppressed
+                base_state, base_details, base_suppressed, base_same
             )
-            VALUES (?, ?, ?, 0, ?, ?, ?, 'synced', NULL, NULL, ?, ?, ?, ?)
+            VALUES (?, ?, ?, 0, ?, ?, ?, 'synced', NULL, NULL, ?, ?, NULL, ?, 1)
             """,
             (
                 *key,
                 value["state"], value["details"], int(value["suppressed"]),
                 now,
-                value["state"], value["details"], int(value["suppressed"]),
+                value["state"], int(value["suppressed"]),
             ),
         ).rowcount
         if not inserted:
             return False
+        # The entry's text is the record's until the record changes; a
+        # database trigger writes it here at that moment.
         self._append_revision(
-            connection, key, 0, value, origin=ORIGIN_IMPORT, author=None, now=now
+            connection, key, 0, {**value, "details": ""},
+            origin=ORIGIN_IMPORT, author=None, now=now,
+        )
+        connection.execute(
+            """
+            UPDATE assessment_revisions SET text_in_record = 1
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ? AND revision = 0 AND origin = ?
+            """,
+            (*key, ORIGIN_IMPORT),
         )
         return True
 
@@ -1428,10 +1460,19 @@ class AssessmentOutboxStore:
         with self._lock, closing(self._connect()) as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM assessment_revisions
-                WHERE project_uuid = ? AND component_uuid = ?
-                  AND vulnerability_uuid = ?
-                ORDER BY revision_id DESC
+                SELECT r.revision, r.analysis_state, r.suppressed, r.origin,
+                       r.author, r.created_at,
+                       CASE WHEN r.text_in_record
+                            THEN s.analysis_details
+                            ELSE r.analysis_details END AS analysis_details
+                FROM assessment_revisions r
+                LEFT JOIN assessment_state s
+                  ON s.project_uuid = r.project_uuid
+                 AND s.component_uuid = r.component_uuid
+                 AND s.vulnerability_uuid = r.vulnerability_uuid
+                WHERE r.project_uuid = ? AND r.component_uuid = ?
+                  AND r.vulnerability_uuid = ?
+                ORDER BY r.revision_id DESC
                 LIMIT ?
                 """,
                 (*key, limit),

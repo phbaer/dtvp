@@ -1711,7 +1711,7 @@ class CacheManager:
             except Exception:
                 logger.exception("Assessment change listener failed")
 
-    def list_export_queue(self) -> List[Dict[str, Any]]:
+    def list_export_queue(self, *, include_texts: bool = True) -> List[Dict[str, Any]]:
         """Local assessments not yet in the source, oldest first, with what
         is needed to review them before exporting."""
         projects = {
@@ -1766,7 +1766,10 @@ class CacheManager:
                     "origin": history[0]["origin"] if history else None,
                     "local": {
                         "analysisState": state.get("analysisState"),
-                        "analysisDetails": state.get("analysisDetails"),
+                        **(
+                            {"analysisDetails": state.get("analysisDetails")}
+                            if include_texts else {}
+                        ),
                         "isSuppressed": state.get("isSuppressed"),
                     },
                     # What the export replaces, when known.
@@ -1775,7 +1778,10 @@ class CacheManager:
                         if (remote or base) is None
                         else {
                             "analysisState": (remote or base)["state"],
-                            "analysisDetails": (remote or base)["details"],
+                            **(
+                                {"analysisDetails": (remote or base)["details"]}
+                                if include_texts else {}
+                            ),
                             "isSuppressed": (remote or base)["suppressed"],
                         }
                     ),

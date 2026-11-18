@@ -105,7 +105,8 @@ An export overwrites whatever Dependency-Track holds for the finding.
 
 **Settings → Export** (reviewers) lists everything that has not reached
 Dependency-Track: the finding, who changed it, the state change, and on
-request the text to be exported next to the text it replaces. Export one entry
+request the text to be exported next to the text it replaces (loaded when an
+entry is opened; `GET /api/export/texts?update_id=…`). Export one entry
 or all. Failed exports show their last error; in `auto` mode they are retried
 with increasing delay (up to a minute for the first ten attempts, then up to
 15 minutes), in `manual` mode on the next export. An export whose project or

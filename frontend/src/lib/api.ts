@@ -2298,8 +2298,9 @@ export interface ExportQueueItem {
     last_error: string | null;
     author: string | null;
     origin: string | null;
-    local: { analysisState: string; analysisDetails: string; isSuppressed: boolean };
-    source: { analysisState: string; analysisDetails: string; isSuppressed: boolean } | null;
+    /** Without the texts; see `getExportTexts`. */
+    local: { analysisState: string; isSuppressed: boolean };
+    source: { analysisState: string; isSuppressed: boolean } | null;
 }
 
 export interface ExportQueue {
@@ -2318,6 +2319,18 @@ export interface ExportResult {
 /** Local assessments that have not reached Dependency-Track yet. */
 export const getExportQueue = async (): Promise<ExportQueue> => {
     const res = await api.get('/export');
+    return res.data;
+};
+
+export interface ExportTexts {
+    update_id: string;
+    local: { analysisState: string; analysisDetails?: string; isSuppressed: boolean };
+    source: { analysisState: string; analysisDetails?: string; isSuppressed: boolean } | null;
+}
+
+/** The text a queued export would write and the text it replaces. */
+export const getExportTexts = async (updateId: string): Promise<ExportTexts> => {
+    const res = await api.get('/export/texts', { params: { update_id: updateId } });
     return res.data;
 };
 

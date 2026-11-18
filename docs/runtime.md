@@ -270,7 +270,7 @@ uv run python scripts/benchmark_assessment_store.py --assessments 50000 200000
 | Same, every assessment lost in Dependency-Track (all queued again) | 109 ms | 108 ms |
 | Start with an existing database | 0.4 s | 2.4 s |
 | One-off read of existing assessments into fields | 5.8 s | 27.7 s |
-| Database, 2.3 KB texts | 618 MiB | 2,468 MiB |
+| Database, 2.3 KB texts | 368 MiB | 1,452 MiB |
 
 Time does not grow with the number of records already stored; memory and disk
 grow linearly with the number of assessments and the length of their texts.
@@ -279,21 +279,24 @@ grow linearly with the number of assessments and the length of their texts.
   assessments that is 174 MiB at 2.5 KB per text and 103 MiB at 1 KB
   (measured with `tracemalloc`). Process memory after a restart with 50,000
   assessments of 2.3 KB was 224 MiB above an empty process.
-- **Disk:** the text is stored four times (the record, the value last agreed
-  with Dependency-Track, the first history entry, and the team fields), about
-  12.9 KB per assessment at 2.5 KB per text and 5.6 KB at 1 KB. The imported
-  finding adds one more copy.
+- **Disk:** the text is stored twice: in the record and split into the team
+  fields. The value last agreed with Dependency-Track and the history entry
+  of an adopted assessment refer to the record while they equal it; a
+  database trigger writes the text out to them when the record changes. That
+  brought the databases in the table down from 618 and 2,468 MiB.
+  An existing database is converted at the first start; the file itself only
+  shrinks after `VACUUM`. The imported finding adds one more copy.
 - **Sizing example:** about 51,000 assessed findings with texts around 1 KB
   need roughly 110 MiB of memory for the records and 400 MiB of database
   (measured with 52,050 synthetic findings in 347 projects).
 - **Through the application** (`CacheManager`, mock source): the first import
   of a 1,000-finding project took about 200 ms, a re-import without changes
   68 ms, a CycloneDX VDR of 1,000 findings 104 ms, and listing 1,000 queued
-  exports 217 ms (5.4 MiB of JSON, because the list carries both texts of
-  every entry).
+  exports 217 ms. That list carried both texts of every entry (5.4 MiB of
+  JSON) when measured; it now leaves them out and the Export tab loads them
+  per entry.
 
 Not measured: the HTTP layer, grouping tasks, concurrent users, and a real
-Dependency-Track. Known ways to reduce the disk use (not implemented): do not
-store the text again in the history entry of an adopted assessment, and do
-not store the agreed value when it equals the record.
+Dependency-Track. The sizing example above was measured before the text was
+reduced to two copies; expect a smaller database.
 
