@@ -94,6 +94,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Run manual real-stack tests | `cd frontend && npm run test:ui:real-stack` |
 | Capture documentation screenshots | `cd frontend && npm run test:ui:docs -- --project=chromium` |
 | Benchmark grouped queries | `uv run python scripts/benchmark_group_queries.py` |
+| Benchmark the assessment record | `uv run python scripts/benchmark_assessment_store.py --assessments 50000` |
 
 Browser tests cover Chromium, Firefox, and WebKit. CI's Playwright image must
 match the version in `frontend/package-lock.json`. See

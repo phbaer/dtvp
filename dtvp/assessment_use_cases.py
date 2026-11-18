@@ -13,8 +13,9 @@ import os
 import re
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
+from .assessment_model import finding_key, parse_assessment, render_assessment
 from .assessment_outbox_services import (
     AssessmentRevisionConflictError,
     assessment_key,
@@ -31,10 +32,50 @@ from .ssvc_services import (
 AssessmentPayloads = list[tuple[dict[str, Any], dict[str, Any]]]
 
 
+class TeamAssessmentFields(BaseModel):
+    """One team's assessment (or the General one) as atomic fields."""
+
+    team: str = Field(min_length=1, max_length=200)
+    state: str = "NOT_SET"
+    justification: Optional[str] = None
+    assessed_by: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    assessed_at_ms: Optional[int] = None
+    rescored_score: Optional[float] = Field(default=None, ge=0, le=10)
+    rescored_vector: Optional[str] = None
+    ssvc: Optional[str] = None
+    ssvc_details: Optional[str] = None
+    assigned: list[str] = Field(default_factory=list)
+    ticket: Optional[str] = None
+    evidence_reviewed: Optional[str] = None
+    version_coverage: Optional[str] = None
+    historical: bool = False
+    copied_from: Optional[str] = None
+    details: str = ""
+
+
+class AssessmentFields(BaseModel):
+    """A whole assessment as atomic fields; see ``assessment_model``."""
+
+    # Text outside the team assessments. ``None`` keeps what is stored for
+    # each finding; an empty string removes it.
+    free_text: Optional[str] = None
+    pending_review: bool = False
+    rescored_score: Optional[float] = Field(default=None, ge=0, le=10)
+    rescored_vector: Optional[str] = None
+    teams: list[TeamAssessmentFields] = Field(default_factory=list)
+
+
 class AssessmentRequest(BaseModel):
     instances: list[dict]
     state: str
-    details: str
+    # The assessment as text in DTVP's markup. Ignored when ``fields`` is
+    # given, which is the form new clients send.
+    details: str = ""
+    fields: Optional[AssessmentFields] = None
+    # Free text to keep per finding ("project|component|vulnerability"),
+    # read from the stored record by the use case; never client input.
+    _stored_free_text: dict[str, str] = PrivateAttr(default_factory=dict)
     comment: Optional[str] = None
     justification: Optional[str] = None
     suppressed: bool = False
@@ -342,6 +383,25 @@ async def save_assessment(
     Raises AssessmentPermissionError, AssessmentValidationError, or
     AssessmentConflictError. Returns one accepted result per instance.
     """
+    if req.fields is not None:
+        # The assessment arrives as fields. Its text, which the checks and
+        # the store work with, is rendered here and nowhere in the client.
+        try:
+            rendered = render_assessment(req.fields.model_dump())
+        except ValueError as exc:
+            raise AssessmentValidationError(str(exc)) from exc
+        req = req.model_copy(update={"details": rendered})
+        req.model_fields_set.add("details")
+        if req.fields.free_text is None:
+            # The client did not touch the free text: keep each finding's.
+            stored = await asyncio.to_thread(
+                deps.cache_manager.get_cached_assessment_details, req.instances
+            )
+            req._stored_free_text = {
+                finding_key(instance): kept
+                for instance, text in zip(req.instances, stored)
+                if (kept := parse_assessment("", text, False)["free_text"])
+            }
     if (
         strict_dt_assessment_conflicts_enabled()
         and not req.force

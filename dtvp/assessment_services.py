@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import httpx
 
+from .assessment_model import finding_key, render_assessment
 from .dt_client import DTClient
 from .assessment_use_cases import AssessmentRequest
 from .ssvc_services import new_record, preserve_record, write_record
@@ -250,7 +251,18 @@ def build_assessment_payloads(
                 or ""
             )
 
-        if req.comparison_mode == "REPLACE":
+        if req.fields is not None and req.fields.free_text is None:
+            # Fields without free text: this finding keeps its own.
+            final_details_str = render_assessment(
+                {
+                    **req.fields.model_dump(),
+                    "free_text": req._stored_free_text.get(finding_key(instance), ""),
+                }
+            )
+            aggregated_state = deps.calculate_aggregated_state(final_details_str)
+        elif req.fields is not None or req.comparison_mode == "REPLACE":
+            # Either the whole text, or the rendering of the fields that the
+            # use case put into ``details``.
             final_details_str = req.details
             aggregated_state = deps.calculate_aggregated_state(req.details)
         else:

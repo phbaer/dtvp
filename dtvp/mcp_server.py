@@ -382,8 +382,10 @@ class McpToolService:
                     ),
                 }
             )
+            # The same assessment written with different spacing is one
+            # assessment; two writers once left a blank line in or out.
             variant = variants.setdefault(
-                current["details"],
+                " ".join(str(current["details"] or "").split()),
                 {**self._assessment_view(current["details"]), "finding_uuids": []},
             )
             variant["finding_uuids"].append(component.get("finding_uuid"))

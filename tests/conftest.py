@@ -24,6 +24,10 @@ def reset_cache_manager(tmp_path, monkeypatch):
     analysis_results_path = tmp_path / "code_analysis_results.json"
     monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
     monkeypatch.setenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", str(analysis_results_path))
+    # Defaults to data/ in the working directory, the developer's real data.
+    monkeypatch.setenv(
+        "DTVP_TMRESCORE_CACHE_PATH", str(tmp_path / "tmrescore_proposals.json")
+    )
     monkeypatch.setenv(
         "DTVP_ACCESS_TOKENS_PATH", str(tmp_path / "access_tokens.sqlite")
     )

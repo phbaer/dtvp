@@ -151,6 +151,16 @@ EXPORT_MODE_AUTO = "auto"
 EXPORT_MODE_MANUAL = "manual"
 
 
+def _refresh_seconds_from_env() -> int:
+    """The background refresh interval; an unusable value falls back to the
+    default instead of stopping the start."""
+    try:
+        return max(1, int(os.getenv("DTVP_DT_CACHE_REFRESH_SECONDS", "60").strip()))
+    except ValueError:
+        logger.warning("DTVP_DT_CACHE_REFRESH_SECONDS is not a whole number; using 60")
+        return 60
+
+
 def get_export_mode() -> str:
     """``auto`` exports local assessments in the background as they are
     saved; ``manual`` keeps them local until an export is requested."""
@@ -314,7 +324,7 @@ class CacheManager:
     ):
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
-            int(os.getenv("DTVP_DT_CACHE_REFRESH_SECONDS", "60"))
+            _refresh_seconds_from_env()
             if refresh_interval_seconds is None
             else refresh_interval_seconds
         )

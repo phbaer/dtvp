@@ -196,7 +196,10 @@ export interface AssessmentPayload {
     ssvc?: import('./lib/ssvc').SsvcSelection | null;
     instances: Instance[];
     state: string;
-    details: string;
+    /** The assessment as fields; the server renders the stored text. */
+    fields?: import('./lib/assessment-helpers').AssessmentFields;
+    /** Text in DTVP's markup; only for callers that do not send fields. */
+    details?: string;
     justification?: string;
     suppressed: boolean;
     team?: string;

@@ -10,7 +10,10 @@ import ssvcModel from '../../../../dtvp/resources/ssvc/deployer-1.0.0.json'
 const clipboardWriteText = vi.fn()
 
 // Mock API
-vi.mock('../../lib/api', () => ({
+vi.mock('../../lib/api', async () => {
+    // The server renders the stored text from the fields a save sends.
+    const { renderAssessmentFields } = await import('../../lib/__tests__/assessmentFieldsText')
+    return {
     getSsvcModels: vi.fn(() => Promise.resolve([ssvcModel])),
     getSsvcExploitation: vi.fn(() => Promise.resolve({ enabled: true, sources: [], suggestion: null, auto_fill: false, retry_after: 0 })),
     updateAssessment: vi.fn((payload: any) => {
@@ -19,7 +22,7 @@ vi.mock('../../lib/api', () => ({
             status: 'success',
             uuid: inst.finding_uuid,
             new_state: payload.state, // In real backend this would be aggregated
-            new_details: `-- - [Team: ${payload.team || 'General'}][State: ${payload.state}][Assessed By: test - mock][Justification: ${payload.justification || 'NOT_SET'}]---\n${payload.details}`,
+            new_details: `-- - [Team: ${payload.team || 'General'}][State: ${payload.state}][Assessed By: test - mock][Justification: ${payload.justification || 'NOT_SET'}]---\n${renderAssessmentFields(payload.fields)}`,
             queued: true,
             sync_status: 'pending',
             update_id: `update-${inst.finding_uuid}`,
@@ -35,7 +38,8 @@ vi.mock('../../lib/api', () => ({
     }),
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
     getKnownUsers: vi.fn(() => Promise.resolve([]))
-}))
+    }
+})
 
 // Mock Icons
 vi.mock('@lucide/vue', async (importOriginal) => {
@@ -65,6 +69,7 @@ vi.mock('../DependencyChainViewer.vue', () => ({
 }))
 
 import { updateAssessment } from '../../lib/api'
+import { renderAssessmentFields } from '../../lib/__tests__/assessmentFieldsText'
 
 describe('VulnGroupCard', () => {
     const mockComponents = [
@@ -501,9 +506,22 @@ describe('VulnGroupCard', () => {
         // Verify API call
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
-            details: expect.stringMatching(/---\s*\[Team:\s*Security\]\s*\[State:\s*NOT_AFFECTED\]\s*\[Assessed By:\s*tester\]\s*\[Date:\s*\d+\]\s*\[Justification:\s*CODE_NOT_PRESENT\]\s*---\n\nFalse positive/),
+            // The assessment is sent as fields, not as composed text.
+            fields: expect.objectContaining({
+                teams: [expect.objectContaining({
+                    team: 'Security',
+                    state: 'NOT_AFFECTED',
+                    assessed_by: 'tester',
+                    assessed_at_ms: expect.any(Number),
+                    justification: 'CODE_NOT_PRESENT',
+                    details: 'False positive',
+                })],
+            }),
             team: 'Security'
         }))
+        const sent = vi.mocked(updateAssessment).mock.calls.at(-1)?.[0] as any
+        expect(sent.details).toBeUndefined()
+        expect(sent.comparison_mode).toBeUndefined()
 
         // Should emit update:assessment
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
@@ -572,9 +590,9 @@ describe('VulnGroupCard', () => {
 
         const payload = vi.mocked(updateAssessment).mock.calls[0]?.[0] as any
         expect(payload.analysis_run_ids).toEqual(['automatic-run-1'])
-        expect(payload.details.match(/\[Team: General\]/g)).toHaveLength(1)
-        expect(payload.details.match(/\[Team: Security\]/g)).toHaveLength(1)
-        const globalBlock = payload.details.split('--- [Team: Security]')[0]
+        expect(renderAssessmentFields(payload.fields).match(/\[Team: General\]/g)).toHaveLength(1)
+        expect(renderAssessmentFields(payload.fields).match(/\[Team: Security\]/g)).toHaveLength(1)
+        const globalBlock = renderAssessmentFields(payload.fields).split('--- [Team: Security]')[0]
         expect(globalBlock).toContain('Assessed Teams: Security')
         expect(globalBlock).not.toContain('No vulnerable code path was found.')
     })
@@ -628,7 +646,11 @@ describe('VulnGroupCard', () => {
 
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             team: 'Security',
-            details: expect.stringContaining('--- [Team: General] [State: IN_TRIAGE] [Assessed By: system]'),
+            fields: expect.objectContaining({
+                teams: expect.arrayContaining([expect.objectContaining({
+                    team: 'General', state: 'IN_TRIAGE', assessed_by: 'system',
+                })]),
+            }),
         }))
     })
 
@@ -1479,10 +1501,10 @@ describe('VulnGroupCard', () => {
         // Verify updateAssessment was called with the Rescored 0.0 vector in the payload.
         // It should inject [Rescored: 0.0] and the default CVSS 3.1 0-score vector.
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
-            details: expect.stringContaining('[Rescored: 0.0]')
-        }))
-        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
-            details: expect.stringContaining('[Rescored Vector: CVSS:3.1')
+            fields: expect.objectContaining({
+                rescored_score: 0,
+                rescored_vector: expect.stringContaining('CVSS:3.1'),
+            }),
         }))
     })
 
@@ -1670,8 +1692,10 @@ describe('VulnGroupCard', () => {
         const calls = (updateAssessment as any).mock.calls
         const lastCallArgs = calls[calls.length - 1][0]
 
-        expect(lastCallArgs.details).not.toContain('[Rescored:')
-        expect(lastCallArgs.details).not.toContain('[Rescored Vector:')
+        expect(lastCallArgs.details).toBeUndefined()
+        expect(lastCallArgs.fields.rescored_score).toBeNull()
+        expect(renderAssessmentFields(lastCallArgs.fields)).not.toContain('[Rescored:')
+        expect(lastCallArgs.fields.rescored_vector).toBeNull()
     })
 
 
@@ -1859,5 +1883,42 @@ describe('VulnGroupCard', () => {
             await calcButton.trigger('click')
         }
         expect(wrapper.findComponent({ name: 'CvssCalculatorV3' }).exists()).toBe(true)
+    })
+
+    it('shows one existing assessment when findings differ only in whitespace', async () => {
+        // The form used to write a blank line after each block header and a
+        // bulk workflow did not: the same assessment in two spellings.
+        const header = '--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794916578955] [Justification: NOT_SET] ---'
+        const fromForm = `[Rescored: 4.0]\n\n${header}\n\nReachable through the parser.\n\n\n[Status: Pending Review]`
+        const fromWorkflow = `[Rescored: 4.0]\n\n${header}\nReachable through the parser.\n\n[Status: Pending Review]`
+        const component = (suffix: string, details: string, state = 'EXPLOITABLE') => ({
+            ...mockComponents[0],
+            component_uuid: `c${suffix}`,
+            finding_uuid: `f${suffix}`,
+            analysis_state: state,
+            analysis_details: details,
+        })
+        const group = {
+            ...mockGroup,
+            affected_versions: [{
+                ...mockGroup.affected_versions[0],
+                components: [
+                    component('1', fromForm),
+                    component('2', fromWorkflow),
+                    component('3', fromWorkflow.replace('Reachable', 'Not reachable'), 'NOT_AFFECTED'),
+                ],
+            }],
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) } },
+        })
+        await flushPromises()
+
+        const groups = (wrapper.vm as any).groupedAssessments
+        expect(groups.map((entry: any) => [entry.state, entry.instances.length])).toEqual([
+            ['EXPLOITABLE', 2],
+            ['NOT_AFFECTED', 1],
+        ])
     })
 })

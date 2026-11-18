@@ -5,19 +5,23 @@ import VulnGroupCard from '../VulnGroupCard.vue'
 import { updateAssessment, getAssessmentDetails } from '../../lib/api'
 
 
-vi.mock('../../lib/api', () => ({
+vi.mock('../../lib/api', async () => {
+    // The server renders the stored text from the fields a save sends.
+    const { renderAssessmentFields } = await import('../../lib/__tests__/assessmentFieldsText')
+    return {
     updateAssessment: vi.fn(async (payload: any) => {
         return payload.instances.map((inst: any) => ({
             status: 'success',
             uuid: inst.finding_uuid,
             new_state: payload.state,
-            new_details: payload.details
+            new_details: renderAssessmentFields(payload.fields)
         }))
     }),
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
     getDependencyChains: vi.fn().mockResolvedValue([]),
     getKnownUsers: vi.fn(() => Promise.resolve([]))
-}))
+    }
+})
 
 vi.mock('@lucide/vue', () => ({
     ChevronDown: { template: '<span />' },

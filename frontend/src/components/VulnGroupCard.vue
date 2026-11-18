@@ -6,7 +6,7 @@ import { marked } from 'marked'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot, Trash2 } from '@lucide/vue'
 
-import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
@@ -1483,8 +1483,10 @@ const groupedAssessments = computed(() => {
             const detailsVal = c.analysis_details || ''
             const suppressedVal = !!c.is_suppressed
 
-            // Group by state, details, and suppression — different details get separate boxes
-            const key = `${stateVal}|${detailsVal}|${suppressedVal}`
+            // Group by state, details, and suppression — different details
+            // get separate boxes. Writers differ in whitespace (a blank line
+            // after a block header or not); that alone is the same assessment.
+            const key = `${stateVal}|${assessmentTextKey(detailsVal)}|${suppressedVal}`
 
             if (!Object.hasOwn(groups, key)) {
                 groups[key] = {
@@ -1969,7 +1971,6 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
                 rationale: pendingSsvc.value.rationale,
                 exploitation_evidence: pendingSsvc.value.exploitation_evidence,
             } } : {}),
-            details: finalText,
             state: finalState,
             analysis_run_ids: [...codeAnalysisRunIds.value],
         }
@@ -3282,7 +3283,7 @@ const teamBlockStateColor = (state?: string): string => {
 
                         <!-- Block header metadata (read-only) -->
                         <div v-if="teamBlockMeta(selectedTeam || 'General')" class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-gray-500">
-                            <span v-if="teamBlockMeta(selectedTeam || 'General')!.user && teamBlockMeta(selectedTeam || 'General')!.user !== 'Unknown'">
+                            <span v-if="teamBlockMeta(selectedTeam || 'General')!.user && teamBlockMeta(selectedTeam || 'General')!.user.toLowerCase() !== 'unknown'">
                                 Assessed by <span class="text-gray-400">{{ teamBlockMeta(selectedTeam || 'General')!.user }}</span>
                             </span>
                             <span v-if="teamBlockMeta(selectedTeam || 'General')!.timestamp">

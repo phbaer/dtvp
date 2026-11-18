@@ -1,4 +1,4 @@
-import { assessmentTeamKey, constructAssessmentDetails, markAssessmentBlocksHistorical, mergeTeamAssessment, parseAssessmentBlocks, sanitizeAssessmentDetails, type AssessmentBlock } from './assessment-helpers'
+import { assessmentTeamKey, assessmentTextToFields, constructAssessmentDetails, markAssessmentBlocksHistorical, mergeTeamAssessment, parseAssessmentBlocks, sanitizeAssessmentDetails, type AssessmentBlock } from './assessment-helpers'
 import { cleanStructuredAssessmentDetails } from './assessmentFormState'
 import type { AssessmentPayload, Instance } from '../types'
 
@@ -312,11 +312,12 @@ export const prepareAssessmentSubmission = (
         payload: {
             instances: input.allInstances,
             state: finalState,
-            details: finalText,
+            // The assessment goes out as fields. The text above is only what
+            // the review dialog shows; the server renders the stored text.
+            fields: assessmentTextToFields(finalText),
             justification: input.justification && input.justification !== 'NOT_SET' ? input.justification : undefined,
             suppressed: input.suppressed,
             team: input.selectedTeam || undefined,
-            comparison_mode: 'REPLACE',
             original_analysis: input.force ? {} : seenAnalysis(input.allInstances, input.originalAnalysis),
             force: input.force,
         },

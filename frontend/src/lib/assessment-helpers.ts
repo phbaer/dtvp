@@ -17,6 +17,44 @@ export interface AssessmentBlock {
     evidenceReviewed?: boolean;
     versionCoverageChecked?: boolean;
     ticket?: string;
+    // Read from a header that carries them; the form does not edit them.
+    reviewer?: string;
+    rescored?: number;
+    vector?: string;
+}
+
+/** One team's assessment (or the General one) as the server stores it. */
+export interface AssessmentTeamFields {
+    team: string;
+    state: string;
+    justification: string | null;
+    assessed_by: string | null;
+    reviewed_by: string | null;
+    assessed_at_ms: number | null;
+    rescored_score: number | null;
+    rescored_vector: string | null;
+    ssvc: string | null;
+    ssvc_details: string | null;
+    assigned: string[];
+    ticket: string | null;
+    evidence_reviewed: string | null;
+    version_coverage: string | null;
+    historical: boolean;
+    copied_from: string | null;
+    details: string;
+}
+
+/**
+ * A whole assessment as fields. This is what a save sends: the server
+ * stores the fields and renders the text Dependency-Track receives.
+ */
+export interface AssessmentFields {
+    /** Text outside the team assessments; null keeps what the server has stored. */
+    free_text: string | null;
+    pending_review: boolean;
+    rescored_score: number | null;
+    rescored_vector: string | null;
+    teams: AssessmentTeamFields[];
 }
 
 export const STATE_PRIORITY: Record<string, number> = {
@@ -303,6 +341,9 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const versionCoverageChecked = /\[Version Coverage:\s*(?:yes|true|checked)\]/i.test(headerText);
         const ticketMatch = headerText.match(/\[Ticket:\s*([^\]]+)\]/);
         const ticket = ticketMatch?.[1]?.trim() || '';
+        const reviewer = headerText.match(/\[Reviewed By:\s*([^\]]+)\]/)?.[1]?.trim();
+        const rescoredText = headerText.match(/\[Rescored:\s*([\d.]+)\]/)?.[1];
+        const vector = headerText.match(/\[Rescored Vector:\s*([^\]]+)\]/)?.[1]?.trim();
 
         const startOfContent = match.index + match[0].length;
 
@@ -349,12 +390,99 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
             evidenceReviewed,
             versionCoverageChecked,
             ticket,
+            ...(reviewer ? { reviewer } : {}),
+            ...(rescoredText !== undefined && !Number.isNaN(Number(rescoredText))
+                ? { rescored: Number(rescoredText) }
+                : {}),
+            ...(vector ? { vector } : {}),
         });
     }
 
     setBoundedCacheEntry(parsedAssessmentBlocksCache, originalText, cloneAssessmentBlocks(blocks), MAX_PARSE_CACHE_ENTRIES);
     return blocks;
 }
+
+const SHARED_RESCORED = /\[Rescored:\s*([\d.]+)\]/;
+const SHARED_RESCORED_VECTOR = /\[Rescored Vector:\s*([^\]]+)\]/;
+const PENDING_REVIEW_MARKER = /\[Status: Pending Review\]/i;
+
+const textOrNull = (value: string | undefined | null): string | null => {
+    const text = String(value ?? '').trim();
+    return text ? text : null;
+};
+
+const blockToTeamFields = (block: AssessmentBlock): AssessmentTeamFields => {
+    const user = String(block.user || '').trim();
+    const justification = String(block.justification || '').trim();
+    return {
+        team: block.team,
+        state: block.state || 'NOT_SET',
+        justification: justification && justification !== 'NOT_SET' ? justification : null,
+        assessed_by: user && user.toLocaleLowerCase() !== 'unknown' ? user : null,
+        reviewed_by: textOrNull(block.reviewer),
+        assessed_at_ms: block.timestamp ? block.timestamp : null,
+        rescored_score: block.rescored ?? null,
+        rescored_vector: textOrNull(block.vector),
+        ssvc: textOrNull(block.ssvc),
+        ssvc_details: textOrNull(block.ssvcDetails),
+        assigned: [...(block.assigned || [])],
+        ticket: textOrNull(block.ticket),
+        evidence_reviewed: block.evidenceReviewed ? 'yes' : null,
+        version_coverage: block.versionCoverageChecked ? 'yes' : null,
+        historical: Boolean(block.historical),
+        copied_from: textOrNull(block.copiedFrom),
+        details: block.details || '',
+    };
+};
+
+/**
+ * The fields of an assessment given as text in DTVP's markup.
+ *
+ * Text before the first team block is the rescoring, the review marker, and
+ * free text; it is not folded into a General assessment as the form's block
+ * model does. Team blocks are de-duplicated exactly as the form does it.
+ */
+export function assessmentTextToFields(fullText: string): AssessmentFields {
+    const source = fullText || '';
+    const masked = maskSsvcDetails(source);
+    const firstHeaderIndex = masked.indexOf('--- [Team:');
+    const shared = firstHeaderIndex === -1 ? masked : masked.slice(0, firstHeaderIndex);
+    const rescored = SHARED_RESCORED.exec(shared)?.[1];
+    const vector = SHARED_RESCORED_VECTOR.exec(shared)?.[1]?.trim();
+    const freeText = shared
+        .replace(/\[Rescored:\s*[\d.]+\]/g, '')
+        .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+        .replace(/\[Status: Pending Review\]/gi, '')
+        .trim();
+
+    const blocks = parseAssessmentBlocks(source);
+    // The parser turns text ahead of the blocks into a General block of its
+    // own, always the first one. Here that text is the free text.
+    if (freeText && firstHeaderIndex !== 0 && blocks.length > 0) {
+        blocks.shift();
+    }
+
+    return {
+        // The form has no field for free text. Beside team assessments an
+        // empty value therefore means "not edited here", and the server
+        // keeps what each finding has.
+        free_text: freeText || (blocks.length > 0 ? null : ''),
+        pending_review: PENDING_REVIEW_MARKER.test(stripSsvcDetails(source)),
+        rescored_score: rescored !== undefined && !Number.isNaN(Number(rescored))
+            ? Number(rescored)
+            : null,
+        rescored_vector: vector || null,
+        teams: deduplicateAssessmentBlocks(blocks).map(blockToTeamFields),
+    };
+}
+
+/**
+ * Whether two stored assessment texts say the same. Writers differ in
+ * whitespace (a blank line after a block header or not); that is not a
+ * difference in the assessment.
+ */
+export const assessmentTextKey = (details: string | undefined | null): string =>
+    String(details || '').replace(/\s+/g, ' ').trim();
 
 export function constructAssessmentDetails(
     blocks: AssessmentBlock[],
