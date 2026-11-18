@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 import httpx
 
-from .assessment_model import parse_assessment
+from .assessment_model import canonical_assessment_text, parse_assessment
 from .cyclonedx_export import VARIANT_INVENTORY, build_inventory, build_vdr
 from .assessment_outbox_services import (
     AssessmentOutboxConflictError,
@@ -2111,6 +2111,13 @@ class CacheManager:
         """
         if not payloads:
             return []
+        for payload in payloads:
+            # Every writer's text gets the same layout here, in place, so the
+            # caller reports what was stored.
+            if isinstance(payload.get("details"), str):
+                payload["details"] = canonical_assessment_text(
+                    payload.get("state"), payload["details"], payload.get("suppressed")
+                )
         try:
             entries = await asyncio.to_thread(
                 self._enqueue_with_bases,

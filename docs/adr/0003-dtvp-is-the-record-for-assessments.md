@@ -89,11 +89,13 @@ DTVP's markup out of the text, which is lossy.
 - Dependency-Track's own justification and response fields, and its comment
   trail, are not adopted and not written. DTVP's justification is part of
   each team's assessment.
-- The web form sends fields and the server renders the text, so the text
-  has one writer and one form. Writers that still build text (MCP, bulk
-  workflows, deletion, repair) are read into fields on saving; a field can
-  hold only what the reader recognises, and anything else stays in the free
-  text.
+- The web form sends fields and the server renders the text. Writers that
+  still edit text (bulk workflows, deletion, repair) are read into fields on
+  saving; a field can hold only what the reader recognises, and anything
+  else stays in the free text.
+- Whatever a writer produces, its text is given the one layout before it is
+  stored, when that changes nothing but white space. The same assessment
+  therefore has the same text on every finding.
 - Free text outside the team assessments is kept by a save that does not
   send any. The form cannot edit it yet.
 - The database is the system of record for reviewed assessments: backup,
@@ -114,6 +116,6 @@ DTVP's markup out of the text, which is lossy.
 | Decision | Status |
 | :--- | :--- |
 | 1–3 Record, adoption, rendering target | Implemented 2026-11-18 |
-| 4 Structured fields | Implemented 2026-11-18 for the web form: it sends the assessment as fields (`POST /api/assessment` with `fields`), the server renders the text in one canonical form, and reading it gives the same fields. Open: the MCP tools, bulk workflows, deletion, and repair still build text, which is read into fields; the form has no input for free text |
+| 4 Structured fields | Implemented 2026-11-18. The web form sends the assessment as fields and the server renders the text. A save that names one team (the MCP tools) renders its blocks with the same renderer and keeps every tag. Every text gets the same layout where it is stored. Open: bulk workflows, deletion, and repair still edit text, which is read into fields; the form has no input for free text |
 | 5 CycloneDX inventory and VDR | Implemented 2026-11-18 in DTVP; see [CycloneDX inventory and VDR](../cyclonedx-export.md). Open: the generator reads from DTVP instead of Dependency-Track |
 | 6 New-finding mark | Implemented 2026-11-18 (separate change) |

@@ -194,6 +194,61 @@ async def test_the_payload_the_web_form_sends_is_accepted(deps):
     )
 
 
+EXISTING_WITH_TAGS = (
+    "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Reviewed By: rita] "
+    "[Date: 1794561289026] [Justification: CODE_NOT_REACHABLE] [Evidence Reviewed: yes] "
+    "[Version Coverage: yes] [Ticket: EXP-1001] ---\nNot reachable.\n\n"
+    "--- [Team: Team B] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794561289027] "
+    "[Justification: CODE_NOT_REACHABLE] [Ticket: EXP-7] ---\nTeam B agrees."
+)
+
+
+async def test_a_team_save_keeps_every_tag_of_the_other_teams(deps):
+    """A save that names one team (the MCP tools, API clients) rebuilt every
+    block with a subset of the tags and dropped date, justification, ticket,
+    and the review confirmations from all of them."""
+    await dt_cache.cache_manager.persist_assessment_updates(
+        [{**INSTANCE, "state": "NOT_AFFECTED", "details": EXISTING_WITH_TAGS,
+          "suppressed": False}]
+    )
+
+    await save_assessment(
+        deps,
+        # As the MCP tools call it: the stored text is the base of the merge.
+        _request(state="NOT_AFFECTED", details="Team A checked it.",
+                 justification="CODE_NOT_PRESENT",
+                 instances=[{**INSTANCE, "analysis_details": EXISTING_WITH_TAGS}]),
+        user="alice", client=None,
+    )
+
+    record = dt_cache.cache_manager.get_assessment_fields("p1", "c1", "v1")
+    teams = {team["team"]: team for team in record["teams"]}
+    general, team_b, team_a = teams["General"], teams["Team B"], teams["Team A"]
+    assert (general["assessed_at_ms"], general["justification"], general["ticket"],
+            general["evidence_reviewed"], general["version_coverage"],
+            general["reviewed_by"]) == (
+        1794561289026, "CODE_NOT_REACHABLE", "EXP-1001", "yes", "yes", "rita"
+    )
+    assert (team_b["assessed_at_ms"], team_b["ticket"], team_b["details"]) == (
+        1794561289027, "EXP-7", "Team B agrees."
+    )
+    # The saved team is dated and carries the justification that was sent.
+    assert team_a["assessed_by"] == "alice" and team_a["assessed_at_ms"] > 1794561289027
+    assert team_a["justification"] == "CODE_NOT_PRESENT"
+
+
+async def test_every_writer_stores_the_same_layout(deps):
+    spaced = EXISTING_WITH_TAGS.replace("---\nNot reachable", "---\n\nNot reachable")
+    payload = {**INSTANCE, "state": "NOT_AFFECTED", "details": spaced, "suppressed": False}
+
+    await dt_cache.cache_manager.persist_assessment_updates([payload])
+
+    stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+    assert stored["analysisDetails"] == EXISTING_WITH_TAGS
+    # The caller is told what was stored.
+    assert payload["details"] == EXISTING_WITH_TAGS
+
+
 async def test_fields_that_cannot_be_rendered_are_refused(deps):
     duplicate = {"teams": [{"team": "Team A"}, {"team": "team a"}]}
     with pytest.raises(AssessmentValidationError, match="More than one assessment"):
