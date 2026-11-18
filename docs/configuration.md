@@ -30,6 +30,8 @@ means the integration or override is disabled.
 | `DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES` | Process-local named-project query LRU entries | `128` |
 | `DTVP_ASSESSMENT_OUTBOX_PATH` | Separate file for local assessments and the export queue. Leave unset to keep them in the database; a former `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` is copied in once | `DTVP_DATABASE_PATH` |
 | `DTVP_EXPORT_MODE` | `auto` exports assessments in the background as they are saved; `manual` keeps them local until a reviewer exports them. See [Import and export](import-export.md) | `auto` |
+| `DTVP_CYCLONEDX_ASSESSMENT_SOURCE` | `source.name` of DTVP's own rating in [CycloneDX VDR exports](cyclonedx-export.md); a request parameter overrides it | `DTVP` |
+| `DTVP_CYCLONEDX_PROPERTY_PREFIX` | Namespace of the properties in CycloneDX VDR exports; a request parameter overrides it | `dtvp` |
 | `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
 | `DTVP_ASSESSMENT_STRICT_DT_CONFLICTS` | Perform live Dependency-Track conflict reads before accepting assessment saves | `false` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |

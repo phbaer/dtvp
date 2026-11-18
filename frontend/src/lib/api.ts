@@ -204,6 +204,12 @@ export const listProjectArchiveSnapshots = async (): Promise<ProjectArchiveSnaps
     return res.data;
 };
 
+export type CycloneDxVariant = 'inventory' | 'vdr';
+
+/** Download address of a project version's CycloneDX inventory or VDR. */
+export const getCycloneDxDownloadUrl = (projectUuid: string, variant: CycloneDxVariant): string =>
+    `${API_BASE}/project/${encodeURIComponent(projectUuid)}/cyclonedx?variant=${variant}&download=true`;
+
 export const getProjectArchiveTaskDownloadUrl = (taskId: string): string =>
     `${API_BASE}/project-archives/tasks/${encodeURIComponent(taskId)}/download`;
 

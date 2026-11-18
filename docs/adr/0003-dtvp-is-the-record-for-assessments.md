@@ -103,7 +103,8 @@ DTVP's markup out of the text, which is lossy.
   values, bounded retries, the upgrade of former conflicts, and the atomic
   fields of adopted, changed, and existing assessments.
 - A CycloneDX VDR from DTVP that the generator reads without its text
-  parser (open).
+  parser: checked by hand on 2026-11-18 with the generator's reader; not an
+  automated test.
 
 ## Implementation progress
 
@@ -111,5 +112,5 @@ DTVP's markup out of the text, which is lossy.
 | :--- | :--- |
 | 1–3 Record, adoption, rendering target | Implemented 2026-11-18 |
 | 4 Structured fields | Partly implemented 2026-11-18: fields are stored on adoption and on every change, and served by `GET /api/assessments/fields`. Open: saving writes fields and the Dependency-Track text is generated from them |
-| 5 CycloneDX inventory and VDR | Proposed |
+| 5 CycloneDX inventory and VDR | Implemented 2026-11-18 in DTVP; see [CycloneDX inventory and VDR](../cyclonedx-export.md). Open: the generator reads from DTVP instead of Dependency-Track |
 | 6 New-finding mark | Implemented 2026-11-18 (separate change) |

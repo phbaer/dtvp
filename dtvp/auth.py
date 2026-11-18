@@ -240,10 +240,19 @@ def _session_user(request: Request) -> str:
 
 
 def _bearer_access_token(request: Request) -> str | None:
+    """The access token a machine client sent, if any.
+
+    Accepted as ``Authorization: Bearer <token>`` or, for clients built for
+    API keys, as ``X-Api-Key: <token>``. Both carry the same token and the
+    same limits.
+    """
     scheme, _, value = request.headers.get("authorization", "").partition(" ")
     value = value.strip()
     if scheme.lower() == "bearer" and looks_like_access_token(value):
         return value
+    api_key = request.headers.get("x-api-key", "").strip()
+    if looks_like_access_token(api_key):
+        return api_key
     return None
 
 

@@ -246,3 +246,54 @@ async def test_an_export_for_a_deleted_project_still_shows_product_and_version(
     assert (pending[0]["project_name"], pending[0]["project_version"]) == ("TestApp", "1.0")
     assert pending[0]["project_last_seen_at"]
     assert pending[0]["component_name"] == "library-a"
+
+
+# -- CycloneDX documents -----------------------------------------------------
+
+
+def test_vdr_carries_the_local_assessments_not_yet_exported(client, queued, monkeypatch):
+    queued.get_bom.return_value = {
+        "bomFormat": "CycloneDX", "specVersion": "1.5",
+        "components": [
+            {"bom-ref": "component-1", "name": "library-a", "version": "2.0"},
+            {"bom-ref": "component-2", "name": "library-a", "version": "2.0"},
+        ],
+    }
+    with patch("dtvp.main.DTClient", return_value=queued):
+        response = client.get("/api/project/p1/cyclonedx", params={"variant": "vdr"})
+        named = client.get(
+            "/api/cyclonedx",
+            params={
+                "name": "TestApp", "version": "1.0", "download": "true",
+                "assessment_source": "ACME", "property_prefix": "acme",
+            },
+        )
+        inventory = client.get("/api/project/p1/cyclonedx", params={"variant": "inventory"})
+        bad_prefix = client.get(
+            "/api/project/p1/cyclonedx", params={"property_prefix": "a:b"}
+        )
+        unknown = client.get("/api/cyclonedx", params={"name": "TestApp", "version": "9"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/vnd.cyclonedx+json")
+    document = response.json()
+    entries = {entry["id"]: entry for entry in document["vulnerabilities"]}
+    assert set(entries) == {"CVE-2026-0001", "CVE-2026-0002"}
+    first = entries["CVE-2026-0001"]
+    # DTVP's value, although Dependency-Track does not hold it yet.
+    assert first["analysis"] == {"state": "not_affected", "detail": "Decision 1"}
+    assert first["affects"] == [{"ref": "component-1"}]
+    assert {"name": "dtvp:assessed_by", "value": "rita"} in first["properties"]
+    assert "[Team:" not in response.text
+
+    assert named.status_code == 200
+    assert named.headers["content-disposition"] == (
+        'attachment; filename="TestApp-1.0.vdr.cdx.json"'
+    )
+    assert {"name": "acme:export_assessment_source", "value": "ACME"} in (
+        named.json()["metadata"]["properties"]
+    )
+    assert inventory.status_code == 200 and "vulnerabilities" not in inventory.json()
+    assert bad_prefix.status_code == 422
+    assert unknown.status_code == 404
+

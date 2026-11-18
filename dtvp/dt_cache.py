@@ -14,6 +14,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 import httpx
 
+from .assessment_model import parse_assessment
+from .cyclonedx_export import VARIANT_INVENTORY, build_inventory, build_vdr
 from .assessment_outbox_services import (
     AssessmentOutboxConflictError,
     AssessmentOutboxStore,
@@ -1574,6 +1576,66 @@ class CacheManager:
                 fetch_analysis,
             )
         return copy.deepcopy(analysis)
+
+    async def export_cyclonedx(
+        self,
+        client: VulnerabilitySource,
+        project_uuid: str,
+        variant: str,
+        *,
+        assessment_source: str,
+        property_prefix: str,
+        tool_version: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """A CycloneDX document of one project version, from local state.
+
+        ``inventory`` is the stored BOM; ``vdr`` adds every finding with its
+        assessment in standard fields. ``None`` when the project has no BOM.
+        """
+        bom = await self.get_bom(client, project_uuid)
+        if not isinstance(bom, dict) or not bom:
+            return None
+        findings = [
+            finding
+            for finding in await self.get_vulnerabilities(client, project_uuid)
+            if isinstance(finding, dict)
+        ]
+        if variant == VARIANT_INVENTORY:
+            return build_inventory(bom, findings, property_prefix=property_prefix)
+
+        def assemble() -> Dict[str, Any]:
+            assessments = []
+            incomplete = 0
+            for finding in findings:
+                analysis = finding.get("analysis")
+                if _is_incomplete_source_assessment(analysis):
+                    incomplete += 1
+                value = _source_assessment_value(analysis)
+                assessments.append(
+                    parse_assessment(
+                        value["state"], value["details"], value["suppressed"]
+                    )
+                )
+            document = build_vdr(
+                bom,
+                findings,
+                assessments,
+                assessment_source=assessment_source,
+                property_prefix=property_prefix,
+                tool_version=tool_version,
+            )
+            if incomplete:
+                # Assessed findings whose text could not be read from the
+                # source: say so instead of exporting them as if empty.
+                document["metadata"]["properties"].append(
+                    {
+                        "name": f"{property_prefix}:export_incomplete_findings",
+                        "value": str(incomplete),
+                    }
+                )
+            return document
+
+        return await asyncio.to_thread(assemble)
 
     async def _merge_source_assessments(
         self,

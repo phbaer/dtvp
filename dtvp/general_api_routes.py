@@ -3,6 +3,8 @@ import copy
 import hashlib
 import inspect
 import json
+import os
+import re
 import threading
 import uuid
 from dataclasses import dataclass
@@ -10,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Awaitable, Callable, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .ssvc_services import (
@@ -21,6 +23,12 @@ from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
 from .evidence_services import evidence_sources
 
 from .access_token_services import forwardable_bearer
+from .cyclonedx_export import (
+    DEFAULT_ASSESSMENT_SOURCE,
+    DEFAULT_PROPERTY_PREFIX,
+    valid_property_prefix,
+)
+from .version import get_app_version
 from .assessment_outbox_services import assessment_key
 from .assessment_use_cases import (
     AssessmentConflictError,
@@ -2921,6 +2929,127 @@ def _register_dependency_route(
         )
 
 
+def cyclonedx_defaults() -> tuple[str, str]:
+    """Configured name of DTVP's own rating source and property namespace."""
+    return (
+        os.getenv("DTVP_CYCLONEDX_ASSESSMENT_SOURCE", "").strip()
+        or DEFAULT_ASSESSMENT_SOURCE,
+        os.getenv("DTVP_CYCLONEDX_PROPERTY_PREFIX", "").strip()
+        or DEFAULT_PROPERTY_PREFIX,
+    )
+
+
+def _register_cyclonedx_routes(
+    router: APIRouter,
+    deps: GeneralApiRouteDeps,
+    current_user_dependency: Callable[..., Any],
+    client_dependency: Callable[..., Any],
+) -> None:
+    async def export(
+        client: DTClient,
+        project_uuid: str,
+        variant: str,
+        assessment_source: str | None,
+        property_prefix: str | None,
+        download: bool,
+        label: str,
+    ) -> Response:
+        default_source, default_prefix = cyclonedx_defaults()
+        source = (assessment_source or "").strip() or default_source
+        prefix = (property_prefix or "").strip() or default_prefix
+        if not valid_property_prefix(prefix):
+            raise HTTPException(
+                status_code=422,
+                detail="property_prefix may contain letters, digits, '.', '_' and '-'",
+            )
+        try:
+            document = await deps.cache_manager.export_cyclonedx(
+                client,
+                project_uuid,
+                variant,
+                assessment_source=source,
+                property_prefix=prefix,
+                tool_version=get_app_version(),
+            )
+        except Exception as exc:
+            deps.logger.error("CycloneDX export of %s failed: %s", project_uuid, exc)
+            raise HTTPException(
+                status_code=503,
+                detail="The project could not be read from Dependency-Track "
+                "and is not stored locally.",
+            ) from exc
+        if document is None:
+            raise HTTPException(
+                status_code=404, detail="No BOM is stored for this project version"
+            )
+        headers = {}
+        if download:
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", label).strip("_") or project_uuid
+            headers["Content-Disposition"] = (
+                f'attachment; filename="{safe}.{variant}.cdx.json"'
+            )
+        return Response(
+            content=json.dumps(document, ensure_ascii=False),
+            media_type="application/vnd.cyclonedx+json",
+            headers=headers,
+        )
+
+    @router.get("/project/{project_uuid}/cyclonedx")
+    async def get_project_cyclonedx(
+        project_uuid: str,
+        variant: str = Query("vdr", pattern="^(inventory|vdr)$"),
+        assessment_source: str | None = Query(None, max_length=200),
+        property_prefix: str | None = Query(None, max_length=100),
+        download: bool = False,
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """CycloneDX of one project version: ``inventory`` (the BOM) or
+        ``vdr`` (the BOM with every finding and its assessment)."""
+        return await export(
+            client, project_uuid, variant, assessment_source, property_prefix,
+            download, project_uuid,
+        )
+
+    @router.get("/cyclonedx")
+    async def get_named_cyclonedx(
+        name: str,
+        version: str,
+        variant: str = Query("vdr", pattern="^(inventory|vdr)$"),
+        assessment_source: str | None = Query(None, max_length=200),
+        property_prefix: str | None = Query(None, max_length=100),
+        download: bool = False,
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """The same documents, addressed by product name and version."""
+        try:
+            projects = await deps.cache_manager.get_projects(client, name)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Dependency-Track unavailable for project search.",
+            ) from exc
+        match = next(
+            (
+                project for project in projects or []
+                if project.get("name") == name
+                and str(project.get("version") or "") == version
+            ),
+            None,
+        )
+        if match is None or not match.get("uuid"):
+            raise HTTPException(
+                status_code=404, detail="No project with this name and version"
+            )
+        return await export(
+            client, str(match["uuid"]), variant, assessment_source, property_prefix,
+            download, f"{name}-{version}",
+        )
+
+
 def create_general_api_router(
     deps: GeneralApiRouteDeps,
     *,
@@ -2930,6 +3059,7 @@ def create_general_api_router(
     router = APIRouter()
     _register_project_routes(router, deps, current_user_dependency, client_dependency)
     _register_task_routes(router, deps, current_user_dependency)
+    _register_cyclonedx_routes(router, deps, current_user_dependency, client_dependency)
     _register_statistics_route(router, deps, current_user_dependency, client_dependency)
     _register_assessment_routes(
         router, deps, current_user_dependency, client_dependency
