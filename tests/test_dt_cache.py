@@ -1036,141 +1036,6 @@ async def _analysis(manager, client, refresh=False):
     return findings[0]["analysis"]
 
 
-async def test_first_local_edit_records_what_the_source_held(tmp_path):
-    manager, _client = await _manager_with_source(
-        tmp_path, state="IN_TRIAGE", details="From the source"
-    )
-
-    await manager.persist_assessment_updates([_local_payload()], author="alice")
-
-    stored = manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))
-    assert stored["base"] == {
-        "state": "IN_TRIAGE",
-        "details": "From the source",
-        "suppressed": False,
-    }
-    history = manager.get_assessment_history("p1", "c1", "v1")
-    assert [(h["revision"], h["author"], h["origin"]) for h in history] == [
-        (1, "alice", "user")
-    ]
-    await manager.close()
-
-
-async def test_a_change_made_only_in_the_source_is_no_longer_shadowed(tmp_path):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload()])
-    await manager.flush_pending_updates(client)
-    assert (await _analysis(manager, client))["dtvpSyncStatus"] == "synced"
-
-    # Someone changes the assessment directly in the source.
-    client.get_vulnerabilities.return_value = [
-        _source_finding("EXPLOITABLE", "Changed in Dependency-Track")
-    ]
-    revision_before = manager.get_grouped_cache_revision(
-        versions=[{"uuid": "p1", "name": "App", "version": "1"}]
-    )
-    analysis = await _analysis(manager, client, refresh=True)
-
-    assert analysis["analysisState"] == "EXPLOITABLE"
-    assert analysis["analysisDetails"] == "Changed in Dependency-Track"
-    assert analysis["dtvpRevision"] == 2
-    assert analysis["dtvpSyncStatus"] == "synced"
-    client.update_analysis.assert_awaited_once()  # nothing exported back
-    assert manager.get_grouped_cache_revision(
-        versions=[{"uuid": "p1", "name": "App", "version": "1"}]
-    ) != revision_before
-    await manager.close()
-
-
-async def test_changes_on_both_sides_become_a_conflict_until_resolved(tmp_path):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    client.get_vulnerabilities.return_value = [
-        _source_finding("EXPLOITABLE", "Theirs")
-    ]
-
-    analysis = await _analysis(manager, client, refresh=True)
-
-    assert analysis["analysisDetails"] == "Mine"
-    assert analysis["dtvpSyncStatus"] == "diverged"
-    assert analysis["dtvpRemote"] == {
-        "analysisState": "EXPLOITABLE",
-        "analysisDetails": "Theirs",
-        "isSuppressed": False,
-    }
-    await manager.flush_pending_updates(client)
-    client.update_analysis.assert_not_awaited()  # export is held
-    assert manager.get_cache_status()["pending_updates"] == 1
-
-    resolved = await manager.resolve_assessment_conflicts(
-        [("p1", "c1", "v1")], "local", author="rita"
-    )
-    assert resolved[0]["dtvpSyncStatus"] == "pending"
-    assert "dtvpRemote" not in resolved[0]
-    await manager.flush_pending_updates(client)
-    client.update_analysis.assert_awaited_once()
-    assert client.update_analysis.await_args.kwargs["details"] == "Mine"
-    assert (await _analysis(manager, client))["dtvpSyncStatus"] == "synced"
-    await manager.close()
-
-
-async def test_a_conflict_can_be_resolved_for_the_source_value(tmp_path):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")], author="alice")
-    client.get_vulnerabilities.return_value = [
-        _source_finding("EXPLOITABLE", "Theirs")
-    ]
-    await _analysis(manager, client, refresh=True)
-
-    await manager.resolve_assessment_conflicts(
-        [("p1", "c1", "v1")], "remote", author="rita"
-    )
-
-    analysis = await _analysis(manager, client)
-    assert (analysis["analysisState"], analysis["analysisDetails"]) == (
-        "EXPLOITABLE",
-        "Theirs",
-    )
-    assert analysis["dtvpSyncStatus"] == "synced"
-    await manager.flush_pending_updates(client)
-    client.update_analysis.assert_not_awaited()
-    assert [
-        (h["analysisDetails"], h["origin"], h["author"])
-        for h in manager.get_assessment_history("p1", "c1", "v1")
-    ] == [("Theirs", "conflict-resolution", "rita"), ("Mine", "user", "alice")]
-    await manager.close()
-
-
-async def test_resolving_without_a_conflict_changes_nothing(tmp_path):
-    from dtvp.assessment_outbox_services import AssessmentNotDivergedError
-
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-
-    with pytest.raises(AssessmentNotDivergedError):
-        await manager.resolve_assessment_conflicts([("p1", "c1", "v1")], "remote")
-
-    assert (await _analysis(manager, client))["analysisDetails"] == "Mine"
-    await manager.close()
-
-
-async def test_a_single_finding_read_detects_a_conflict_too(tmp_path):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    client.get_analysis.return_value = {
-        "analysisState": "EXPLOITABLE",
-        "analysisDetails": "Theirs",
-        "isSuppressed": False,
-    }
-
-    analysis = await manager.get_analysis(client, "p1", "c1", "v1", refresh=True)
-
-    assert analysis["dtvpSyncStatus"] == "diverged"
-    assert analysis["analysisDetails"] == "Mine"
-    assert analysis["dtvpRemote"]["analysisDetails"] == "Theirs"
-    await manager.close()
-
-
 async def test_an_assessment_the_source_dropped_is_exported_again(tmp_path):
     manager, client = await _manager_with_source(tmp_path)
     await manager.persist_assessment_updates([_local_payload("Carefully written")])
@@ -1185,89 +1050,6 @@ async def test_an_assessment_the_source_dropped_is_exported_again(tmp_path):
     assert analysis["dtvpSyncStatus"] == "pending"
     await manager.flush_pending_updates(client)
     assert client.update_analysis.await_args.kwargs["details"] == "Carefully written"
-    await manager.close()
-
-
-async def test_export_reads_the_source_first_and_holds_on_a_change(tmp_path):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    # Changed in the source after our last import, before the export runs.
-    client.get_analysis.return_value = {
-        "analysisState": "EXPLOITABLE",
-        "analysisDetails": "Theirs",
-        "isSuppressed": False,
-    }
-
-    await manager.flush_pending_updates(client)
-
-    client.update_analysis.assert_not_awaited()
-    analysis = await _analysis(manager, client)
-    assert analysis["dtvpSyncStatus"] == "diverged"
-    assert analysis["dtvpRemote"]["analysisDetails"] == "Theirs"
-    await manager.close()
-
-
-@pytest.mark.parametrize(
-    "source_value",
-    [
-        None,  # the source has no assessment yet
-        {"analysisState": "NOT_SET", "analysisDetails": "", "isSuppressed": False},
-    ],
-)
-async def test_export_proceeds_when_the_source_is_unchanged(tmp_path, source_value):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    client.get_analysis.return_value = source_value
-
-    await manager.flush_pending_updates(client)
-
-    client.update_analysis.assert_awaited_once()
-    assert (await _analysis(manager, client))["dtvpSyncStatus"] == "synced"
-    await manager.close()
-
-
-async def test_export_is_skipped_when_the_source_already_holds_the_value(tmp_path):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    client.get_analysis.return_value = {
-        "analysisState": "NOT_AFFECTED",
-        "analysisDetails": "Mine",
-        "isSuppressed": False,
-    }
-
-    await manager.flush_pending_updates(client)
-
-    client.update_analysis.assert_not_awaited()
-    assert (await _analysis(manager, client))["dtvpSyncStatus"] == "synced"
-    assert manager.get_cache_status()["pending_updates"] == 0
-    await manager.close()
-
-
-async def test_export_proceeds_when_the_source_cannot_be_read(tmp_path):
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    client.get_analysis.side_effect = httpx.ConnectError("down")
-
-    await manager.flush_pending_updates(client)
-
-    client.update_analysis.assert_awaited_once()
-    await manager.close()
-
-
-async def test_export_verification_can_be_turned_off(tmp_path, monkeypatch):
-    monkeypatch.setenv("DTVP_EXPORT_VERIFY_SOURCE", "false")
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    client.get_analysis.return_value = {
-        "analysisState": "EXPLOITABLE",
-        "analysisDetails": "Theirs",
-        "isSuppressed": False,
-    }
-
-    await manager.flush_pending_updates(client)
-
-    client.get_analysis.assert_not_awaited()
-    client.update_analysis.assert_awaited_once()
     await manager.close()
 
 
@@ -1358,47 +1140,6 @@ async def test_an_assessed_finding_without_readable_details_is_not_merged(tmp_pa
     await manager.close()
 
 
-async def test_an_edit_made_on_an_outdated_view_becomes_a_conflict(tmp_path):
-    manager, client = await _manager_with_source(tmp_path, details="V1")
-    # A background refresh stores V2 while the author still looks at V1.
-    client.get_vulnerabilities.return_value = [_source_finding(details="V2")]
-    await manager.get_vulnerabilities(client, "p1", refresh=True)
-    client.get_analysis.return_value = {
-        "analysisState": "NOT_SET",
-        "analysisDetails": "V2",
-        "isSuppressed": False,
-    }
-
-    await manager.persist_assessment_updates(
-        [_local_payload("Built on V1")],
-        seen={("p1", "c1", "v1"): {"state": "NOT_SET", "details": "V1", "suppressed": False}},
-    )
-    await manager.flush_pending_updates(client)
-
-    client.update_analysis.assert_not_awaited()
-    analysis = await _analysis(manager, client)
-    assert analysis["dtvpSyncStatus"] == "diverged"
-    assert analysis["dtvpRemote"]["analysisDetails"] == "V2"
-    await manager.close()
-
-
-async def test_resolving_conflicts_through_the_manager_is_all_or_nothing(tmp_path):
-    from dtvp.assessment_outbox_services import AssessmentNotDivergedError
-
-    manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Mine")])
-    client.get_vulnerabilities.return_value = [_source_finding("EXPLOITABLE", "Theirs")]
-    await _analysis(manager, client, refresh=True)
-
-    with pytest.raises(AssessmentNotDivergedError):
-        await manager.resolve_assessment_conflicts(
-            [("p1", "c1", "v1"), ("p1", "c9", "v9")], "remote"
-        )
-
-    assert (await _analysis(manager, client))["dtvpSyncStatus"] == "diverged"
-    await manager.close()
-
-
 def test_hopeless_exports_back_off_instead_of_retrying_every_minute():
     from dtvp.dt_cache import export_retry_delay_seconds
 
@@ -1430,3 +1171,84 @@ async def test_exports_to_a_deleted_project_stop_and_keep_the_assessment(tmp_pat
     await manager.flush_pending_updates(client)
     assert client.update_analysis.await_count == 1
     await manager.close()
+
+
+# -- the local database is the record ---------------------------------------
+
+
+async def test_source_assessments_are_adopted_and_unedited_ones_keep_all_fields(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    finding = _source_finding("NOT_AFFECTED", "From the source")
+    finding["analysis"]["analysisJustification"] = "CODE_NOT_REACHABLE"
+    client.get_vulnerabilities.return_value = [finding]
+
+    analysis = (await manager.get_vulnerabilities(client, "p1"))[0]["analysis"]
+
+    # Shown exactly as imported, including fields DTVP does not model.
+    assert analysis["analysisJustification"] == "CODE_NOT_REACHABLE"
+    assert analysis["analysisDetails"] == "From the source"
+    # And recorded locally, so it survives the source losing it.
+    record = manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))
+    assert (record["revision"], record["sync_status"]) == (0, "synced")
+    history = manager.get_assessment_history("p1", "c1", "v1")
+    assert [(h["revision"], h["origin"]) for h in history] == [(0, "import")]
+    assert manager.get_cache_status()["pending_updates"] == 0
+    await manager.close()
+
+
+async def test_first_local_edit_follows_the_adopted_value(tmp_path):
+    manager, _client = await _manager_with_source(
+        tmp_path, state="IN_TRIAGE", details="From the source"
+    )
+
+    await manager.persist_assessment_updates([_local_payload()], author="alice")
+
+    stored = manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))
+    assert stored["base"] == {
+        "state": "IN_TRIAGE", "details": "From the source", "suppressed": False,
+    }
+    history = manager.get_assessment_history("p1", "c1", "v1")
+    assert [(h["revision"], h["author"], h["origin"]) for h in history] == [
+        (1, "alice", "user"),
+        (0, None, "import"),
+    ]
+    await manager.close()
+
+
+async def test_a_change_made_in_the_source_is_overwritten_by_the_local_record(tmp_path):
+    manager, client = await _manager_with_source(tmp_path)
+    await manager.persist_assessment_updates([_local_payload("Decided in DTVP")])
+    await manager.flush_pending_updates(client)
+    client.update_analysis.reset_mock()
+
+    client.get_vulnerabilities.return_value = [
+        _source_finding("EXPLOITABLE", "Changed in Dependency-Track")
+    ]
+    analysis = await _analysis(manager, client, refresh=True)
+
+    assert analysis["analysisDetails"] == "Decided in DTVP"
+    assert analysis["dtvpSyncStatus"] == "pending"
+    assert analysis["dtvpRemote"]["analysisDetails"] == "Changed in Dependency-Track"
+    await manager.flush_pending_updates(client)
+    assert client.update_analysis.await_args.kwargs["details"] == "Decided in DTVP"
+    # The source is not read before the export any more.
+    client.get_analysis.assert_not_awaited()
+    await manager.close()
+
+
+async def test_an_adopted_assessment_the_source_lost_is_exported_back(tmp_path):
+    manager, client = await _manager_with_source(
+        tmp_path, state="NOT_AFFECTED", details="Assessed long ago"
+    )
+
+    # The source recreated the finding and reports no assessment.
+    client.get_vulnerabilities.return_value = [_source_finding()]
+    analysis = await _analysis(manager, client, refresh=True)
+
+    assert analysis["analysisDetails"] == "Assessed long ago"
+    assert analysis["dtvpSyncStatus"] == "pending"
+    await manager.flush_pending_updates(client)
+    assert client.update_analysis.await_args.kwargs["details"] == "Assessed long ago"
+    await manager.close()
+

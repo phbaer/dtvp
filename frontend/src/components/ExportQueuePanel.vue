@@ -14,8 +14,7 @@ const expanded = ref<Set<string>>(new Set())
 const errorMessage = (err: any, fallback: string): string =>
     err?.response?.data?.detail || err?.message || fallback
 
-const exportable = computed(() =>
-    (queue.value?.pending || []).filter(item => item.status !== 'diverged'))
+const exportable = computed(() => queue.value?.pending || [])
 
 /** After this many failed attempts an export is not going to fix itself. */
 const STUCK_ATTEMPTS = 10
@@ -66,7 +65,6 @@ const discard = async (items: ExportQueueItem[]) => {
 }
 
 const statusLabel = (item: ExportQueueItem): string => {
-    if (item.status === 'diverged') return 'Conflict'
     if (item.status === 'error') {
         return item.attempts >= STUCK_ATTEMPTS || !item.project_known ? 'Stuck' : 'Failed, will retry'
     }
@@ -113,8 +111,7 @@ const runExport = async (item?: ExportQueueItem) => {
         const result = await exportAssessments(item ? [item.update_id] : undefined)
         const parts = [`${result.exported} exported`]
         if (result.dropped > 0) parts.push(`${result.dropped} no longer in Dependency-Track`)
-        if (result.conflicts > 0) parts.push(`${result.conflicts} in conflict`)
-        const failed = result.failed.filter(entry => entry.status !== 'diverged')
+        const failed = result.failed
         if (failed.length > 0) parts.push(`${failed.length} failed`)
         notice.value = parts.join(', ') + '.'
         if (failed.length > 0 && failed[0]?.error) error.value = failed[0].error
@@ -144,7 +141,7 @@ onMounted(() => load())
                     </template>
                     <template v-else>
                         Assessments are exported automatically shortly after they are saved.
-                        What is listed here is still waiting, failed, or in conflict.
+                        What is listed here is still waiting or failed.
                     </template>
                 </p>
             </div>
@@ -195,11 +192,6 @@ onMounted(() => load())
         </p>
 
         <div v-else-if="queue" class="overflow-x-auto">
-            <p v-if="queue.conflicts > 0" class="mb-3 flex items-center gap-2 text-sm text-amber-300" data-testid="export-conflicts">
-                <AlertTriangle :size="14" aria-hidden="true" />
-                {{ queue.conflicts }} {{ queue.conflicts === 1 ? 'assessment was' : 'assessments were' }} also changed in
-                Dependency-Track. Open the vulnerability and choose a version; until then it is not exported.
-            </p>
             <table class="w-full text-left text-sm text-gray-300">
                 <thead class="text-xs uppercase text-gray-500">
                     <tr>
@@ -234,7 +226,7 @@ onMounted(() => load())
                             </td>
                             <td class="py-2 pr-4">
                                 <span
-                                    :class="item.status === 'diverged' ? 'text-amber-300' : item.status === 'error' ? 'text-red-400' : 'text-gray-300'"
+                                    :class="item.status === 'error' ? 'text-red-400' : 'text-gray-300'"
                                 >{{ statusLabel(item) }}</span>
                                 <span class="block text-xs text-gray-500">
                                     {{ waitingSince(item) }}<template v-if="item.attempts > 0"> · {{ item.attempts }} {{ item.attempts === 1 ? 'attempt' : 'attempts' }}</template>
@@ -251,7 +243,6 @@ onMounted(() => load())
                                     {{ expanded.has(item.update_id) ? 'Hide text' : 'Show text' }}
                                 </button>
                                 <button
-                                    v-if="item.status !== 'diverged'"
                                     type="button"
                                     class="mr-2 rounded border border-blue-700 px-2 py-1 text-xs text-blue-200 hover:bg-blue-900/40 disabled:opacity-50"
                                     :disabled="exporting !== ''"

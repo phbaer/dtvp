@@ -99,9 +99,9 @@ export interface Instance {
     dtvp_sync_status?: string;
     dtvp_update_id?: string | null;
     dtvp_sync_error?: string | null;
-    /** Set for findings assessed in DTVP; `diverged` means both sides changed. */
+    /** Set for findings assessed in DTVP: synced, pending, error, inactive, or cancelled. */
     sync_status?: string;
-    /** What Dependency-Track holds while the finding is diverged. */
+    /** What Dependency-Track holds while an export is waiting or failing and it differs. */
     source_assessment?: SourceAssessment | null;
 }
 
@@ -124,8 +124,7 @@ export type InconsistencyReason =
     | 'MISSING_RESCORING_VECTOR'
     | 'ANALYSIS_STATE_MISMATCH'
     | 'TEAM_ASSESSMENT_MISMATCH'
-    | 'ASSESSMENT_DETAILS_MISMATCH'
-    | 'SOURCE_CONFLICT';
+    | 'ASSESSMENT_DETAILS_MISMATCH';
 
 export interface GroupedVulnListMetadata {
     lifecycle?: string;
@@ -230,8 +229,6 @@ export interface CacheStatus {
     cached_boms: number;
     cached_analyses: number;
     pending_updates: number;
-    /** Findings changed both here and in Dependency-Track. */
-    diverged_assessments?: number;
     /** Queued exports whose last attempt failed. */
     failed_exports?: number;
     oldest_pending_at?: string | null;

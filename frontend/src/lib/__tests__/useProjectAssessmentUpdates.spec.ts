@@ -256,12 +256,12 @@ describe('changes that are not saves', () => {
         Object.assign(first, {
             is_suppressed: true,
             justification: 'CODE_NOT_PRESENT',
-            sync_status: 'diverged',
+            sync_status: 'pending',
             source_assessment: { analysisState: 'EXPLOITABLE', analysisDetails: 'Theirs', isSuppressed: false },
         })
         group.affected_versions[0]!.components.push({ ...first, finding_uuid: 'finding-2' })
 
-        // A settled conflict on the first finding only, as the card reports it.
+        // An export that went through for the first finding only, as the card reports it.
         const updated = applyAssessmentDataToGroup(group, {
             dtvp_results: [{
                 uuid: 'finding-1',
@@ -284,7 +284,7 @@ describe('changes that are not saves', () => {
             sync_status: 'synced',
             source_assessment: null,
         })
-        expect(untouched).toMatchObject({ sync_status: 'diverged', is_suppressed: true })
+        expect(untouched).toMatchObject({ sync_status: 'pending', is_suppressed: true })
         expect(untouched!.source_assessment).toEqual(first.source_assessment)
         expect(updated.rescored_cvss).toBe(4.2)
         expect(updated.rescored_vector).toBe('CVSS:3.1/AV:N')

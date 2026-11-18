@@ -156,16 +156,6 @@ def get_export_mode() -> str:
     return EXPORT_MODE_MANUAL if mode == EXPORT_MODE_MANUAL else EXPORT_MODE_AUTO
 
 
-def _export_verification_enabled() -> bool:
-    return os.getenv("DTVP_EXPORT_VERIFY_SOURCE", "true").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-        "enabled",
-    }
-
-
 def _is_incomplete_source_assessment(analysis: Any) -> bool:
     """An assessed finding whose details could not be read.
 
@@ -557,7 +547,6 @@ class CacheManager:
                 "pending_updates": len(pending),
                 # Findings changed both here and in the source; their export
                 # waits for a decision.
-                "diverged_assessments": len(self.assessment_outbox.list_diverged()),
                 # Exports whose last attempt failed, and how long the oldest
                 # queued change has been waiting.
                 "failed_exports": sum(
@@ -1591,17 +1580,17 @@ class CacheManager:
         source_analyses: Dict[AssessmentKey, Any],
         fetch_started_at: datetime,
     ) -> None:
-        """Merge assessments just read from the source into local state.
+        """Compare assessments just read from the source with the local record.
 
-        A finding edited here used to shadow the source for good. Now a
-        change made only in the source is adopted, and a change on both
-        sides is recorded as a conflict instead of one side silently winning.
+        The local database is the record. An assessment the source holds for
+        a finding without a local record is adopted once; after that the
+        source never changes local state. Where it holds something else, the
+        local value is exported again.
         """
         remote = {
             key: _source_assessment_value(analysis)
             for key, analysis in source_analyses.items()
-            if self.assessment_outbox.get_overlay(key) is not None
-            and not _is_incomplete_source_assessment(analysis)
+            if not _is_incomplete_source_assessment(analysis)
         }
         if not remote:
             return
@@ -1609,16 +1598,25 @@ class CacheManager:
             self.assessment_outbox.reconcile_remote,
             remote,
             fetched_at=fetch_started_at,
+            retry_delay=export_retry_delay_seconds,
         )
-        changed = {key for keys in outcomes.values() for key in keys}
-        if not changed:
+        if not any(outcomes.values()):
             return
         logger.info(
-            "Merged source assessments: %s",
+            "Compared source assessments: %s",
             ", ".join(
                 f"{len(keys)} {name}" for name, keys in outcomes.items() if keys
             ),
         )
+        # Adopting a value does not change what is shown for the finding.
+        changed = {
+            key
+            for name, keys in outcomes.items()
+            if name != "adopted"
+            for key in keys
+        }
+        if not changed:
+            return
         async with self.lock:
             self.pending_updates = self._load_pending_updates()
             self._invalidate_cache_status()
@@ -1640,64 +1638,6 @@ class CacheManager:
                 await asyncio.to_thread(listener, keys)
             except Exception:
                 logger.exception("Assessment change listener failed")
-
-    async def _source_changed_before_export(
-        self,
-        client: AssessmentSink,
-        key: AssessmentKey,
-    ) -> bool:
-        """Read the source's value just before writing over it.
-
-        Exports usually run within a second of a save, long before the next
-        refresh, so without this a change made in the source in the meantime
-        would be overwritten unseen. Returns True when the export must not
-        go ahead: the two sides diverged, or the source already holds the
-        local value. If the source cannot be read the export proceeds, as
-        it did before this check existed.
-        """
-        if not _export_verification_enabled():
-            return False
-        state = self.assessment_outbox.get_overlay(key)
-        if state is None or state.get("base") is None:
-            return False
-        fetch_started_at = datetime.now(timezone.utc)
-        try:
-            analysis = await client.get_analysis(
-                project_uuid=key[0],
-                component_uuid=key[1],
-                vulnerability_uuid=key[2],
-            )
-        except Exception as exc:
-            logger.debug("Could not read %s before export: %s", ":".join(key), exc)
-            return False
-        if analysis is not None and not isinstance(analysis, dict):
-            return False
-        await self._merge_source_assessments({key: analysis or {}}, fetch_started_at)
-        after = self.assessment_outbox.get_overlay(key)
-        return after is None or after.get("sync_status") not in ("pending", "error")
-
-    async def resolve_assessment_conflicts(
-        self,
-        keys: List[AssessmentKey],
-        choice: str,
-        *,
-        author: str | None = None,
-    ) -> List[Dict[str, Any]]:
-        """Settle diverged findings; see ``AssessmentOutboxStore.resolve``.
-
-        All or nothing: raises without changing anything if any finding has
-        no open conflict.
-        """
-        keys = list(dict.fromkeys(keys))
-        await asyncio.to_thread(
-            self.assessment_outbox.resolve_many, keys, choice, author=author
-        )
-        async with self.lock:
-            self.pending_updates = self._load_pending_updates()
-            self._invalidate_cache_status()
-            self._touch_cache_meta(project_uuids={key[0] for key in keys})
-        self._assessment_sync_wakeup.set()
-        return [self.get_assessment_overlay(*key) or {} for key in keys]
 
     def list_export_queue(self) -> List[Dict[str, Any]]:
         """Local assessments not yet in the source, oldest first, with what
@@ -1783,6 +1723,18 @@ class CacheManager:
             (project_uuid, component_uuid, vulnerability_uuid), limit=limit
         )
 
+    def get_assessment_fields(
+        self,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> Optional[Dict[str, Any]]:
+        """The assessment of a finding as atomic fields; ``None`` when the
+        finding has no local record."""
+        return self.assessment_outbox.get_fields(
+            (project_uuid, component_uuid, vulnerability_uuid)
+        )
+
     def get_assessment_overlay(
         self,
         project_uuid: str,
@@ -1794,11 +1746,19 @@ class CacheManager:
         )
         if overlay is None:
             return None
+        if (
+            int(overlay.get("revision") or 0) == 0
+            and overlay.get("sync_status") == "synced"
+        ):
+            # Adopted from the source and never changed here: the imported
+            # analysis is the same value and carries the source's other
+            # fields (justification, response, comments) as well.
+            return None
         remote = overlay.get("remote")
-        if remote is not None and overlay.get("sync_status") == "diverged":
+        if remote is not None and overlay.get("sync_status") in ("pending", "error"):
             return {
                 **self._overlay_fields(overlay),
-                # What the source holds while the two sides disagree.
+                # What the source holds while the local value waits for export.
                 "dtvpRemote": {
                     "analysisState": remote["state"],
                     "analysisDetails": remote["details"],
@@ -2200,8 +2160,6 @@ class CacheManager:
                     key = assessment_key(payload)
                     revision = int(entry.get("revision") or 0)
                     if key is None:
-                        continue
-                    if await self._source_changed_before_export(client, key):
                         continue
                     if self.assessment_outbox.pending_revision(key) != revision:
                         # Saved again since this batch was read: the newer

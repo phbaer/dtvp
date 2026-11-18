@@ -34,18 +34,17 @@ describe('ExportIssuesIndicator', () => {
         wrapper.unmount()
     })
 
-    it('warns about failing exports and conflicts and opens the queue', async () => {
+    it('warns about failing exports and opens the queue', async () => {
         vi.mocked(api.getCacheStatus).mockResolvedValue(status({
             pending_updates: 11,
             failed_exports: 10,
-            diverged_assessments: 1,
             oldest_pending_at: '2026-11-02T04:31:29+00:00',
         }))
         const wrapper = mount(ExportIssuesIndicator)
         await flushPromises()
 
         const indicator = wrapper.get('[data-testid="export-issues-indicator"]')
-        expect(indicator.text()).toContain('10 failing, 1 in conflict')
+        expect(indicator.text()).toContain('Export: 10 failing')
         expect(indicator.attributes('title')).toContain('waiting since')
         await indicator.trigger('click')
         expect(wrapper.emitted('open')).toHaveLength(1)

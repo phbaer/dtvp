@@ -12,17 +12,11 @@ const emit = defineEmits<{ (e: 'open'): void }>()
 
 const POLL_MS = 60_000
 const failed = ref(0)
-const conflicts = ref(0)
 const oldest = ref<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | undefined
 
-const total = computed(() => failed.value + conflicts.value)
-const label = computed(() => {
-    const parts: string[] = []
-    if (failed.value > 0) parts.push(`${failed.value} failing`)
-    if (conflicts.value > 0) parts.push(`${conflicts.value} in conflict`)
-    return parts.join(', ')
-})
+const total = computed(() => failed.value)
+const label = computed(() => `${failed.value} failing`)
 const title = computed(() => {
     const since = oldest.value ? ` The oldest change has been waiting since ${new Date(oldest.value).toLocaleString()}.` : ''
     return `Assessments not reaching Dependency-Track: ${label.value}.${since} Open the export queue.`
@@ -33,7 +27,6 @@ const poll = async () => {
         try {
             const status = await getCacheStatus()
             failed.value = status.failed_exports ?? 0
-            conflicts.value = status.diverged_assessments ?? 0
             oldest.value = status.oldest_pending_at ?? null
         } catch {
             // The header must not break when the backend is unreachable.

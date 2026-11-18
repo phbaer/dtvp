@@ -39,6 +39,7 @@ def test_outbox_enqueue_is_persistent_and_exposes_overlay(tmp_path):
         "update_id": records[0]["id"],
         "last_error": None,
         "updated_at": records[0]["updated_at"],
+        "export_rejections": 0,
         "base": None,
         "remote": None,
     }
@@ -249,6 +250,7 @@ def test_missing_or_empty_former_outbox_file_is_harmless(tmp_path):
 
 # -- merging values read from the source -----------------------------------
 
+import sqlite3  # noqa: E402
 from datetime import UTC, datetime, timedelta  # noqa: E402
 
 KEY = ("project", "component", "vulnerability")
@@ -275,17 +277,6 @@ def _synced(store, **payload):
 BASE = {"state": "NOT_SET", "details": "", "suppressed": False}
 
 
-def test_findings_without_a_local_assessment_are_not_touched(tmp_path):
-    store = _store(tmp_path)
-    assert store.reconcile_remote(_remote(), fetched_at=_later()) == {
-        "fast_forwarded": [],
-        "diverged": [],
-        "settled": [],
-        "requeued": [],
-    }
-    assert store.get_overlay(KEY) is None
-
-
 def test_unchanged_source_leaves_a_synced_assessment_alone(tmp_path):
     store = _store(tmp_path)
     _synced(store)
@@ -299,32 +290,6 @@ def test_unchanged_source_leaves_a_synced_assessment_alone(tmp_path):
     assert store.get_overlay(KEY) == before
 
 
-def test_a_source_only_change_becomes_a_new_local_revision(tmp_path):
-    store = _store(tmp_path)
-    _synced(store)
-
-    outcomes = store.reconcile_remote(
-        _remote("NOT_AFFECTED", "Decided in Dependency-Track", True),
-        fetched_at=_later(),
-    )
-
-    assert outcomes["fast_forwarded"] == [KEY]
-    overlay = store.get_overlay(KEY)
-    assert overlay["revision"] == 2
-    assert overlay["analysisState"] == "NOT_AFFECTED"
-    assert overlay["analysisDetails"] == "Decided in Dependency-Track"
-    assert overlay["isSuppressed"] is True
-    assert overlay["sync_status"] == "synced"
-    assert store.pending_count() == 0
-    history = store.list_revisions(KEY)
-    assert [(h["revision"], h["origin"], h["author"]) for h in history] == [
-        (2, "import", None),
-        (1, "user", "alice"),
-    ]
-    # Survives a restart.
-    assert AssessmentOutboxStore(store.path).get_overlay(KEY) == overlay
-
-
 def test_a_local_only_change_stays_queued(tmp_path):
     store = _store(tmp_path)
     store.enqueue_many([_payload()], bases={KEY: BASE})
@@ -332,125 +297,6 @@ def test_a_local_only_change_stays_queued(tmp_path):
     outcomes = store.reconcile_remote(_remote("NOT_SET", ""), fetched_at=_later())
 
     assert not any(outcomes.values())
-    assert store.get_overlay(KEY)["sync_status"] == "pending"
-    assert len(store.list_due()) == 1
-
-
-def test_changes_on_both_sides_diverge_and_hold_the_export(tmp_path):
-    store = _store(tmp_path)
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
-
-    outcomes = store.reconcile_remote(
-        _remote("EXPLOITABLE", "Theirs"), fetched_at=_later()
-    )
-
-    assert outcomes["diverged"] == [KEY]
-    overlay = store.get_overlay(KEY)
-    assert overlay["sync_status"] == "diverged"
-    assert overlay["analysisDetails"] == "Mine"  # nothing overwritten
-    assert overlay["revision"] == 1
-    assert overlay["remote"] == {
-        "state": "EXPLOITABLE",
-        "details": "Theirs",
-        "suppressed": False,
-    }
-    assert store.pending_count() == 1  # still recorded ...
-    assert store.list_due() == []  # ... but not exported
-    assert [s["analysisDetails"] for s in store.list_diverged()] == ["Mine"]
-    reopened = AssessmentOutboxStore(store.path)
-    assert reopened.get_overlay(KEY) == overlay
-    assert reopened.list_due() == []
-
-
-def test_a_further_local_edit_does_not_settle_a_conflict(tmp_path):
-    store = _store(tmp_path)
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-
-    store.enqueue_many([_payload(details="Mine, edited")])
-
-    overlay = store.get_overlay(KEY)
-    assert overlay["sync_status"] == "diverged"
-    assert overlay["remote"]["details"] == "Theirs"
-    assert store.list_due() == []
-
-
-def test_resolving_for_the_local_value_exports_it(tmp_path):
-    store = _store(tmp_path)
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-
-    resolved = store.resolve(KEY, "local", author="rita")
-
-    assert resolved["sync_status"] == "pending"
-    assert resolved["remote"] is None
-    assert resolved["base"]["details"] == "Theirs"
-    due = store.list_due()
-    assert [entry["payload"]["details"] for entry in due] == ["Mine"]
-    # The source still shows its own value until the export lands: no new conflict.
-    assert not any(
-        store.reconcile_remote(
-            _remote("EXPLOITABLE", "Theirs"), fetched_at=_later()
-        ).values()
-    )
-    assert store.mark_synced(KEY, due[0]["revision"])
-    assert store.get_overlay(KEY)["sync_status"] == "synced"
-
-
-def test_resolving_for_the_source_value_adopts_it(tmp_path):
-    store = _store(tmp_path)
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE}, author="alice")
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-
-    resolved = store.resolve(KEY, "remote", author="rita")
-
-    assert resolved["sync_status"] == "synced"
-    assert resolved["analysisDetails"] == "Theirs"
-    assert resolved["analysisState"] == "EXPLOITABLE"
-    assert resolved["revision"] == 2
-    assert store.pending_count() == 0
-    # The replaced local value stays in the history.
-    assert [(h["analysisDetails"], h["origin"], h["author"]) for h in store.list_revisions(KEY)] == [
-        ("Theirs", "conflict-resolution", "rita"),
-        ("Mine", "user", "alice"),
-    ]
-
-
-def test_resolution_needs_an_open_conflict(tmp_path):
-    from dtvp.assessment_outbox_services import AssessmentNotDivergedError
-
-    store = _store(tmp_path)
-    with pytest.raises(AssessmentNotDivergedError):
-        store.resolve(KEY, "local")
-    _synced(store)
-    with pytest.raises(AssessmentNotDivergedError):
-        store.resolve(KEY, "remote")
-    with pytest.raises(ValueError):
-        store.resolve(KEY, "both")
-
-
-def test_conflict_settles_itself_when_the_sides_meet(tmp_path):
-    store = _store(tmp_path)
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-
-    # Someone entered the local value in the source.
-    outcomes = store.reconcile_remote(
-        _remote("IN_TRIAGE", "Mine"), fetched_at=_later()
-    )
-    assert outcomes["settled"] == [KEY]
-    assert store.get_overlay(KEY)["sync_status"] == "synced"
-    assert store.pending_count() == 0
-
-
-def test_conflict_reopens_the_export_when_the_source_reverts(tmp_path):
-    store = _store(tmp_path)
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-
-    outcomes = store.reconcile_remote(_remote("NOT_SET", ""), fetched_at=_later())
-
-    assert outcomes["settled"] == [KEY]
     assert store.get_overlay(KEY)["sync_status"] == "pending"
     assert len(store.list_due()) == 1
 
@@ -510,19 +356,6 @@ def test_a_read_that_started_before_a_local_change_cannot_undo_it(tmp_path):
     assert store.get_overlay(KEY)["analysisDetails"] == (
         "Exported while the read was in flight"
     )
-
-
-def test_a_cancelled_local_edit_gives_way_to_the_source(tmp_path):
-    store = _store(tmp_path)
-    # Queued before bases were recorded: discarding cannot revert, only cancel.
-    record = store.enqueue_many([_payload(details="Discarded")])[0]
-    assert store.discard(record["id"])
-
-    outcomes = store.reconcile_remote(_remote("NOT_SET", ""), fetched_at=_later())
-
-    assert outcomes["fast_forwarded"] == [KEY]
-    overlay = store.get_overlay(KEY)
-    assert (overlay["analysisDetails"], overlay["sync_status"]) == ("", "synced")
 
 
 def test_an_existing_database_gains_base_values_for_synced_assessments(tmp_path):
@@ -626,23 +459,6 @@ def test_a_returning_finding_with_its_assessment_is_simply_active_again(tmp_path
 # -- regressions from the independent review (2026-11-17) -------------------
 
 
-def test_a_source_change_that_empties_the_details_is_adopted_not_overwritten(tmp_path):
-    """Only a source with nothing at all counts as having lost the assessment."""
-    store = _store(tmp_path)
-    _synced(store, details="Mine")
-
-    outcomes = store.reconcile_remote(_remote("EXPLOITABLE", ""), fetched_at=_later())
-
-    assert outcomes["fast_forwarded"] == [KEY]
-    assert store.get_overlay(KEY)["analysisState"] == "EXPLOITABLE"
-    assert store.pending_count() == 0
-
-    suppressed = store.reconcile_remote(
-        _remote("NOT_SET", "", suppressed=True), fetched_at=_later()
-    )
-    assert suppressed["fast_forwarded"] == [KEY]
-
-
 def test_an_empty_source_never_conflicts_with_a_pending_change(tmp_path):
     store = _store(tmp_path)
     old = {"state": "IN_TRIAGE", "details": "Old text we had stored", "suppressed": False}
@@ -671,20 +487,6 @@ def test_an_unexported_edit_survives_its_finding_vanishing_and_returning(tmp_pat
     assert [d["payload"]["details"] for d in store.list_due()] == ["B"]
 
 
-def test_an_unexported_edit_conflicts_if_its_returning_finding_changed(tmp_path):
-    store = _store(tmp_path)
-    _synced(store, details="A")
-    edit = store.enqueue_many([_payload(details="B")])[0]
-    store.drop_missing_finding(KEY, edit["revision"])
-
-    outcomes = store.reconcile_remote(_remote("EXPLOITABLE", "C"), fetched_at=_later())
-
-    assert outcomes["diverged"] == [KEY]
-    overlay = store.get_overlay(KEY)
-    assert (overlay["analysisDetails"], overlay["sync_status"]) == ("B", "diverged")
-    assert store.pending_count() == 1 and store.list_due() == []
-
-
 def test_a_discarded_edit_is_not_revived_through_inactivity(tmp_path):
     store = _store(tmp_path)
     # Queued before bases were recorded: discarding cannot revert, only cancel.
@@ -696,37 +498,6 @@ def test_a_discarded_edit_is_not_revived_through_inactivity(tmp_path):
 
     assert store.pending_count() == 0
     assert store.get_overlay(KEY)["analysisDetails"] == ""
-
-
-def test_a_failed_write_does_not_turn_a_conflict_back_into_a_retry(tmp_path):
-    store = _store(tmp_path)
-    record = store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})[0]
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-
-    store.mark_failed(KEY, record["revision"], "timeout")
-
-    assert store.get_overlay(KEY)["sync_status"] == "diverged"
-    assert store.list_due() == []
-    assert AssessmentOutboxStore(store.path).get_overlay(KEY)["sync_status"] == "diverged"
-
-
-def test_resolving_several_findings_is_all_or_nothing(tmp_path):
-    from dtvp.assessment_outbox_services import AssessmentNotDivergedError
-
-    store = _store(tmp_path)
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-    other = ("project", "other", "vulnerability")
-    store.enqueue_many([{**_payload(), "component_uuid": "other"}])
-
-    with pytest.raises(AssessmentNotDivergedError):
-        store.resolve_many([KEY, other], "remote")
-    assert store.get_overlay(KEY)["sync_status"] == "diverged"
-    assert store.get_overlay(KEY)["analysisDetails"] == "Mine"
-
-    # The same finding named twice is one resolution, not a failure.
-    resolved = store.resolve_many([KEY, KEY], "remote")
-    assert [r["analysisDetails"] for r in resolved] == ["Theirs"]
 
 
 def test_migrations_apply_schema_changes_atomically(tmp_path):
@@ -758,29 +529,6 @@ def test_migrations_apply_schema_changes_atomically(tmp_path):
     assert run_sqlite_migrations(
         connection, namespace="t", migrations_path=migrations
     ) == [1]
-
-
-def test_a_review_marker_dtvp_added_to_its_copy_is_not_a_source_change(tmp_path):
-    store = _store(tmp_path)
-    shown = {
-        "state": "IN_TRIAGE",
-        "details": "Source text\n\n[Status: Pending Review]",
-        "suppressed": False,
-    }
-    store.enqueue_many([_payload(details="Mine")], bases={KEY: shown})
-
-    outcomes = store.reconcile_remote(
-        _remote("IN_TRIAGE", "Source text"), fetched_at=_later()
-    )
-
-    assert not any(outcomes.values())
-    assert len(store.list_due()) == 1
-
-    # A real difference in the text is still a conflict.
-    changed = store.reconcile_remote(
-        _remote("IN_TRIAGE", "Source text, edited"), fetched_at=_later()
-    )
-    assert changed["diverged"] == [KEY]
 
 
 # -- discarding queued exports -----------------------------------------------
@@ -823,16 +571,315 @@ def test_discarding_an_export_without_a_known_base_keeps_the_text_as_cancelled(t
     assert store.discard(change["id"]) is False
 
 
-def test_discarding_a_conflicting_export_takes_the_last_agreed_value(tmp_path):
+# -- the local database is the record ---------------------------------------
+
+
+def test_a_source_assessment_without_a_local_record_is_adopted_once(tmp_path):
     store = _store(tmp_path)
-    change = store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})[0]
-    store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
 
-    store.discard_many([change["id"]])
+    outcomes = store.reconcile_remote(
+        _remote("NOT_AFFECTED", "From Dependency-Track", True), fetched_at=_later()
+    )
 
+    assert outcomes["adopted"] == [KEY]
+    record = store.get_overlay(KEY)
+    assert (record["revision"], record["sync_status"]) == (0, "synced")
+    assert record["analysisDetails"] == "From Dependency-Track"
+    assert record["isSuppressed"] is True
+    assert store.pending_count() == 0
+    assert [(h["revision"], h["origin"]) for h in store.list_revisions(KEY)] == [
+        (0, "import")
+    ]
+    # A second import of the same value does nothing.
+    again = store.reconcile_remote(
+        _remote("NOT_AFFECTED", "From Dependency-Track", True), fetched_at=_later()
+    )
+    assert not any(again.values())
+    # Survives a restart.
+    assert AssessmentOutboxStore(store.path).get_overlay(KEY) == record
+
+
+def test_a_blank_source_assessment_creates_no_record(tmp_path):
+    store = _store(tmp_path)
+    outcomes = store.reconcile_remote(_remote("NOT_SET", ""), fetched_at=_later())
+    assert not any(outcomes.values())
+    assert store.get_overlay(KEY) is None
+
+
+def test_a_view_loaded_before_the_adoption_can_still_save(tmp_path):
+    store = _store(tmp_path)
+    store.reconcile_remote(_remote("IN_TRIAGE", "Theirs"), fetched_at=_later())
+
+    # The client saw no local record, that is revision 0.
+    record = store.enqueue_many(
+        [_payload(details="Mine")], expected_revisions={KEY: 0}, author="alice"
+    )[0]
+
+    assert record["revision"] == 1
+    assert store.get_overlay(KEY)["base"] == {
+        "state": "IN_TRIAGE", "details": "Theirs", "suppressed": False,
+    }
+
+
+def test_the_source_never_changes_a_local_assessment(tmp_path):
+    store = _store(tmp_path)
+    _synced(store, details="Decided in DTVP")
+
+    outcomes = store.reconcile_remote(
+        _remote("EXPLOITABLE", "Changed in Dependency-Track"), fetched_at=_later()
+    )
+
+    assert outcomes["requeued"] == [KEY]
+    record = store.get_overlay(KEY)
+    assert record["analysisDetails"] == "Decided in DTVP"
+    assert (record["revision"], record["sync_status"]) == (1, "pending")
+    # What the source holds is kept for display only.
+    assert record["remote"]["details"] == "Changed in Dependency-Track"
+    due = store.list_due()
+    assert [item["payload"]["details"] for item in due] == ["Decided in DTVP"]
+
+
+def test_an_adopted_assessment_the_source_lost_is_sent_back(tmp_path):
+    store = _store(tmp_path)
+    store.reconcile_remote(_remote("NOT_AFFECTED", "Assessed"), fetched_at=_later())
+
+    outcomes = store.reconcile_remote(_remote("NOT_SET", ""), fetched_at=_later())
+
+    assert outcomes["requeued"] == [KEY]
+    assert [item["payload"]["details"] for item in store.list_due()] == ["Assessed"]
+
+
+def test_a_pending_change_is_exported_whatever_the_source_holds(tmp_path):
+    store = _store(tmp_path)
+    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
+
+    outcomes = store.reconcile_remote(
+        _remote("EXPLOITABLE", "Theirs"), fetched_at=_later()
+    )
+
+    assert not any(outcomes.values())
+    record = store.get_overlay(KEY)
+    assert record["sync_status"] == "pending"
+    assert record["remote"]["details"] == "Theirs"
+    assert len(store.list_due()) == 1
+
+
+def test_a_source_that_keeps_dropping_an_export_is_reported_not_hammered(tmp_path):
+    store = _store(tmp_path)
+    _synced(store, details="Mine")
+    delays = []
+
+    def delay(repetition):
+        delays.append(repetition)
+        return 600
+
+    def import_and_export():
+        outcomes = store.reconcile_remote(
+            _remote("NOT_SET", ""), fetched_at=_later(), retry_delay=delay
+        )
+        assert outcomes["requeued"] == [KEY]
+        pending = store.list_pending()[0]
+        state = store.get_overlay(KEY)
+        store.mark_synced(KEY, pending["revision"])
+        return pending, state
+
+    first, state = import_and_export()
+    # The first time it is simply sent again.
+    assert (first["attempts"], state["sync_status"]) == (0, "pending")
+    assert store.list_due() == []  # exported by the helper
+
+    second, state = import_and_export()
+    assert second["attempts"] == 1 and delays == [1]
+    assert state["sync_status"] == "error"
+    assert "did not keep the exported assessment" in state["last_error"]
+
+    third, _state = import_and_export()
+    assert third["attempts"] == 2 and delays == [1, 2]
+
+    # Waiting for its retry time, it is not due.
+    store.reconcile_remote(_remote("NOT_SET", ""), fetched_at=_later(), retry_delay=delay)
+    assert store.list_due() == []
+
+    # Once the source holds the value, the count starts over.
+    settled = store.reconcile_remote(_remote(details="Mine"), fetched_at=_later())
+    assert settled["settled"] == [KEY]
+    record = store.get_overlay(KEY)
+    assert (record["sync_status"], record["export_rejections"]) == ("synced", 0)
+    assert store.pending_count() == 0
+
+
+def test_a_discarded_export_with_unknown_previous_value_takes_the_source_value(tmp_path):
+    store = _store(tmp_path)
+    # Queued before bases were recorded: discarding cannot revert, only cancel.
+    record = store.enqueue_many([_payload(details="Discarded")])[0]
+    assert store.discard(record["id"])
+
+    outcomes = store.reconcile_remote(_remote("NOT_SET", ""), fetched_at=_later())
+
+    assert outcomes["replaced"] == [KEY]
     overlay = store.get_overlay(KEY)
-    assert overlay["sync_status"] == "synced" and overlay["remote"] is None
-    assert store.list_diverged() == []
-    # The source's newer value arrives with the next import.
-    outcomes = store.reconcile_remote(_remote("EXPLOITABLE", "Theirs"), fetched_at=_later())
-    assert outcomes["fast_forwarded"] == [KEY]
+    assert (overlay["analysisDetails"], overlay["sync_status"]) == ("", "synced")
+
+
+def test_former_conflicts_become_ordinary_pending_exports(tmp_path):
+    path = str(tmp_path / "dtvp.sqlite3")
+    store = AssessmentOutboxStore(path)
+    store.enqueue_many([_payload(details="Mine")])
+    # Rewind to the schema before this version, with a held conflict.
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM assessment_outbox")
+        connection.execute(
+            "UPDATE assessment_state SET sync_status = 'diverged', update_id = NULL"
+        )
+        connection.execute("ALTER TABLE assessment_state DROP COLUMN export_rejections")
+        connection.execute(
+            "DELETE FROM schema_migrations WHERE version = 4 AND namespace = 'assessment_outbox'"
+        )
+
+    upgraded = AssessmentOutboxStore(path)
+
+    record = upgraded.get_overlay(KEY)
+    assert record["sync_status"] == "pending" and record["update_id"]
+    due = upgraded.list_due()
+    assert [item["payload"] for item in due] == [_payload(details="Mine")]
+    assert due[0]["id"] == record["update_id"]
+
+
+
+# -- atomic fields -----------------------------------------------------------
+
+DTVP_TEXT = (
+    "[Rescored: 2.5] [Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N]"
+    "\n\n[Status: Pending Review]\n\n"
+    "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] "
+    "[Reviewed By: rita] [Justification: CODE_NOT_REACHABLE] ---\n"
+    "The parser is never called.\n\n"
+    "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] "
+    "[Date: 1794561289026] [Justification: CODE_NOT_REACHABLE] "
+    "[Assigned: carol, dave] ---\n"
+    "See global assessment. Tracked in EXP-1001."
+)
+
+
+def test_an_adopted_assessment_is_stored_as_atomic_fields(tmp_path):
+    store = _store(tmp_path)
+    assert store.get_fields(KEY) is None
+
+    store.reconcile_remote(
+        _remote("NOT_AFFECTED", DTVP_TEXT, True), fetched_at=_later()
+    )
+
+    fields = store.get_fields(KEY)
+    teams = fields.pop("teams")
+    assert fields == {
+        "revision": 0,
+        "state": "NOT_AFFECTED",
+        "suppressed": True,
+        "pending_review": True,
+        "rescored_score": 2.5,
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N",
+        "free_text": "",
+        "form": "structured",
+    }
+    assert [
+        (t["team"], t["state"], t["justification"], t["assessed_by"],
+         t["reviewed_by"], t["assessed_at_ms"], t["assigned"], t["details"])
+        for t in teams
+    ] == [
+        ("General", "NOT_AFFECTED", "CODE_NOT_REACHABLE", "alice", "rita", None,
+         [], "The parser is never called."),
+        ("Core", "NOT_AFFECTED", "CODE_NOT_REACHABLE", "bob", None,
+         1794561289026, ["carol", "dave"],
+         "See global assessment. Tracked in EXP-1001."),
+    ]
+    # Stored in the database, not derived on reading.
+    assert AssessmentOutboxStore(store.path).get_fields(KEY) == {**fields, "teams": teams}
+
+
+def test_fields_follow_every_change_of_the_assessment(tmp_path):
+    store = _store(tmp_path)
+    store.reconcile_remote(_remote("NOT_AFFECTED", DTVP_TEXT), fetched_at=_later())
+
+    record = store.enqueue_many([_payload("EXPLOITABLE", "Plain note")])[0]
+    fields = store.get_fields(KEY)
+    assert (fields["revision"], fields["state"], fields["form"]) == (1, "EXPLOITABLE", "text")
+    assert fields["free_text"] == "Plain note" and fields["teams"] == []
+    assert fields["pending_review"] is False and fields["rescored_score"] is None
+
+    # Discarding the export goes back to the adopted value, fields included.
+    store.discard_many([record["id"]])
+    fields = store.get_fields(KEY)
+    assert fields["state"] == "NOT_AFFECTED"
+    assert [team["team"] for team in fields["teams"]] == ["General", "Core"]
+
+
+def test_existing_assessments_get_their_fields_on_startup(tmp_path):
+    path = str(tmp_path / "dtvp.sqlite3")
+    store = AssessmentOutboxStore(path)
+    store.enqueue_many([_payload("NOT_AFFECTED", DTVP_TEXT)])
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM assessment_team_fields")
+        connection.execute("DELETE FROM assessment_fields")
+
+    fields = AssessmentOutboxStore(path).get_fields(KEY)
+
+    assert fields["form"] == "structured" and len(fields["teams"]) == 2
+
+
+def test_an_empty_assessment_has_empty_fields(tmp_path):
+    store = _store(tmp_path)
+    store.enqueue_many([_payload("NOT_SET", "")])
+    fields = store.get_fields(KEY)
+    assert (fields["form"], fields["free_text"], fields["teams"]) == ("empty", "", [])
+
+
+def test_free_text_outside_the_team_blocks_is_kept_as_written(tmp_path):
+    store = _store(tmp_path)
+    note = "Agreed with the supplier on 2026-03-01.\nSee ticket EXP-7 (second line)."
+    text = (
+        "[Rescored: 2.5]\n\n" + note + "\n\n"
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] ---\nNot used."
+    )
+    store.enqueue_many([_payload("NOT_AFFECTED", text)])
+
+    fields = store.get_fields(KEY)
+
+    assert fields["free_text"] == note
+    assert fields["rescored_score"] == 2.5
+    assert [team["details"] for team in fields["teams"]] == ["Not used."]
+    # The text as it was saved is kept as well, in the record and its history.
+    assert store.get_overlay(KEY)["analysisDetails"] == text
+    assert store.list_revisions(KEY)[0]["analysisDetails"] == text
+
+
+def test_reading_existing_assessments_into_fields_is_reported(tmp_path, capsys, monkeypatch):
+    from dtvp import assessment_outbox_services as services
+    from dtvp.startup_progress import clear_startup_progress, current_startup_progress
+
+    path = str(tmp_path / "dtvp.sqlite3")
+    store = AssessmentOutboxStore(path)
+    payloads = [
+        {**_payload(details=f"Note {index}"), "component_uuid": f"component-{index}"}
+        for index in range(5)
+    ]
+    store.enqueue_many(payloads)
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM assessment_fields")
+    monkeypatch.setattr(services, "FIELD_MIGRATION_REPORT_EVERY", 2)
+    clear_startup_progress()
+    capsys.readouterr()
+
+    AssessmentOutboxStore(path).pending_count()
+
+    printed = capsys.readouterr().out
+    assert "[startup] Data migration: reading 5 assessments into fields" in printed
+    assert "[startup] Data migration: 2 of 5 assessments read into fields" in printed
+    assert "5 assessments read into fields in" in printed
+    # Finished: the start page shows its own messages again.
+    assert current_startup_progress() is None
+
+    # Nothing to do the next time: nothing is reported.
+    clear_startup_progress()
+    AssessmentOutboxStore(path).pending_count()
+    assert current_startup_progress() is None
+
