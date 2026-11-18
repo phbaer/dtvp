@@ -208,6 +208,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
 | [Import and export](docs/import-export.md) | The local database as the record for assessments, adoption on import, automatic and manual export, failing exports, vanished findings, and history |
+| [CycloneDX inventory and VDR](docs/cyclonedx-export.md) | Downloading the BOM and a VDR with assessments in standard fields per project version, the field mapping, and its limits |
 | [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
 | [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |

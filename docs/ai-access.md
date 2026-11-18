@@ -130,7 +130,10 @@ the value yet. See [Import and export](import-export.md).
 
 ## REST API With A Token
 
-The same `Authorization: Bearer` header works on `/api` for **reading**:
+The same `Authorization: Bearer` header works on `/api` for **reading**.
+Clients built for API keys can send the token as `X-Api-Key: <token>`
+instead; it is the same token with the same limits. The MCP endpoint accepts
+the `Authorization` header only. On `/api`:
 every `GET` endpoint, plus `POST /api/tasks/group-vulns`, which starts or
 joins a project snapshot. All other requests are refused with 403, whatever
 the token's scopes. That includes `POST /api/assessments/details`, which

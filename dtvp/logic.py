@@ -1382,6 +1382,9 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                     "ssvc": parsed_tags.get("SSVC"),
                     "ssvc_details": ssvc_details,
                     "assigned": assigned_list,
+                    "ticket": parsed_tags.get("Ticket"),
+                    "evidence_reviewed": parsed_tags.get("Evidence Reviewed"),
+                    "version_coverage": parsed_tags.get("Version Coverage"),
                     "timestamp": timestamp,
                     "details": content,
                 }

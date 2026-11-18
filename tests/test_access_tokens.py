@@ -195,6 +195,24 @@ def test_bearer_token_authenticates_reads(client, enabled):
     assert me.json()["username"] == "alice"
 
 
+def test_a_token_sent_as_api_key_has_the_same_access_and_limits(client, enabled):
+    _record, plain = access_token_store.create(
+        username="alice", name="generator", scopes=["read", "write"]
+    )
+    key = {"X-Api-Key": plain}
+
+    assert client.get("/api/projects", headers=key).status_code == 200
+    assert client.get("/auth/me", headers=key).json()["username"] == "alice"
+    # Read-only through REST, and never an interactive session.
+    assert client.post("/api/export", json={}, headers=key).status_code == 403
+    assert client.get("/api/settings/tokens", headers=key).status_code == 403
+    # Anything that is not a DTVP token is not an API key.
+    assert client.get("/api/projects", headers={"X-Api-Key": "odt_abc"}).status_code == 401
+    assert client.get(
+        "/api/projects", headers={"X-Api-Key": plain[:-2] + "xx"}
+    ).status_code == 401
+
+
 def test_bearer_token_is_rejected_when_invalid_or_disabled(client, monkeypatch):
     monkeypatch.setenv("DTVP_ACCESS_TOKENS_ENABLED", "true")
     record, plain = access_token_store.create(

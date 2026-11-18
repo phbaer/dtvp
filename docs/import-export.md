@@ -71,8 +71,9 @@ that are stored in the database:
   vector, and `free_text`: everything written outside the team blocks, kept
   as written;
 - per team (including General): state, justification, assessor, reviewer,
-  date, rescoring, SSVC decision, assignees, whether the block is historical,
-  and the team's text.
+  date, rescoring, SSVC decision, assignees, ticket reference, the evidence
+  and version-coverage confirmations, whether the block is historical, and
+  the team's text.
 
 An assessment without team blocks (plain or legacy text) is all free text.
 Nothing is dropped: the text as it was saved also stays in the record and in

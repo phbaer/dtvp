@@ -556,9 +556,12 @@ class AssessmentOutboxStore:
                         position, team, state, justification, assessed_by,
                         reviewed_by, assessed_at_ms, rescored_score,
                         rescored_vector, ssvc, ssvc_details, assigned_json,
-                        historical, copied_from, details
+                        historical, copied_from, details, ticket,
+                        evidence_reviewed, version_coverage
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
                     """,
                     [
                         (
@@ -569,7 +572,8 @@ class AssessmentOutboxStore:
                             team["ssvc"], team["ssvc_details"],
                             json.dumps(team["assigned"]),
                             int(team["historical"]), team["copied_from"],
-                            team["details"],
+                            team["details"], team["ticket"],
+                            team["evidence_reviewed"], team["version_coverage"],
                         )
                         for position, team in enumerate(fields["teams"])
                     ],
@@ -647,6 +651,9 @@ class AssessmentOutboxStore:
                     "ssvc": team["ssvc"],
                     "ssvc_details": team["ssvc_details"],
                     "assigned": json.loads(team["assigned_json"]),
+                    "ticket": team["ticket"],
+                    "evidence_reviewed": team["evidence_reviewed"],
+                    "version_coverage": team["version_coverage"],
                     "historical": bool(team["historical"]),
                     "copied_from": team["copied_from"],
                     "details": team["details"],

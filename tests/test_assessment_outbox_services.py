@@ -756,7 +756,8 @@ DTVP_TEXT = (
     "The parser is never called.\n\n"
     "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] "
     "[Date: 1794561289026] [Justification: CODE_NOT_REACHABLE] "
-    "[Assigned: carol, dave] ---\n"
+    "[Assigned: carol, dave] [Evidence Reviewed: yes] "
+    "[Version Coverage: yes] [Ticket: EXP-1001] ---\n"
     "See global assessment. Tracked in EXP-1001."
 )
 
@@ -792,6 +793,9 @@ def test_an_adopted_assessment_is_stored_as_atomic_fields(tmp_path):
          1794561289026, ["carol", "dave"],
          "See global assessment. Tracked in EXP-1001."),
     ]
+    assert [
+        (t["ticket"], t["evidence_reviewed"], t["version_coverage"]) for t in teams
+    ] == [(None, None, None), ("EXP-1001", "yes", "yes")]
     # Stored in the database, not derived on reading.
     assert AssessmentOutboxStore(store.path).get_fields(KEY) == {**fields, "teams": teams}
 
