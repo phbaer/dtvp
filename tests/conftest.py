@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,10 +29,30 @@ def reset_cache_manager(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("DTVP_ACCESS_TOKENS_ENABLED", raising=False)
     access_token_store.reset()
+    # A project load left over from the previous test must not be joined by
+    # this one: it read that test's source and may still be writing.
+    main.tasks.clear()
     dt_cache.cache_manager.reset(str(cache_dir))
     main.code_analysis_result_store.reset()
     yield
+    _wait_for_project_loads()
     main.code_analysis_result_store.reset()
+
+
+def _wait_for_project_loads(timeout: float = 5.0) -> None:
+    """Let project loads started by a test finish before the next test gets a
+    new store. On a slow machine they otherwise write into it."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        unfinished = [
+            task
+            for task in list(main.tasks.values())
+            if isinstance(task, dict)
+            and task.get("status") not in ("completed", "failed")
+        ]
+        if not unfinished:
+            return
+        time.sleep(0.02)
 
 
 # Mock Dependency Track Client

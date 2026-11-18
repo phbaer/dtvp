@@ -32,6 +32,7 @@ export interface FilterState {
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
 }

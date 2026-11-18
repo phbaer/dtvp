@@ -506,6 +506,7 @@ const {
     tmrescoreProposalFilter,
     cvssVersionMismatchOnly,
     notRescoredOnly,
+    newFindingsOnly,
     attributionAgeDays,
     attributionAgeMode,
     lifecycleFilters,
@@ -613,6 +614,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     versionFilters: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
+    newFindingsOnly: newFindingsOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
     tmrescoreFilters: selectedTMRescoreProposalFilters.value,
@@ -740,6 +742,7 @@ const listFilterOptions = computed(() => ({
     versionFilterList: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
+    newFindingsOnly: newFindingsOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
     lifecycleFilters: lifecycleFilters.value,
@@ -1242,6 +1245,7 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     automaticAssessmentRescoreOptions: AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
+    newFindingsOnly: newFindingsOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
 }))
@@ -1300,6 +1304,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'notRescored':
             notRescoredOnly.value = false
             break
+        case 'newFindings':
+            newFindingsOnly.value = false
+            break
         case 'attributionAge':
             attributionAgeDays.value = null
             attributionAgeMode.value = 'older'
@@ -1320,6 +1327,7 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     versionFilters: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
+    newFindingsOnly: newFindingsOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,

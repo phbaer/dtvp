@@ -74,6 +74,13 @@ describe('projectVulnTaskQuery', () => {
             parsedSearch: parseVulnSearchQuery('has:no_rescore'),
         })).not_rescored).toBe(true)
     })
+    it('requests only vulnerabilities with new findings from the sidebar toggle or a search token', () => {
+        expect(buildTaskVulnGroupListQuery(baseInput()).new_findings).toBeFalsy()
+        expect(buildTaskVulnGroupListQuery(baseInput({ newFindingsOnly: true })).new_findings).toBe(true)
+        expect(buildTaskVulnGroupListQuery(baseInput({
+            parsedSearch: parseVulnSearchQuery('has:new_findings'),
+        })).new_findings).toBe(true)
+    })
     it('combines sidebar filters and smart-search tokens into a backend task-window query', () => {
         const query = buildTaskVulnGroupListQuery(baseInput({
             parsedSearch: parseVulnSearchQuery('urgent lifecycle:open analysis:resolved team:platform id:CVE-2026-9999 component:spring assignee:alice version:2.0.0 dependency:direct tm:with has:cvss_mismatch'),

@@ -141,6 +141,7 @@ class BulkWorkflowFilters(BaseModel):
     versions: list[str] = Field(default_factory=list)
     cvss_mismatch: bool = False
     not_rescored: bool = False
+    new_findings: bool = False
     attributed_before_days: Optional[int] = None
     attribution_mode: str = "older"
     tmrescore: list[str] = Field(default_factory=list)
@@ -906,6 +907,7 @@ GROUP_QUERY_DEFAULTS: dict[str, Any] = {
     "versions": [],
     "cvss_mismatch": False,
     "not_rescored": False,
+    "new_findings": False,
     "attributed_before_days": None,
     "attribution_mode": "older",
     "tmrescore": [],
@@ -1087,6 +1089,7 @@ def _register_task_routes(
         versions: list[str] | None = Query(default=None),
         cvss_mismatch: bool = False,
         not_rescored: bool = False,
+        new_findings: bool = False,
         attributed_before_days: int | None = Query(default=None, ge=1),
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
@@ -1141,6 +1144,7 @@ def _register_task_routes(
                     "versions": split_query_values(versions),
                     "cvss_mismatch": cvss_mismatch,
                     "not_rescored": not_rescored,
+                    "new_findings": new_findings,
                     "attributed_before_days": attributed_before_days,
                     "attribution_mode": attribution_mode,
                     "tmrescore": split_query_values(tmrescore),
@@ -1221,6 +1225,7 @@ def _register_task_routes(
         versions: list[str] | None = Query(default=None),
         cvss_mismatch: bool = False,
         not_rescored: bool = False,
+        new_findings: bool = False,
         attributed_before_days: int | None = Query(default=None, ge=1),
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
@@ -1270,6 +1275,7 @@ def _register_task_routes(
                     "versions": split_query_values(versions),
                     "cvss_mismatch": cvss_mismatch,
                     "not_rescored": not_rescored,
+                    "new_findings": new_findings,
                     "attributed_before_days": attributed_before_days,
                     "attribution_mode": attribution_mode,
                     "tmrescore": split_query_values(tmrescore),
@@ -1713,6 +1719,7 @@ def _filter_bulk_workflow_groups(
         versions=filters.versions,
         cvss_mismatch=filters.cvss_mismatch,
         not_rescored=filters.not_rescored,
+        new_findings=filters.new_findings,
         attributed_before_days=filters.attributed_before_days,
         attribution_mode=filters.attribution_mode,
         tmrescore=filters.tmrescore,

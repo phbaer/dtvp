@@ -301,6 +301,7 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
             group.get("rescored_cvss") is None
             and not str(group.get("rescored_vector") or "").strip()
         ),
+        "has_new_findings": int(metadata.get("new_finding_count") or 0) > 0,
         "attributed_on_ms_values": _attributed_on_ms_values(group),
         "base_score": _score_value(base_score),
         "rescored_score": _score_value(rescored_score),
@@ -484,6 +485,7 @@ def _matches_task_group_fields(
     versions: set[str],
     cvss_mismatch: bool,
     not_rescored: bool = False,
+    new_findings: bool = False,
     attributed_before_days: int | None,
     attribution_mode: str,
     tmrescore: set[str],
@@ -545,6 +547,8 @@ def _matches_task_group_fields(
     if cvss_mismatch and not fields["cvss_version_mismatch"]:
         return False
     if not_rescored and not fields["not_rescored"]:
+        return False
+    if new_findings and not fields["has_new_findings"]:
         return False
     if not _matches_attribution_age(
         fields,
@@ -803,6 +807,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     components: dict[str, int] = {}
     cvss_version_mismatch = 0
     not_rescored = 0
+    new_findings = 0
     assessment_restore_counts = _empty_assessment_restore_counts()
     inconsistency_reason_counts = _empty_inconsistency_reason_counts()
 
@@ -832,6 +837,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             cvss_version_mismatch += 1
         if fields["not_rescored"]:
             not_rescored += 1
+        if fields["has_new_findings"]:
+            new_findings += 1
         if fields["assessment_restore_count"] > 0:
             assessment_restore_counts["WITH_RESTORE"] += 1
             status = str(fields.get("assessment_restore_status") or "").upper()
@@ -870,6 +877,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "dependency_relationship": dependency_counts,
         "cvss_version_mismatch": cvss_version_mismatch,
         "not_rescored": not_rescored,
+        "new_findings": new_findings,
         "ids": ids,
         "versions": versions,
         "tags": tags,
@@ -1202,6 +1210,7 @@ def _query_cache_key(
     versions: list[str],
     cvss_mismatch: bool,
     not_rescored: bool = False,
+    new_findings: bool = False,
     attributed_before_days: int | None,
     attribution_mode: str,
     tmrescore: list[str],
@@ -1252,6 +1261,7 @@ def _query_cache_key(
         _normalized_lower_tuple(versions),
         bool(cvss_mismatch),
         bool(not_rescored),
+        bool(new_findings),
         attributed_before_days,
         attribution_mode,
         attribution_day_bucket,
@@ -1448,6 +1458,7 @@ def query_task_groups(
     versions: list[str],
     cvss_mismatch: bool,
     not_rescored: bool = False,
+    new_findings: bool = False,
     attributed_before_days: int | None,
     attribution_mode: str,
     tmrescore: list[str],
@@ -1502,6 +1513,7 @@ def query_task_groups(
         versions=versions,
         cvss_mismatch=cvss_mismatch,
         not_rescored=not_rescored,
+        new_findings=new_findings,
         attributed_before_days=attributed_before_days,
         attribution_mode=normalized_mode,
         tmrescore=tmrescore,
@@ -1599,6 +1611,7 @@ def query_task_groups(
                 or version_set
                 or cvss_mismatch
                 or not_rescored
+                or new_findings
                 or attributed_before_days is not None
                 or tmrescore_set
                 or automatic_assessment_set
@@ -1624,6 +1637,7 @@ def query_task_groups(
                 versions=version_set,
                 cvss_mismatch=cvss_mismatch,
                 not_rescored=not_rescored,
+                new_findings=new_findings,
                 attributed_before_days=attributed_before_days,
                 attribution_mode=normalized_mode,
                 tmrescore=tmrescore_set,
@@ -1744,6 +1758,7 @@ def query_task_groups(
                     "automatic_assessment_rescore": ("automatic_assessment_rescore", set()),
                     "cvss_version_mismatch": ("cvss_mismatch", False),
                     "not_rescored": ("not_rescored", False),
+                    "new_findings": ("new_findings", False),
                     "attribution_age": ("attributed_before_days", None),
                     "evidence": (None, None),
                 }

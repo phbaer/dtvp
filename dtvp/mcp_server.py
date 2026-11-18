@@ -328,6 +328,7 @@ class McpToolService:
                     "assessed_teams": metadata.get("assessed_teams") or [],
                     "components": metadata.get("component_names") or [],
                     "versions": metadata.get("versions") or [],
+                    "new_findings": int(metadata.get("new_finding_count") or 0),
                 }
             )
         return {
@@ -373,6 +374,7 @@ class McpToolService:
                     "revision": current["revision"],
                     "sync_status": current["sync_status"],
                     "attributed_on": component.get("attributed_on"),
+                    "new_finding": bool(component.get("is_new_finding")),
                     "dependency_chains": chains[:MAX_DEPENDENCY_CHAINS],
                     "dependency_chains_truncated": bool(
                         component.get("dependency_chains_truncated")

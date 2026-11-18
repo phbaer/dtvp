@@ -36,6 +36,7 @@ export interface BuildTaskVulnGroupListQueryInput {
     versionFilters: readonly string[]
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
     tmrescoreFilters: readonly TMRescoreProposalFilter[]
@@ -124,6 +125,7 @@ export function buildTaskVulnGroupListQuery({
     versionFilters,
     cvssVersionMismatchOnly,
     notRescoredOnly,
+    newFindingsOnly,
     attributionAgeDays,
     attributionAgeMode,
     tmrescoreFilters,
@@ -184,6 +186,7 @@ export function buildTaskVulnGroupListQuery({
         versions: uniqueStrings([...versionFilters, ...parsedSearch.versionTerms]),
         cvss_mismatch: cvssVersionMismatchOnly || parsedSearch.cvssMismatchOnly,
         not_rescored: notRescoredOnly || parsedSearch.notRescoredOnly,
+        new_findings: newFindingsOnly || parsedSearch.newFindingsOnly,
         attributed_before_days: attributionAgeDays,
         attribution_mode: attributionAgeMode,
         tmrescore: isTMRescoreRestricted ? tmrescore : [],

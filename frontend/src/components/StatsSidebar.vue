@@ -57,6 +57,7 @@ export interface FilterState {
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
     assigneeFilter: string
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
@@ -734,6 +735,29 @@ const handleCopy = () => {
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState) ? 'text-white' : 'text-gray-500'">
                                                 {{ countLabel((props.facetCounts || props.resultCounts).automatic_assessment_rescore?.[opt.value as AutomaticAssessmentRescoreState]) }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Findings</label>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button
+                                            data-testid="filter-new-findings"
+                                            @click="updateFilter('newFindingsOnly', !props.filters.newFindingsOnly)"
+                                            :aria-pressed="!!props.filters.newFindingsOnly"
+                                            title="Show only vulnerabilities with a finding that was added after the vulnerability was assessed and has no assessment yet"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
+                                                props.filters.newFindingsOnly
+                                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20'
+                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+                                            ]"
+                                        >
+                                            New findings
+                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.newFindingsOnly ? 'text-white' : 'text-gray-500'">
+                                                {{ countLabel((props.facetCounts || props.resultCounts).new_findings) }}
                                             </span>
                                         </button>
                                     </div>

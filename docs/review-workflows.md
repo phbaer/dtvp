@@ -13,7 +13,7 @@ Paths and commands refer to the repository root unless stated otherwise.
 The project view searches and filters grouped vulnerabilities by lifecycle,
 inconsistency reason, analysis state, dependency relationship, component,
 version, team, assignee, attribution age, tmrescore proposal, CVSS mismatch,
-missing rescoring,
+missing rescoring, new findings,
 code-assessment availability, automatic-analysis outcome, and proposed
 automatic CVSS severity. Outcome choices (`Affected`, `Probably affected`,
 `Not affected`, and `Uncertain`) and rescore choices (`Critical` through
@@ -29,6 +29,32 @@ ignores lifecycle, so combine it with an overall status such as Assessed to
 find decisions that still lack a rescoring. The same filter is available as the
 `has:no_rescore` or `cvss:not-rescored` search token and the `not_rescored=true`
 URL and API parameter, and it also narrows Bulk Changes candidates.
+
+### New findings
+
+Dependency-Track creates a new finding, with no analysis, whenever a new
+project version (or a re-imported BOM) contains a vulnerability again. Next to
+the assessed findings of the other versions this looks like an assessment that
+was lost; it is a finding nobody has assessed yet.
+
+DTVP marks such a finding as **new**: it has neither a state nor text, and it
+was first reported after the vulnerability's assessment was written (the
+oldest team block date; for assessments without dated blocks, after every
+assessed finding was reported). A finding that was merely left out when the
+others were assessed is not new, only incomplete.
+
+- The list row shows **N new**; its tooltip names the versions and the date
+  the first of them was reported.
+- In the vulnerability's dependency list each such finding carries a **New**
+  badge.
+- The **New findings** toggle under **More filters** lists only these
+  vulnerabilities. The same filter is the `has:new_findings` search token and
+  the `new_findings=true` URL and API parameter, and it narrows Bulk Changes
+  candidates.
+
+Nothing is copied automatically: the same component may be used differently in
+the new version. Assess the finding by hand, or apply the existing assessment
+with a bulk workflow. The mark disappears once the finding is assessed.
 
 The Filters sidebar provides a searchable checkbox list of canonical **Teams**
 from the complete task. Multiple selections match vulnerabilities owned by any

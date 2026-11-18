@@ -167,6 +167,7 @@ describe('useProjectVulnFilters', () => {
                 automatic_assessment_rescore: 'low',
                 cvss_mismatch: 'true',
                 not_rescored: 'true',
+                new_findings: 'true',
                 attributed_before_days: '14',
                 attribution_mode: 'younger',
                 sort: 'id',
@@ -198,6 +199,8 @@ describe('useProjectVulnFilters', () => {
         expect(filters.cvssVersionMismatchOnly.value).toBe(true)
         expect(filters.notRescoredOnly.value).toBe(true)
         expect(filters.filterUrl.value).toContain('not_rescored=true')
+        expect(filters.newFindingsOnly.value).toBe(true)
+        expect(filters.filterUrl.value).toContain('new_findings=true')
         expect(filters.attributionAgeDays.value).toBe(14)
         expect(filters.attributionAgeMode.value).toBe('younger')
         expect(filters.sortBy.value).toBe('id')

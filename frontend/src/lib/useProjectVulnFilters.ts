@@ -98,6 +98,7 @@ const FILTER_QUERY_KEYS = new Set([
     'automatic_assessment_rescore',
     'cvss_mismatch',
     'not_rescored',
+    'new_findings',
     'attributed_before_days',
     'attribution_mode',
     'attribution_age_days',
@@ -138,6 +139,7 @@ export function useProjectVulnFilters({
     )
     const cvssVersionMismatchOnly = ref(false)
     const notRescoredOnly = ref(false)
+    const newFindingsOnly = ref(false)
     const attributionAgeDays = ref<number | null>(null)
     const attributionAgeMode = ref<'older' | 'younger'>('older')
     const lifecycleFilters = ref<string[]>([])
@@ -207,6 +209,7 @@ export function useProjectVulnFilters({
         versionFilterInput.value = ''
         cvssVersionMismatchOnly.value = false
         notRescoredOnly.value = false
+        newFindingsOnly.value = false
         attributionAgeDays.value = null
         attributionAgeMode.value = 'older'
         sortBy.value = 'rescored-severity'
@@ -290,6 +293,7 @@ export function useProjectVulnFilters({
         }
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
         if (q.not_rescored === 'true') notRescoredOnly.value = true
+        if (q.new_findings === 'true') newFindingsOnly.value = true
         const legacyDays = normalizeAttributionAgeDays(
             firstQueryValue(q.attributed_before_days ?? q.attribution_age_days ?? q.age_days),
         )
@@ -455,6 +459,8 @@ export function useProjectVulnFilters({
         else delete query.cvss_mismatch
         if (notRescoredOnly.value) query.not_rescored = 'true'
         else delete query.not_rescored
+        if (newFindingsOnly.value) query.new_findings = 'true'
+        else delete query.new_findings
 
         if (attributionAgeDays.value == null) {
             delete query.attributed_before_days
@@ -498,6 +504,7 @@ export function useProjectVulnFilters({
         analysisFilters: analysisFilters.value,
         cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
         notRescoredOnly: notRescoredOnly.value,
+        newFindingsOnly: newFindingsOnly.value,
         attributionAgeDays: attributionAgeDays.value,
         attributionAgeMode: attributionAgeMode.value,
     }))
@@ -534,6 +541,7 @@ export function useProjectVulnFilters({
         analysisFilters.value = newFilters.analysisFilters
         cvssVersionMismatchOnly.value = newFilters.cvssVersionMismatchOnly
         notRescoredOnly.value = !!newFilters.notRescoredOnly
+        newFindingsOnly.value = !!newFilters.newFindingsOnly
         attributionAgeDays.value = normalizeAttributionAgeDays(newFilters.attributionAgeDays)
         attributionAgeMode.value = newFilters.attributionAgeMode === 'younger' ? 'younger' : 'older'
     }
@@ -568,6 +576,7 @@ export function useProjectVulnFilters({
         versionFilterInput,
         cvssVersionMismatchOnly,
         notRescoredOnly,
+        newFindingsOnly,
         attributionAgeDays,
         attributionAgeMode,
         sortBy,
@@ -610,6 +619,7 @@ export function useProjectVulnFilters({
         automaticAssessmentRescoreFilter,
         cvssVersionMismatchOnly,
         notRescoredOnly,
+        newFindingsOnly,
         attributionAgeDays,
         attributionAgeMode,
         lifecycleFilters,

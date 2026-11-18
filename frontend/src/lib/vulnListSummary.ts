@@ -43,6 +43,7 @@ const summarizeComponent = (component: Instance): Instance => ({
     assessment_restore: component.assessment_restore ? { ...component.assessment_restore } : undefined,
     // Kept so a row can show and settle a conflict with Dependency-Track.
     sync_status: component.sync_status,
+    is_new_finding: component.is_new_finding,
     source_assessment: component.source_assessment ? { ...component.source_assessment } : undefined,
 })
 

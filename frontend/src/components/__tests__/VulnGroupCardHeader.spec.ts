@@ -2,10 +2,10 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import VulnGroupCardHeader from '../VulnGroupCardHeader.vue'
 
-const mountHeader = (displayState: string) => mount(VulnGroupCardHeader, {
+const mountHeader = (displayState: string, affected_versions: any[] = []) => mount(VulnGroupCardHeader, {
     props: {
         group: {
-            id: 'CVE-TEST', tags: ['Team A', 'Team B'], affected_versions: [],
+            id: 'CVE-TEST', tags: ['Team A', 'Team B'], affected_versions,
             list_metadata: { lifecycle: displayState, assessed_teams: ['Team A'] },
         },
         displayState, technicalState: 'NOT_AFFECTED',
@@ -36,6 +36,34 @@ describe('lifecycle presentation', () => {
         expect(title).toContain('No completed assessment for Team B.')
         expect(title).not.toContain('Team A')
         expect(title).not.toContain('General')
+        wrapper.unmount()
+    })
+})
+
+describe('new findings', () => {
+    it('counts findings added after the assessment and names their version', () => {
+        const wrapper = mountHeader('INCOMPLETE', [
+            { project_version: '7.1.0', components: [{ component_name: 'ffmpeg', component_version: '7.1.1' }] },
+            {
+                project_version: '7.1.2',
+                components: [{
+                    component_name: 'ffmpeg', component_version: '7.1.1',
+                    is_new_finding: true, attributed_on: Date.UTC(2026, 10, 18),
+                }],
+            },
+        ])
+        const chip = wrapper.get('[data-testid="new-findings-chip"]')
+        expect(chip.text()).toBe('1 new')
+        expect(chip.attributes('title')).toContain('version 7.1.2')
+        expect(chip.attributes('title')).toContain('first reported 2026-11-18')
+        wrapper.unmount()
+    })
+
+    it('shows nothing when no finding is new', () => {
+        const wrapper = mountHeader('INCOMPLETE', [
+            { project_version: '7.1.0', components: [{ component_name: 'ffmpeg', component_version: '7.1.1' }] },
+        ])
+        expect(wrapper.find('[data-testid="new-findings-chip"]').exists()).toBe(false)
         wrapper.unmount()
     })
 })

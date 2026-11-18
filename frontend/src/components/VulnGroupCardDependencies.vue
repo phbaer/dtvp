@@ -228,6 +228,7 @@ const partitionByRelationship = (instances: Array<{
   project_name?: string
   dependency_chains?: string[]
   is_direct_dependency?: boolean | null
+  is_new_finding?: boolean
 }>) => {
   const direct: typeof instances = []
   const transitive: typeof instances = []
@@ -373,6 +374,7 @@ const isChainExpanded = (id: string) => {
                 {{ inst.component_name }}<span class="text-gray-500">@{{ inst.component_version }}</span>
               </span>
               <span class="px-1 py-0 text-[8px] font-black uppercase text-red-400 bg-red-600/15 rounded border border-red-600/25">Direct</span>
+              <span v-if="inst.is_new_finding" data-testid="new-finding-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-emerald-300 bg-emerald-600/15 rounded border border-emerald-600/30" title="Added after this vulnerability was assessed; not assessed yet">New</span>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-[9px] text-gray-400">Team:</span>
                 <span class="text-[9px] font-semibold uppercase text-blue-300">
@@ -407,6 +409,7 @@ const isChainExpanded = (id: string) => {
                 {{ inst.component_name }}<span class="text-gray-600">@{{ inst.component_version }}</span>
               </span>
               <span class="px-1 py-0 text-[8px] font-bold uppercase text-purple-400/70 bg-purple-600/10 rounded border border-purple-600/20">Transitive</span>
+              <span v-if="inst.is_new_finding" data-testid="new-finding-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-emerald-300 bg-emerald-600/15 rounded border border-emerald-600/30" title="Added after this vulnerability was assessed; not assessed yet">New</span>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-[9px] text-gray-400">Team:</span>
                 <span class="text-[9px] font-semibold uppercase text-blue-300">
@@ -441,6 +444,7 @@ const isChainExpanded = (id: string) => {
                 {{ inst.component_name }}<span class="text-gray-600">@{{ inst.component_version }}</span>
               </span>
               <span class="px-1 py-0 text-[8px] font-bold uppercase text-gray-500 bg-gray-700/20 rounded border border-gray-600/25">Unknown</span>
+              <span v-if="inst.is_new_finding" data-testid="new-finding-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-emerald-300 bg-emerald-600/15 rounded border border-emerald-600/30" title="Added after this vulnerability was assessed; not assessed yet">New</span>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-[9px] text-gray-400">Team:</span>
                 <span class="text-[9px] font-semibold uppercase text-blue-300">

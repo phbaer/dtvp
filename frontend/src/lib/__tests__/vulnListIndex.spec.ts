@@ -566,6 +566,18 @@ describe('vulnListIndex', () => {
         expect(matchesSmartSearch(scored, 'cvss:not-rescored')).toBe(false)
     })
 
+    it('flags and filters vulnerabilities with findings added after the assessment', () => {
+        const withNew = buildVulnListItem(makeGroup({ list_metadata: { new_finding_count: 2 } }), {})
+        const without = buildVulnListItem(makeGroup({ list_metadata: { new_finding_count: 0 } }), {})
+
+        expect(withNew.hasNewFindings).toBe(true)
+        expect(without.hasNewFindings).toBe(false)
+        expect(parseVulnSearchQuery('has:new_findings').newFindingsOnly).toBe(true)
+        expect(parseVulnSearchQuery('has:no_rescore').newFindingsOnly).toBeFalsy()
+        expect(matchesSmartSearch(withNew, 'has:new')).toBe(true)
+        expect(matchesSmartSearch(without, 'has:new')).toBe(false)
+    })
+
     it('parses broad smart search terms and typed filter tokens', () => {
         const parsed = parseVulnSearchQuery('log4j team:platform state:open dep:direct has:tmrescore cvss:mismatch')
 

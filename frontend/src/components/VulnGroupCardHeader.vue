@@ -188,6 +188,29 @@ const instanceCount = computed(() =>
     : group.value.affected_versions?.reduce((sum, v) => sum + (v.components?.length || 0), 0) || 0
 )
 
+// Findings added after the vulnerability was assessed and still unassessed.
+const newFindings = computed(() =>
+  (group.value.affected_versions || []).flatMap(version =>
+    (version.components || [])
+      .filter(component => component.is_new_finding)
+      .map(component => ({
+        version: String(version.project_version || component.project_version || ''),
+        reported: parseAttributionTimestamp(component.attributed_on),
+      })),
+  ),
+)
+
+const newFindingsTitle = computed(() => {
+  const versions = [...new Set(newFindings.value.map(finding => finding.version).filter(Boolean))]
+  const dates = newFindings.value
+    .map(finding => finding.reported)
+    .filter((value): value is number => value != null)
+  const since = dates.length ? `, first reported ${new Date(Math.min(...dates)).toISOString().slice(0, 10)}` : ''
+  const count = newFindings.value.length
+  return `${count} finding${count !== 1 ? 's were' : ' was'} added after this vulnerability was assessed`
+    + `${versions.length ? ` (version ${versions.join(', ')})` : ''}${since}. Not assessed yet.`
+})
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const oldestAttributedOnMs = computed(() => {
@@ -347,6 +370,10 @@ const componentSummary = computed(() => {
         <span v-if="attributionAgeLabel" class="inline-flex items-center gap-1 rounded border border-cyan-500/20 bg-cyan-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-300 shrink-0 tabular-nums" data-testid="attribution-age-chip" :title="attributionAgeTitle">
           <CalendarClock :size="9" />
           Age {{ attributionAgeLabel }}
+        </span>
+
+        <span v-if="newFindings.length > 0" class="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-300 shrink-0 tabular-nums" data-testid="new-findings-chip" :title="newFindingsTitle">
+          {{ newFindings.length }} new
         </span>
 
         <span
