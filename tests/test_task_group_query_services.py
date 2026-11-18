@@ -819,3 +819,23 @@ def test_not_rescored_filter_matches_groups_without_rescored_score_or_vector():
     # The facet count ignores its own restriction but keeps the lifecycle one.
     assert combined["counts"]["facets"]["not_rescored"] == 1
     assert _query(index, lifecycle=["OPEN"])["counts"]["filtered"]["not_rescored"] == 1
+
+
+def test_new_findings_filter_matches_groups_with_a_new_finding():
+    groups = [_group(index) for index in range(3)]
+    groups[1]["list_metadata"]["new_finding_count"] = 2
+    groups[2]["list_metadata"]["new_finding_count"] = 1
+    groups[2]["list_metadata"]["lifecycle"] = "INCOMPLETE"
+    index = query_services.build_task_group_query_index(groups)
+
+    assert _query(index)["counts"]["all"]["new_findings"] == 2
+
+    result = _query(index, new_findings=True)
+    assert [item["id"] for item in result["items"]] == [
+        "CVE-2026-0001",
+        "CVE-2026-0002",
+    ]
+
+    combined = _query(index, new_findings=True, lifecycle=["INCOMPLETE"])
+    assert [item["id"] for item in combined["items"]] == ["CVE-2026-0002"]
+    assert combined["counts"]["facets"]["new_findings"] == 1

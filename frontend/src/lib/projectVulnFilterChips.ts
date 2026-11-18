@@ -26,6 +26,7 @@ export type ActiveFilterChipKey =
     | 'automaticAssessmentRescore'
     | 'cvss'
     | 'notRescored'
+    | 'newFindings'
     | 'attributionAge'
 
 export interface ActiveFilterChip {
@@ -67,6 +68,7 @@ export interface BuildActiveFilterChipsInput {
     automaticAssessmentRescoreOptions: readonly ProjectVulnFilterOption[]
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
 }
@@ -85,6 +87,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     versionFilters: readonly string[]
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
     attributionAgeDays: number | null
     sortBy: string
     sortOrder: 'asc' | 'desc'
@@ -165,6 +168,7 @@ export function buildActiveFilterChips({
     automaticAssessmentRescoreOptions,
     cvssVersionMismatchOnly,
     notRescoredOnly,
+    newFindingsOnly,
     attributionAgeDays,
     attributionAgeMode,
 }: BuildActiveFilterChipsInput): ActiveFilterChip[] {
@@ -219,6 +223,7 @@ export function buildActiveFilterChips({
     }
     if (cvssVersionMismatchOnly) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
     if (notRescoredOnly) chips.push({ key: 'notRescored', label: 'Not rescored' })
+    if (newFindingsOnly) chips.push({ key: 'newFindings', label: 'New findings' })
     if (attributionAgeDays != null) {
         const verb = attributionAgeMode === 'younger' ? 'younger' : 'older'
         chips.push({ key: 'attributionAge', label: `Attributed ${verb} than ${attributionAgeDays}d` })
@@ -240,6 +245,7 @@ export function hasCustomProjectVulnFilterState({
     versionFilters,
     cvssVersionMismatchOnly,
     notRescoredOnly,
+    newFindingsOnly,
     attributionAgeDays,
     sortBy,
     sortOrder,
@@ -273,6 +279,7 @@ export function hasCustomProjectVulnFilterState({
         || versionFilters.length > 0
         || cvssVersionMismatchOnly
         || notRescoredOnly
+        || newFindingsOnly
         || attributionAgeDays != null
         || sortBy !== 'rescored-severity'
         || sortOrder !== 'desc'

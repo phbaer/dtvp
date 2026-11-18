@@ -86,6 +86,7 @@ describe('projectVulnFilterChips', () => {
             automaticAssessmentRescoreOptions,
             cvssVersionMismatchOnly: true,
             notRescoredOnly: true,
+            newFindingsOnly: true,
             attributionAgeDays: 14,
             attributionAgeMode: 'younger',
         })
@@ -105,6 +106,7 @@ describe('projectVulnFilterChips', () => {
             { key: 'automaticAssessmentRescore', label: 'Auto rescore: Low' },
             { key: 'cvss', label: 'CVSS mismatch' },
             { key: 'notRescored', label: 'Not rescored' },
+            { key: 'newFindings', label: 'New findings' },
             { key: 'attributionAge', label: 'Attributed younger than 14d' },
         ])
     })

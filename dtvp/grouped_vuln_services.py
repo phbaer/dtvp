@@ -459,6 +459,79 @@ def _derive_group_lifecycle(
     return "ASSESSED" if has_any else "OPEN"
 
 
+def refresh_new_finding_flags(group: Dict[str, Any]) -> int:
+    """Mark findings that were added after the vulnerability was assessed.
+
+    Dependency-Track creates a new finding, with new identifiers and no
+    analysis, when a new project version (or a re-imported BOM) contains a
+    vulnerability again. Next to the assessed findings of the other versions
+    that looks like an assessment that was lost. A finding is *new* when it has
+    no assessment and was first reported after an assessment of the same
+    vulnerability already existed. Findings that were merely skipped when the
+    others were assessed are not new.
+
+    Sets ``is_new_finding`` on each such finding, removes it from all others,
+    and returns their number.
+    """
+    components = [
+        component
+        for affected_version in group.get("affected_versions") or []
+        for component in affected_version.get("components") or []
+        if isinstance(component, dict)
+    ]
+    assessed = [
+        component
+        for component in components
+        if _instance_state(component) != "NOT_SET"
+    ]
+    # Text without a state is work in progress: neither assessed nor new.
+    untouched_ids = {
+        id(component)
+        for component in components
+        if _instance_state(component) == "NOT_SET"
+        and not _instance_details(component).strip()
+    }
+
+    reference_ms: Optional[int] = None
+    if assessed and len(assessed) < len(components):
+        # The moment the first assessment existed: the oldest team block date.
+        block_dates = [
+            int(block["timestamp"])
+            for component in assessed
+            for block in _parse_assessment_blocks(_instance_details(component))[1]
+            if not block.get("historical")
+            and isinstance(block.get("timestamp"), (int, float))
+            and block["timestamp"] > 0
+        ]
+        if block_dates:
+            reference_ms = min(block_dates)
+        else:
+            # Assessments without dated blocks: a finding is new when it was
+            # reported after every assessed finding.
+            reported = [
+                _parse_attribution_timestamp_ms(component.get("attributed_on"))
+                for component in assessed
+            ]
+            if reported and all(value is not None for value in reported):
+                reference_ms = max(value for value in reported if value is not None)
+
+    count = 0
+    for component in components:
+        reported_ms = _parse_attribution_timestamp_ms(component.get("attributed_on"))
+        is_new = (
+            reference_ms is not None
+            and id(component) in untouched_ids
+            and reported_ms is not None
+            and reported_ms > reference_ms
+        )
+        if is_new:
+            component["is_new_finding"] = True
+            count += 1
+        else:
+            component.pop("is_new_finding", None)
+    return count
+
+
 def _build_group_list_metadata(
     group: Dict[str, Any],
     team_mapping: Dict[str, Any],
@@ -477,6 +550,7 @@ def _build_group_list_metadata(
     )
     attributed_on_ms_numbers = [int(value) for value in attributed_on_ms_values]
     normalized_tags = _normalize_group_tags(group.get("tags") or [], team_mapping)
+    new_finding_count = refresh_new_finding_flags(group)
     summary = _build_assessment_summary(group)
     inconsistency_reasons = _derive_group_inconsistency_reasons(group, summary)
     # The wildcard mapping uses Unassigned as an ownership fallback. It is a
@@ -524,6 +598,7 @@ def _build_group_list_metadata(
         "instance_count": len(components),
         "dependency_relationship": _dependency_relationship(components),
         "cvss_version_mismatch": _has_cvss_version_mismatch(group),
+        "new_finding_count": new_finding_count,
         "assessment_restore_count": int(group.get("assessment_restore_count") or 0),
         "assessment_restore_recoverable_count": int(
             group.get("assessment_restore_recoverable_count") or 0
@@ -553,6 +628,7 @@ def _summarize_component(component: Dict[str, Any]) -> Dict[str, Any]:
         "tags": component.get("tags", []),
         "owner_mapping_keys": component.get("owner_mapping_keys", []),
         "assessment_restore": component.get("assessment_restore"),
+        **({"is_new_finding": True} if component.get("is_new_finding") else {}),
         **(
             {"sync_status": component["sync_status"]}
             if component.get("sync_status")

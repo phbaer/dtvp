@@ -43,6 +43,18 @@ describe('VulnGroupCardDependencies.vue', () => {
         expect(wrapper.text()).not.toContain('Add Component Team Tag')
     })
 
+    it('marks only findings added after the assessment as new', () => {
+        const mountWith = (is_new_finding: boolean) => mount(VulnGroupCardDependencies, {
+            props: { instances: [{ ...instances[0], is_new_finding }] },
+            global: {
+                provide: { user: { role: 'ANALYST' }, teamMapping: ref({}) },
+                stubs: { DependencyChainViewer: true },
+            },
+        })
+        expect(mountWith(true).get('[data-testid="new-finding-badge"]').text()).toBe('New')
+        expect(mountWith(false).find('[data-testid="new-finding-badge"]').exists()).toBe(false)
+    })
+
     it('does not show edit controls for non-reviewers', () => {
         const wrapper = mount(VulnGroupCardDependencies, {
             props: { instances },

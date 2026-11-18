@@ -1023,3 +1023,105 @@ def test_unassessed_version_keeps_assessed_group_incomplete(details):
     group["affected_versions"] = assessed_versions
     metadata = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
     assert metadata["lifecycle"] in {"ASSESSED", "ASSESSED_LEGACY"}
+
+
+def _finding(version, reported, state="NOT_SET", details=""):
+    return {
+        "project_version": version,
+        "components": [{
+            "analysis_state": state,
+            "analysis_details": details,
+            "attributed_on": reported,
+        }],
+    }
+
+
+def _new_flags(group):
+    summary = summarize_grouped_vulnerabilities([group], {})[0]
+    return summary["list_metadata"]["new_finding_count"], [
+        bool(component.get("is_new_finding"))
+        for version in summary["affected_versions"]
+        for component in version["components"]
+    ]
+
+
+# 2026-03-01 and 2026-06-01 in milliseconds.
+MARCH, JUNE = 1772323200000, 1780272000000
+DATED = f"--- [Team: TeamA] [State: NOT_AFFECTED] [Date: {MARCH + 86_400_000}] ---\nok"
+
+
+def test_finding_reported_after_the_assessment_is_new():
+    group = {
+        "id": "CVE-NEW",
+        "tags": ["TeamA"],
+        "affected_versions": [
+            _finding("1.0", MARCH, "NOT_AFFECTED", DATED),
+            _finding("1.1", JUNE),
+        ],
+    }
+    assert _new_flags(group) == (1, [False, True])
+    # The flag is also on the full group, which the detail view returns.
+    assert group["affected_versions"][1]["components"][0]["is_new_finding"] is True
+
+    # Assessing it ends being new.
+    group["affected_versions"][1]["components"][0].update(
+        analysis_state="NOT_AFFECTED", analysis_details=DATED
+    )
+    assert _new_flags(group) == (0, [False, False])
+    assert "is_new_finding" not in group["affected_versions"][1]["components"][0]
+
+
+def test_finding_skipped_when_the_others_were_assessed_is_not_new():
+    # Reported before the assessment was written: incomplete, but not new.
+    group = {
+        "id": "CVE-SKIPPED",
+        "tags": ["TeamA"],
+        "affected_versions": [
+            _finding("1.0", MARCH, "NOT_AFFECTED", DATED),
+            _finding("1.1", MARCH),
+        ],
+    }
+    assert _new_flags(group) == (0, [False, False])
+
+
+def test_undated_assessment_compares_with_when_assessed_findings_were_reported():
+    group = {
+        "id": "CVE-LEGACY",
+        "tags": ["TeamA"],
+        "affected_versions": [
+            _finding("1.0", MARCH, "NOT_AFFECTED", "Legacy text"),
+            _finding("1.1", JUNE, "NOT_AFFECTED", "Legacy text"),
+            _finding("1.2", JUNE + 1),
+            _finding("0.9", MARCH - 1),
+            _finding("0.8", None),
+        ],
+    }
+    assert _new_flags(group) == (1, [False, False, True, False, False])
+
+
+def test_nothing_is_new_without_an_assessment_or_when_all_are_assessed():
+    unassessed = {
+        "id": "CVE-OPEN",
+        "affected_versions": [_finding("1.0", MARCH), _finding("1.1", JUNE)],
+    }
+    assert _new_flags(unassessed) == (0, [False, False])
+
+
+def test_text_without_a_state_is_neither_an_assessment_nor_new():
+    notes_only = {
+        "id": "CVE-NOTES",
+        "affected_versions": [
+            _finding("1.0", MARCH, "NOT_SET", "Some notes"),
+            _finding("1.1", JUNE),
+        ],
+    }
+    assert _new_flags(notes_only) == (0, [False, False])
+
+    in_progress = {
+        "id": "CVE-IN-PROGRESS",
+        "affected_versions": [
+            _finding("1.0", MARCH, "NOT_AFFECTED", DATED),
+            _finding("1.1", JUNE, "NOT_SET", "Looking into it"),
+        ],
+    }
+    assert _new_flags(in_progress) == (0, [False, False])

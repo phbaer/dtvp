@@ -82,8 +82,8 @@ claude mcp add --transport http dtvp https://dtvp.example.com/dtvp/mcp \
 | Tool | Scope | Purpose |
 | :--- | :--- | :--- |
 | `list_projects` | read | Projects and their versions |
-| `search_vulnerabilities` | read | Filter one project's vulnerabilities by text, lifecycle, team, severity, or analysis state; at most 100 rows per call |
-| `get_vulnerability` | read | Description, scores, every finding with its revision and responsible teams, dependency paths, exploitation evidence, and the current team assessments |
+| `search_vulnerabilities` | read | Filter one project's vulnerabilities by text, lifecycle, team, severity, or analysis state; at most 100 rows per call. `new_findings` counts the [findings added after the assessment](review-workflows.md#new-findings) |
+| `get_vulnerability` | read | Description, scores, every finding with its revision and responsible teams (and `new_finding` when it was added after the assessment), dependency paths, exploitation evidence, and the current team assessments |
 | `get_sync_status` | read | Local changes waiting for export, how many of them conflict with a change in Dependency-Track, and the time of the last import |
 | `preview_assessment` | read | The assessment `save_assessment` would store, without saving, plus the revisions to pass on |
 | `save_assessment` | write | Record one team's assessment for every finding of a vulnerability |

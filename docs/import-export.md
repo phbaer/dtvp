@@ -209,6 +209,10 @@ A finding that returns under **new** identifiers is matched by component and
 vulnerability identity against the previous import only, as before, and its
 restored assessment is marked for review.
 
+A finding that appears for the first time in a **new project version** has no
+assessment. DTVP marks it as new instead of copying one; see
+[New findings](review-workflows.md#new-findings).
+
 ## History
 
 Every value a finding's assessment has had in DTVP is kept with its time,

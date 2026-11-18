@@ -77,6 +77,8 @@ export interface Instance {
     vulnerability_uuid: string;
     finding_uuid: string;
     attributed_on?: string | number | null;
+    /** Added after the vulnerability was assessed and not assessed yet. */
+    is_new_finding?: boolean;
     analysis_state: string;
     analysisState?: string;
     analysis_details?: string;
@@ -141,6 +143,8 @@ export interface GroupedVulnListMetadata {
     instance_count?: number;
     dependency_relationship?: GroupedVulnDependencyRelationship;
     cvss_version_mismatch?: boolean;
+    /** Findings added after the vulnerability was assessed, still unassessed. */
+    new_finding_count?: number;
     assessment_restore_count?: number;
     assessment_restore_recoverable_count?: number;
     assessment_restore_reasons?: string[];

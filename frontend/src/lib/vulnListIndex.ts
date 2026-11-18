@@ -67,6 +67,7 @@ export interface VulnListItem {
     automaticAssessmentRescore: AutomaticAssessmentRescoreState | null
     cvssVersionMismatch: boolean
     notRescored?: boolean
+    hasNewFindings?: boolean
     assessmentRestoreCount: number
     assessmentRestoreRecoverableCount: number
     assessmentRestoreStatus: string
@@ -112,6 +113,7 @@ export interface VulnListFilterInput {
     versionFilterList?: readonly string[]
     cvssVersionMismatchOnly?: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
     attributionAgeDays?: number | string | null
     attributionAgeMode?: 'older' | 'younger'
 }
@@ -144,6 +146,7 @@ export interface CompiledVulnListFilters {
     versionSearchTerms: readonly string[]
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
     attributionAgeActive: boolean
     attributionAgeCutoffMs: number | null
     attributionAgeMode: 'older' | 'younger'
@@ -285,6 +288,7 @@ type SmartSearchField =
     | 'dependency'
     | 'tmrescore'
     | 'cvss'
+    | 'findings'
 
 export interface SmartSearchChip {
     field: SmartSearchField
@@ -308,6 +312,7 @@ export interface ParsedVulnSearchQuery {
     tmrescoreTerms: TMRescoreProposalFilter[]
     cvssMismatchOnly: boolean
     notRescoredOnly?: boolean
+    newFindingsOnly?: boolean
 }
 
 const emptyParsedSearch = (raw = ''): ParsedVulnSearchQuery => ({
@@ -325,6 +330,7 @@ const emptyParsedSearch = (raw = ''): ParsedVulnSearchQuery => ({
     tmrescoreTerms: [],
     cvssMismatchOnly: false,
     notRescoredOnly: false,
+    newFindingsOnly: false,
 })
 
 const tokenizeSearchQuery = (query: string): string[] => {
@@ -510,6 +516,9 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 } else if (['NO_RESCORE', 'NO_RESCORING', 'NOT_RESCORED'].includes(normalized)) {
                     parsed.notRescoredOnly = true
                     addChip('cvss', 'Has: no rescore', 'not-rescored')
+                } else if (['NEW', 'NEW_FINDING', 'NEW_FINDINGS'].includes(normalized)) {
+                    parsed.newFindingsOnly = true
+                    addChip('findings', 'Has: new findings', 'new')
                 }
                 break
             }
@@ -812,6 +821,7 @@ export function buildVulnListItem(
             ? metadata.cvss_version_mismatch
             : hasCvssVersionMismatch(group),
         notRescored: group.rescored_cvss == null && !String(group.rescored_vector || '').trim(),
+        hasNewFindings: Number(metadata?.new_finding_count || 0) > 0,
         assessmentRestoreCount,
         assessmentRestoreRecoverableCount,
         assessmentRestoreStatus,
@@ -935,6 +945,7 @@ export function compileVulnListFilters(
         versionSearchTerms: parsedSearch?.versionTerms || [],
         cvssVersionMismatchOnly: !!filters.cvssVersionMismatchOnly,
         notRescoredOnly: !!filters.notRescoredOnly,
+        newFindingsOnly: !!filters.newFindingsOnly,
         attributionAgeActive: filters.attributionAgeDays != null,
         attributionAgeCutoffMs: normalizedAgeDays == null ? null : nowMs - normalizedAgeDays * DAY_MS,
         attributionAgeMode: filters.attributionAgeMode || 'older',
@@ -1065,6 +1076,9 @@ export function matchesSmartSearch(
     if (parsed.notRescoredOnly && !item.notRescored) {
         return false
     }
+    if (parsed.newFindingsOnly && !item.hasNewFindings) {
+        return false
+    }
 
     return true
 }
@@ -1146,6 +1160,10 @@ export function matchesCompiledListFilters(
     }
 
     if (filters.notRescoredOnly && !item.notRescored) {
+        return false
+    }
+
+    if (filters.newFindingsOnly && !item.hasNewFindings) {
         return false
     }
 

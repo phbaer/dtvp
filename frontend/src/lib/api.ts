@@ -312,6 +312,7 @@ export interface TaskVulnGroupListQuery {
     versions?: string[];
     cvss_mismatch?: boolean;
     not_rescored?: boolean;
+    new_findings?: boolean;
     attributed_before_days?: number | null;
     attribution_mode?: 'older' | 'younger';
     tmrescore?: string[];
@@ -414,6 +415,7 @@ export interface TaskVulnGroupListCounts {
     };
     cvss_version_mismatch: number;
     not_rescored?: number;
+    new_findings?: number;
     ids?: Record<string, number>;
     versions: Record<string, number>;
     tags: Record<string, number>;
