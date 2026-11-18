@@ -2,8 +2,10 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .assessment_model import render_team_block
 from .assessment_restore_services import (
     build_missing_rescoring_vector_restore_candidate,
     refresh_group_restore_metadata,
@@ -1465,9 +1467,13 @@ def process_assessment_details(
     state: str = "NOT_SET",
     existing_details: str = "",
     assigned: Optional[List[str]] = None,
+    justification: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
     Parses and merges assessment details, preserving multi-team blocks.
+
+    ``justification`` sets the target team's justification; ``None`` keeps
+    the one it has.
     """
     role = role.upper() if role else "ANALYST"
     target_team = team if team else "General"
@@ -1566,33 +1572,29 @@ def process_assessment_details(
         else (target_block.get("assigned", []) if target_block else [])
     )
 
+    changed = {
+        "historical": False,
+        "state": state,
+        "user": final_user,
+        "reviewer": final_reviewer,
+        "rescored": res_val,
+        "vector": res_vec,
+        "assigned": final_assigned,
+        "details": content,
+        # When this assessment was made. A reviewer who approves does not
+        # re-date the assessor's work.
+        "timestamp": (
+            target_block.get("timestamp")
+            if role == "REVIEWER" and target_block and target_block.get("timestamp")
+            else int(time.time() * 1000)
+        ),
+    }
+    if justification is not None:
+        changed["justification"] = justification
     if target_block:
-        target_block.update(
-            {
-                "historical": False,
-                "state": state,
-                "user": final_user,
-                "reviewer": final_reviewer,
-                "rescored": res_val,
-                "vector": res_vec,
-                "assigned": final_assigned,
-                "details": content,
-            }
-        )
+        target_block.update(changed)
     else:
-        blocks_list.append(
-            {
-                "team": target_team,
-                "historical": False,
-                "state": state,
-                "user": final_user,
-                "reviewer": final_reviewer,
-                "rescored": res_val,
-                "vector": res_vec,
-                "assigned": final_assigned,
-                "details": content,
-            }
-        )
+        blocks_list.append({"team": target_team, **changed})
     blocks_list = _deduplicate_assessment_blocks(blocks_list)
 
     # 6. Reconstruct Final String
@@ -1610,31 +1612,10 @@ def process_assessment_details(
         ):
             continue
 
-        h_parts = [
-            f"[Team: {b['team']}]",
-            f"[State: {b['state']}]",
-            f"[Assessed By: {b['user']}]",
-        ]
-        if b.get("reviewer"):
-            h_parts.append(f"[Reviewed By: {b['reviewer']}]")
-        if b.get("rescored") is not None:
-            h_parts.append(f"[Rescored: {b['rescored']}]")
-        if b.get("vector"):
-            h_parts.append(f"[Rescored Vector: {b['vector']}]")
-        if b.get("ssvc"):
-            h_parts.append(f"[SSVC: {b['ssvc']}]")
-        if b.get("assigned"):
-            h_parts.append(f"[Assigned: {', '.join(b['assigned'])}]")
-        if b.get("historical"):
-            h_parts.append("[Historical: yes]")
-        if b.get("copied_from"):
-            h_parts.append(f"[Copied From: {b['copied_from']}]")
-
-        header = "--- " + " ".join(h_parts) + " ---"
-        body = b.get('details') or ''
-        if b.get("ssvc_details"):
-            body += "\n\n" + b["ssvc_details"]
-        final_parts.append(f"{header}\n{body}")
+        # One renderer for every writer: it keeps every tag a block has
+        # (date, justification, ticket, review confirmations). This function
+        # used to write a subset and dropped the others from all blocks.
+        final_parts.append(render_team_block(b))
 
     final_str = "\n\n".join(final_parts).strip()
 

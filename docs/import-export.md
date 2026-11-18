@@ -86,7 +86,8 @@ The web form saves an assessment as these fields (`fields` in
 `POST /api/assessment`), and the server writes the text from them, always in
 the same form. A save that leaves `free_text` out keeps the free text each
 finding has; an empty string removes it. Other writers (MCP tools, bulk
-workflows) still compose text, which is read into the same fields.
+workflows) still work on text, which is read into the same fields. Every
+text is stored in the same layout, whoever wrote it.
 
 Adoption happens as projects are imported, so after an upgrade the records
 appear project by project. Until a project has been imported once with this

@@ -31,6 +31,37 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def team_from_block(block: dict[str, Any]) -> dict[str, Any]:
+    """One team's fields from a block of the text parser."""
+    return {
+        "team": str(block.get("team") or ""),
+        "state": str(block.get("state") or "NOT_SET"),
+        "justification": (
+            None
+            if block.get("justification") in (None, "", "NOT_SET")
+            else str(block["justification"])
+        ),
+        "assessed_by": (
+            None if block.get("user") in (None, "", "unknown") else str(block["user"])
+        ),
+        "reviewed_by": block.get("reviewer") or None,
+        "assessed_at_ms": (
+            int(block["timestamp"]) if _number(block.get("timestamp")) else None
+        ),
+        "rescored_score": _number(block.get("rescored")),
+        "rescored_vector": block.get("vector") or None,
+        "ssvc": block.get("ssvc") or None,
+        "ssvc_details": block.get("ssvc_details") or None,
+        "assigned": [str(name) for name in block.get("assigned") or []],
+        "ticket": block.get("ticket") or None,
+        "evidence_reviewed": block.get("evidence_reviewed") or None,
+        "version_coverage": block.get("version_coverage") or None,
+        "historical": bool(block.get("historical")),
+        "copied_from": block.get("copied_from") or None,
+        "details": str(block.get("details") or ""),
+    }
+
+
 def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any]:
     """The fields of one finding's assessment.
 
@@ -46,36 +77,7 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
     vector = _VECTOR.search(shared)
     general = next((b for b in blocks if b.get("team") == "General"), None)
     free_text = _PENDING.sub("", _VECTOR.sub("", _SCORE.sub("", shared))).strip()
-    teams = [
-        {
-            "team": str(block.get("team") or ""),
-            "state": str(block.get("state") or "NOT_SET"),
-            "justification": (
-                None
-                if block.get("justification") in (None, "", "NOT_SET")
-                else str(block["justification"])
-            ),
-            "assessed_by": (
-                None if block.get("user") in (None, "", "unknown") else str(block["user"])
-            ),
-            "reviewed_by": block.get("reviewer") or None,
-            "assessed_at_ms": (
-                int(block["timestamp"]) if _number(block.get("timestamp")) else None
-            ),
-            "rescored_score": _number(block.get("rescored")),
-            "rescored_vector": block.get("vector") or None,
-            "ssvc": block.get("ssvc") or None,
-            "ssvc_details": block.get("ssvc_details") or None,
-            "assigned": [str(name) for name in block.get("assigned") or []],
-            "ticket": block.get("ticket") or None,
-            "evidence_reviewed": block.get("evidence_reviewed") or None,
-            "version_coverage": block.get("version_coverage") or None,
-            "historical": bool(block.get("historical")),
-            "copied_from": block.get("copied_from") or None,
-            "details": str(block.get("details") or ""),
-        }
-        for block in blocks
-    ]
+    teams = [team_from_block(block) for block in blocks]
     return {
         "state": str(state or "NOT_SET"),
         "suppressed": bool(suppressed),
@@ -219,38 +221,7 @@ def _render_clean(fields: dict[str, Any]) -> str:
     if fields["free_text"]:
         parts.append(fields["free_text"])
     for team in fields["teams"]:
-        tags = [
-            f"[Team: {team['team']}]",
-            f"[State: {team['state']}]",
-            f"[Assessed By: {team['assessed_by'] or 'unknown'}]",
-        ]
-        if team["reviewed_by"]:
-            tags.append(f"[Reviewed By: {team['reviewed_by']}]")
-        if team["assessed_at_ms"]:
-            tags.append(f"[Date: {team['assessed_at_ms']}]")
-        tags.append(f"[Justification: {team['justification'] or 'NOT_SET'}]")
-        if team["assigned"]:
-            tags.append(f"[Assigned: {', '.join(team['assigned'])}]")
-        if team["evidence_reviewed"]:
-            tags.append(f"[Evidence Reviewed: {team['evidence_reviewed']}]")
-        if team["version_coverage"]:
-            tags.append(f"[Version Coverage: {team['version_coverage']}]")
-        if team["ticket"]:
-            tags.append(f"[Ticket: {team['ticket']}]")
-        if team["rescored_score"] is not None:
-            tags.append(f"[Rescored: {_score(team['rescored_score'])}]")
-        if team["rescored_vector"]:
-            tags.append(f"[Rescored Vector: {team['rescored_vector']}]")
-        if team["ssvc"]:
-            tags.append(f"[SSVC: {team['ssvc']}]")
-        if team["historical"]:
-            tags.append("[Historical: yes]")
-        if team["copied_from"]:
-            tags.append(f"[Copied From: {team['copied_from']}]")
-        body = team["details"]
-        if team["ssvc_details"]:
-            body = f"{body}\n\n{team['ssvc_details']}".strip()
-        parts.append(f"--- {' '.join(tags)} ---\n{body}".rstrip())
+        parts.append(_render_team(team))
     if fields["pending_review"]:
         parts.append(PENDING_REVIEW_MARKER)
     return "\n\n".join(parts)
@@ -262,3 +233,57 @@ def finding_key(instance: dict[str, Any]) -> str:
         str(instance.get(name) or "")
         for name in ("project_uuid", "component_uuid", "vulnerability_uuid")
     )
+
+
+def _render_team(team: dict[str, Any]) -> str:
+    tags = [
+        f"[Team: {team['team']}]",
+        f"[State: {team['state']}]",
+        f"[Assessed By: {team['assessed_by'] or 'unknown'}]",
+    ]
+    if team["reviewed_by"]:
+        tags.append(f"[Reviewed By: {team['reviewed_by']}]")
+    if team["assessed_at_ms"]:
+        tags.append(f"[Date: {team['assessed_at_ms']}]")
+    tags.append(f"[Justification: {team['justification'] or 'NOT_SET'}]")
+    if team["assigned"]:
+        tags.append(f"[Assigned: {', '.join(team['assigned'])}]")
+    if team["evidence_reviewed"]:
+        tags.append(f"[Evidence Reviewed: {team['evidence_reviewed']}]")
+    if team["version_coverage"]:
+        tags.append(f"[Version Coverage: {team['version_coverage']}]")
+    if team["ticket"]:
+        tags.append(f"[Ticket: {team['ticket']}]")
+    if team["rescored_score"] is not None:
+        tags.append(f"[Rescored: {_score(team['rescored_score'])}]")
+    if team["rescored_vector"]:
+        tags.append(f"[Rescored Vector: {team['rescored_vector']}]")
+    if team["ssvc"]:
+        tags.append(f"[SSVC: {team['ssvc']}]")
+    if team["historical"]:
+        tags.append("[Historical: yes]")
+    if team["copied_from"]:
+        tags.append(f"[Copied From: {team['copied_from']}]")
+    body = team["details"]
+    if team["ssvc_details"]:
+        body = f"{body}\n\n{team['ssvc_details']}".strip()
+    return f"--- {' '.join(tags)} ---\n{body}".rstrip()
+
+
+def render_team_block(block: dict[str, Any]) -> str:
+    """One block of the text parser as text, with every tag it carries."""
+    [team] = _clean_fields({"teams": [team_from_block(block)]})["teams"]
+    return _render_team(team)
+
+
+def canonical_assessment_text(state: Any, details: Any, suppressed: Any = False) -> str:
+    """``details`` in the one spacing every stored assessment has.
+
+    Writers lay the same assessment out differently (a blank line after a
+    block header or none), and identical assessments then looked different.
+    Only the layout is changed: when writing the text's fields back would
+    change anything but white space, the text is returned as it came.
+    """
+    text = str(details or "")
+    canonical = _render_clean(_clean_fields(parse_assessment(state, text, suppressed)))
+    return canonical if "".join(canonical.split()) == "".join(text.split()) else text

@@ -167,3 +167,43 @@ def test_every_field_is_stored_as_it_was_sent():
         **sent, "state": "NOT_SET", "suppressed": False, "form": "structured",
     }
 
+
+def test_the_same_assessment_in_two_layouts_becomes_one_text():
+    from dtvp.assessment_model import canonical_assessment_text
+
+    compact = (
+        "[Rescored: 4.0]\n\n"
+        "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] "
+        "[Date: 1794916578955] [Justification: NOT_SET] ---\nReachable.\n\n"
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] "
+        "[Date: 1792582253274] [Justification: NOT_SET] ---\nNot in Core.\n\n"
+        "[Status: Pending Review]"
+    )
+    # As the web form used to write it: a blank line after each header.
+    spaced = compact.replace("---\nReachable", "---\n\nReachable").replace(
+        "---\nNot in Core", "---\n\nNot in Core"
+    )
+    assert spaced != compact
+    assert canonical_assessment_text("EXPLOITABLE", spaced) == compact
+    assert canonical_assessment_text("EXPLOITABLE", compact) == compact
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Legacy note without any team block.",
+        # Tag order the renderer would change.
+        "--- [State: IN_TRIAGE] [Team: Core] [Assessed By: bob] ---\nLooking.",
+        # A tag the fields do not know.
+        "--- [Team: Core] [State: IN_TRIAGE] [Assessed By: bob] [Custom: x] ---\nLooking.",
+        # Text the reader would shorten.
+        "--- [Team: Core] [State: IN_TRIAGE] [Assessed By: bob] "
+        "[Justification: NOT_SET] ---\nKept -- dropped",
+        "",
+    ],
+)
+def test_a_text_is_left_alone_when_more_than_its_layout_would_change(text):
+    from dtvp.assessment_model import canonical_assessment_text
+
+    assert canonical_assessment_text("IN_TRIAGE", text) == text
+

@@ -274,6 +274,7 @@ def build_assessment_payloads(
                 req.state,
                 existing_details,
                 assigned=req.assigned,
+                justification=req.justification,
             )
 
         final_details_str = (
