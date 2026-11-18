@@ -104,12 +104,18 @@ def test_queue_shows_what_would_be_exported_and_what_it_replaces(
     assert first["status"] == "pending"
     assert first["author"] == "rita" and first["origin"] == "individual-assessment"
     assert first["local"]["analysisState"] == "NOT_AFFECTED"
-    assert "Decision 1" in first["local"]["analysisDetails"]
-    assert first["source"] == {
+    # The list carries no texts; they are fetched for the entry that is opened.
+    assert first["local"] == {"analysisState": "NOT_AFFECTED", "isSuppressed": False}
+    assert first["source"] == {"analysisState": "IN_TRIAGE", "isSuppressed": False}
+    texts = client.get("/api/export/texts", params={"update_id": first["update_id"]}).json()
+    assert texts["update_id"] == first["update_id"]
+    assert "Decision 1" in texts["local"]["analysisDetails"]
+    assert texts["source"] == {
         "analysisState": "IN_TRIAGE",
         "analysisDetails": "From the source",
         "isSuppressed": False,
     }
+    assert client.get("/api/export/texts", params={"update_id": "nope"}).status_code == 404
 
 
 def test_reviewer_exports_a_chosen_change_then_the_rest(client, queued):

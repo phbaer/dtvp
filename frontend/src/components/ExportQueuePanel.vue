@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { AlertTriangle, RefreshCw, Trash2, Upload } from '@lucide/vue'
-import { discardExports, exportAssessments, getExportQueue } from '../lib/api'
+import { discardExports, exportAssessments, getExportQueue, getExportTexts, type ExportTexts } from '../lib/api'
 import type { ExportQueue, ExportQueueItem } from '../lib/api'
 
 const queue = ref<ExportQueue | null>(null)
@@ -80,10 +80,33 @@ const findingLabel = (item: ExportQueueItem): string => {
 const formatDate = (value: string | null): string =>
     value ? new Date(value).toLocaleString() : ''
 
+// The list carries no texts; an entry's are loaded when it is opened.
+const texts = ref<Record<string, ExportTexts | 'loading' | 'failed'>>({})
+
+const loadTexts = async (id: string) => {
+    texts.value = { ...texts.value, [id]: 'loading' }
+    try {
+        texts.value = { ...texts.value, [id]: await getExportTexts(id) }
+    } catch {
+        texts.value = { ...texts.value, [id]: 'failed' }
+    }
+}
+
+const textOf = (id: string, side: 'local' | 'source'): string => {
+    const entry = texts.value[id]
+    if (entry === undefined || entry === 'loading') return 'Loading…'
+    if (entry === 'failed') return 'The text could not be loaded.'
+    if (side === 'source' && !entry.source) return 'Not known'
+    return entry[side]?.analysisDetails || '(No details)'
+}
+
 const toggle = (id: string) => {
     const next = new Set(expanded.value)
     if (next.has(id)) next.delete(id)
-    else next.add(id)
+    else {
+        next.add(id)
+        void loadTexts(id)
+    }
     expanded.value = next
 }
 
@@ -277,11 +300,11 @@ onMounted(() => load())
                                 <div class="grid gap-3 md:grid-cols-2">
                                     <div>
                                         <h5 class="mb-1 text-xs font-bold uppercase text-gray-500">Last known in Dependency-Track</h5>
-                                        <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-gray-700 bg-gray-900 p-2 text-xs text-gray-300">{{ item.source ? (item.source.analysisDetails || '(No details)') : 'Not known' }}</pre>
+                                        <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-gray-700 bg-gray-900 p-2 text-xs text-gray-300">{{ textOf(item.update_id, 'source') }}</pre>
                                     </div>
                                     <div>
                                         <h5 class="mb-1 text-xs font-bold uppercase text-gray-500">Will be exported</h5>
-                                        <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-gray-700 bg-gray-900 p-2 text-xs text-gray-100">{{ item.local.analysisDetails || '(No details)' }}</pre>
+                                        <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-gray-700 bg-gray-900 p-2 text-xs text-gray-100">{{ textOf(item.update_id, 'local') }}</pre>
                                     </div>
                                 </div>
                             </td>

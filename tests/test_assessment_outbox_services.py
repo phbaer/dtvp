@@ -887,3 +887,117 @@ def test_reading_existing_assessments_into_fields_is_reported(tmp_path, capsys, 
     AssessmentOutboxStore(path).pending_count()
     assert current_startup_progress() is None
 
+
+# -- each text is stored once -------------------------------------------------
+
+
+def _raw(store, sql):
+    with sqlite3.connect(store.path) as connection:
+        return connection.execute(sql).fetchall()
+
+
+def test_an_adopted_assessment_stores_its_text_once(tmp_path):
+    store = _store(tmp_path)
+    store.reconcile_remote(_remote("NOT_AFFECTED", DTVP_TEXT), fetched_at=_later())
+
+    assert _raw(store, "SELECT base_details, base_same FROM assessment_state") == [(None, 1)]
+    assert _raw(
+        store, "SELECT analysis_details, text_in_record FROM assessment_revisions"
+    ) == [("", 1)]
+    # Readers still see the text in both places.
+    assert store.get_overlay(KEY)["base"]["details"] == DTVP_TEXT
+    assert store.list_revisions(KEY)[0]["analysisDetails"] == DTVP_TEXT
+    assert AssessmentOutboxStore(store.path).get_overlay(KEY)["base"]["details"] == DTVP_TEXT
+
+
+def test_changing_the_record_keeps_the_text_it_replaces(tmp_path):
+    store = _store(tmp_path)
+    store.reconcile_remote(_remote("NOT_AFFECTED", DTVP_TEXT), fetched_at=_later())
+
+    record = store.enqueue_many([_payload("EXPLOITABLE", "Changed here")], author="alice")[0]
+
+    # The value last agreed with the source, and the adoption's history entry.
+    assert store.get_overlay(KEY)["base"]["details"] == DTVP_TEXT
+    history = store.list_revisions(KEY)
+    assert [(h["revision"], h["analysisDetails"]) for h in history] == [
+        (1, "Changed here"), (0, DTVP_TEXT),
+    ]
+    assert _raw(
+        store, "SELECT text_in_record FROM assessment_revisions ORDER BY revision"
+    ) == [(0,), (0,)]
+
+    # Once the source holds the new value, that is stored once again.
+    assert store.mark_synced(KEY, record["revision"])
+    assert _raw(store, "SELECT base_details, base_same FROM assessment_state") == [(None, 1)]
+    assert store.get_overlay(KEY)["base"]["details"] == "Changed here"
+    # And the next change keeps it in turn.
+    store.enqueue_many([_payload("NOT_AFFECTED", "Changed again")])
+    assert store.get_overlay(KEY)["base"]["details"] == "Changed here"
+    assert AssessmentOutboxStore(store.path).get_overlay(KEY)["base"]["details"] == "Changed here"
+
+
+def test_a_differing_agreed_value_is_stored_as_before(tmp_path):
+    store = _store(tmp_path)
+    store.enqueue_many([_payload(details="Mine")], bases={KEY: BASE})
+    assert _raw(store, "SELECT base_details, base_same FROM assessment_state") == [("", 0)]
+    assert store.get_overlay(KEY)["base"] == BASE
+
+    unknown = _store(tmp_path / "other")
+    unknown.enqueue_many([_payload(details="Mine")])
+    assert unknown.get_overlay(KEY)["base"] is None
+
+
+def test_an_existing_database_is_reduced_to_one_copy_of_each_text(tmp_path):
+    path = str(tmp_path / "dtvp.sqlite3")
+    store = AssessmentOutboxStore(path)
+    store.reconcile_remote(_remote("NOT_AFFECTED", DTVP_TEXT), fetched_at=_later())
+    other = ("project", "component-2", "vulnerability")
+    edited = {**_payload("EXPLOITABLE", "Edited"), "component_uuid": "component-2"}
+    store.reconcile_remote(
+        {other: {"state": "IN_TRIAGE", "details": "Adopted", "suppressed": False}},
+        fetched_at=_later(),
+    )
+    store.enqueue_many([edited])
+    before = {key: (store.get_overlay(key), store.list_revisions(key)) for key in (KEY, other)}
+    # Rewind to the layout before this version: every copy written out.
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TRIGGER assessment_state_keep_replaced_text")
+        connection.execute(
+            "UPDATE assessment_state SET base_details = analysis_details WHERE base_same = 1"
+        )
+        connection.execute(
+            """
+            UPDATE assessment_revisions SET analysis_details = (
+                SELECT analysis_details FROM assessment_state s
+                WHERE s.project_uuid = assessment_revisions.project_uuid
+                  AND s.component_uuid = assessment_revisions.component_uuid
+                  AND s.vulnerability_uuid = assessment_revisions.vulnerability_uuid
+            ) WHERE text_in_record = 1
+            """
+        )
+        connection.execute("ALTER TABLE assessment_state DROP COLUMN base_same")
+        connection.execute("ALTER TABLE assessment_revisions DROP COLUMN text_in_record")
+        connection.execute(
+            "DELETE FROM schema_migrations WHERE version = 7 AND namespace = 'assessment_outbox'"
+        )
+
+    upgraded = AssessmentOutboxStore(path)
+
+    assert {
+        key: (upgraded.get_overlay(key), upgraded.list_revisions(key)) for key in (KEY, other)
+    } == before
+    # The unchanged adoption is stored once; the edited record keeps the
+    # texts that differ from it.
+    rows = dict(_raw(upgraded, "SELECT component_uuid, base_same FROM assessment_state"))
+    assert rows == {"component": 1, "component-2": 0}
+    kept = _raw(
+        upgraded,
+        "SELECT component_uuid, revision, analysis_details, text_in_record "
+        "FROM assessment_revisions ORDER BY component_uuid, revision",
+    )
+    assert kept == [
+        ("component", 0, "", 1),
+        ("component-2", 0, "Adopted", 0),
+        ("component-2", 1, "Edited", 0),
+    ]
+

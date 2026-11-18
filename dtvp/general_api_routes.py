@@ -2609,11 +2609,30 @@ def _register_assessment_routes(
     async def get_export_queue(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        """Local assessments waiting for export, for review."""
-        queue = await asyncio.to_thread(deps.cache_manager.list_export_queue)
+        """Local assessments waiting for export, for review. The texts of an
+        entry are fetched separately; a long queue would carry megabytes."""
+        queue = await asyncio.to_thread(
+            deps.cache_manager.list_export_queue, include_texts=False
+        )
         return {
             "mode": get_export_mode(),
             "pending": queue,
+        }
+
+    @router.get("/export/texts")
+    async def get_export_texts(
+        update_id: str,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """The text a queued export would write and the text it replaces."""
+        queue = await asyncio.to_thread(deps.cache_manager.list_export_queue)
+        entry = next((item for item in queue if item["update_id"] == update_id), None)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="No such queued export")
+        return {
+            "update_id": update_id,
+            "local": entry["local"],
+            "source": entry["source"],
         }
 
     @router.post("/export")

@@ -7,6 +7,7 @@ vi.mock('../../lib/api', () => ({
     discardExports: vi.fn(),
     exportAssessments: vi.fn(),
     getExportQueue: vi.fn(),
+    getExportTexts: vi.fn(),
 }))
 
 const item = (overrides: Record<string, unknown> = {}) => ({
@@ -28,8 +29,9 @@ const item = (overrides: Record<string, unknown> = {}) => ({
     last_error: null,
     author: 'rita',
     origin: 'individual-assessment',
-    local: { analysisState: 'NOT_AFFECTED', analysisDetails: 'Local text', isSuppressed: false },
-    source: { analysisState: 'IN_TRIAGE', analysisDetails: 'Source text', isSuppressed: false },
+    // The list carries no texts; they are loaded when an entry is opened.
+    local: { analysisState: 'NOT_AFFECTED', isSuppressed: false },
+    source: { analysisState: 'IN_TRIAGE', isSuppressed: false },
     ...overrides,
 })
 
@@ -71,10 +73,37 @@ describe('ExportQueuePanel', () => {
         expect(row.text()).toContain('rita')
         expect(wrapper.find('[data-testid="export-detail"]').exists()).toBe(false)
 
+        expect(api.getExportTexts).not.toHaveBeenCalled()
+        vi.mocked(api.getExportTexts).mockResolvedValue({
+            update_id: 'u1',
+            local: { analysisState: 'NOT_AFFECTED', analysisDetails: 'Local text', isSuppressed: false },
+            source: { analysisState: 'IN_TRIAGE', analysisDetails: 'Source text', isSuppressed: false },
+        })
         await wrapper.get('[data-testid="export-toggle"]').trigger('click')
+        await flushPromises()
         const detail = wrapper.get('[data-testid="export-detail"]')
+        expect(api.getExportTexts).toHaveBeenCalledWith('u1')
         expect(detail.text()).toContain('Source text')
         expect(detail.text()).toContain('Local text')
+    })
+
+    it('says so when an entry has no known previous value or its texts cannot be loaded', async () => {
+        vi.mocked(api.getExportQueue).mockResolvedValue(queue([item({ source: null }), item({ update_id: 'u2' })]))
+        vi.mocked(api.getExportTexts).mockImplementation(async (id: string) => {
+            if (id === 'u2') throw new Error('down')
+            return { update_id: id, local: { analysisState: 'NOT_AFFECTED', analysisDetails: '', isSuppressed: false }, source: null }
+        })
+        const wrapper = await mountPanel()
+
+        const toggles = wrapper.findAll('[data-testid="export-toggle"]')
+        await toggles[0].trigger('click')
+        await toggles[1].trigger('click')
+        await flushPromises()
+
+        const details = wrapper.findAll('[data-testid="export-detail"]')
+        expect(details[0].text()).toContain('Not known')
+        expect(details[0].text()).toContain('(No details)')
+        expect(details[1].text()).toContain('The text could not be loaded.')
     })
 
     it('exports one change or all of them and reports the outcome', async () => {
