@@ -250,7 +250,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+          # Pull requests from forks, or created by pushing to refs/for/*,
+          # get no secrets. Reading the repository does not need this one.
+          token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN || github.token }}
           fetch-depth: 0
       - name: Install Node.js runtime library
         run: |
@@ -363,6 +365,13 @@ jobs:
             --tag "$repository:${tags[0]}" \
             .
 
+          if [[ -z "$REGISTRY_TOKEN" ]]; then
+            # No secrets for this pull request (a fork, or one created by
+            # pushing to refs/for/*): the image was built, which is the
+            # check; it cannot be published.
+            echo "::warning::Image built but not published: this pull request has no access to the registry token. Open it from a branch of this repository to get a pr-$PR_NUMBER image."
+            exit 0
+          fi
           printf '%s' "$REGISTRY_TOKEN" | buildah login --username "$REGISTRY_USER" --password-stdin "$REGISTRY"
           for tag in "${tags[@]}"; do
             buildah push "$repository:${tags[0]}" "docker://$repository:$tag"

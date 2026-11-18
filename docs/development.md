@@ -89,6 +89,12 @@ rewriting project manifests or lockfiles in CI.
 The committed frontend lockfile resolves packages only from the default
 `registry.npmjs.org` registry; do not persist private registry or mirror URLs.
 
+Forgejo passes no secrets to pull requests from forks or to pull requests
+created by pushing to `refs/for/<branch>`. For those, the image job still
+builds the image as a check but does not publish it, and says so in a
+warning. Open the pull request from a branch of this repository to get a
+`pr-<number>` test image.
+
 ## Split Backend And Frontend
 
 The [quick start](../README.md#quick-start) is preferred for normal work. To run processes separately,
