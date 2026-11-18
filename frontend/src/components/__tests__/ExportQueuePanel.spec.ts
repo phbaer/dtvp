@@ -36,7 +36,6 @@ const item = (overrides: Record<string, unknown> = {}) => ({
 const queue = (pending: any[], mode: 'auto' | 'manual' = 'manual') => ({
     mode,
     pending,
-    conflicts: pending.filter(entry => entry.status === 'diverged').length,
 })
 
 const mountPanel = async () => {
@@ -80,7 +79,7 @@ describe('ExportQueuePanel', () => {
 
     it('exports one change or all of them and reports the outcome', async () => {
         vi.mocked(api.getExportQueue).mockResolvedValue(queue([item(), item({ update_id: 'u2' })]))
-        vi.mocked(api.exportAssessments).mockResolvedValue({ exported: 1, dropped: 0, remaining: 1, conflicts: 0, failed: [] })
+        vi.mocked(api.exportAssessments).mockResolvedValue({ exported: 1, dropped: 0, remaining: 1, failed: [] })
         const wrapper = await mountPanel()
 
         await wrapper.findAll('[data-testid="export-one"]')[1]!.trigger('click')
@@ -95,14 +94,14 @@ describe('ExportQueuePanel', () => {
         expect(api.exportAssessments).toHaveBeenLastCalledWith(undefined)
     })
 
-    it('does not offer to export a conflict and says how to settle it', async () => {
-        vi.mocked(api.getExportQueue).mockResolvedValue(queue([item({ status: 'diverged' }), item({ update_id: 'u2' })]))
+    it('offers every entry for export, also when Dependency-Track holds a different value', async () => {
+        vi.mocked(api.getExportQueue).mockResolvedValue(queue([item({ status: 'error', last_error: 'not kept' }), item({ update_id: 'u2' })]))
         const wrapper = await mountPanel()
 
-        expect(wrapper.get('[data-testid="export-conflicts"]').text()).toContain('1 assessment was also changed in')
-        expect(wrapper.findAll('[data-testid="export-one"]')).toHaveLength(1)
-        expect(wrapper.get('[data-testid="export-all"]').text()).toContain('Export all (1)')
-        expect(wrapper.findAll('[data-testid="export-row"]')[0]!.text()).toContain('Conflict')
+        expect(wrapper.find('[data-testid="export-conflicts"]').exists()).toBe(false)
+        expect(wrapper.findAll('[data-testid="export-one"]')).toHaveLength(2)
+        expect(wrapper.get('[data-testid="export-all"]').text()).toContain('Export all (2)')
+        expect(wrapper.findAll('[data-testid="export-row"]')[0]!.text()).not.toContain('Conflict')
     })
 
     it('shows why an export is stuck and lets a reviewer discard it', async () => {
@@ -157,7 +156,7 @@ describe('ExportQueuePanel', () => {
     it('reports failures from the export and from loading', async () => {
         vi.mocked(api.getExportQueue).mockResolvedValue(queue([item({ status: 'error', last_error: 'timeout' })]))
         vi.mocked(api.exportAssessments).mockResolvedValue({
-            exported: 0, dropped: 1, remaining: 1, conflicts: 0,
+            exported: 0, dropped: 1, remaining: 1,
             failed: [{ update_id: 'u1', status: 'error', error: 'Dependency-Track answered 503' }],
         })
         const wrapper = await mountPanel()

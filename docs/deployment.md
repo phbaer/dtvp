@@ -65,6 +65,13 @@ Deployment rules:
   and uses a 2048-connection accept backlog.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
   logs time cache and integration initialization.
+- Database and data migrations run during startup and report what they are
+  doing: each step is printed to the console with a `[startup]` prefix, and
+  the start page shows the current step, for example
+  `Data migration: 4000 of 51000 assessments read into fields`, until it is
+  finished. Reading existing assessments into fields happens once, at the
+  first start of a version that needs it; 51,000 assessments took under
+  three seconds in a test on a development machine.
 - The DTVP container startup script prints its packaged project version and
   image build number before importing the application, so deployment identity
   remains visible in Docker logs even if initialization fails.

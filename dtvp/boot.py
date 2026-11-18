@@ -6,6 +6,7 @@ import traceback
 from contextlib import AsyncExitStack
 from typing import Any, Awaitable, Callable
 
+from .startup_progress import clear_startup_progress
 from .startup_page_services import (
     build_startup_page_html,
     build_startup_status_payload,
@@ -136,6 +137,7 @@ class BootApp:
                 await stack.enter_async_context(lifespan_context(real_app))
             self._real_app_stack = stack
             self.real_app = real_app
+            clear_startup_progress()
             self._set_state("ready", "DTVP is ready.")
         except asyncio.CancelledError:
             self._set_state("stopped", "DTVP startup was stopped.")

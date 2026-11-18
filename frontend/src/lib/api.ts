@@ -1089,19 +1089,6 @@ export const updateAssessment = async (payload: AssessmentPayload) => {
 };
 
 /**
- * Settle findings changed both in DTVP and in Dependency-Track: keep the
- * DTVP value (`local`, exported over the other) or take Dependency-Track's
- * (`remote`).
- */
-export const resolveAssessmentConflicts = async (
-    instances: any[],
-    resolution: 'local' | 'remote',
-): Promise<Array<{ finding_uuid: string | null; analysis: any }>> => {
-    const res = await api.post('/assessments/conflicts/resolve', { instances, resolution });
-    return res.data;
-};
-
-/**
  * Delete one team's assessment of the given findings (`"General"` for the
  * global one), or with `null` the whole assessment. Exported like a save.
  */
@@ -2312,7 +2299,6 @@ export interface ExportQueueItem {
 export interface ExportQueue {
     mode: 'auto' | 'manual';
     pending: ExportQueueItem[];
-    conflicts: number;
 }
 
 export interface ExportResult {
@@ -2320,7 +2306,6 @@ export interface ExportResult {
     /** The finding no longer exists in Dependency-Track; its assessment is kept. */
     dropped: number;
     remaining: number;
-    conflicts: number;
     failed: Array<{ update_id: string; status: string; error: string | null }>;
 }
 

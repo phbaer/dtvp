@@ -7,6 +7,7 @@
 | Decision status | Accepted (2026-11-17, repository owner) |
 | Implementation status | Implemented (2026-11-17), with the limits listed under [Implementation progress](#implementation-progress); see [Import and export](../import-export.md) |
 | Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md) |
+| Superseded in part | The three-way merge of assessments and the conflict handling are replaced by [ADR 0003](0003-dtvp-is-the-record-for-assessments.md) |
 
 ## Context
 

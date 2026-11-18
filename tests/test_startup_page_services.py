@@ -43,3 +43,27 @@ def test_startup_page_uses_contextual_status_endpoint():
     assert "Preparing cache." in html
     assert '"/dtvp/api/startup"' in html
     assert '"/dtvp/"' in html
+
+
+def test_startup_status_shows_the_migration_in_progress_only_while_starting():
+    from dtvp.startup_progress import clear_startup_progress, report_startup_progress
+
+    report_startup_progress("Data migration: 2000 of 51000 assessments read into fields")
+    try:
+        starting = build_startup_status_payload(
+            {"status": "starting", "message": "DTVP application is loading."}
+        )
+        ready = build_startup_status_payload(
+            {"status": "ready", "message": "DTVP is ready."}
+        )
+        html = build_startup_page_html(
+            state={"status": "starting", "message": "loading"}, context_path=""
+        )
+    finally:
+        clear_startup_progress()
+
+    assert starting["message"].startswith("Data migration: 2000 of 51000")
+    assert ready["message"] == "DTVP is ready."
+    assert "Data migration: 2000 of 51000" in html
+    assert build_startup_status_payload({"status": "starting"})["message"] == "DTVP is starting."
+

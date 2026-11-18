@@ -116,7 +116,7 @@ constraints, and CI conventions.
 | :--- | :--- |
 | **Open** | No assessment started |
 | **Incomplete** | Required team or finding coverage is missing |
-| **Conflicting** | Assessment data disagrees, needs repair, or was changed both here and in Dependency-Track |
+| **Conflicting** | Assessment data disagrees or needs repair |
 | **Ready for approval** | Complete, consistent assessments await reviewer sign-off |
 | **Assessed** | Complete with no pending approval; includes legacy assessments |
 
@@ -207,7 +207,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Configuration](docs/configuration.md) | Environment variables and defaults |
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
-| [Import and export](docs/import-export.md) | The local database, how imports merge assessments, automatic and manual export, conflicts, vanished findings, and history |
+| [Import and export](docs/import-export.md) | The local database as the record for assessments, adoption on import, automatic and manual export, failing exports, vanished findings, and history |
 | [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
 | [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |

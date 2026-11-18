@@ -21,7 +21,7 @@ from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
 from .evidence_services import evidence_sources
 
 from .access_token_services import forwardable_bearer
-from .assessment_outbox_services import AssessmentNotDivergedError, assessment_key
+from .assessment_outbox_services import assessment_key
 from .assessment_use_cases import (
     AssessmentConflictError,
     AssessmentPermissionError,
@@ -95,11 +95,6 @@ from .team_group_services import (
 
 class AssessmentDetailsRequest(BaseModel):
     instances: list[dict]
-
-
-class AssessmentConflictResolutionRequest(BaseModel):
-    instances: list[dict]
-    resolution: Literal["local", "remote"]
 
 
 class ExportDiscardRequest(BaseModel):
@@ -2553,53 +2548,6 @@ def _register_assessment_routes(
 
         return results
 
-    @router.post("/assessments/conflicts/resolve")
-    async def resolve_assessment_conflicts(
-        req: AssessmentConflictResolutionRequest,
-        *,
-        user: Annotated[str, Depends(current_user_dependency)],
-    ):
-        """Settle findings whose local assessment and source value were both
-        changed: keep the local value (exported over the source's) or accept
-        the source's value."""
-        keys = [assessment_key(instance) for instance in req.instances]
-        if not keys or any(key is None for key in keys):
-            raise HTTPException(
-                status_code=422,
-                detail="Each instance needs project_uuid, component_uuid, "
-                "and vulnerability_uuid",
-            )
-        try:
-            analyses = await deps.cache_manager.resolve_assessment_conflicts(
-                keys, req.resolution, author=user
-            )
-        except AssessmentNotDivergedError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        deps.logger.info(
-            "%s resolved %d assessment conflict(s) for the %s value",
-            user,
-            len(keys),
-            req.resolution,
-        )
-        try:
-            await asyncio.to_thread(
-                _refresh_grouped_vuln_task_snapshots,
-                deps.tasks,
-                [
-                    (instance, _assessment_payload_from_analysis(analysis))
-                    for instance, analysis in zip(req.instances, analyses)
-                ],
-                deps.load_team_mapping(),
-            )
-        except Exception:
-            deps.logger.exception(
-                "Failed to refresh task snapshots after conflict resolution"
-            )
-        return [
-            {"finding_uuid": instance.get("finding_uuid"), "analysis": analysis}
-            for instance, analysis in zip(req.instances, analyses)
-        ]
-
     @router.post("/assessment/delete")
     async def delete_assessment_route(
         req: AssessmentDeletionRequest,
@@ -2658,7 +2606,6 @@ def _register_assessment_routes(
         return {
             "mode": get_export_mode(),
             "pending": queue,
-            "conflicts": sum(1 for item in queue if item["status"] == "diverged"),
         }
 
     @router.post("/export")
@@ -2710,7 +2657,6 @@ def _register_assessment_routes(
             # The source no longer has the finding; the assessment is kept.
             "dropped": dropped,
             "remaining": len(after),
-            "conflicts": sum(1 for item in after if item["status"] == "diverged"),
             "failed": [
                 {
                     "update_id": item["update_id"],
@@ -2718,7 +2664,7 @@ def _register_assessment_routes(
                     "error": item["last_error"],
                 }
                 for item in considered(after, requested)
-                if item["status"] in ("error", "diverged")
+                if item["status"] == "error"
             ],
         }
 
@@ -2769,6 +2715,28 @@ def _register_assessment_routes(
             vulnerability_uuid,
             limit=limit,
         )
+
+    @router.get("/assessments/fields")
+    async def get_assessment_fields(
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """A finding's assessment as atomic fields: state, suppression, review
+        status, rescoring, and one entry per team."""
+        fields = await asyncio.to_thread(
+            deps.cache_manager.get_assessment_fields,
+            project_uuid,
+            component_uuid,
+            vulnerability_uuid,
+        )
+        if fields is None:
+            raise HTTPException(
+                status_code=404, detail="No assessment is recorded for this finding"
+            )
+        return fields
 
     @router.post("/assessments/restore-preview")
     async def preview_assessment_restore(

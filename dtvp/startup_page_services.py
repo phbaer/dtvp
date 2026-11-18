@@ -2,6 +2,8 @@ import json
 from html import escape
 from typing import Any, Mapping
 
+from .startup_progress import current_startup_progress
+
 
 def contextual_path(context_path: str, suffix: str) -> str:
     normalized_suffix = suffix if suffix.startswith("/") else f"/{suffix}"
@@ -15,6 +17,9 @@ def build_startup_status_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     message = str(state.get("message") or "DTVP is starting.")
     if status == "failed":
         message = "DTVP startup failed. Check the backend logs."
+    elif status == "starting":
+        # A migration in progress says more than "loading".
+        message = current_startup_progress() or message
     return {
         "status": status,
         "ready": status == "ready",

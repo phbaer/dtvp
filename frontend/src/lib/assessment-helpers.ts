@@ -748,10 +748,6 @@ const getGroupInconsistencyReasonsFromSummary = (
         reasons.push('MISSING_RESCORING_VECTOR');
     }
 
-    if (allInstances.some(instance => (instance.sync_status || instance.dtvp_sync_status) === 'diverged')) {
-        reasons.push('SOURCE_CONFLICT');
-    }
-
     const distinctNonMissingStates = new Set(componentStates.filter(state => state !== 'NOT_SET'));
     if (distinctNonMissingStates.size > 1) {
         reasons.push('ANALYSIS_STATE_MISMATCH');

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component } from 'vue'
-import { updateAssessment, getAssessmentDetails, getKnownUsers, resolveAssessmentConflicts, deleteAssessment } from '../lib/api'
+import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment } from '../lib/api'
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
@@ -180,36 +180,19 @@ const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Ana
 const syncStatusOf = (analysis: any): string =>
     String(analysis?.dtvpSyncStatus || analysis?.dtvp_sync_status || '').toLowerCase()
 
-// Findings changed both here and in Dependency-Track. Their export waits
-// until someone chooses which version to keep.
-const sourceConflicts = computed(() => allInstances.value
-    .map((instance: any) => {
-        // A reload or save gives the freshest state; until then the state
-        // that came with the vulnerability detail is what we know.
-        const analysis = originalAnalysis.value[instance.finding_uuid] ?? {
-            analysisState: instance.analysis_state,
-            analysisDetails: instance.analysis_details,
-            isSuppressed: instance.is_suppressed,
-            dtvpSyncStatus: instance.sync_status || instance.dtvp_sync_status,
-            dtvpRemote: instance.source_assessment,
-        }
-        const remote = analysis?.dtvpRemote
-        if (syncStatusOf(analysis) !== 'diverged' || !remote) return null
-        return {
-            finding_uuid: instance.finding_uuid,
-            project_name: instance.project_name,
-            project_version: instance.project_version,
-            component_name: instance.component_name,
-            component_version: instance.component_version,
-            current: remote,
-            your_change: analysis,
-            instance,
-        }
-    })
-    .filter((conflict: any) => conflict !== null))
-const showSourceConflictModal = ref(false)
-const resolvingSourceConflict = ref(false)
-const sourceConflictError = ref('')
+// DTVP is the record. While an export is waiting or failing, the backend
+// reports what Dependency-Track still holds when that differs; the export
+// overwrites it. This is information only, there is nothing to decide.
+const sourceOutOfDate = computed(() => allInstances.value.some((instance: any) => {
+    // A reload or save gives the freshest state; until then the state
+    // that came with the vulnerability detail is what we know.
+    const analysis = originalAnalysis.value[instance.finding_uuid] ?? {
+        dtvpSyncStatus: instance.sync_status || instance.dtvp_sync_status,
+        dtvpRemote: instance.source_assessment,
+    }
+    return !!analysis?.dtvpRemote
+        && ['pending', 'syncing', 'error', 'failed'].includes(syncStatusOf(analysis))
+}))
 
 // Tell the list about a change that did not come from the save form, the
 // way a save does. `update` would mean "ownership changed" and makes the
@@ -228,28 +211,6 @@ const emitRefreshedAssessment = () => {
             source_assessment: instance.source_assessment ?? null,
         })),
     })
-}
-
-const resolveSourceConflicts = async (resolution: 'local' | 'remote') => {
-    if (resolvingSourceConflict.value || sourceConflicts.value.length === 0) return
-    resolvingSourceConflict.value = true
-    sourceConflictError.value = ''
-    try {
-        await resolveAssessmentConflicts(
-            sourceConflicts.value.map((conflict: any) => conflict.instance),
-            resolution,
-        )
-        showSourceConflictModal.value = false
-        await refreshDetails()
-        historyRefreshKey.value += 1
-        emitRefreshedAssessment()
-    } catch (err: any) {
-        sourceConflictError.value = err?.response?.data?.detail
-            || err?.message
-            || 'The conflict could not be resolved.'
-    } finally {
-        resolvingSourceConflict.value = false
-    }
 }
 
 // Explicit deletion of one team's assessment or the whole assessment.
@@ -297,13 +258,6 @@ const confirmDeleteAssessment = async (team: string | null) => {
 
 const assessmentPersistenceStatus = computed(() => {
     const analyses = Object.values(originalAnalysis.value)
-    if (sourceConflicts.value.length > 0) {
-        return {
-            kind: 'conflict',
-            label: 'Changed here and in Dependency-Track — choose a version',
-            detail: 'Nothing is exported for this vulnerability until you decide.',
-        }
-    }
     const failed = analyses.find(analysis =>
         ['error', 'failed'].includes(
             String(analysis?.dtvpSyncStatus || analysis?.dtvp_sync_status || '').toLowerCase(),
@@ -312,7 +266,9 @@ const assessmentPersistenceStatus = computed(() => {
     if (failed) {
         return {
             kind: 'error',
-            label: 'Saved locally — Dependency-Track sync is retrying',
+            label: sourceOutOfDate.value
+                ? 'Saved locally — Dependency-Track is out of date, export is retrying'
+                : 'Saved locally — Dependency-Track sync is retrying',
             detail: failed.dtvpSyncError || failed.dtvp_sync_error || '',
         }
     }
@@ -325,8 +281,12 @@ const assessmentPersistenceStatus = computed(() => {
     return queued
         ? {
             kind: 'pending',
-            label: 'Saved locally — syncing to Dependency-Track',
-            detail: '',
+            label: sourceOutOfDate.value
+                ? 'Saved locally — Dependency-Track is out of date'
+                : 'Saved locally — syncing to Dependency-Track',
+            detail: sourceOutOfDate.value
+                ? 'Dependency-Track holds a different value. The next export overwrites it.'
+                : '',
         }
         : null
 })
@@ -2943,19 +2903,8 @@ const teamBlockStateColor = (state?: string): string => {
                         </span>
                     </button>
                 </div>
-                <button
-                    v-if="assessmentPersistenceStatus?.kind === 'conflict'"
-                    type="button"
-                    data-testid="assessment-source-conflict"
-                    class="my-1.5 inline-flex shrink-0 items-center gap-1.5 rounded border border-red-700 bg-red-950/60 px-2 py-1 text-[10px] font-semibold text-red-200 hover:bg-red-900/60"
-                    :title="assessmentPersistenceStatus.detail"
-                    @click="showSourceConflictModal = true"
-                >
-                    <AlertTriangle :size="12" aria-hidden="true" />
-                    {{ assessmentPersistenceStatus.label }}
-                </button>
                 <div
-                    v-else-if="assessmentPersistenceStatus"
+                    v-if="assessmentPersistenceStatus"
                     data-testid="assessment-persistence-status"
                     class="my-1.5 inline-flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 text-[10px] font-semibold"
                     :class="assessmentPersistenceStatus.kind === 'error'
@@ -3921,22 +3870,6 @@ const teamBlockStateColor = (state?: string): string => {
       @close="showConflictModal = false"
       @use-server-state="handleUseServerState"
       @force-overwrite="() => handleUpdate(true)"
-    />
-
-    <!-- Changed both here and in Dependency-Track -->
-    <ConflictResolutionModal
-      :show="showSourceConflictModal"
-      :conflictData="sourceConflicts"
-      :busy="resolvingSourceConflict"
-      title="Changed here and in Dependency-Track"
-      :intro="sourceConflictError || 'This assessment was changed in DTVP and, independently, in Dependency-Track. Nothing is exported until you choose which version to keep. The other version stays in the history.'"
-      server-heading="Dependency-Track"
-      local-heading="DTVP (not exported)"
-      use-server-label="Use the Dependency-Track version"
-      overwrite-label="Keep the DTVP version and export it"
-      @close="showSourceConflictModal = false"
-      @use-server-state="() => resolveSourceConflicts('remote')"
-      @force-overwrite="() => resolveSourceConflicts('local')"
     />
 
     <DeleteAssessmentModal

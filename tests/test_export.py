@@ -94,7 +94,6 @@ def test_queue_shows_what_would_be_exported_and_what_it_replaces(
     body = client.get("/api/export").json()
 
     assert body["mode"] == "manual"
-    assert body["conflicts"] == 0
     assert [item["vulnerability_id"] for item in body["pending"]] == [
         "CVE-2026-0001",
         "CVE-2026-0002",
@@ -123,7 +122,6 @@ def test_reviewer_exports_a_chosen_change_then_the_rest(client, queued):
         "exported": 1,
         "dropped": 0,
         "remaining": 1,
-        "conflicts": 0,
         "failed": [],
     }
     assert queued.update_analysis.await_count == 1
@@ -132,25 +130,6 @@ def test_reviewer_exports_a_chosen_change_then_the_rest(client, queued):
     rest = client.post("/api/export", json={})
     assert rest.json()["exported"] == 1 and rest.json()["remaining"] == 0
     assert client.get("/api/export").json()["pending"] == []
-
-
-def test_export_skips_conflicts_and_reports_them(client, queued):
-    queued.get_analysis.return_value = {
-        "analysisState": "EXPLOITABLE",
-        "analysisDetails": "Changed in the source",
-        "isSuppressed": False,
-    }
-
-    result = client.post("/api/export", json={}).json()
-
-    assert result["exported"] == 0
-    assert result["remaining"] == 2 and result["conflicts"] == 2
-    assert {item["status"] for item in result["failed"]} == {"diverged"}
-    queued.update_analysis.assert_not_awaited()
-    body = client.get("/api/export").json()
-    assert body["conflicts"] == 2
-    # The queue shows the value the source now holds.
-    assert body["pending"][0]["source"]["analysisDetails"] == "Changed in the source"
 
 
 def test_failed_exports_are_reported_with_their_error(client, queued):
@@ -227,6 +206,14 @@ def test_failures_are_counted_and_stuck_exports_can_be_discarded(client, queued)
         params={"project_uuid": "p1", "component_uuid": "component-1", "vulnerability_uuid": "vuln-1"},
     ).json()
     assert (history[0]["origin"], history[0]["author"]) == ("export-discarded", "rita")
+    # The same assessment as atomic fields.
+    identity = {"project_uuid": "p1", "component_uuid": "component-1", "vulnerability_uuid": "vuln-1"}
+    fields = client.get("/api/assessments/fields", params=identity).json()
+    assert (fields["form"], fields["free_text"]) == ("text", "From the source")
+    missing = client.get(
+        "/api/assessments/fields", params={**identity, "component_uuid": "unknown"}
+    )
+    assert missing.status_code == 404
 
 
 def test_an_access_token_cannot_discard_exports(client, queued, monkeypatch):

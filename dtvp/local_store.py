@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .sqlite_migration_services import run_sqlite_migrations
+from .startup_progress import report_startup_progress
 
 LOCAL_STORE_MIGRATION_NAMESPACE = "local_store"
 DATABASE_FILENAME = "dtvp.sqlite3"
@@ -550,7 +551,17 @@ class LocalStore:
                 "analyses": 0,
                 "skipped": 0,
             }
+            report_startup_progress(
+                "Data migration: importing the JSON cache into the database"
+            )
             self.write_many(self._legacy_documents(base_path, counts, marker))
+            report_startup_progress(
+                "Data migration: imported "
+                + ", ".join(f"{count} {name}" for name, count in counts.items() if count)
+                if any(counts.values())
+                else "Data migration: the JSON cache was empty",
+                done=True,
+            )
             return counts
 
     def _legacy_documents(

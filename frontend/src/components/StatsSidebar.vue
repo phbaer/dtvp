@@ -1038,10 +1038,6 @@ const handleCopy = () => {
                                 <span class="text-gray-500">Failing</span>
                                 <span class="font-medium tabular-nums text-red-300">{{ props.cacheStatusDetail.failed_exports }}</span>
                             </div>
-                            <div v-if="(props.cacheStatusDetail.diverged_assessments ?? 0) > 0" class="flex justify-between" title="Assessments changed both here and in Dependency-Track; their export waits for a decision.">
-                                <span class="text-gray-500">Conflicts</span>
-                                <span class="font-medium tabular-nums text-amber-300">{{ props.cacheStatusDetail.diverged_assessments }}</span>
-                            </div>
                         </div>
                     </div>
                 </div>

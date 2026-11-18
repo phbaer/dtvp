@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .startup_progress import report_startup_progress
+
 
 MIGRATION_FILENAME_RE = re.compile(r"^(\d+)_(.+)\.sql$")
 
@@ -133,6 +135,10 @@ def run_sqlite_migrations(
             continue
 
         statements = _iter_sql_statements(migration.sql)
+        report_startup_progress(
+            f"Database migration: {namespace} {migration.version} "
+            f"({migration.name.replace('_', ' ')})"
+        )
         with connection:
             # sqlite3 opens a transaction only before data changes, so
             # leading schema statements would commit one by one and a crash
@@ -161,6 +167,9 @@ def run_sqlite_migrations(
                 ),
             )
         applied_now.append(migration.version)
+        report_startup_progress(
+            f"Database migration: {namespace} {migration.version} applied", done=True
+        )
         if logger:
             logger.info(
                 "Applied SQLite migration %s/%s from %s",

@@ -416,7 +416,7 @@ class McpToolService:
         status = await asyncio.to_thread(cache_manager.get_cache_status)
         return {
             "pending_exports": status.get("pending_updates", 0),
-            "source_conflicts": status.get("diverged_assessments", 0),
+            "failed_exports": status.get("failed_exports", 0),
             "last_import_at": status.get("last_refreshed_at"),
             "projects": status.get("projects", 0),
         }
@@ -828,8 +828,8 @@ def build_mcp_server(service: McpToolService) -> Any:
     @server.tool(annotations=read_only)
     async def get_sync_status(ctx: Context) -> dict[str, Any]:
         """How many local assessment changes still wait for export to
-        Dependency-Track, how many of them conflict with a change made there
-        (a human must decide those), and when data was last imported."""
+        Dependency-Track, how many exports keep failing, and when data was
+        last imported."""
         return await call(ctx, service.get_sync_status)
 
     @server.tool(annotations=read_only)
