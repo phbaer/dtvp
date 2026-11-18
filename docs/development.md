@@ -58,8 +58,23 @@ and jsdom 31. Icons use the maintained `@lucide/vue` package instead of the depr
 `lucide-vue-next`; component imports and test mocks must use the new package name.
 TypeScript stays on 6.0.3: the current `vue-tsc` 3.3.14 loads
 `typescript/lib/tsc`, which TypeScript 7's native compiler no longer exports.
-Revisit that constraint when Vue's type checker supports the native compiler;
-do not bypass Vue component type checking to upgrade TypeScript.
+Do not bypass Vue component type checking to upgrade TypeScript, and do not
+take the TypeScript 7 bump in routine dependency updates.
+Support is planned for TypeScript 7.1 through Vue Language Tools v4, which
+replaces `vue-tsc` with `tsc --runExternalCode` and a `contentMappers` entry for
+`@vue/content-mapper` in `tsconfig.app.json`
+([tracking issue](https://github.com/vuejs/language-tools/issues/5381),
+[v4 pull request](https://github.com/vuejs/language-tools/pull/6170)).
+A trial on 2026-11-17 with `typescript@7.1.0-beta` and
+`@vue/content-mapper@4.0.0-alpha.3` built and passed the unit tests, but the
+type check reported 240 errors where `vue-tsc` reports none: about 225 from an
+alpha bug with bound `data-*` attributes on native elements
+([#6355](https://github.com/vuejs/language-tools/issues/6355), fixed after
+alpha.3), about 14 from attributes such as `data-testid`, `id`, and `title`
+passed to components that do not declare them, which v4 rejects by design, and
+one suspected false positive in a `v-if`/`v-else` chain. Installing the
+prereleases also required `--legacy-peer-deps`. Revisit once TypeScript 7.1 is
+stable and `@vue/content-mapper` has left alpha.
 CI uses `setup-uv`'s direct latest-release path, which avoids the remote version
 manifest that range resolution requires. `Dockerfile.free-threaded` likewise
 uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build

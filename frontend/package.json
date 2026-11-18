@@ -23,22 +23,22 @@
     "test:ui:real-stack": "DTVP_E2E_REAL_STACK=true playwright test --config=playwright.manual.config.ts e2e/tmrescore-real-stack.manual.ts e2e/code-analysis-real-stack.manual.ts"
   },
   "dependencies": {
-    "@lucide/vue": "^1.72.0",
+    "@lucide/vue": "^1.74.0",
     "@tailwindcss/postcss": "^4.3.5",
     "ae-cvss-calculator": "^1.0.13",
     "autoprefixer": "^10.6.2",
     "axios": "^1.21.1",
-    "marked": "^18.2.0",
-    "postcss": "^8.5.32",
+    "marked": "^18.2.1",
+    "postcss": "^8.5.33",
     "vue": "^3.5.45",
-    "vue-router": "^5.5.0"
+    "vue-router": "^5.5.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.6",
     "@vitejs/plugin-vue": "^6.0.11",
     "@vitest/coverage-v8": "^5.1.0",
-    "@vue/test-utils": "^2.5.1",
+    "@vue/test-utils": "^2.6.0",
     "@vue/tsconfig": "^0.9.1",
     "flush-promises": "^1.0.2",
     "jsdom": "^31.0.1",
