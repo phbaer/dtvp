@@ -1490,6 +1490,47 @@ class AssessmentOutboxStore:
             for row in rows
         ]
 
+    def list_ticket_histories(self) -> dict[AssessmentKey, list[dict[str, Any]]]:
+        """Every version of the assessments that ever named a ticket.
+
+        Per finding, oldest first. Only findings with a ``[Ticket: …]`` tag in
+        some version are returned: the others have no ticket to lose.
+        """
+        self._ensure_initialized()
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                WITH texts AS (
+                    SELECT r.revision_id, r.project_uuid, r.component_uuid,
+                           r.vulnerability_uuid, r.origin, r.created_at,
+                           CASE WHEN r.text_in_record
+                                THEN s.analysis_details
+                                ELSE r.analysis_details END AS analysis_details
+                    FROM assessment_revisions r
+                    LEFT JOIN assessment_state s
+                      ON s.project_uuid = r.project_uuid
+                     AND s.component_uuid = r.component_uuid
+                     AND s.vulnerability_uuid = r.vulnerability_uuid
+                )
+                SELECT * FROM texts
+                WHERE (project_uuid, component_uuid, vulnerability_uuid) IN (
+                    SELECT project_uuid, component_uuid, vulnerability_uuid
+                    FROM texts WHERE analysis_details LIKE '%[Ticket:%'
+                )
+                ORDER BY revision_id
+                """
+            ).fetchall()
+        histories: dict[AssessmentKey, list[dict[str, Any]]] = {}
+        for row in rows:
+            histories.setdefault(self._row_key(row), []).append(
+                {
+                    "analysisDetails": str(row["analysis_details"] or ""),
+                    "origin": str(row["origin"]),
+                    "created_at": str(row["created_at"]),
+                }
+            )
+        return histories
+
     def mark_failed(
         self,
         key: AssessmentKey,

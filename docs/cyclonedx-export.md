@@ -95,6 +95,7 @@ the property prefix, and the DTVP version (`<prefix>:export`,
 
 | Property | Meaning |
 | :--- | :--- |
+| `<prefix>:export_findings_read_at` | When the findings were last read from Dependency-Track, as a date-time in UTC. The document lists the findings of that import: what Dependency-Track has reported or assessed since is not in it. Open or refresh the project in DTVP before an export that has to be current |
 | `<prefix>:export_ticket_prefixes` | The ticket prefixes the texts were searched for. Absent: no text was searched |
 | `<prefix>:export_text_only_tickets` | Number of entries with a ticket key that only a text mentions; their records lack the ticket field |
 | `<prefix>:export_historical_assessments` | Number of historical team assessments in the document. Absent: none |

@@ -1905,6 +1905,7 @@ def _bulk_workflow_context(
         result_store=deps.code_analysis_result_store,
         assessment_records=assessment_records,
         assessment_diagnostics=assessment_diagnostics,
+        ticket_histories=getattr(deps.cache_manager, "get_ticket_histories", None),
     )
 
 
