@@ -698,3 +698,89 @@ def test_the_vdr_names_the_inventory_it_describes():
     # inventory it points at.
     assert first["serialNumber"] != second["serialNumber"]
     assert inventory["serialNumber"] not in (first["serialNumber"], second["serialNumber"])
+
+
+# --- The analysis response ---------------------------------------------------
+
+_GENERAL_EXPLOITABLE = (
+    "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] "
+    "[Justification: NOT_SET] ---\nReachable from the upload handler."
+)
+
+
+def test_the_response_is_exported_as_analysis_response():
+    import pytest
+
+    for stored, exported in [
+        ("UPDATE", "update"),
+        ("ROLLBACK", "rollback"),
+        ("WORKAROUND_AVAILABLE", "workaround_available"),
+        ("WILL_NOT_FIX", "will_not_fix"),
+        ("CAN_NOT_FIX", "can_not_fix"),
+    ]:
+        entry, document = _entry(
+            f"[Response: {stored}]\n\n{_GENERAL_EXPLOITABLE}", state="EXPLOITABLE"
+        )
+        assert entry["analysis"]["response"] == [exported]
+        # The tag is the field, never part of the rationale.
+        assert entry["analysis"]["detail"] == "Reachable from the upload handler."
+        assert "Response" not in json.dumps(document)
+        assert _valid(document)
+
+    entry, document = _entry(_GENERAL_EXPLOITABLE, state="EXPLOITABLE")
+    assert "response" not in entry["analysis"]
+    assert _valid(document)
+
+    # The schema check is strict: a value outside CycloneDX's list fails it.
+    entry, document = _entry(
+        f"[Response: UPDATE]\n\n{_GENERAL_EXPLOITABLE}", state="EXPLOITABLE"
+    )
+    entry["analysis"]["response"] = ["maybe_later"]
+    assert not _valid(document)
+    with pytest.raises(KeyError):
+        _entry("[Response: UPDATE]", state="NOT_SET")[0]["analysis"]
+
+
+def test_a_response_beside_a_rescoring_and_free_text_only():
+    entry, document = _entry(
+        f"[Rescored: 2.5] [Rescored Vector: {VECTOR}] [Response: WORKAROUND_AVAILABLE]"
+        "\n\nDisable the endpoint.",
+        state="EXPLOITABLE",
+    )
+    assert entry["analysis"] == {
+        "state": "exploitable",
+        "response": ["workaround_available"],
+        "detail": "Disable the endpoint.",
+    }
+    assert _valid(document)
+
+
+def test_findings_that_differ_only_in_the_response_are_separate_entries():
+    document = _vdr(
+        [_finding(C1), _finding(C2)],
+        [
+            ("EXPLOITABLE", f"[Response: UPDATE]\n\n{_GENERAL_EXPLOITABLE}"),
+            ("EXPLOITABLE", f"[Response: WILL_NOT_FIX]\n\n{_GENERAL_EXPLOITABLE}"),
+        ],
+    )
+    first, second = document["vulnerabilities"]
+    assert (first["bom-ref"], second["bom-ref"]) == ("v1", "v1#2")
+    assert first["analysis"]["response"] == ["update"]
+    assert second["analysis"]["response"] == ["will_not_fix"]
+    assert (first["affects"], second["affects"]) == ([{"ref": "c1"}], [{"ref": "ref-b"}])
+    assert _valid(document)
+
+    # One with and one without a response differ as well; equal ones are one.
+    mixed = _vdr(
+        [_finding(C1), _finding(C2)],
+        [
+            ("EXPLOITABLE", f"[Response: UPDATE]\n\n{_GENERAL_EXPLOITABLE}"),
+            ("EXPLOITABLE", _GENERAL_EXPLOITABLE),
+        ],
+    )
+    assert len(mixed["vulnerabilities"]) == 2
+    same = _vdr(
+        [_finding(C1), _finding(C2)],
+        [("EXPLOITABLE", f"[Response: UPDATE]\n\n{_GENERAL_EXPLOITABLE}")] * 2,
+    )
+    assert len(same["vulnerabilities"]) == 1

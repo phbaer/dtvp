@@ -26,6 +26,7 @@ from .access_token_services import (
     access_tokens_enabled,
     looks_like_access_token,
 )
+from .assessment_model import analysis_response, set_shared_response
 from .assessment_use_cases import (
     AssessmentConflictError,
     AssessmentRequest,
@@ -210,7 +211,10 @@ class McpToolService:
         shared_text, blocks = parse_assessment_blocks(details)
         return {
             "pending_review": "[status: pending review]" in details.casefold(),
-            "unstructured_text": shared_text,
+            # What is done about the finding; part of the Global assessment
+            # and set by reviewers in the web form, not through these tools.
+            "response": analysis_response(details),
+            "unstructured_text": set_shared_response(shared_text, None),
             "blocks": [
                 {
                     "team": block.get("team"),

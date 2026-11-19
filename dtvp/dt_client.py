@@ -459,9 +459,13 @@ class DTClient:
         comment: Optional[str] = None,
         justification: Optional[str] = None,
         suppressed: bool = False,
+        response: Optional[str] = None,
     ):
         """
         Update analysis for a finding.
+
+        ``response`` is always written: without one Dependency-Track is told
+        ``NOT_SET``, so a response removed in DTVP is removed there as well.
         """
         payload = {
             "project": project_uuid,
@@ -470,6 +474,7 @@ class DTClient:
             "analysisState": state,
             "isSuppressed": suppressed,
             "analysisDetails": details,
+            "analysisResponse": response or "NOT_SET",
         }
         if justification:
             payload["analysisJustification"] = justification

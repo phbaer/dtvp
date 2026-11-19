@@ -1,4 +1,4 @@
-import { assessmentTeamKey, assessmentTextToFields, constructAssessmentDetails, markAssessmentBlocksHistorical, mergeTeamAssessment, parseAssessmentBlocks, sanitizeAssessmentDetails, type AssessmentBlock } from './assessment-helpers'
+import { assessmentTeamKey, assessmentTextToFields, constructAssessmentDetails, markAssessmentBlocksHistorical, mergeTeamAssessment, parseAssessmentBlocks, parseAssessmentResponse, sanitizeAssessmentDetails, setAssessmentResponse, type AssessmentBlock } from './assessment-helpers'
 import { cleanStructuredAssessmentDetails } from './assessmentFormState'
 import type { AssessmentPayload, Instance } from '../types'
 
@@ -28,6 +28,12 @@ interface PrepareAssessmentSubmissionInput {
     evidenceReviewed: boolean
     versionCoverageChecked: boolean
     ticket: string
+    /**
+     * The response chosen in the Global form ("NOT_SET" for none), given
+     * when the Global assessment is saved. Only a reviewer's save sends it;
+     * left out, the server keeps what each finding has.
+     */
+    response?: string
     teamDrafts: Map<string, AssessmentDraft>
     takeoverSources?: Map<string, string>
     isReviewer: boolean
@@ -163,10 +169,12 @@ const collectCurrentFullDetails = (
     const teamToIndex = new Map<string, number>()
     const allTags = new Set<string>()
     let isPending = false
+    let response: string | null = null
 
     for (const instance of allInstances) {
         const detailsToParse = getInstanceAssessmentDetails(instance, originalAnalysis)
         if (!detailsToParse) continue
+        response = response ?? parseAssessmentResponse(detailsToParse)
 
         if (detailsToParse.includes('[Status: Pending Review]')) {
             isPending = true
@@ -179,8 +187,9 @@ const collectCurrentFullDetails = (
         collectRescoredTags(detailsToParse, allTags)
     }
 
+    const sharedTags = [...allTags, ...(response ? [`[Response: ${response}]`] : [])]
     return allBlocks.length > 0
-        ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text
+        ? constructAssessmentDetails(allBlocks, sharedTags, isPending).text
         : ''
 }
 
@@ -300,11 +309,15 @@ export const prepareAssessmentSubmission = (
 
     let reviewText: string
     let aggregatedState: string
+    // Whether this save decides the response: a reviewer's Global save, or
+    // a reviewer's edit of the whole text, where it is the tag left there.
+    let sendsResponse = input.isReviewer && input.response !== undefined
 
     if (input.showRawEdit && input.rawDetailsTouched && input.rawDetails !== input.mergedAssessmentFullText) {
         const sanitized = sanitizeAssessmentDetails(input.rawDetails)
         reviewText = sanitized.text
         aggregatedState = sanitized.aggregatedState
+        sendsResponse = input.isReviewer
     } else {
         let mergedText = currentFullDetails
         let mergedState = ''
@@ -332,6 +345,9 @@ export const prepareAssessmentSubmission = (
             mergedText = result.text
             mergedState = result.aggregatedState
         }
+        if (sendsResponse) {
+            mergedText = setAssessmentResponse(mergedText, input.response)
+        }
         reviewText = mergedText
         aggregatedState = mergedState || 'NOT_SET'
     }
@@ -340,6 +356,10 @@ export const prepareAssessmentSubmission = (
     const sanitized = sanitizeAssessmentDetails(reviewText)
     const finalText = sanitized.text
     const finalState = sanitized.aggregatedState || aggregatedState
+    const fields = assessmentTextToFields(finalText)
+    // The response is the Global assessment's, which reviewers save. Every
+    // other save leaves it out and the server keeps what each finding has.
+    if (!sendsResponse) delete fields.response
 
     return {
         targetTeam,
@@ -352,7 +372,7 @@ export const prepareAssessmentSubmission = (
             state: finalState,
             // The assessment goes out as fields. The text above is only what
             // the review dialog shows; the server renders the stored text.
-            fields: assessmentTextToFields(finalText),
+            fields,
             justification: input.justification && input.justification !== 'NOT_SET' ? input.justification : undefined,
             suppressed: input.suppressed,
             team: input.selectedTeam || undefined,

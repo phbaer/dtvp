@@ -4,8 +4,8 @@
 assessments in standard fields, so a consumer does not have to parse DTVP's
 markup out of an analysis text:
 
-- ``analysis``: state, justification, the rationale as ``detail``, and the
-  date of the General assessment as ``lastUpdated``;
+- ``analysis``: state, justification, response, the rationale as ``detail``,
+  and the date of the General assessment as ``lastUpdated``;
 - ``ratings``: one rating per CVSS version of the advisory, each with its
   score, plus DTVP's own rescoring as a rating whose ``source.name`` is the
   configured assessment source, with its vector and the rationale as
@@ -32,7 +32,11 @@ from typing import Any, Iterable
 from cvss import CVSS2, CVSS3, CVSS4
 from cvss.exceptions import CVSSError
 
-from .assessment_model import FORMER_TEAM_NOTE, SEE_GLOBAL_ASSESSMENT
+from .assessment_model import (
+    ANALYSIS_RESPONSES,
+    FORMER_TEAM_NOTE,
+    SEE_GLOBAL_ASSESSMENT,
+)
 
 VARIANT_INVENTORY = "inventory"
 VARIANT_VDR = "vdr"
@@ -60,6 +64,8 @@ _JUSTIFICATIONS = {
     "protected_at_perimeter",
     "protected_by_mitigating_control",
 }
+# CycloneDX names the responses as Dependency-Track does, in lower case.
+_RESPONSES = {name: name.lower() for name in ANALYSIS_RESPONSES}
 _PREFIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _TICKET_PREFIX = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 # The former way of naming people: tags inside a text instead of a block header.
@@ -465,6 +471,9 @@ def _analysis(fields: dict[str, Any], read: dict[str, Any]) -> dict[str, Any] | 
     )
     if justification and state == "not_affected":
         analysis["justification"] = justification
+    # One response per finding in DTVP; CycloneDX takes a list.
+    if response := _RESPONSES.get(str(fields.get("response") or "").upper()):
+        analysis["response"] = [response]
     if read["rationale"]:
         analysis["detail"] = read["rationale"]
     # The date of the General assessment. A reviewer's approval keeps it, so
@@ -768,6 +777,7 @@ def build_vdr(
             vuln_id,
             fields["state"], fields["suppressed"], fields["pending_review"],
             fields["rescored_score"], fields["rescored_vector"], fields["free_text"],
+            fields.get("response"),
             tuple(
                 (team["team"], team["state"], team["justification"], team["details"],
                  team["historical"])

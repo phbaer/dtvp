@@ -531,3 +531,39 @@ def test_only_post_reaches_the_transport(client, project):
         response = client.request(method, "/mcp", headers=headers)
         assert response.status_code == 405
         assert response.headers["allow"] == "POST"
+
+
+async def test_the_response_is_readable_and_survives_an_agents_save(service, project):
+    """Agents see the response; they cannot set it, and their team save
+    keeps it on every finding."""
+    for findings in (project["p1"], project["p2"]):
+        findings[0]["analysis"]["analysisDetails"] = f"[Response: UPDATE]\n\n{EXISTING}"
+    token = _token()
+
+    before = await service.get_vulnerability(
+        token, project="TestApp", vulnerability_id="CVE-2026-0001"
+    )
+    [assessment] = before["assessments"]
+    assert assessment["response"] == "UPDATE"
+    assert assessment["unstructured_text"] == ""
+
+    preview = await service.preview_assessment(
+        token, **{**ARGS, "details": ARGS["details"] + " [Response: ROLLBACK]"}
+    )
+    assert all("[Response: ROLLBACK]" not in str(change) for change in preview["changes"])
+    await service.save_assessment(
+        token, **{**ARGS, "details": ARGS["details"] + " [Response: ROLLBACK]"},
+        expected_revisions=preview["expected_revisions"],
+    )
+
+    for project_uuid, component_uuid in (("p1", "component-1"), ("p2", "component-2")):
+        fields = main.cache_manager.get_assessment_fields(
+            project_uuid, component_uuid, "vuln-1"
+        )
+        assert fields["response"] == "UPDATE"
+        team_a = next(team for team in fields["teams"] if team["team"] == "Team A")
+        assert "Response" not in team_a["details"]
+    after = await service.get_vulnerability(
+        token, project="TestApp", vulnerability_id="CVE-2026-0001"
+    )
+    assert after["assessments"][0]["response"] == "UPDATE"

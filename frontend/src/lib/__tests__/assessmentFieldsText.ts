@@ -17,6 +17,7 @@ export const renderAssessmentFields = (fields: AssessmentFields | undefined | nu
     if (fields.rescored_vector && fields.rescored_vector !== general?.rescored_vector) {
         shared.push(`[Rescored Vector: ${fields.rescored_vector}]`)
     }
+    if (fields.response) shared.push(`[Response: ${fields.response}]`)
     if (shared.length) parts.push(shared.join(' '))
     if (fields.free_text) parts.push(fields.free_text)
     for (const team of fields.teams) {

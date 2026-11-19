@@ -779,6 +779,7 @@ def test_an_adopted_assessment_is_stored_as_atomic_fields(tmp_path):
         "pending_review": True,
         "rescored_score": 2.5,
         "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N",
+        "response": None,
         "free_text": "",
         "form": "structured",
     }
@@ -1020,3 +1021,30 @@ def test_ticket_histories_list_every_version_of_assessments_that_named_a_ticket(
     assert "[Ticket: VP-1]" in histories[KEY][-2]["analysisDetails"]
     assert "Rewritten" in histories[KEY][-1]["analysisDetails"]
     assert all(h["created_at"] for h in histories[KEY])
+
+
+def test_the_response_is_stored_as_a_field_and_read_again_after_the_upgrade(tmp_path):
+    import sqlite3
+
+    store = _store(tmp_path)
+    text = (
+        "[Response: WILL_NOT_FIX]\n\n--- [Team: General] [State: EXPLOITABLE] "
+        "[Assessed By: rita] [Justification: NOT_SET] ---\nAccepted."
+    )
+    store.enqueue_many([_payload("EXPLOITABLE", text)])
+    assert store.get_fields(KEY)["response"] == "WILL_NOT_FIX"
+
+    store.enqueue_many([_payload("EXPLOITABLE", "Plain text.")], replace=True)
+    assert store.get_fields(KEY)["response"] is None
+
+    # A database from before the field: the column is added and every
+    # assessment is read into fields again at the next start.
+    store.enqueue_many([_payload("EXPLOITABLE", text)], replace=True)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("ALTER TABLE assessment_fields DROP COLUMN response")
+        connection.execute(
+            "DELETE FROM schema_migrations WHERE version = 8 "
+            "AND namespace = 'assessment_outbox'"
+        )
+    upgraded = AssessmentOutboxStore(store.path)
+    assert upgraded.get_fields(KEY)["response"] == "WILL_NOT_FIX"

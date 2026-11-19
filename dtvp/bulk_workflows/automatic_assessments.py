@@ -4,6 +4,7 @@ import hashlib
 import re
 from typing import Any
 
+from ..assessment_model import agreed_response, preserve_response
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..code_analysis_assessment_services import (
     record_application_eligible,
@@ -1469,6 +1470,10 @@ def build_automatic_assessment_payloads(
         skipped["already_applied"] += item["already_applied_finding_count"]
         skipped["missing_identity"] += item["missing_identity_finding_count"]
         skipped["replaced_existing"] += item["preexisting_finding_count"]
+        response = agreed_response(
+            raw_instance.get("analysis_details") or raw_instance.get("analysisDetails") or ""
+            for raw_instance in item["instances"]
+        )
         for raw_instance in item["instances"]:
             instance = dict(raw_instance)
             identity_keys = (
@@ -1493,9 +1498,17 @@ def build_automatic_assessment_payloads(
                         "component_uuid": instance["component_uuid"],
                         "vulnerability_uuid": instance["vulnerability_uuid"],
                         "state": item["target_state"],
-                        "details": preserve_ssvc_record(
-                            item["target_details"],
+                        # The draft replaces the text; the reviewer's SSVC
+                        # record and response stay with the finding. A
+                        # finding without a response takes the one the
+                        # others agree on.
+                        "details": preserve_response(
+                            preserve_ssvc_record(
+                                item["target_details"],
+                                instance.get("analysis_details") or instance.get("analysisDetails") or "",
+                            ),
                             instance.get("analysis_details") or instance.get("analysisDetails") or "",
+                            response,
                         ),
                         "justification": item["target_justification"],
                         "suppressed": False,

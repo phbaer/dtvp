@@ -14,7 +14,11 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 import httpx
 
-from .assessment_model import canonical_assessment_text, parse_assessment
+from .assessment_model import (
+    canonical_assessment_text,
+    parse_assessment,
+    with_analysis_response,
+)
 from .cyclonedx_export import (
     VARIANT_INVENTORY,
     build_inventory,
@@ -2314,7 +2318,9 @@ class CacheManager:
                         # value is queued and goes out with the next batch.
                         continue
                     try:
-                        await client.update_analysis(**payload)
+                        await client.update_analysis(
+                            **with_analysis_response(payload)
+                        )
                         marked = await asyncio.to_thread(
                             self.assessment_outbox.mark_synced,
                             key,

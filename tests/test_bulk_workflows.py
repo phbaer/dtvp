@@ -2473,3 +2473,118 @@ def test_repair_keeps_the_date_of_a_former_team_assessment():
         " | TeamC; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice; dated 2026-10-16"
         "):\nNot reachable."
     ) in details
+
+
+# --- The analysis response in bulk workflows ---------------------------------
+
+_RESPONSE_GENERAL = (
+    "--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] "
+    "[Justification: NOT_SET] ---\nReachable."
+)
+
+
+@pytest.mark.parametrize("workflow", ["incomplete", "automatic"])
+def test_bulk_assessments_keep_each_findings_response(workflow):
+    """Both workflows rebuild the text from blocks; the response stands
+    beside them and stays with the finding that has it."""
+    from dtvp.assessment_model import analysis_response
+
+    group = _automatic_group()
+    group["list_metadata"] = {"lifecycle": "INCOMPLETE"}
+    instances = [instance for version in group["affected_versions"] for instance in version["components"]]
+    instances[0]["analysis_state"] = "EXPLOITABLE"
+    instances[0]["analysis_details"] = f"[Response: WORKAROUND_AVAILABLE]\n\n{_RESPONSE_GENERAL}"
+    if workflow == "incomplete":
+        payloads, _ = build_incomplete_sync_payloads([group], [group["id"]])
+    else:
+        context = BulkWorkflowContext(task_id="task", groups=[group], user="reviewer", result_store=_AutomaticResultStore([_automatic_record("run-api", "owned-api", "Not Affected", exposure="none")]))
+        payloads, _ = build_automatic_assessment_payloads(context, [group["id"]])
+    assert len(payloads) == len(instances)
+    by_finding = {instance["finding_uuid"]: payload["details"] for instance, payload in payloads}
+    assert analysis_response(by_finding["finding-api"]) == "WORKAROUND_AVAILABLE"
+    # A finding without one takes it with the rest of the assessment, so
+    # the findings do not differ afterwards.
+    assert analysis_response(by_finding["finding-worker"]) == "WORKAROUND_AVAILABLE"
+    for details in by_finding.values():
+        assert details.count("[Response:") == 1
+        read = parse_assessment("EXPLOITABLE", details, False)
+        assert all("Response" not in team["details"] for team in read["teams"])
+
+    # Findings that disagree each keep their own.
+    instances[1]["analysis_state"] = "EXPLOITABLE"
+    instances[1]["analysis_details"] = f"[Response: ROLLBACK]\n\n{_RESPONSE_GENERAL}"
+    if workflow == "incomplete":
+        payloads, _ = build_incomplete_sync_payloads([group], [group["id"]])
+    else:
+        payloads, _ = build_automatic_assessment_payloads(context, [group["id"]])
+    assert {
+        instance["finding_uuid"]: analysis_response(payload["details"])
+        for instance, payload in payloads
+    } == {"finding-api": "WORKAROUND_AVAILABLE", "finding-worker": "ROLLBACK"}
+
+
+def test_repair_keeps_each_findings_response_when_it_synchronizes():
+    from dtvp.assessment_model import analysis_response
+
+    assessed = ("NOT_AFFECTED", f"[Response: WILL_NOT_FIX]\n\n{_CURRENT}")
+    group = _repair_group([assessed, ("NOT_SET", "")], tags=["TeamB"])
+    assert group["list_metadata"]["lifecycle"] == "INCOMPLETE"
+
+    _preview, payloads, _skipped = _repair(group)
+
+    details = {instance["finding_uuid"]: payload["details"] for instance, payload in payloads}
+    # The unassessed finding takes the response with the assessment.
+    assert details["finding-2"] == assessed[1]
+    assert analysis_response(details["finding-2"]) == "WILL_NOT_FIX"
+    # The assessed finding is unchanged, so it is not written at all.
+    assert "finding-1" not in details
+
+
+def test_repair_keeps_the_response_when_it_moves_a_former_team():
+    from dtvp.assessment_model import analysis_response
+
+    both = ("NOT_AFFECTED", f"[Response: UPDATE]\n\n{_FORMER}\n\n{_CURRENT}")
+    group = _repair_group([both, both], tags=["TeamB"])
+
+    _preview, payloads, _skipped = _repair(group)
+
+    assert len(payloads) == 2
+    for _instance, payload in payloads:
+        assert analysis_response(payload["details"]) == "UPDATE"
+        assert "[Team: TeamA]" not in payload["details"]
+
+
+def test_rescoring_writers_keep_the_response():
+    from dtvp.assessment_model import analysis_response
+    from dtvp.assessment_restore_services import restore_rescoring_tags_in_details
+    from dtvp.rescore_rule_services import replace_rescoring_tags
+
+    vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"
+    for text in (
+        f"[Response: ROLLBACK]\n\n{_RESPONSE_GENERAL}",
+        f"[Rescored: 4.0] [Response: ROLLBACK]\n\n{_RESPONSE_GENERAL}",
+    ):
+        replaced = replace_rescoring_tags(text, vector=vector, score=0.0)
+        assert analysis_response(replaced) == "ROLLBACK"
+        assert parse_assessment("EXPLOITABLE", replaced, False)["rescored_vector"] == vector
+        restored = restore_rescoring_tags_in_details(
+            text, restored_vector=vector, restored_score=0.0
+        )
+        assert analysis_response(restored) == "ROLLBACK"
+        assert parse_assessment("EXPLOITABLE", restored, False)["rescored_vector"] == vector
+
+
+def test_restoring_a_ticket_keeps_the_response():
+    from dtvp.assessment_model import analysis_response
+
+    noted = f"[Response: UPDATE]\n\n{_NOTED}"
+    group = _repair_group([("NOT_AFFECTED", noted)], tags=["TeamB"])
+    histories = _versions(
+        ("import", f"{_TICKETED}\n\n{_CURRENT}"), ("bulk-workflow", noted),
+    )
+
+    details = _repair_with_history(group, histories)[1][0][1]["details"]
+
+    assert analysis_response(details) == "UPDATE"
+    general = parse_assessment("NOT_AFFECTED", details, False)["teams"][0]
+    assert (general["team"], general["ticket"]) == ("General", "VP-101, SR-7")

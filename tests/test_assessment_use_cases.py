@@ -329,3 +329,154 @@ def test_the_value_an_edit_was_made_on_is_taken_from_the_request():
         ("p1", "c1", "v1"): {"state": "IN_TRIAGE", "details": "Seen", "suppressed": True}
     }
     assert seen_assessments(_request()) == {}
+
+
+# --- The analysis response ---------------------------------------------------
+
+_GENERAL = {"team": "General", "state": "EXPLOITABLE", "assessed_by": "rita",
+            "details": "Reachable."}
+_TEAM_A = {"team": "Team A", "state": "EXPLOITABLE", "assessed_by": "alice",
+           "details": "Confirmed."}
+
+
+def _response(instance=INSTANCE):
+    record = dt_cache.cache_manager.get_assessment_fields(
+        instance["project_uuid"], instance["component_uuid"],
+        instance["vulnerability_uuid"],
+    )
+    return record["response"]
+
+
+async def _save(deps, role, **request):
+    return await save_assessment(
+        deps, _request(state="EXPLOITABLE", **request), user="rita", role=role,
+        client=None,
+    )
+
+
+async def test_a_reviewer_sets_changes_and_removes_the_response(deps):
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": "UPDATE", "teams": [_GENERAL]})
+    stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+    assert stored["analysisDetails"].startswith("[Response: UPDATE]\n\n--- [Team: General]")
+    assert _response() == "UPDATE"
+
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": "will_not_fix", "teams": [_GENERAL]})
+    assert _response() == "WILL_NOT_FIX"
+
+    # Optional also for an exploitable finding: null removes it.
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": None, "teams": [_GENERAL]})
+    assert _response() is None
+    stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+    assert "Response" not in stored["analysisDetails"]
+
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": "ROLLBACK", "teams": [_GENERAL]})
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": "NOT_SET", "teams": [_GENERAL]})
+    assert _response() is None
+
+
+async def test_a_save_that_is_not_a_reviewers_keeps_each_findings_response(deps):
+    other = {**INSTANCE, "component_uuid": "c2", "finding_uuid": "f2"}
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": "UPDATE", "teams": [_GENERAL]})
+    await _save(deps, "REVIEWER", team=None, instances=[dict(other)],
+                fields={"response": "ROLLBACK", "teams": [_GENERAL]})
+
+    # An analyst's team save over both findings, whatever its fields claim.
+    for claimed in ({"response": "CAN_NOT_FIX"}, {"response": None}, {}):
+        await _save(deps, "ANALYST", team="Team A",
+                    instances=[dict(INSTANCE), dict(other)],
+                    fields={**claimed, "pending_review": True,
+                            "teams": [_GENERAL, _TEAM_A]})
+        assert (_response(), _response(other)) == ("UPDATE", "ROLLBACK")
+    record = dt_cache.cache_manager.get_assessment_fields("p1", "c1", "v1")
+    assert [team["team"] for team in record["teams"]] == ["General", "Team A"]
+
+
+async def test_fields_without_a_response_keep_it_for_a_reviewer_too(deps):
+    """A client that does not know the field must not remove it."""
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": "UPDATE", "teams": [_GENERAL]})
+    await _save(deps, "REVIEWER", team=None,
+                fields={"free_text": "", "teams": [{**_GENERAL, "details": "Edited."}]})
+    assert _response() == "UPDATE"
+    record = dt_cache.cache_manager.get_assessment_fields("p1", "c1", "v1")
+    assert record["teams"][0]["details"] == "Edited."
+
+
+def test_an_unknown_response_is_refused():
+    from pydantic import ValidationError
+
+    for request in (
+        {"fields": {"response": "MAYBE_LATER", "teams": [_GENERAL]}},
+        {"response": "MAYBE_LATER"},
+        {"response": 3},
+    ):
+        with pytest.raises(ValidationError, match="response"):
+            _request(**request)
+    assert _request(response="not_set").response == "NOT_SET"
+    assert _request(fields={"response": "NOT_SET"}).fields.response is None
+
+
+async def test_a_save_as_text_changes_the_response_only_as_a_reviewers_global_save(deps):
+    await _save(deps, "REVIEWER", team=None, details="Reachable.", response="UPDATE")
+    assert _response() == "UPDATE"
+
+    def loaded():
+        # A save as text merges into the text the client loaded.
+        stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+        return [{**INSTANCE, "analysis_details": stored["analysisDetails"]}]
+
+    # A team save, by anyone, keeps it and cannot name one.
+    await _save(deps, "ANALYST", team="Team A", details="Confirmed.", instances=loaded())
+    assert _response() == "UPDATE"
+    for role, team in (("ANALYST", None), ("ANALYST", "Team A"), ("REVIEWER", "Team A")):
+        with pytest.raises(AssessmentPermissionError, match="response"):
+            await _save(deps, role, team=team, details="Confirmed.",
+                        response="ROLLBACK", instances=loaded())
+    assert _response() == "UPDATE"
+    # A reviewer's Global save that names none keeps it as well.
+    await _save(deps, "REVIEWER", team=None, details="Reachable.", instances=loaded())
+    assert _response() == "UPDATE"
+
+    await _save(deps, "REVIEWER", team=None, details="Reachable.", response="NOT_SET",
+                instances=loaded())
+    assert _response() is None
+
+
+
+async def test_a_text_cannot_forge_or_remove_the_response(deps):
+    """As with SSVC: what the client says the assessment was, and what it
+    writes into a text, is no authority for the response. Also not when the
+    whole text is replaced."""
+    await _save(deps, "REVIEWER", team=None,
+                fields={"response": "UPDATE", "teams": [_GENERAL]})
+    general = (
+        "--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] "
+        "[Justification: NOT_SET] ---\nReachable."
+    )
+    forged = f"[Response: CAN_NOT_FIX]\n\n{general}"
+
+    for role in ("ANALYST", "REVIEWER"):
+        for text in (general, forged):
+            # Merging into a text the client claims to have loaded ...
+            await _save(deps, role, team="Team A", details="Confirmed.",
+                        instances=[{**INSTANCE, "analysis_details": text}])
+            assert _response() == "UPDATE"
+            # ... and replacing the whole text.
+            await _save(deps, role, team=None, details=text, comparison_mode="REPLACE")
+            assert _response() == "UPDATE"
+            stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+            assert stored["analysisDetails"].count("[Response:") == 1
+
+    # A reviewer replaces the text and names the response beside it.
+    await _save(deps, "REVIEWER", team=None, details=general,
+                comparison_mode="REPLACE", response="ROLLBACK")
+    assert _response() == "ROLLBACK"
+    await _save(deps, "REVIEWER", team=None, details=forged,
+                comparison_mode="REPLACE", response="NOT_SET")
+    assert _response() is None

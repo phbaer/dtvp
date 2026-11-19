@@ -1,4 +1,4 @@
-import { assessmentTeamKey, constructAssessmentDetails, parseAssessmentBlocks, type AssessmentBlock } from './assessment-helpers'
+import { assessmentTeamKey, constructAssessmentDetails, parseAssessmentBlocks, parseAssessmentResponse, type AssessmentBlock } from './assessment-helpers'
 import type { Instance } from '../types'
 
 const RESCORED_TAG_REGEX = /\[Rescored:\s*[\d.]+\]/
@@ -7,6 +7,8 @@ export interface MergedAssessmentData {
     blocks: AssessmentBlock[]
     fullText: string
     isPending: boolean
+    /** The response of the findings: the first one found, null for none. */
+    response: string | null
 }
 
 const upsertLatestBlock = (
@@ -37,10 +39,12 @@ export const buildMergedAssessmentData = (allInstances: Instance[], _refreshTick
     const teamToIndex = new Map<string, number>()
     const allTags = new Set<string>()
     let isPendingValue = false
+    let response: string | null = null
 
     for (const instance of allInstances) {
         const instDetails = instance.analysis_details || instance.analysisDetails || ''
         if (!instDetails) continue
+        response = response ?? parseAssessmentResponse(instDetails)
 
         if (instDetails.includes('[Status: Pending Review]')) {
             isPendingValue = true
@@ -57,9 +61,11 @@ export const buildMergedAssessmentData = (allInstances: Instance[], _refreshTick
         }
     }
 
+    const sharedTags = [...allTags, ...(response ? [`[Response: ${response}]`] : [])]
     return {
         blocks: allBlocks,
-        fullText: allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPendingValue).text : '',
+        fullText: allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, sharedTags, isPendingValue).text : '',
         isPending: isPendingValue,
+        response,
     }
 }

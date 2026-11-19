@@ -89,6 +89,10 @@ DTVP's markup out of the text, which is lossy.
 - Dependency-Track's own justification and response fields, and its comment
   trail, are not adopted and not written. DTVP's justification is part of
   each team's assessment.
+  *Changed 2026-11-19 (repository owner):* the response is a field of DTVP's
+  record, one per finding with the General assessment, and is written to
+  Dependency-Track's `analysisResponse` on export. It is still not adopted
+  from that field. See [Response](../assessment-model.md#response).
 - The web form sends fields and the server renders the text. Writers that
   still edit text (bulk workflows, deletion, repair) are read into fields on
   saving; a field can hold only what the reader recognises, and anything
@@ -116,6 +120,6 @@ DTVP's markup out of the text, which is lossy.
 | Decision | Status |
 | :--- | :--- |
 | 1–3 Record, adoption, rendering target | Implemented 2026-11-18 |
-| 4 Structured fields | Implemented 2026-11-18. The web form sends the assessment as fields and the server renders the text. A save that names one team (the MCP tools) renders its blocks with the same renderer and keeps every tag. Every text gets the same layout where it is stored. Open: bulk workflows, deletion, and repair still edit text, which is read into fields; the form has no input for free text |
+| 4 Structured fields | Implemented 2026-11-18; the response added 2026-11-19. The web form sends the assessment as fields and the server renders the text. A save that names one team (the MCP tools) renders its blocks with the same renderer and keeps every tag. Every text gets the same layout where it is stored. Open: bulk workflows, deletion, and repair still edit text, which is read into fields; the form has no input for free text |
 | 5 CycloneDX inventory and VDR | Implemented 2026-11-18 in DTVP; see [CycloneDX inventory and VDR](../cyclonedx-export.md). Open: the generator reads from DTVP instead of Dependency-Track |
 | 6 New-finding mark | Implemented 2026-11-18 (separate change) |

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from .assessment_model import with_analysis_response
 from .dt_client import DTClient
 
 
@@ -784,7 +785,9 @@ async def _restore_version_assessments(
         }
 
         try:
-            await client.update_analysis(**payload)
+            # The response is restored from the text, DTVP's record; the
+            # archived Dependency-Track field of its own is not read.
+            await client.update_analysis(**with_analysis_response(payload))
             deps.cache_manager._save_local_analysis(payload)
             restored += 1
         except Exception as exc:

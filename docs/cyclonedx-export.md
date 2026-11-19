@@ -6,7 +6,7 @@
 | :--- | :--- |
 | Status | Implemented |
 | Decision | [ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md), decision 5 |
-| Verified | 2026-11-19: the consumer read a second export of a real project version after the first fixes and found the eight gaps closed; historical team assessments, the date fallback and the prefix property were added after that reading and are checked against `tests/test_cyclonedx_export.py` only. 2026-11-18 against `tests/test_cyclonedx_export.py` and `tests/test_export.py`, a run against the mock Dependency-Track in Chromium, and by reading a generated VDR with the security documentation generator's CycloneDX reader (`from_cyclonedx` and `read_cyclonedx_fields` at its commit `6646bb8`). The inventory and the VDR are validated against the official CycloneDX 1.5 JSON schema (strict) in `tests/test_cyclonedx_export.py`. |
+| Verified | 2026-11-19: the consumer read a second export of a real project version after the first fixes and found the eight gaps closed; historical team assessments, the date fallback and the prefix property were added after that reading and are checked against `tests/test_cyclonedx_export.py` only. 2026-11-18 against `tests/test_cyclonedx_export.py` and `tests/test_export.py`, a run against the mock Dependency-Track in Chromium, and by reading a generated VDR with the security documentation generator's CycloneDX reader (`from_cyclonedx` and `read_cyclonedx_fields` at its commit `6646bb8`). The inventory and the VDR are validated against the official CycloneDX 1.5 JSON schema (strict) in `tests/test_cyclonedx_export.py`. `analysis.response` was added on 2026-11-19 and is checked against that test file and schema only; no consumer has read it yet. |
 
 DTVP serves two CycloneDX documents for each project version:
 
@@ -93,7 +93,8 @@ Every finding of the project version is listed, also those in triage and
 those without an assessment. Findings of one vulnerability that share the same
 assessment are one `vulnerabilities` entry with several `affects`; findings
 with differing assessments are separate entries (the second has the
-`bom-ref` `<uuid>#2`).
+`bom-ref` `<uuid>#2`). Findings that differ only in the response are
+separate entries as well.
 
 | DTVP | CycloneDX |
 | :--- | :--- |
@@ -103,6 +104,7 @@ with differing assessments are separate entries (the second has the
 | Affected component | `affects[].ref`, the component's `bom-ref` in the BOM |
 | State | `analysis.state` (`in_triage`, `not_affected`, `exploitable`, `false_positive`, `resolved`). Not set: no `analysis` |
 | Justification | `analysis.justification`, for not-affected findings with a CycloneDX justification |
+| [Response](assessment-model.md#response) | `analysis.response`, a list with the one value in lower case (`update`, `rollback`, `workaround_available`, `will_not_fix`, `can_not_fix`). Not set: no `response` |
 | Rationale (the General assessment, else the free text) | `analysis.detail`, without former team assessments and without `[Assessed by: …]` and `[Reviewed by: …]` tags |
 | Date of the assessment | `analysis.lastUpdated`: the date of the General assessment, or, when it has none, the latest date of the live team assessments. A reviewer's approval keeps the date, so it is when the assessment was last written. DTVP does not record when it was first made: no `analysis.firstIssued` |
 | Rescoring | A `ratings` entry whose `source.name` is the assessment source, with `score`, `severity`, `method`, `vector`, and the rationale as `justification`. A rescoring that has a score and no CVSS vector has the `method` `other` and no `vector` |
@@ -190,8 +192,9 @@ both per product (`assessment_source` and `sbom_property_prefix` in its
   both documents with the name, version, and package URL the finding has,
   and the property `<prefix>:added_from_finding`. Every `affects` reference
   therefore resolves in the inventory as well.
-- Dependency-Track's own justification, response, and comment fields are not
-  part of DTVP's record and are not exported.
+- What Dependency-Track holds in its own justification, response, and
+  comment fields is not read. The justification and the response in the VDR
+  are those of DTVP's record.
 
 ## Planned
 

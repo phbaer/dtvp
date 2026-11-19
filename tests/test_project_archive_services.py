@@ -313,9 +313,39 @@ async def test_apply_project_archive_creates_missing_and_restores_assessment(tmp
             "details": "Restored assessment",
             "justification": "CODE_NOT_PRESENT",
             "suppressed": True,
+            # Read from the text; this one names none.
+            "response": None,
         }
     ]
-    assert cache.saved_payloads == client.updated_payloads
+    assert cache.saved_payloads == [
+        {key: value for key, value in payload.items() if key != "response"}
+        for payload in client.updated_payloads
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_restored_assessment_takes_its_response_from_the_text(
+    tmp_path, monkeypatch
+):
+    """The archive holds Dependency-Track's analysis. The response DTVP
+    recorded is in its text; the field of its own beside it is not read."""
+    monkeypatch.setitem(
+        SOURCE_ANALYSIS,
+        "analysisDetails",
+        "[Response: UPDATE]\n\n--- [Team: General] [State: NOT_AFFECTED] "
+        "[Assessed By: rita] [Justification: NOT_SET] ---\nRestored assessment",
+    )
+    monkeypatch.setitem(SOURCE_ANALYSIS, "analysisResponse", "ROLLBACK")
+    deps, result = await create_archive(tmp_path)
+    client = FakeRestoreClient(existing=False)
+
+    await apply_project_archive(
+        deps, client, archive_path=result["archive_path"], mode="create_missing"
+    )
+
+    [payload] = client.updated_payloads
+    assert payload["response"] == "UPDATE"
+    assert payload["details"].startswith("[Response: UPDATE]")
 
 
 @pytest.mark.asyncio

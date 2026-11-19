@@ -1307,3 +1307,42 @@ async def test_an_adopted_assessment_the_source_lost_is_exported_back(tmp_path):
     assert client.update_analysis.await_args.kwargs["details"] == "Assessed long ago"
     await manager.close()
 
+
+
+@pytest.mark.asyncio
+async def test_an_export_writes_the_response_of_the_exported_text(tmp_path):
+    """Dependency-Track gets the response as its own field, read from the
+    text of the very revision that is exported."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.update_analysis = AsyncMock(return_value={"status": "updated"})
+    payload = {
+        "project_uuid": "puuid",
+        "component_uuid": "cuuid",
+        "vulnerability_uuid": "vuuid",
+        "state": "EXPLOITABLE",
+        "details": (
+            "[Response: UPDATE]\n\n--- [Team: General] [State: EXPLOITABLE] "
+            "[Assessed By: rita] [Justification: NOT_SET] ---\nUpgrade to 2.0."
+        ),
+        "suppressed": False,
+    }
+
+    await manager.queue_analysis_update(payload)
+    await manager.flush_pending_updates(client)
+
+    sent = client.update_analysis.await_args.kwargs
+    assert sent["response"] == "UPDATE"
+    assert sent["details"] == payload["details"]
+    assert manager._load_pending_updates() == []
+    assert manager.get_assessment_fields("puuid", "cuuid", "vuuid")["response"] == "UPDATE"
+
+    # Removed in DTVP: the next export says so.
+    await manager.queue_analysis_update(
+        {**payload, "details": payload["details"].replace("[Response: UPDATE]\n\n", "")},
+        replace=True,
+    )
+    await manager.flush_pending_updates(client)
+
+    assert client.update_analysis.await_args.kwargs["response"] is None
+    assert manager.get_assessment_fields("puuid", "cuuid", "vuuid")["response"] is None

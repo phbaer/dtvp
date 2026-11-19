@@ -13,9 +13,18 @@ import os
 import re
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
-from .assessment_model import finding_key, parse_assessment, render_assessment
+from .assessment_model import (
+    ANALYSIS_RESPONSES,
+    RESPONSE_NOT_SET,
+    analysis_response,
+    finding_key,
+    normalize_response,
+    parse_assessment,
+    render_assessment,
+    with_response,
+)
 from .assessment_outbox_services import (
     AssessmentRevisionConflictError,
     assessment_key,
@@ -54,6 +63,25 @@ class TeamAssessmentFields(BaseModel):
     details: str = ""
 
 
+def _checked_response(value: Any) -> Optional[str]:
+    """A response of the list, ``NOT_SET``, or ``None``; anything else is
+    an error rather than a value that is silently dropped."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("response must be a string")
+    text = value.strip().upper()
+    if text in ("", RESPONSE_NOT_SET):
+        return RESPONSE_NOT_SET
+    normalized = normalize_response(text)
+    if normalized is None:
+        raise ValueError(
+            "response must be one of "
+            + ", ".join((*ANALYSIS_RESPONSES, RESPONSE_NOT_SET))
+        )
+    return normalized
+
+
 class AssessmentFields(BaseModel):
     """A whole assessment as atomic fields; see ``assessment_model``."""
 
@@ -63,7 +91,18 @@ class AssessmentFields(BaseModel):
     pending_review: bool = False
     rescored_score: Optional[float] = Field(default=None, ge=0, le=10)
     rescored_vector: Optional[str] = None
+    # What is done about the finding (Dependency-Track's analysisResponse).
+    # Part of the General assessment: a reviewer's save sets it, ``null`` or
+    # ``NOT_SET`` removes it. A save that leaves it out, and every save by
+    # someone who is not a reviewer, keeps what each finding has.
+    response: Optional[str] = None
     teams: list[TeamAssessmentFields] = Field(default_factory=list)
+
+    @field_validator("response", mode="before")
+    @classmethod
+    def _response_of_the_list(cls, value: Any) -> Optional[str]:
+        checked = _checked_response(value)
+        return None if checked == RESPONSE_NOT_SET else checked
 
 
 class AssessmentRequest(BaseModel):
@@ -78,6 +117,10 @@ class AssessmentRequest(BaseModel):
     _stored_free_text: dict[str, str] = PrivateAttr(default_factory=dict)
     comment: Optional[str] = None
     justification: Optional[str] = None
+    # For a save as text (without ``fields``): the finding's response.
+    # ``NOT_SET`` removes it; leaving it out keeps what each finding has,
+    # whatever the text says. Reviewers only, with the General assessment.
+    response: Optional[str] = None
     suppressed: bool = False
     team: Optional[str] = None
     assigned: Optional[list[str]] = None
@@ -86,6 +129,11 @@ class AssessmentRequest(BaseModel):
     comparison_mode: Optional[str] = "MERGE"
     analysis_run_ids: list[str] = Field(default_factory=list)
     ssvc: SsvcInput | None = None
+
+    @field_validator("response", mode="before")
+    @classmethod
+    def _response_of_the_list(cls, value: Any) -> Optional[str]:
+        return _checked_response(value)
 
 
 class AssessmentUseCaseError(Exception):
@@ -335,6 +383,30 @@ def _validate_ssvc_change(req: AssessmentRequest, role: str) -> None:
             raise AssessmentValidationError(str(exc)) from exc
 
 
+def _validate_response_change(req: AssessmentRequest, role: str) -> None:
+    """A save as text names a response only as a reviewer's General save.
+    With ``fields`` the request-level value is not used at all."""
+    if req.fields is not None or req.response is None:
+        return
+    if role.upper() != "REVIEWER" or (
+        req.team and req.team.casefold() != "general"
+    ):
+        raise AssessmentPermissionError(
+            "The response is part of the Global assessment, which reviewers save"
+        )
+
+
+def _changes_response(req: AssessmentRequest, role: str) -> bool:
+    """Whether this save decides the response. Only a reviewer's does, and
+    only when it names one: in its fields, or beside its text. Any other
+    save keeps what each finding has stored, whatever its text says."""
+    if role.upper() != "REVIEWER":
+        return False
+    if req.fields is not None:
+        return "response" in req.fields.model_fields_set
+    return req.response is not None
+
+
 def _validate_analysis_runs(
     deps: AssessmentUseCaseDeps,
     req: AssessmentRequest,
@@ -383,6 +455,8 @@ async def save_assessment(
     Raises AssessmentPermissionError, AssessmentValidationError, or
     AssessmentConflictError. Returns one accepted result per instance.
     """
+    if role is None:
+        role = deps.get_user_role(user)
     if req.fields is not None:
         # The assessment arrives as fields. Its text, which the checks and
         # the store work with, is rendered here and nowhere in the client.
@@ -412,20 +486,31 @@ async def save_assessment(
         if conflicts:
             raise AssessmentConflictError(conflicts)
 
-    if role is None:
-        role = deps.get_user_role(user)
     _validate_ssvc_change(req, role)
+    _validate_response_change(req, role)
     _validate_analysis_runs(deps, req)
 
     payloads = deps.build_assessment_payloads(req, user, role)
-    if "ssvc" not in req.model_fields_set:
+    keep_ssvc = "ssvc" not in req.model_fields_set
+    keep_response = not _changes_response(req, role)
+    if keep_ssvc or keep_response:
         # Never trust client-supplied original_analysis/headers as authority
-        # for reviewer-only SSVC. Preserve each finding's stored record.
+        # for what reviewers decide with the Global assessment: the SSVC
+        # record and the response. Preserve each finding's stored value.
         stored_details = await asyncio.to_thread(
             deps.cache_manager.get_cached_assessment_details, req.instances
         )
         for (_instance, payload), existing in zip(payloads, stored_details):
-            payload["details"] = preserve_ssvc_record(payload["details"], existing)
+            if keep_ssvc:
+                payload["details"] = preserve_ssvc_record(payload["details"], existing)
+            if keep_response:
+                payload["details"] = with_response(
+                    payload["details"], analysis_response(existing)
+                )
+    if not keep_response and req.fields is None:
+        # A reviewer's save as text names the response beside the text.
+        for _instance, payload in payloads:
+            payload["details"] = with_response(payload["details"], req.response)
     if suppressed_by_finding:
         for instance, payload in payloads:
             finding_uuid = instance.get("finding_uuid")

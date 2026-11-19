@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { History, ClipboardCopy, Plus } from '@lucide/vue'
-import { parseAssessmentBlocks, type AssessmentBlock } from '../lib/assessment-helpers'
+import { analysisResponseLabel, parseAssessmentBlocks, parseAssessmentResponse, type AssessmentBlock } from '../lib/assessment-helpers'
 import VulnGroupCardDependencies from './VulnGroupCardDependencies.vue'
 
 const props = withDefaults(defineProps<{
@@ -67,6 +67,10 @@ const getVersionGroupedInstances = (instances: any[]) => {
 }
 
 const parsedBlocks = computed(() => parseAssessmentBlocks(props.assessment.details))
+// The response belongs to the Global assessment; it is shown with it, or
+// on its own line when the assessment has no Global block.
+const responseLabel = computed(() => analysisResponseLabel(parseAssessmentResponse(props.assessment.details)))
+const hasGlobalBlock = computed(() => parsedBlocks.value.some(block => block.team === 'General'))
 </script>
 
 <template>
@@ -104,6 +108,11 @@ const parsedBlocks = computed(() => parseAssessmentBlocks(props.assessment.detai
       <!-- Assessment blocks -->
       <div v-if="props.assessment.state !== 'NOT_SET' || props.assessment.details || props.assessment.comments.length > 0">
         <div v-if="props.assessment.state !== 'NOT_SET' || props.assessment.details" class="space-y-1.5">
+          <div
+            v-if="responseLabel && !hasGlobalBlock"
+            class="text-[10px] text-gray-500"
+            data-testid="assessment-response"
+          >Response: <span class="text-gray-300">{{ responseLabel }}</span></div>
           <div v-for="block in parsedBlocks" :key="block.team">
             <!-- Single-line header: team, state, justification, user, date -->
             <div class="flex items-center gap-1.5 text-[10px]">
@@ -125,6 +134,11 @@ const parsedBlocks = computed(() => parseAssessmentBlocks(props.assessment.detai
                 v-if="block.justification && block.justification !== 'NOT_SET'"
                 class="text-gray-500 shrink-0"
               >· {{ block.justification.replace(/_/g, ' ') }}</span>
+              <span
+                v-if="responseLabel && block.team === 'General'"
+                class="text-gray-500 shrink-0"
+                data-testid="assessment-response"
+              >· Response: <span class="text-gray-300">{{ responseLabel }}</span></span>
               <span class="flex-1"></span>
               <span v-if="block.user" class="text-gray-500 font-mono shrink-0">{{ block.user }}</span>
               <span v-if="block.timestamp" class="text-gray-600 font-mono shrink-0">{{ new Date(typeof block.timestamp === 'number' ? block.timestamp : parseInt(block.timestamp)).toLocaleDateString() }}</span>
