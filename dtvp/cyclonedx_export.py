@@ -597,6 +597,64 @@ def _add_missing_components(
         document.setdefault("components", []).append(entry)
 
 
+# Names of this application's inventories; fixed, so an identity can be
+# derived again from the same content.
+_INVENTORY_NAMESPACE = uuid.UUID("6f1d3c0a-5b0e-5d2f-9a57-2f1c8d3e4b6a")
+# A changed inventory is a new BOM with a new serial number, not a new
+# version of the old one: nothing has to remember a counter.
+INVENTORY_VERSION = 1
+_INVENTORY_CONTENT = ("components", "services", "dependencies", "compositions")
+
+
+def _canonical(value: Any) -> Any:
+    """``value`` with every list in an order that depends on its content only."""
+    if isinstance(value, dict):
+        return {key: _canonical(item) for key, item in sorted(value.items())}
+    if isinstance(value, list):
+        return sorted(
+            (_canonical(item) for item in value),
+            key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=False),
+        )
+    return value
+
+
+def inventory_serial_number(document: dict[str, Any]) -> str:
+    """The serial number of an inventory, derived from what it lists.
+
+    Dependency-Track gives every export of a BOM a new serial number. An
+    inventory is identified here by its content instead: the described
+    component, the components, services, dependencies and compositions.
+    The same content has the same serial number in every export, in any
+    order, and under any property prefix; a changed inventory has another.
+    """
+    def unmarked(component: Any) -> Any:
+        # The mark of an added component carries the requested prefix.
+        if not isinstance(component, dict) or "properties" not in component:
+            return component
+        properties = [
+            item for item in component["properties"]
+            if not str((item or {}).get("name", "")).endswith(":added_from_finding")
+        ]
+        rest = {key: item for key, item in component.items() if key != "properties"}
+        return {**rest, "properties": properties} if properties else rest
+
+    content: dict[str, Any] = {
+        "subject": (document.get("metadata") or {}).get("component"),
+        **{name: document.get(name) or [] for name in _INVENTORY_CONTENT},
+    }
+    content["components"] = [unmarked(item) for item in content["components"]]
+    digest = json.dumps(
+        _canonical(content), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    )
+    return f"urn:uuid:{uuid.uuid5(_INVENTORY_NAMESPACE, digest)}"
+
+
+def inventory_bom_link(document: dict[str, Any]) -> str:
+    """The BOM-Link of an inventory built by ``build_inventory``."""
+    serial = str(document["serialNumber"]).removeprefix("urn:uuid:")
+    return f"urn:cdx:{serial}/{document['version']}"
+
+
 def build_inventory(
     bom: dict[str, Any],
     findings: Iterable[dict[str, Any]] = (),
@@ -608,6 +666,9 @@ def build_inventory(
     document = copy.deepcopy(bom)
     document.pop("vulnerabilities", None)
     _add_missing_components(document, findings, property_prefix)
+    # The same inventory is the same BOM, whenever it is exported.
+    document["serialNumber"] = inventory_serial_number(document)
+    document["version"] = INVENTORY_VERSION
     return document
 
 
@@ -645,8 +706,23 @@ def build_vdr(
     if spec < MINIMUM_SPEC_VERSION:
         document["specVersion"] = ".".join(str(part) for part in MINIMUM_SPEC_VERSION)
     document.setdefault("bomFormat", "CycloneDX")
+    # The report is a document of its own, issued anew with every export. It
+    # says which inventory it describes: the one ``build_inventory`` gives
+    # for the same project version at this moment.
+    inventory = inventory_bom_link(document)
     document["serialNumber"] = f"urn:uuid:{uuid.uuid4()}"
     document["version"] = 1
+    document["externalReferences"] = [
+        *[
+            item for item in document.get("externalReferences") or []
+            if not (item.get("type") == "bom" and str(item.get("url", "")).startswith("urn:cdx:"))
+        ],
+        {
+            "type": "bom",
+            "url": inventory,
+            "comment": "The inventory this report describes",
+        },
+    ]
     metadata = document.setdefault("metadata", {})
     metadata["timestamp"] = moment
     metadata["properties"] = [
@@ -656,6 +732,7 @@ def build_vdr(
         ],
         {"name": f"{property_prefix}:export", "value": VARIANT_VDR},
         {"name": f"{property_prefix}:export_assessment_source", "value": assessment_source},
+        {"name": f"{property_prefix}:export_inventory", "value": inventory},
         # The prefix of every property of this document, stated outright.
         {"name": f"{property_prefix}:export_property_prefix", "value": property_prefix},
         *(

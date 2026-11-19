@@ -625,3 +625,76 @@ def test_the_document_names_its_property_prefix():
     assert {"name": "acme:export_property_prefix", "value": "acme"} in (
         document["metadata"]["properties"]
     )
+
+
+# -- the report names its inventory -----------------------------------------
+
+
+def test_the_same_inventory_has_the_same_serial_number_in_every_export():
+    first = build_inventory({**BOM, "serialNumber": "urn:uuid:" + "1" * 8 + "-1111-4111-8111-" + "1" * 12})
+    # Dependency-Track gives each export another serial number and time, and
+    # may list the components in another order.
+    again = build_inventory({
+        **BOM,
+        "serialNumber": "urn:uuid:" + "2" * 8 + "-2222-4222-8222-" + "2" * 12,
+        "metadata": {**BOM["metadata"], "timestamp": "2026-11-19T08:00:00Z"},
+        "components": list(reversed(BOM["components"])),
+    })
+    assert first["serialNumber"] == again["serialNumber"]
+    assert first["serialNumber"].startswith("urn:uuid:")
+    assert first["version"] == again["version"] == 1
+
+    # Another content is another BOM.
+    changed = build_inventory({
+        **BOM,
+        "components": [*BOM["components"], {"bom-ref": "c9", "name": "lib-z", "version": "9"}],
+    })
+    assert changed["serialNumber"] != first["serialNumber"]
+    other_product = build_inventory({
+        **BOM, "metadata": {"component": {"name": "App", "version": "2.0"}},
+    })
+    assert other_product["serialNumber"] != first["serialNumber"]
+
+
+def test_the_serial_number_does_not_depend_on_the_property_prefix():
+    unknown = {"uuid": "c7", "name": "lib-x", "version": "7.0"}
+    findings = [_finding(unknown)]
+    default = build_inventory(BOM, findings)
+    prefixed = build_inventory(BOM, findings, property_prefix="acme")
+    # The added component is part of the inventory, its mark's name is not.
+    assert default["serialNumber"] == prefixed["serialNumber"]
+    assert default["serialNumber"] != build_inventory(BOM)["serialNumber"]
+
+
+def test_the_vdr_names_the_inventory_it_describes():
+    findings = [_finding(C1), _finding({"uuid": "c7", "name": "lib-x", "version": "7.0"})]
+    inventory = build_inventory(BOM, findings)
+    first = _vdr(findings, [("NOT_SET", ""), ("NOT_SET", "")])
+    second = _vdr(findings, [("EXPLOITABLE", "Reachable."), ("NOT_SET", "")])
+
+    link = "urn:cdx:" + inventory["serialNumber"].removeprefix("urn:uuid:") + "/1"
+    for document in (first, second):
+        assert document["externalReferences"] == [
+            {"type": "bom", "url": link, "comment": "The inventory this report describes"}
+        ]
+        assert {"name": "dtvp:export_inventory", "value": link} in (
+            document["metadata"]["properties"]
+        )
+        assert _valid(document)
+        # The reference, the serial number and the version themselves are
+        # what the schema accepts (a BOM-Link as the URL of a ``bom``).
+        assert _schema_errors({
+            **SCHEMA_BOM,
+            **{key: document[key] for key in ("serialNumber", "version", "externalReferences")},
+        }) is None
+    assert _schema_errors({
+        **SCHEMA_BOM, "serialNumber": inventory["serialNumber"], "version": inventory["version"],
+    }) is None
+    # A malformed link is refused, so the check above is a real one.
+    assert _schema_errors({
+        **SCHEMA_BOM, "externalReferences": [{"type": "bom", "url": "urn:cdx:not a link"}],
+    }) is not None
+    # Each report is its own document; a new assessment does not change the
+    # inventory it points at.
+    assert first["serialNumber"] != second["serialNumber"]
+    assert inventory["serialNumber"] not in (first["serialNumber"], second["serialNumber"])

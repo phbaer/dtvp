@@ -19,6 +19,7 @@ The documents come from DTVP's own records. An assessment that has not been
 exported to Dependency-Track yet is already in the VDR.
 
 - [Getting The Documents](#getting-the-documents)
+- [Two Documents And How They Belong Together](#two-documents-and-how-they-belong-together)
 - [What The VDR Contains](#what-the-vdr-contains)
 - [Naming The Rating Source And Properties](#naming-the-rating-source-and-properties)
 - [Limits](#limits)
@@ -58,6 +59,33 @@ curl -H "Authorization: Bearer $DTVP_TOKEN" \
   "https://dtvp.example/api/cyclonedx?name=App&version=1.4.0&variant=vdr" \
   -o App-1.4.0.vdr.cdx.json
 ```
+
+## Two Documents And How They Belong Together
+
+The inventory describes a release and changes only when its components do.
+The VDR changes with every new advisory and every revised assessment. They are
+two documents so that a new assessment does not make the inventory another
+file.
+
+- **The inventory has a stable serial number.** It is derived from what the
+  inventory lists (the described component, the components, services,
+  dependencies and compositions), so the same content has the same
+  `serialNumber` in every export, in any order and under any property prefix.
+  `version` is always 1: a changed inventory is a new BOM with a new serial
+  number. Dependency-Track's own serial number, which is new with every one of
+  its exports, is not kept. The timestamp is not part of the identity.
+- **The VDR is a new document with every export** and names the inventory it
+  describes as a [BOM-Link](https://cyclonedx.org/capabilities/bomlink/):
+  `externalReferences` has an entry of type `bom` with the URL
+  `urn:cdx:<inventory serial number>/1`, and `metadata.properties` repeats it
+  as `<prefix>:export_inventory`.
+- **To check that two files belong together**, compare that link with the
+  inventory's `serialNumber` and `version`. An inventory exported later
+  matches as long as the components did not change.
+
+The VDR still lists the components itself, so that every `affects` reference
+resolves inside it; a reader needs the inventory file only as the release
+artefact.
 
 ## What The VDR Contains
 
