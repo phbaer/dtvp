@@ -447,6 +447,8 @@ async function openProjectCard(page: Page, groupId: string) {
 
     const detailCard = inspector.locator('.vuln-card').first()
     await expect(detailCard.getByRole('tab', { name: 'Context' })).toBeVisible({ timeout: 10000 })
+    // A reviewer opening a pending assessment lands on the Assessment tab.
+    await detailCard.getByRole('tab', { name: 'Context' }).click()
     await expect(detailCard.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
     return detailCard
 }

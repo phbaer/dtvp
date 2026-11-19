@@ -491,10 +491,10 @@ const componentSummary = computed(() => {
           </span>
         </template>
 
-        <button v-if="canApprove" @click.stop="emit('approve-assessment', $event)"
+        <button v-if="canApprove && !expanded" @click.stop="emit('approve-assessment', $event)"
           class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer ml-auto"
           data-testid="approve-btn"
-          title="Approve this assessment and remove the pending review status"
+          title="Open the Global assessment to check and approve it"
         >
           <CheckCircle :size="9" />
           Approve

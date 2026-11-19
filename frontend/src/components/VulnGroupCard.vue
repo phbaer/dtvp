@@ -79,6 +79,7 @@ onMounted(() => {
         if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
     })
     getKnownUsers().then(users => { knownUsers.value = users }).catch(() => {})
+    if (props.inModal && canApprove.value) void openApproval()
 })
 
 onUnmounted(() => {
@@ -230,6 +231,12 @@ const assessedTeamNames = computed(() => {
     return Array.from(names.values())
 })
 
+// Every action of the card uses one button shape; only the role changes.
+// Plain utility classes, as everywhere else in the templates.
+const actionButton = 'inline-flex h-8 items-center gap-1.5 rounded border px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50'
+const actionButtonPrimary = 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+const actionButtonApprove = 'border-green-600 bg-green-600 text-white hover:bg-green-700'
+const actionButtonSecondary = 'border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
 const showMoreMenu = ref(false)
 const canChangeSuppression = computed(() => (
     isReviewer.value && (!activeTeamScope.value || showAllAssessmentTeams.value || !selectedTeam.value)
@@ -1218,19 +1225,71 @@ const isRescoredOrModified = computed(() => {
     return Math.abs(Number(current) - Number(base)) > 0.05
 })
 
-const approveAssessment = async (e: Event) => {
-    e.stopPropagation() // Prevent card expansion
-    if (!await promptConfirm('Approve Assessment', 'Approve this assessment? This will remove the pending status.')) return
+const hasSavedGlobalAssessment = computed(() => mergedAssessmentData.value.blocks.some(block =>
+    block.team.toLocaleLowerCase() === 'general' && block.state !== 'NOT_SET'
+))
+/** True while the Global form holds a decision taken over from the teams. */
+const approvalPrefilled = ref(false)
 
-    // Get current details from first instance (assuming grouped logic holds)
-    const first = allInstances.value[0]
-    if (!first) return
+const whenDetailsLoaded = () => loadingDetails.value
+    ? new Promise<void>(resolve => {
+        const stop = watch(loadingDetails, loading => {
+            if (!loading) {
+                stop()
+                resolve()
+            }
+        })
+    })
+    : Promise.resolve()
 
-    // We update using the existing handleUpdate but need to make sure state is set correctly first
-    // Since details.value is reactive, handleUpdate will pick it up
+/**
+ * Brings a reviewer to the one place where a pending assessment is approved:
+ * the Global assessment, with the team decisions already taken over when no
+ * Global assessment exists. Nothing is saved here.
+ */
+const openApproval = async () => {
+    if (!canApprove.value) return
+    if (!expanded.value) expanded.value = true
+    await nextTick()
+    await whenDetailsLoaded()
+    if (!canApprove.value) return
+    if (activeDetailTab.value !== 'review') setDetailTab('review', true)
+    if (selectedTeam.value) {
+        selectedTeam.value = ''
+        await nextTick()
+    }
+    if (!hasSavedGlobalAssessment.value && !formTouched.value && effectiveAssessmentWorst.value) {
+        await applyEffectiveAssessmentSummary()
+        approvalPrefilled.value = true
+    }
+}
+
+const requestApproval = (e?: Event) => {
+    e?.stopPropagation() // Prevent card expansion
+    void openApproval()
+}
+
+const approvalBlockedReason = computed(() => {
+    if (state.value === 'NOT_SET') return 'Set the Global decision first.'
+    if (assessmentMissingFields.value.length > 0) return `Still needed: ${assessmentMissingFields.value.join(', ')}.`
+    return ''
+})
+const approvalAtForm = computed(() => activeDetailTab.value === 'review' && !selectedTeam.value)
+const canApproveNow = computed(() => (
+    canApprove.value
+    && approvalAtForm.value
+    && !updating.value
+    && !loadingDetails.value
+    && !approvalBlockedReason.value
+))
+
+/** Saves the Global assessment as shown and clears the pending status. */
+const approveAssessment = async () => {
+    if (!canApproveNow.value) return
     updating.value = true
     try {
         await handleUpdate(true, true) // force=true, isApprove=true
+        approvalPrefilled.value = false
     } finally {
         updating.value = false
     }
@@ -1729,6 +1788,7 @@ watch(expanded, (isOpen) => {
         const shouldLockAfterScroll = openCardCount === 0
         openCardCount += 1
         refreshDetails()
+        if (canApprove.value) void openApproval()
         nextTick(() => {
             // Measure header for badge height
             if (headerEl.value) {
@@ -2709,7 +2769,7 @@ const teamBlockStateColor = (state?: string): string => {
             :suppressedCount="suppressedInstanceCount"
             :oldestAttributedOnMsOverride="scopedOldestAttributedOnMs"
             :componentSummaryOverride="scopedComponentSummary"
-            @approve-assessment="approveAssessment"
+            @approve-assessment="requestApproval"
         >
             <template v-if="inModal" #actions>
                 <button
@@ -2765,6 +2825,93 @@ const teamBlockStateColor = (state?: string): string => {
                     <AlertTriangle v-if="assessmentPersistenceStatus.kind === 'error'" :size="12" />
                     <Loader2 v-else :size="12" class="animate-spin" />
                     {{ assessmentPersistenceStatus.label }}
+                </div>
+                <div class="my-1.5 flex shrink-0 items-center gap-2" data-testid="assessment-actions">
+                    <button
+                        v-if="canApprove"
+                        type="button"
+                        :disabled="approvalAtForm && !canApproveNow"
+                        :title="approvalAtForm
+                            ? (approvalBlockedReason || 'Save this Global assessment and remove the pending review status')
+                            : 'Open the Global assessment to check and approve it'"
+                        data-testid="assessment-approve-button"
+                        :class="[actionButton, actionButtonApprove]"
+                        @click="approvalAtForm ? approveAssessment() : requestApproval()"
+                    >
+                        <CheckCircle :size="13" />
+                        {{ approvalAtForm ? 'Approve' : 'Review & approve' }}
+                    </button>
+                    <button
+                        type="button"
+                        @click="() => handleUpdate(false)"
+                        :disabled="!canApplyAssessment"
+                        data-testid="assessment-submit-button"
+                        :class="[actionButton, canApprove ? actionButtonSecondary : actionButtonPrimary]"
+                    >
+                        {{ assessmentActionLabel }}
+                    </button>
+                    <button
+                        type="button"
+                        @click="refreshDetails"
+                        :disabled="updating || loadingDetails"
+                        :class="[actionButton, actionButtonSecondary]"
+                        title="Reload from server (discard local changes)"
+                        aria-label="Reload assessment from server"
+                    >
+                        <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
+                    </button>
+                    <div class="relative">
+                        <button
+                            type="button"
+                            :class="[actionButton, actionButtonSecondary]"
+                            title="More actions"
+                            aria-label="More actions"
+                            aria-haspopup="menu"
+                            :aria-expanded="showMoreMenu ? 'true' : 'false'"
+                            data-testid="assessment-more-button"
+                            @click="showMoreMenu = !showMoreMenu"
+                        >
+                            <MoreHorizontal :size="14" />
+                        </button>
+                        <div v-if="showMoreMenu" class="fixed inset-0 z-40" aria-hidden="true" @click="showMoreMenu = false"></div>
+                        <div
+                            v-if="showMoreMenu"
+                            role="menu"
+                            data-testid="assessment-more-menu"
+                            class="absolute right-0 z-50 mt-1 w-64 rounded border border-gray-700 bg-gray-900 py-1 text-left text-xs shadow-xl"
+                            @keydown.esc="showMoreMenu = false"
+                        >
+                            <label
+                                v-if="canChangeSuppression"
+                                :for="`suppress-${group.id}`"
+                                role="menuitemcheckbox"
+                                :aria-checked="suppressed ? 'true' : 'false'"
+                                class="flex cursor-pointer items-start gap-2 px-3 py-2 text-gray-300 hover:bg-gray-800"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :id="`suppress-${group.id}`"
+                                    v-model="suppressed"
+                                    class="mt-0.5 h-3.5 w-3.5 rounded"
+                                    @change="formTouched = true"
+                                />
+                                <span>
+                                    <span class="flex items-center gap-1.5 font-semibold"><EyeOff :size="12" /> Suppress in Dependency-Track</span>
+                                    <span class="mt-0.5 block text-[10px] leading-snug text-gray-500">Takes effect when the assessment is saved.</span>
+                                </span>
+                            </label>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
+                                class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-red-300 hover:bg-red-950/50 disabled:cursor-not-allowed disabled:opacity-40"
+                                data-testid="assessment-delete-button"
+                                @click="showMoreMenu = false; openDeleteModal()"
+                            >
+                                <Trash2 :size="12" /> Delete assessment…
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3109,6 +3256,15 @@ const teamBlockStateColor = (state?: string): string => {
                         </div>
 
                         <div
+                            v-if="approvalPrefilled && !selectedTeam"
+                            data-testid="approval-prefilled-note"
+                            class="mt-3 rounded border border-green-700/40 bg-green-950/20 px-3 py-2 text-[11px] leading-relaxed text-green-100/90"
+                            role="status"
+                        >
+                            The Global decision below is taken over from the team assessments, with the rescoring rule for that state applied.
+                            Nothing is saved until you press Approve.
+                        </div>
+                        <div
                             v-if="isReviewer && !selectedTeam && effectiveTeamAssessments.length"
                             data-testid="effective-team-assessment-summary"
                             class="mt-3 border-l-2 border-purple-500/60 bg-purple-950/10 px-3 py-2.5"
@@ -3159,81 +3315,6 @@ const teamBlockStateColor = (state?: string): string => {
                         description="Set the assessment state, justification, technical rationale, ownership, and any reviewer-only rescoring context."
                         data-testid="assessment-decision-section"
                     >
-                    <template #actions>
-                        <div class="flex shrink-0 items-center gap-2" data-testid="assessment-decision-actions">
-                            <button
-                                type="button"
-                                @click="() => handleUpdate(false)"
-                                :disabled="!canApplyAssessment"
-                                data-testid="assessment-submit-button"
-                                class="rounded bg-blue-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                {{ assessmentActionLabel }}
-                            </button>
-                            <button
-                                type="button"
-                                @click="refreshDetails"
-                                :disabled="updating || loadingDetails"
-                                class="rounded border border-gray-600 bg-gray-800 px-3 py-2 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                                title="Reload from server (discard local changes)"
-                                aria-label="Reload assessment from server"
-                            >
-                                <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
-                            </button>
-                            <div class="relative">
-                                <button
-                                    type="button"
-                                    class="rounded border border-gray-600 bg-gray-800 px-3 py-2 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-                                    title="More actions"
-                                    aria-label="More actions"
-                                    aria-haspopup="menu"
-                                    :aria-expanded="showMoreMenu ? 'true' : 'false'"
-                                    data-testid="assessment-more-button"
-                                    @click="showMoreMenu = !showMoreMenu"
-                                >
-                                    <MoreHorizontal :size="14" />
-                                </button>
-                                <div v-if="showMoreMenu" class="fixed inset-0 z-40" aria-hidden="true" @click="showMoreMenu = false"></div>
-                                <div
-                                    v-if="showMoreMenu"
-                                    role="menu"
-                                    data-testid="assessment-more-menu"
-                                    class="absolute right-0 z-50 mt-1 w-64 rounded border border-gray-700 bg-gray-900 py-1 text-left text-xs shadow-xl"
-                                    @keydown.esc="showMoreMenu = false"
-                                >
-                                    <label
-                                        v-if="canChangeSuppression"
-                                        :for="`suppress-${group.id}`"
-                                        role="menuitemcheckbox"
-                                        :aria-checked="suppressed ? 'true' : 'false'"
-                                        class="flex cursor-pointer items-start gap-2 px-3 py-2 text-gray-300 hover:bg-gray-800"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            :id="`suppress-${group.id}`"
-                                            v-model="suppressed"
-                                            class="mt-0.5 h-3.5 w-3.5 rounded"
-                                            @change="formTouched = true"
-                                        />
-                                        <span>
-                                            <span class="flex items-center gap-1.5 font-semibold"><EyeOff :size="12" /> Suppress in Dependency-Track</span>
-                                            <span class="mt-0.5 block text-[10px] leading-snug text-gray-500">Takes effect when the assessment is saved.</span>
-                                        </span>
-                                    </label>
-                                    <button
-                                        type="button"
-                                        role="menuitem"
-                                        :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
-                                        class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-red-300 hover:bg-red-950/50 disabled:cursor-not-allowed disabled:opacity-40"
-                                        data-testid="assessment-delete-button"
-                                        @click="showMoreMenu = false; openDeleteModal()"
-                                    >
-                                        <Trash2 :size="12" /> Delete assessment…
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
                     <div
                         v-if="selectedTeam && selectedAutomaticProposal"
                         data-testid="automatic-assessment-proposal"
