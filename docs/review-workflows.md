@@ -361,8 +361,15 @@ The rescoring repair includes cases where a transition such as
 `NOT_AFFECTED` should produce a `0.0` score but no rescore was stored. Rows
 place the stored vector and score beside the fixed values that will be written.
 Findings that cannot be repaired automatically stay listed with an amber note
-and are not selectable: a matching transition with a missing or unsupported
-original CVSS vector, or a lost vector with ambiguous or no audit history. If
+and are not selectable: a matching transition with an unsupported original
+CVSS vector, or a lost vector with ambiguous or no audit history.
+
+Some advisories state a severity and no CVSS vector. A rescoring needs a base
+all the same, so the repair invents one: the base metrics of the rescored
+vector the finding already has, since whoever rescored it chose that base;
+else a base without impact (`CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N`),
+the one the assessment form starts from in that case. The row says that the
+base is invented. If
 the rescore rule configuration is invalid, the other repairs still run and the
 preview states why rescoring was skipped.
 

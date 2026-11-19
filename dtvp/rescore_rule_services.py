@@ -344,6 +344,29 @@ def _finding_identity(component: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# The base of a vulnerability whose advisory states no CVSS vector: no impact
+# on anything, like the vector the assessment form starts from in that case.
+INVENTED_BASE_VECTOR = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"
+
+
+def _invented_base_vector(config: dict[str, Any], stored_vector: str | None) -> str:
+    """A base vector for a vulnerability that has none.
+
+    The base metrics of the rescored vector already stored, when it has them
+    all: whoever rescored the finding chose that base. Else a base without
+    impact.
+    """
+    if stored_vector:
+        try:
+            version, prefix, metrics = _parse_vector(stored_vector)
+            metric_rule = config["metric_rules"][version]
+            base = {key: metrics[key] for key in metric_rule["base_metrics"]}
+            return _serialize_vector(version, prefix, base, metric_rule)
+        except (RescoreRuleError, ValueError, KeyError):
+            pass
+    return INVENTED_BASE_VECTOR
+
+
 def _evaluate_component(
     config: dict[str, Any], group: dict[str, Any], component: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -364,17 +387,11 @@ def _evaluate_component(
         "cvss_version": None,
     }
     base_vector = group.get("cvss_vector")
-    if not base_vector:
-        return {
-            **finding,
-            "status": "review",
-            "issue_type": "manual_review",
-            "reasons": ["Original CVSS vector is missing"],
-            "current_vector": current_vector,
-            "current_score": current_score,
-            "proposed_vector": None,
-            "proposed_score": None,
-        }
+    # Some advisories have a severity and no CVSS vector. A rescoring needs
+    # a base all the same, so one is invented.
+    invented_base = not base_vector
+    if invented_base:
+        base_vector = _invented_base_vector(config, current_vector)
     try:
         version = _detect_version(str(base_vector))
     except RescoreRuleError as exc:
@@ -432,6 +449,8 @@ def _evaluate_component(
         return {**finding, "status": "compliant"}
 
     reasons: list[str] = []
+    if invented_base:
+        reasons.append("The advisory has no CVSS vector: the base is invented")
     if not current_vector:
         reasons.append("Missing rescored vector")
     elif cross_version:
