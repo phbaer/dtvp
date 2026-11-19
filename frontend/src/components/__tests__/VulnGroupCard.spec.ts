@@ -304,7 +304,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('1.0') // Version should be shown
     })
 
-    it('keeps the sticky detail bar focused on tabs and shows no next-action banner or team mapping tab', async () => {
+    it('keeps tabs and all actions in the sticky bar and shows no next-action banner or team mapping tab', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
         })
@@ -316,7 +316,9 @@ describe('VulnGroupCard', () => {
         expect(stickyBar.text()).toContain('Code Evidence')
         expect(stickyBar.text()).toContain('Assessment')
         expect(stickyBar.text()).not.toContain('Review context')
-        expect(stickyBar.find('[data-testid="sticky-tab-apply-button"]').exists()).toBe(false)
+        // Every action of the card sits in this bar, and only once.
+        expect(stickyBar.findAll('[data-testid="assessment-submit-button"]')).toHaveLength(1)
+        expect(stickyBar.find('[data-testid="assessment-more-button"]').exists()).toBe(true)
         expect(stickyBar.text()).not.toContain('Team Mapping')
         expect(wrapper.find('[data-testid="analyst-next-action"]').exists()).toBe(false)
         expect(wrapper.find('[data-testid="workflow-primary-action"]').exists()).toBe(false)
@@ -1076,7 +1078,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Team Assessment: Security')
     })
 
-    it('enables the assessment header action when the CVSS vector or score changes', async () => {
+    it('enables the Save action when the CVSS vector or score changes', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: { ...mockGroup, tags: ['Security'] } },
             global: {
@@ -1089,9 +1091,10 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         const decisionSection = wrapper.get('[data-testid="assessment-decision-section"]')
-        const actions = decisionSection.get('[data-testid="assessment-decision-actions"]')
+        // All actions live in the sticky bar, not in the form sections.
+        expect(decisionSection.find('[data-testid="assessment-submit-button"]').exists()).toBe(false)
+        const actions = wrapper.get('[data-vuln-card-sticky-nav] [data-testid="assessment-actions"]')
         const saveButton = actions.get('[data-testid="assessment-submit-button"]')
-        expect(decisionSection.get('header').element.contains(saveButton.element)).toBe(true)
         expect(wrapper.findAll('[data-testid="assessment-submit-button"]')).toHaveLength(1)
         expect(saveButton.attributes('disabled')).toBeDefined()
 
@@ -1790,6 +1793,57 @@ describe('VulnGroupCard', () => {
         await wrapper.get('[data-testid="assessment-more-button"]').trigger('click')
         expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Suppress in Dependency-Track')
         expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Delete assessment')
+    })
+
+    it('lets a reviewer approve a pending assessment in one step', async () => {
+        const pending = JSON.parse(JSON.stringify(mockGroup))
+        pending.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+        pending.affected_versions[0].components[0].analysis_details =
+            '--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: ana] [Justification: CODE_NOT_PRESENT] ---\nThe parser is not shipped.\n\n[Status: Pending Review]'
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: pending },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }), teamMapping: ref({}) } },
+        })
+        // Collapsed, the header button is the way in.
+        expect(wrapper.find('[data-testid="assessment-approve-button"]').exists()).toBe(false)
+        await wrapper.get('[data-testid="approve-btn"]').trigger('click')
+        await flushPromises()
+
+        // It opens the Global assessment with the team decision taken over.
+        expect((wrapper.vm as any).activeDetailTab).toBe('review')
+        expect((wrapper.vm as any).selectedTeam).toBe('')
+        expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
+        expect(wrapper.get('[data-testid="approval-prefilled-note"]').text()).toContain('Nothing is saved until you press Approve')
+        expect(updateAssessment).not.toHaveBeenCalled()
+        expect(wrapper.find('[data-testid="approve-btn"]').exists()).toBe(false)
+
+        const approve = wrapper.get('[data-vuln-card-sticky-nav] [data-testid="assessment-approve-button"]')
+        expect(approve.text()).toBe('Approve')
+        await approve.trigger('click')
+        await flushPromises()
+
+        expect(updateAssessment).toHaveBeenCalledTimes(1)
+        const payload = vi.mocked(updateAssessment).mock.calls[0]![0] as any
+        expect(payload.state).toBe('NOT_AFFECTED')
+        expect(payload.fields.pending_review).toBeFalsy()
+        expect(payload.fields.teams.map((team: any) => team.team).sort()).toEqual(['General', 'Security'])
+    })
+
+    it('does not overwrite an existing Global assessment when opening the approval', async () => {
+        const pending = JSON.parse(JSON.stringify(mockGroup))
+        pending.affected_versions[0].components[0].analysis_state = 'EXPLOITABLE'
+        pending.affected_versions[0].components[0].analysis_details =
+            '--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] ---\nKept as decided.\n\n'
+            + '--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: ana] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n[Status: Pending Review]'
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: pending },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }), teamMapping: ref({}) } },
+        })
+        await wrapper.get('[data-testid="approve-btn"]').trigger('click')
+        await flushPromises()
+
+        expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
+        expect(wrapper.find('[data-testid="approval-prefilled-note"]').exists()).toBe(false)
     })
 
     it('marks a suppressed vulnerability in the header', async () => {

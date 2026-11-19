@@ -166,8 +166,23 @@ The detail workspace provides:
 
 Compact vulnerability rows expose the current workflow state, such as mapping
 needed, analysis running, result ready, assessment needed, awaiting review, or
-complete. Inside the card, the tab status badges say what is still missing; the
-sticky bar contains only navigation and persistence state.
+complete. Inside the card, the tab status badges say what is still missing.
+
+All actions of a card sit in one place, the sticky bar next to the tabs:
+Approve (reviewers, while a review is pending), Save or Submit, Reload, and the
+"More" menu. They share one button shape; the one that completes the current
+work is filled, the others are outlined.
+
+### Approving
+
+A reviewer who opens a pending assessment lands on the Global assessment. If no
+Global assessment exists yet, the form is filled from the team assessments: the
+worst state, its justification and the combined rationale, with the rescoring
+rule for that state applied. An existing Global assessment is never replaced.
+Nothing is saved at this point. The reviewer adjusts the decision or the CVSS
+vector where needed and presses Approve, which saves the Global assessment and
+removes the pending status in one step. On a collapsed card the Approve button
+in the header opens this view; it does not approve by itself.
 
 Component ownership is edited in Settings → Team Mapping, not in the card. A
 vulnerability whose components belong to no team offers the team `Unassigned`,
