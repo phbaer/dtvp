@@ -25,6 +25,9 @@ class BulkWorkflowContext:
     result_store: Any = None
     assessment_records: Optional[list[dict[str, Any]]] = None
     assessment_diagnostics: dict[str, int] = field(default_factory=dict)
+    # The earlier versions of the assessments that ever named a ticket, per
+    # finding (project, component, vulnerability), oldest first.
+    ticket_histories: Optional[Callable[[], dict[tuple[str, str, str], list[dict[str, Any]]]]] = None
 
 
 @dataclass(frozen=True)

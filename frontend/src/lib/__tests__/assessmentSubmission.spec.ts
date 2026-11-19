@@ -19,6 +19,64 @@ describe('assessmentSubmission', () => {
         },
     ]
 
+    it('leaves the assessments of other teams alone when their drafts say nothing new', () => {
+        const stored = [
+            '--- [Team: Phoenix] [State: NOT_AFFECTED] [Assessed By: paul] [Date: 1791500000000] [Justification: CODE_NOT_PRESENT] ---',
+            'Not shipped.',
+            '',
+            '--- [Team: R-Web] [State: EXPLOITABLE] [Assessed By: rosa] [Date: 1786600000000] [Justification: NOT_SET] [Ticket: VP-66089] ---',
+            'Reachable from the web tier.',
+        ].join('\n')
+        const draft = (state: string, details: string, justification: string, ticket: string) => ({
+            state, details, justification, ticket,
+            assigned: [], evidenceReviewed: false, versionCoverageChecked: false,
+        })
+        const prepared = prepareAssessmentSubmission({
+            allInstances: [{ ...instances[0]!, analysis_state: 'EXPLOITABLE', analysis_details: stored }],
+            originalAnalysis: {},
+            selectedTeam: '',
+            state: 'NOT_AFFECTED',
+            details: 'Decided.',
+            justification: 'CODE_NOT_PRESENT',
+            currentAssigned: [],
+            evidenceReviewed: false,
+            versionCoverageChecked: false,
+            ticket: '',
+            teamDrafts: new Map([
+                // The tab was opened and left as it was.
+                ['Phoenix', draft('NOT_AFFECTED', 'Not shipped.', 'CODE_NOT_PRESENT', '')],
+                // A form that never showed the team's assessment.
+                ['R-Web', draft('NOT_SET', '', 'NOT_SET', '')],
+            ]),
+            isReviewer: true,
+            pendingVector: '',
+            pendingScore: null,
+            initialVector: '',
+            initialScore: null,
+            originalVector: '',
+            originalScore: null,
+            currentUser: 'reviewer',
+            isApprove: true,
+            showRawEdit: false,
+            rawDetailsTouched: false,
+            rawDetails: '',
+            mergedAssessmentFullText: stored,
+            suppressed: false,
+            force: false,
+        })
+
+        const teams = Object.fromEntries(prepared.payload.fields!.teams.map(team => [team.team, team]))
+        expect(Object.keys(teams).sort()).toEqual(['General', 'Phoenix', 'R-Web'])
+        expect(teams.General).toMatchObject({ state: 'NOT_AFFECTED', assessed_by: 'reviewer' })
+        // Not written again under the saving user's name and time.
+        expect(teams.Phoenix).toMatchObject({ assessed_by: 'paul', assessed_at_ms: 1791500000000 })
+        // Not removed, and its ticket is still there.
+        expect(teams['R-Web']).toMatchObject({
+            state: 'EXPLOITABLE', assessed_by: 'rosa', ticket: 'VP-66089',
+            details: 'Reachable from the web tier.',
+        })
+    })
+
     it('merges the active draft into the payload and preserves unsaved team drafts', () => {
         const prepared = prepareAssessmentSubmission({
             allInstances: instances,

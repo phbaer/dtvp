@@ -1001,3 +1001,22 @@ def test_an_existing_database_is_reduced_to_one_copy_of_each_text(tmp_path):
         ("component-2", 1, "Edited", 0),
     ]
 
+
+
+def test_ticket_histories_list_every_version_of_assessments_that_named_a_ticket(tmp_path):
+    store = _store(tmp_path)
+    ticketed = "--- [Team: A] [State: IN_TRIAGE] [Assessed By: alice] [Ticket: VP-1] ---\nText"
+    store.enqueue_many([_payload(details=ticketed)], author="alice")
+    store.enqueue_many([_payload(details="Rewritten")], origin="bulk-workflow")
+    store.enqueue_many([{**_payload(details="Never a ticket"), "component_uuid": "other"}])
+
+    histories = store.list_ticket_histories()
+
+    assert list(histories) == [KEY]
+    assert [(h["origin"], h["analysisDetails"]) for h in histories[KEY]][-2:] == [
+        ("user", histories[KEY][-2]["analysisDetails"]),
+        ("bulk-workflow", histories[KEY][-1]["analysisDetails"]),
+    ]
+    assert "[Ticket: VP-1]" in histories[KEY][-2]["analysisDetails"]
+    assert "Rewritten" in histories[KEY][-1]["analysisDetails"]
+    assert all(h["created_at"] for h in histories[KEY])

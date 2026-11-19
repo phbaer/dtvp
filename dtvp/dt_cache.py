@@ -215,6 +215,27 @@ def _has_meaningful_assessment(analysis: Optional[Dict[str, Any]]) -> bool:
     return bool(_get_analysis_details(analysis))
 
 
+def _one_assessment(
+    candidates: List[Tuple[Tuple[str, str, str], Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """The assessment the earlier findings of one component and vulnerability
+    agree on; ``None`` when there is none or they differ.
+
+    A BOM can list the same component several times. When the source replaces
+    them all, each earlier finding is a candidate; as long as they say the
+    same there is nothing to choose between.
+    """
+    values = {
+        (
+            _get_analysis_state(analysis),
+            _get_analysis_details(analysis),
+            _get_analysis_suppressed(analysis),
+        )
+        for _key, analysis in candidates
+    }
+    return candidates[0][1] if len(values) == 1 else None
+
+
 def _mark_assessment_for_review(analysis: Dict[str, Any]) -> Dict[str, Any]:
     details = _get_analysis_details(analysis)
     if not details:
@@ -1636,6 +1657,10 @@ class CacheManager:
                 exc,
             )
 
+        findings_read_at = self.store.snapshot_updated_at(
+            DocumentRef(KIND_FINDINGS, project_uuid=project_uuid)
+        )
+
         def assemble() -> Dict[str, Any]:
             assessments = []
             incomplete = 0
@@ -1658,6 +1683,7 @@ class CacheManager:
                 tool_version=tool_version,
                 unowned_teams=unowned_teams,
                 ticket_prefixes=ticket_prefixes,
+                findings_read_at=findings_read_at or "",
             )
             if not advisories_read:
                 # Ratings, dates, and recommendations are those of the
@@ -1834,6 +1860,10 @@ class CacheManager:
         return self.assessment_outbox.list_revisions(
             (project_uuid, component_uuid, vulnerability_uuid), limit=limit
         )
+
+    def get_ticket_histories(self) -> Dict[AssessmentKey, List[Dict[str, Any]]]:
+        """The versions of every assessment that ever named a ticket."""
+        return self.assessment_outbox.list_ticket_histories()
 
     def get_assessment_fields(
         self,
@@ -2032,9 +2062,9 @@ class CacheManager:
                     else None
                 )
                 if previous_analysis is None and identity:
-                    candidates = previous_candidates.get(identity, [])
-                    if len(candidates) == 1:
-                        _, previous_analysis = candidates[0]
+                    previous_analysis = _one_assessment(
+                        previous_candidates.get(identity, [])
+                    )
 
                 if previous_analysis:
                     changed, previous_score, current_score = _threadmodel_score_changed(
@@ -2060,11 +2090,10 @@ class CacheManager:
             if not identity:
                 continue
 
-            candidates = previous_candidates.get(identity, [])
-            if len(candidates) != 1:
+            previous_analysis = _one_assessment(previous_candidates.get(identity, []))
+            if previous_analysis is None:
                 continue
 
-            _, previous_analysis = candidates[0]
             preserved_analysis = _mark_assessment_for_review(previous_analysis)
             self._save_project_cache(
                 current_path,

@@ -1,5 +1,6 @@
 """Reviewing and exporting the queue of local assessments."""
 
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
@@ -376,6 +377,8 @@ def test_vdr_uses_vulnerability_records_ticket_keys_and_the_team_mapping(
     assert metadata["dtvp:export_ticket_prefixes"] == "EXP, SEC"
     assert metadata["dtvp:export_text_only_tickets"] == "1"
     assert "dtvp:export_advisory_records" not in metadata
+    # When the findings were last read from Dependency-Track.
+    assert datetime.fromisoformat(metadata["dtvp:export_findings_read_at"]).tzinfo is not None
 
     # The request names other keys than the configuration.
     assert requested.json()["metadata"]["properties"][-2:] == [

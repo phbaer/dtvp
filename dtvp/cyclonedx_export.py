@@ -622,6 +622,7 @@ def build_vdr(
     tool_version: str = "",
     unowned_teams: Iterable[str] = (),
     ticket_prefixes: Iterable[str] = (),
+    findings_read_at: str = "",
 ) -> dict[str, Any]:
     """The BOM with its findings and their assessments.
 
@@ -633,6 +634,7 @@ def build_vdr(
     team owns: an assessment under such a name is not a team's.
     ``ticket_prefixes`` are the project keys of ticket references
     (``<prefix>-<number>``) to recognise in the texts.
+    ``findings_read_at`` is when the findings were last read from the source.
     """
     moment = (generated_at or datetime.now(UTC)).astimezone(UTC).isoformat()
     document = build_inventory(bom, findings, property_prefix=property_prefix)
@@ -659,6 +661,12 @@ def build_vdr(
         *(
             [{"name": f"{property_prefix}:export_tool", "value": f"DTVP {tool_version}"}]
             if tool_version else []
+        ),
+        # The findings are those of the last import. Advisories the source
+        # has reported since are not in the document.
+        *(
+            [{"name": f"{property_prefix}:export_findings_read_at", "value": findings_read_at}]
+            if findings_read_at else []
         ),
     ]
 

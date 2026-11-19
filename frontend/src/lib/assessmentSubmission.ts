@@ -225,6 +225,41 @@ const buildRescoredTags = ({
     return tags
 }
 
+const sameText = (left: string | undefined, right: string | undefined) =>
+    (left || '').replace(/\s+/g, ' ').trim() === (right || '').replace(/\s+/g, ' ').trim()
+
+/**
+ * Whether the draft of a team other than the one being saved says something
+ * new. Such a draft is what the form held when its tab was left. An unchanged
+ * one must not be written again under the saving user's name and time, and an
+ * empty one must not remove the assessment of a team nobody was editing:
+ * removing an assessment is done on that team's own tab.
+ */
+const changesOtherTeam = (
+    currentText: string,
+    teamName: string,
+    draft: AssessmentDraft,
+    takeoverSources?: Map<string, string>,
+): boolean => {
+    const state = draft.state || 'NOT_SET'
+    const justification = draft.justification || 'NOT_SET'
+    const details = cleanStructuredAssessmentDetails(draft.details)
+    if (state === 'NOT_SET' && !details.trim() && justification === 'NOT_SET') return false
+    if (takeoverSources?.has(teamName)) return true
+    const existing = parseAssessmentBlocks(currentText)
+        .find(block => assessmentTeamKey(block.team) === assessmentTeamKey(teamName))
+    if (!existing || existing.historical) return true
+    return !(
+        (existing.state || 'NOT_SET') === state
+        && (existing.justification || 'NOT_SET') === justification
+        && sameText(existing.details, details)
+        && sameText(existing.ticket, draft.ticket)
+        && Boolean(existing.evidenceReviewed) === Boolean(draft.evidenceReviewed)
+        && Boolean(existing.versionCoverageChecked) === Boolean(draft.versionCoverageChecked)
+        && [...(existing.assigned || [])].sort().join(',') === [...(draft.assigned || [])].sort().join(',')
+    )
+}
+
 export const prepareAssessmentSubmission = (
     input: PrepareAssessmentSubmissionInput,
 ): PreparedAssessmentSubmission => {
@@ -274,6 +309,9 @@ export const prepareAssessmentSubmission = (
         let mergedText = currentFullDetails
         let mergedState = ''
         for (const [teamName, draft] of nextDrafts.entries()) {
+            if (teamName !== targetTeam && !changesOtherTeam(mergedText, teamName, draft, input.takeoverSources)) {
+                continue
+            }
             const result = mergeTeamAssessment(
                 mergedText,
                 teamName,

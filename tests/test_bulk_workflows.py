@@ -2297,3 +2297,179 @@ def test_repair_synchronization_keeps_and_copies_a_manual_rescoring():
     assert [instance["finding_uuid"] for instance, _ in payloads] == ["finding-2"]
     assert payloads[0][1]["details"].startswith(f"{rescoring}\n\n--- [Team: TeamA]")
     assert payloads[0][1]["state"] == "EXPLOITABLE"
+
+
+_TICKETED = _FORMER.replace("] ---", "] [Ticket: VP-101, SR-7] ---")
+
+
+def test_repair_keeps_the_tickets_of_a_former_team():
+    group = _repair_group(
+        [("NOT_AFFECTED", f"{_TICKETED}\n\n{_CURRENT}")], tags=["TeamB"], lifecycle="ASSESSED",
+    )
+
+    details = _repair(group)[1][0][1]["details"]
+
+    # In the note a person reads, and as a field of the block that stays.
+    assert (
+        "Former team assessment (TeamA; NOT_AFFECTED; justification CODE_NOT_REACHABLE; "
+        "assessed by alice; ticket VP-101, SR-7):\nNot reachable."
+    ) in details
+    general = parse_assessment("NOT_AFFECTED", details, False)["teams"][0]
+    assert (general["team"], general["ticket"]) == ("General", "VP-101, SR-7")
+
+
+def test_repair_keeps_the_tickets_when_it_combines_a_conflict():
+    exploitable = _TICKETED.replace("NOT_AFFECTED", "EXPLOITABLE")
+    other = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: carol] "
+        "[Justification: CODE_NOT_PRESENT] [Ticket: VP-9] ---\nNot shipped."
+    )
+    group = _repair_group(
+        [("EXPLOITABLE", exploitable), ("NOT_AFFECTED", other)],
+        tags=["TeamB"], lifecycle="INCONSISTENT",
+    )
+
+    details = _repair(group)[1][0][1]["details"]
+
+    general = parse_assessment("EXPLOITABLE", details, False)["teams"][0]
+    assert general["team"] == "General"
+    assert general["ticket"] == "VP-9, VP-101, SR-7"
+
+
+def _repair_with_history(group, histories):
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        ticket_histories=lambda: histories,
+    )
+    preview = build_assessment_repair_preview(context, lambda: {})
+    payloads, _ = build_assessment_repair_payloads(context, [group["id"]], lambda: {})
+    return preview, payloads
+
+
+_NOTED = (
+    "--- [Team: General] [State: NOT_SET] [Assessed By: reviewer] [Justification: NOT_SET] ---\n"
+    "Former team assessment (TeamA; NOT_AFFECTED; assessed by alice):\nNot reachable.\n\n"
+    + _CURRENT
+)
+_FINDING = ("project-1", "component-1", "vulnerability-1")
+
+
+def _versions(*versions):
+    return {
+        _FINDING: [
+            {"analysisDetails": text, "origin": origin, "created_at": "2026-11-10T00:00:00+00:00"}
+            for origin, text in versions
+        ]
+    }
+
+
+def test_repair_restores_a_ticket_that_a_workflow_dropped():
+    group = _repair_group([("NOT_AFFECTED", _NOTED)], tags=["TeamB"])
+    histories = _versions(
+        ("import", f"{_TICKETED}\n\n{_CURRENT}"), ("bulk-workflow", _NOTED),
+    )
+
+    preview, payloads = _repair_with_history(group, histories)
+
+    assert _labels(preview) == ["restore_tickets"]
+    assert preview["items"][0]["repairs"][0]["label"] == (
+        "Restore 2 tickets a workflow dropped (VP-101, SR-7) on 1 finding"
+    )
+    assert preview["summary"]["restore_tickets_groups"] == 1
+    details = payloads[0][1]["details"]
+    teams = parse_assessment("NOT_AFFECTED", details, False)["teams"]
+    # TeamA has no block any more: the General assessment takes its tickets.
+    assert {team["team"]: team["ticket"] for team in teams} == {
+        "General": "VP-101, SR-7", "TeamB": None,
+    }
+    assert "Not reachable." in details and "Not shipped." in details
+    assert payloads[0][1]["state"] == "NOT_AFFECTED"
+
+    # Once the text names the tickets there is nothing left to restore.
+    applied = _repair_group([("NOT_AFFECTED", details)], tags=["TeamB"])
+    assert _repair_with_history(applied, histories)[0]["items"] == []
+
+
+def test_repair_returns_a_dropped_ticket_to_the_block_of_its_team():
+    without = f"{_FORMER}\n\n{_CURRENT}".replace("TeamA", "TeamC")
+    group = _repair_group([("NOT_AFFECTED", without)], tags=["TeamB", "TeamC"])
+    histories = _versions(
+        ("user", f"{_TICKETED}\n\n{_CURRENT}".replace("TeamA", "TeamC")),
+        ("bulk-workflow", without),
+    )
+
+    details = _repair_with_history(group, histories)[1][0][1]["details"]
+
+    teams = parse_assessment("NOT_AFFECTED", details, False)["teams"]
+    assert {team["team"]: team["ticket"] for team in teams} == {
+        "TeamC": "VP-101, SR-7", "TeamB": None,
+    }
+
+
+def test_repair_leaves_a_ticket_that_a_person_removed():
+    group = _repair_group([("NOT_AFFECTED", _NOTED)], tags=["TeamB"])
+    for origin in ("user", "mcp-assessment", "assessment-deletion"):
+        histories = _versions(("import", f"{_TICKETED}\n\n{_CURRENT}"), (origin, _NOTED))
+        assert _repair_with_history(group, histories)[0]["items"] == []
+    # Named in a text counts as kept, and so does a later version naming it.
+    mentioned = _NOTED.replace("Not reachable.", "Not reachable, see VP-101 and SR-7.")
+    histories = _versions(("import", f"{_TICKETED}\n\n{_CURRENT}"), ("bulk-workflow", mentioned))
+    assert _repair_with_history(
+        _repair_group([("NOT_AFFECTED", mentioned)], tags=["TeamB"]), histories
+    )[0]["items"] == []
+
+
+def test_repair_reports_a_dropped_ticket_it_cannot_place():
+    plain = "No blocks at all."
+    group = _repair_group([("NOT_AFFECTED", plain)], tags=["TeamB"])
+    histories = _versions(("import", _TICKETED), ("bulk-workflow", plain))
+
+    preview, payloads = _repair_with_history(group, histories)
+
+    assert payloads == []
+    assert preview["items"][0]["repairs"] == []
+    assert preview["items"][0]["review"] == [
+        "A workflow dropped VP-101, SR-7; no assessment of its team or global one to return it to"
+    ]
+
+
+def test_repair_does_not_refer_the_fallback_team_to_the_global_assessment():
+    mapping = {"*": "Unknown", "library-a": "TeamB"}
+    general = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] "
+        "[Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+    )
+    # A component no team owns carries the mapping's fallback name as its tag.
+    group = _repair_group([("NOT_AFFECTED", general)], tags=["TeamB", "Unknown"])
+
+    preview, payloads, _ = _repair(group, team_mapping=mapping)
+
+    details = payloads[0][1]["details"]
+    assert "[Team: TeamB]" in details and "[Team: Unknown]" not in details
+    assert _labels(preview) == ["refer_teams"]
+
+    # With the fallback name alone nobody owns the component: nothing to repair.
+    alone = _repair_group([("NOT_AFFECTED", general)], tags=["Unknown"])
+    assert _repair(alone, team_mapping=mapping)[0]["items"] == []
+
+
+def test_repair_keeps_the_date_of_a_former_team_assessment():
+    # 2026-08-12 and 2026-10-16, in milliseconds since 1970.
+    first = _FORMER.replace("[Justification:", "[Date: 1786492800000] [Justification:")
+    second = first.replace("TeamA", "TeamC").replace("1786492800000", "1792108800000")
+    third = first.replace("TeamA", "TeamD")
+    group = _repair_group(
+        [("NOT_AFFECTED", f"{first}\n\n{second}\n\n{third}\n\n{_CURRENT}")],
+        tags=["TeamB"], lifecycle="ASSESSED",
+    )
+
+    details = _repair(group)[1][0][1]["details"]
+
+    # Teams that decided on the same day share a decision; another day is
+    # a decision of its own.
+    assert (
+        "Former team assessment ("
+        "TeamA, TeamD; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice; dated 2026-08-12"
+        " | TeamC; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice; dated 2026-10-16"
+        "):\nNot reachable."
+    ) in details

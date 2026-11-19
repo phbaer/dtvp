@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from ..assessment_model import FORMER_TEAM_NOTE, SEE_GLOBAL_ASSESSMENT
@@ -27,6 +28,7 @@ from ..rescore_rule_services import (
 )
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..ssvc_services import strip_details as strip_ssvc_details
+from ..team_mapping import normalize_team_values
 from .assessment_restore import (
     build_assessment_restore_payloads,
     build_assessment_restore_preview,
@@ -46,6 +48,7 @@ from .incomplete_sync import (
 Payload = tuple[dict[str, Any], dict[str, Any]]
 
 REPAIR_RESTORE_CVSS = "restore_cvss"
+REPAIR_RESTORE_TICKETS = "restore_tickets"
 REPAIR_SYNC_FINDINGS = "sync_findings"
 REPAIR_FORMER_TEAMS = "former_teams"
 REPAIR_REFER_TEAMS = "refer_teams"
@@ -55,6 +58,7 @@ REPAIR_RESCORING = "rescoring"
 # Short names for the per-topic selection buttons, in pipeline order.
 REPAIR_TOPICS = {
     REPAIR_RESTORE_CVSS: "Restore CVSS",
+    REPAIR_RESTORE_TICKETS: "Restore tickets",
     REPAIR_SYNC_FINDINGS: "Synchronize",
     REPAIR_FORMER_TEAMS: "Former teams",
     REPAIR_REFER_TEAMS: "Refer to global",
@@ -113,10 +117,13 @@ def _header_value(value: Any) -> str:
 
 
 def _current_teams(group: dict[str, Any], team_mapping: dict[str, Any]) -> dict[str, str]:
+    # The name the mapping gives to components no team owns is not a team:
+    # nobody is there to refer to the global assessment.
+    unowned = {"unassigned", *(_team_key(name) for name in normalize_team_values(team_mapping.get("*")))}
     return {
         _team_key(team): team
         for team in _normalize_group_tags(group.get("tags") or [], team_mapping)
-        if _team_key(team) != "unassigned"
+        if _team_key(team) not in unowned
     }
 
 
@@ -124,23 +131,61 @@ def _normalized(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
+def _ticket_keys(value: Any) -> list[str]:
+    """The ticket keys of a ``Ticket`` tag, which may list several."""
+    return list(dict.fromkeys(
+        key for key in (part.strip() for part in str(value or "").split(",")) if key
+    ))
+
+
+def _assessment_day(value: Any) -> str:
+    """The day (UTC) of a ``Date`` tag, which holds milliseconds since 1970."""
+    text = str(value or "").strip()
+    if not text.isdigit():
+        return ""
+    try:
+        return datetime.fromtimestamp(int(text) / 1000, UTC).date().isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def _carry_tickets(target: dict[str, Any], sources: list[dict[str, Any]]) -> None:
+    """Keep the tickets of blocks that are removed on the block that stays.
+
+    A ticket tracks the vulnerability in the product, whoever owned the
+    component when it was opened.
+    """
+    keys = _ticket_keys(target["tags"].get("Ticket"))
+    for block in sources:
+        keys += [key for key in _ticket_keys(block["tags"].get("Ticket")) if key not in keys]
+    if keys:
+        target["tags"]["Ticket"] = ", ".join(keys)
+
+
 def _former_team_note(blocks: list[dict[str, Any]], existing: str = "") -> str:
     """Deduplicated record of the removed blocks, kept as plain text.
 
     A rationale is written once however many teams or decisions share it, and
     not at all when the global assessment (`existing`) already contains it;
-    who decided what is always kept.
+    who decided what, when, and under which ticket, is always kept.
     """
     by_text: dict[str, dict[str, Any]] = {}
     for block in blocks:
         tags = block["tags"]
         text = strip_ssvc_details(block["details"]).strip()
         entry = by_text.setdefault(_normalized(text), {"text": text, "decisions": {}})
+        # Teams that decided the same on different days stay apart, so that
+        # every decision has one date.
+        dated = _assessment_day(tags.get("Date"))
         decision = entry["decisions"].setdefault(
-            (tags.get("State", ""), tags.get("Justification", "")),
-            {"teams": [], "assessors": []},
+            (tags.get("State", ""), tags.get("Justification", ""), dated),
+            {"teams": [], "assessors": [], "tickets": []},
         )
-        for target, value in (("teams", block["team"]), ("assessors", tags.get("Assessed By"))):
+        for target, value in (
+            ("teams", block["team"]),
+            ("assessors", tags.get("Assessed By")),
+            *(("tickets", key) for key in _ticket_keys(tags.get("Ticket"))),
+        ):
             value = _header_value(value)
             if value and value not in decision[target]:
                 decision[target].append(value)
@@ -149,12 +194,16 @@ def _former_team_note(blocks: list[dict[str, Any]], existing: str = "") -> str:
     notes = []
     for key, entry in by_text.items():
         decisions = []
-        for (state, justification), decision in entry["decisions"].items():
+        for (state, justification, dated), decision in entry["decisions"].items():
             facts = [", ".join(decision["teams"]), state]
             if justification and justification != "NOT_SET":
                 facts.append(f"justification {justification}")
             if decision["assessors"]:
                 facts.append(f"assessed by {', '.join(decision['assessors'])}")
+            if dated:
+                facts.append(f"dated {dated}")
+            if decision["tickets"]:
+                facts.append(f"ticket {', '.join(decision['tickets'])}")
             decisions.append("; ".join(facts))
         if key in known and all(_normalized(decision) in known for decision in decisions):
             # Both the rationale and who decided it are recorded already.
@@ -250,6 +299,7 @@ def _repair_former_teams(
             if decisive["tags"].get(tag) and not general["tags"].get(tag):
                 general["tags"][tag] = decisive["tags"][tag]
         promoted = True
+    _carry_tickets(general, former)
     existing = str(general.get("details") or "").strip()
     general["details"] = "\n\n".join(
         part for part in (existing, _former_team_note(former, existing)) if part
@@ -351,6 +401,9 @@ def _combine_conflict(
         if decisive["tags"].get(tag):
             tags[tag] = decisive["tags"][tag]
 
+    carrier = {"tags": tags}
+    _carry_tickets(carrier, sources)
+
     texts: dict[str, str] = {}
     for block in generals:
         text = strip_ssvc_details(block["details"]).strip()
@@ -450,6 +503,101 @@ def _payload(instance: dict[str, Any], state: str, details: str) -> dict[str, An
         "justification": instance.get("justification"),
         "suppressed": bool(instance.get("is_suppressed", False)),
     }
+
+
+# A workflow copies or moves assessments; it never decides that a ticket no
+# longer applies. A ticket that a person removed stays removed.
+_WORKFLOW_ORIGINS = frozenset({"bulk-workflow"})
+
+
+def _names(text: str, key: str) -> bool:
+    return re.search(rf"(?<![\w-]){re.escape(key)}(?![\w-])", text) is not None
+
+
+def _dropped_tickets(history: list[dict[str, Any]], current: str) -> list[dict[str, str]]:
+    """Tickets a workflow removed from an assessment, and from which team.
+
+    ``history`` holds the versions oldest first. A ticket counts when a
+    version had it in a ``Ticket`` tag, the next version names it nowhere and
+    was written by a workflow, and the current text does not name it either.
+    """
+    dropped: dict[str, dict[str, str]] = {}
+    for before, after in zip(history, history[1:]):
+        if after.get("origin") not in _WORKFLOW_ORIGINS:
+            continue
+        text = str(after.get("analysisDetails") or "")
+        for block in _parse_blocks(str(before.get("analysisDetails") or "")):
+            for key in _ticket_keys(block["tags"].get("Ticket")):
+                if not _names(text, key):
+                    dropped[key] = {"ticket": key, "team": block["team"]}
+    return [drop for key, drop in dropped.items() if not _names(current, key)]
+
+
+def _ticket_stage(
+    groups: list[dict[str, Any]],
+    context: BulkWorkflowContext,
+) -> tuple[list[Payload], dict[str, dict[str, Any]]]:
+    """Give back the tickets that a workflow dropped, from the history.
+
+    The ticket returns to the block of its team when the team still has one,
+    else to the General assessment. Without either, it is left for a person.
+    """
+    histories = context.ticket_histories() if context.ticket_histories else {}
+    payloads: list[Payload] = []
+    info: dict[str, dict[str, Any]] = {}
+    if not histories:
+        return payloads, info
+    for group in groups:
+        restored: list[str] = []
+        unplaced: list[str] = []
+        findings = 0
+        for instance in _instances(group):
+            if not all(instance.get(key) for key in _IDENTITY_KEYS):
+                continue
+            history = histories.get(tuple(str(instance[key]) for key in _IDENTITY_KEYS))
+            if not history:
+                continue
+            old = _details(instance)
+            drops = _dropped_tickets(history, old)
+            if not drops:
+                continue
+            blocks = _parse_blocks(old)
+            placed = False
+            for drop in drops:
+                target = next(
+                    (block for block in blocks if _team_key(block["team"]) == _team_key(drop["team"])),
+                    None,
+                ) or next(
+                    (block for block in blocks if _team_key(block["team"]) == "general"),
+                    None,
+                )
+                if target is None:
+                    if drop["ticket"] not in unplaced:
+                        unplaced.append(drop["ticket"])
+                    continue
+                _carry_tickets(target, [{"tags": {"Ticket": drop["ticket"]}}])
+                placed = True
+                if drop["ticket"] not in restored:
+                    restored.append(drop["ticket"])
+            if not placed:
+                continue
+            first_header = HEADER_RE.search(old)
+            details = _render(
+                blocks,
+                preamble=old[: first_header.start()] if first_header else "",
+                pending=bool(_PENDING_RE.search(old)),
+            )
+            payloads.append(
+                (instance, _payload(instance, _state(instance), preserve_ssvc_record(details, old)))
+            )
+            findings += 1
+        if restored or unplaced:
+            info[str(group.get("id") or "")] = {
+                "restored": restored,
+                "unplaced": [key for key in unplaced if key not in restored],
+                "findings": findings,
+            }
+    return payloads, info
 
 
 def _team_stage(
@@ -608,6 +756,9 @@ def _run(
     restore_preview = build_assessment_restore_preview(groups)
     record(*build_assessment_restore_payloads(groups))
 
+    ticket_payloads, ticket_info = _ticket_stage(keep_alive[-1], context)
+    record(ticket_payloads, {})
+
     team_payloads, team_info, missing_identity = _team_stage(
         keep_alive[-1], context, int(time.time() * 1000)
     )
@@ -628,6 +779,7 @@ def _run(
         "skipped": skipped,
         "notes": notes,
         "restore_items": {item["group_id"]: item for item in restore_preview["items"]},
+        "ticket_info": ticket_info,
         "team_info": team_info,
         "rescore_items": {item["group_id"]: item for item in rescore_preview["items"]},
     }
@@ -687,6 +839,21 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
         unresolved = int(restore.get("finding_count") or 0) - recoverable
         if unresolved:
             review.append(f"CVSS vector not recoverable on {_plural(unresolved, 'finding')}")
+
+    tickets = run["ticket_info"].get(group_id) or {}
+    if tickets.get("restored"):
+        repairs.append({
+            "id": REPAIR_RESTORE_TICKETS,
+            "label": (
+                f"Restore {_plural(len(tickets['restored']), 'ticket')} a workflow dropped "
+                f"({', '.join(tickets['restored'])}) on {_plural(tickets['findings'], 'finding')}"
+            ),
+        })
+    if tickets.get("unplaced"):
+        review.append(
+            f"A workflow dropped {', '.join(tickets['unplaced'])}; "
+            "no assessment of its team or global one to return it to"
+        )
 
     team = run["team_info"].get(group_id) or {}
     if team.get("synchronized"):

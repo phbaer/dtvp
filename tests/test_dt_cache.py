@@ -942,6 +942,61 @@ async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("second_text, carried", [("Same.", True), ("Another.", False)])
+async def test_recreated_findings_of_a_component_listed_twice_keep_a_shared_assessment(
+    tmp_path, second_text, carried
+):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    project_uuid = "project-1"
+
+    def finding(component_uuid, state="NOT_SET", details=""):
+        return {
+            "component": {
+                "uuid": component_uuid,
+                "name": "netty-codec-http",
+                "version": "4.1.100",
+                "purl": "pkg:maven/io.netty/netty-codec-http@4.1.100",
+            },
+            "vulnerability": {"uuid": "vuln-1", "vulnId": "CVE-2026-1", "name": "CVE-2026-1"},
+            "analysis": {
+                "analysisState": state, "analysisDetails": details, "isSuppressed": False,
+            },
+        }
+
+    def block(text):
+        return f"--- [Team: K-Core] [State: NOT_AFFECTED] [Assessed By: kim] ---\n{text}"
+
+    # The BOM lists the component twice, each with the team's assessment.
+    old = [finding("old-1", "NOT_AFFECTED", block("Same.")),
+           finding("old-2", "NOT_AFFECTED", block(second_text))]
+    manager._save_project_cache(manager._findings_path(project_uuid), old)
+    for item in old:
+        manager._save_local_analysis({
+            "project_uuid": project_uuid,
+            "component_uuid": item["component"]["uuid"],
+            "vulnerability_uuid": "vuln-1",
+            "state": "NOT_AFFECTED",
+            "details": item["analysis"]["analysisDetails"],
+            "suppressed": False,
+        })
+    # A BOM upload replaces both components; the source has no analysis.
+    client.get_vulnerabilities.return_value = [finding("new-1"), finding("new-2")]
+
+    findings = await manager.get_vulnerabilities(client, project_uuid, refresh=True)
+
+    for item in findings:
+        details = item["analysis"]["analysisDetails"]
+        if carried:
+            assert item["analysis"]["analysisState"] == "NOT_AFFECTED"
+            assert "[Team: K-Core]" in details and "Same." in details
+            assert "[Status: Pending Review]" in details
+        else:
+            # Two different assessments: which one applies is not ours to say.
+            assert not details
+
+
+@pytest.mark.asyncio
 async def test_get_vulnerabilities_marks_review_when_threadmodel_score_changes(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()

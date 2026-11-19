@@ -263,6 +263,7 @@ label per applicable repair and count only the findings that change.
 | Repair | Applies to | Result |
 | :--- | :--- | :--- |
 | Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
+| Restore tickets | Findings whose history shows that a workflow removed a ticket | See below |
 | Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one |
 | Move former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
 | Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset |
@@ -270,8 +271,13 @@ label per applicable repair and count only the findings that change.
 | Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
 
 A former team's assessment is never discarded. Its block is removed and its
-decision, justification, assessor, and rationale are recorded as a note in the
-global assessment. Notes are deduplicated, ignoring case and whitespace: a
+decision, justification, assessor, date, ticket, and rationale are recorded as
+a note in the global assessment (`…; assessed by alice; dated 2026-08-12;
+ticket VP-101`). The date is the day the team wrote its assessment, not the
+day of the repair; teams that decided the same on different days are listed as
+separate decisions. Its tickets also become tickets of the global
+assessment: a ticket tracks the vulnerability in the product, whoever owned
+the component when it was opened. Notes are deduplicated, ignoring case and whitespace: a
 rationale shared by several teams or decisions is written once with every
 decision listed, a rationale the global assessment already contains is
 referenced instead of repeated, and a decision that is already recorded adds
@@ -296,6 +302,16 @@ block and the vulnerability becomes Assessed. If the sources disagree, the
 combined decision is new: it is marked pending review and the current teams
 stay open. Conflicts that involve a current team's assessment still need a
 manual decision.
+
+Tickets are restored from DTVP's own [history](import-export.md#history). A
+ticket counts as dropped when one version of a finding's assessment had it in
+a team's ticket field, the next version was written by a bulk workflow and
+names it nowhere, and the current text does not name it either. It returns to
+the block of its team when the team still has one, else to the global
+assessment; without either, the preview lists it for a manual decision. A
+ticket that a person removed stays removed. Versions from before the history
+existed cannot be compared: for those, the text Dependency-Track still holds
+or its audit trail is the only source.
 
 Ownership comes from the current team mapping, including aliases. Groups with
 no mapped team and blocks already marked `[Historical: yes]` are left

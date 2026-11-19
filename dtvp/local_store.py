@@ -417,6 +417,14 @@ class LocalStore:
 
     # -- inventory --------------------------------------------------------
 
+    def snapshot_updated_at(self, ref: DocumentRef) -> str | None:
+        """When a list read from the source was last stored, as ISO time."""
+        row = self._connection().execute(
+            "SELECT updated_at FROM source_snapshots WHERE kind = ? AND project_uuid = ?",
+            (ref.kind, ref.project_uuid or ""),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
     def counts(self) -> dict[str, int]:
         connection = self._connection()
 
