@@ -1,4 +1,5 @@
 import {
+    analysisResponseLabel,
     assessmentTextKey,
     assessmentTextToFields,
     STATE_PRIORITY,
@@ -211,6 +212,7 @@ export const compareVariants = (variants: readonly MatrixVariant[]): ComparisonR
         field.rescored_score == null ? '' : String(field.rescored_score)
     )))
     add('rescored_vector', 'Rescored vector', fields.map(field => field.rescored_vector || ''))
+    add('response', 'Response', fields.map(field => analysisResponseLabel(field.response)))
     add('free_text', 'Text outside the team assessments', fields.map(field => (field.free_text || '').trim()))
 
     const teamNames: string[] = []
