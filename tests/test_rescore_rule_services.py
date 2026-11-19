@@ -210,8 +210,8 @@ def test_bulk_sync_writes_zero_score_for_every_shipped_transition(
     assert "[Rescored: 0.0]" in payloads[0][1]["details"]
 
 
-def test_sync_preview_lists_matching_state_with_missing_base_vector_for_review(rules):
-    group = {
+def _no_base_group(details):
+    return {
         "id": "CVE-2026-NO-BASE",
         "affected_versions": [
             {
@@ -222,26 +222,47 @@ def test_sync_preview_lists_matching_state_with_missing_base_vector_for_review(r
                         "component_uuid": "component-1",
                         "vulnerability_uuid": "vulnerability-1",
                         "analysis_state": "not_affected",
-                        "analysis_details": "Keep this text.",
+                        "analysis_details": details,
                     }
                 ]
             }
         ],
     }
 
+
+def test_sync_invents_a_base_for_a_vulnerability_without_a_source_vector(rules):
+    group = _no_base_group("Keep this text.")
+
     preview = build_rescore_rule_sync_preview([group], rules)
 
-    assert preview["summary"]["groups"] == 1
-    assert preview["summary"]["review_findings"] == 1
     finding = preview["items"][0]["findings"][0]
-    assert finding["state"] == "NOT_AFFECTED"
-    assert finding["status"] == "review"
-    assert finding["issue_type"] == "manual_review"
-    assert finding["reasons"] == ["Original CVSS vector is missing"]
+    assert (finding["state"], finding["status"]) == ("NOT_AFFECTED", "ready")
+    assert finding["reasons"][0] == "The advisory has no CVSS vector: the base is invented"
+    # The base without impact, with what the rule sets for the state.
+    assert finding["proposed_vector"].startswith("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N/")
+    assert finding["proposed_score"] == 0.0
 
     payloads, skipped = build_rescore_rule_sync_payloads([group], rules)
-    assert payloads == []
-    assert skipped == {"review_required": 1, "unchanged": 0}
+    assert skipped == {"review_required": 0, "unchanged": 0}
+    details = payloads[0][1]["details"]
+    assert "Keep this text." in details and "[Rescored: 0.0]" in details
+    assert f"[Rescored Vector: {finding['proposed_vector']}]" in details
+
+    # Once written, the stored vector's own base is the base: nothing to do.
+    again = build_rescore_rule_sync_preview([_no_base_group(details)], rules)
+    assert again["items"] == []
+
+
+def test_sync_takes_the_base_of_a_stored_vector_when_the_advisory_has_none(rules):
+    stored = "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N"
+    group = _no_base_group(f"[Rescored: 0.0] [Rescored Vector: {stored}/MAV:A]\n\nText.")
+
+    finding = build_rescore_rule_sync_preview([group], rules)["items"][0]["findings"][0]
+
+    # The base someone chose stays; the rule's metrics are added to it.
+    assert finding["status"] == "ready"
+    assert finding["proposed_vector"].startswith(stored + "/")
+    assert finding["proposed_score"] == 0.0
 
 
 def test_sync_replaces_cross_version_vector_with_the_rule_on_the_base_vector(rules):

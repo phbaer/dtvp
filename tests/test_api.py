@@ -416,9 +416,12 @@ def test_incomplete_bulk_workflow_preview_hydrates_summary_lifecycle(client):
     preview = response.json()
     assert preview["selectable_group_ids"] == [group["id"]]
     assert preview["summary"]["groups"] == 1
-    # Only the finding that lacks the assessment is written.
-    assert preview["summary"]["findings"] == 1
+    # One finding lacks the assessment. The group has no CVSS vector, so the
+    # rescoring for the not-affected state is written on an invented base, to
+    # both findings.
+    assert preview["summary"]["findings"] == 2
     assert preview["summary"]["sync_findings_groups"] == 1
+    assert preview["summary"]["rescoring_groups"] == 1
 
 
 def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_client):
