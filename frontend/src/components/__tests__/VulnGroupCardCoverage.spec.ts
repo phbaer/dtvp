@@ -47,6 +47,7 @@ vi.mock('@lucide/vue', () => ({
     Tags: { template: '<span />' },
     Trash2: { template: '<span />' },
     MoreHorizontal: { template: '<span />' },
+    ChevronRight: { template: '<span />' },
     EyeOff: { template: '<span />' },
     X: { template: '<span />' }
 }))

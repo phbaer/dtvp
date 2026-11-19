@@ -329,19 +329,20 @@ describe('VulnGroupCard', () => {
         expect(stickyBar.text()).not.toContain('1 target')
     })
 
-    it('orders Context from description through scope and dependencies to assessment evidence', async () => {
+    it('orders Context from description through where it was found to assessment evidence', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
 
         const html = wrapper.html()
         const description = html.indexOf('Description &amp; references')
-        const scope = html.indexOf('Finding scope &amp; affected components')
-        const dependencies = html.indexOf('Dependency context')
+        const scope = html.indexOf('Where it was found')
         const assessments = html.indexOf('Existing assessment evidence')
         expect(description).toBeGreaterThanOrEqual(0)
         expect(description).toBeLessThan(scope)
-        expect(scope).toBeLessThan(dependencies)
-        expect(dependencies).toBeLessThan(assessments)
+        expect(scope).toBeLessThan(assessments)
+        // The separate version, component and dependency lists are one matrix now.
+        expect(html).not.toContain('Dependency context')
+        expect(wrapper.find('[data-testid="affected-components"]').exists()).toBe(false)
     })
 
     it('shows scoped affected components in Context for analysts', async () => {
@@ -356,9 +357,11 @@ describe('VulnGroupCard', () => {
         })
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        const components = wrapper.get('[data-testid="affected-components"]')
-        expect(components.text()).toContain('Affected Components')
-        expect(components.text()).toContain('lib@1.0')
+        const matrix = wrapper.get('[data-testid="where-found"] [data-testid="finding-matrix"]')
+        expect(matrix.get('[data-testid="finding-matrix-summary"]').text()).toBe('1 component · 1 version')
+        expect(matrix.get('[data-testid="finding-matrix-row"]').text()).toContain('lib@1.0')
+        expect(matrix.findAll('[data-testid="context-project-version"]').map(cell => cell.text())).toEqual(['1.0'])
+        expect(matrix.get('[data-testid="finding-matrix-cell"]').text()).toContain('Not set')
     })
 
     it('guides analysts through the required assessment fields before submission', async () => {
@@ -684,7 +687,10 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         expect(wrapper.get('[data-testid="triggering-team-components"]').text()).toContain('Security')
-        expect(wrapper.get('[data-testid="dependency-context"]').text()).toContain('Team:Security')
+        // The dependency chains of a component open from its row.
+        expect(wrapper.find('[data-testid="finding-matrix-chains"]').exists()).toBe(false)
+        await wrapper.get('[data-testid="finding-matrix-row-toggle"]').trigger('click')
+        expect(wrapper.get('[data-testid="finding-matrix-chains"]').text()).toContain('Team:Security')
 
         const analysisTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Code Evidence'))
         await analysisTab?.trigger('click')
@@ -849,8 +855,8 @@ describe('VulnGroupCard', () => {
         expect(wrapper.get('[data-testid="instance-count"]').text()).toContain('1×')
         expect(wrapper.get('[data-testid="component-summary"]').text()).toContain('lib')
         expect(wrapper.get('[data-testid="component-summary"]').text()).not.toContain('worker')
-        expect(wrapper.get('[data-testid="dependency-context"]').text()).toContain('lib')
-        expect(wrapper.get('[data-testid="dependency-context"]').text()).not.toContain('worker')
+        expect(wrapper.get('[data-testid="finding-matrix"]').text()).toContain('lib')
+        expect(wrapper.get('[data-testid="finding-matrix"]').text()).not.toContain('worker')
 
         expect(wrapper.get('[data-testid="vulnerability-assessments"]').text()).toContain('lib')
         expect(wrapper.get('[data-testid="vulnerability-assessments"]').text()).not.toContain('worker')
@@ -1844,6 +1850,86 @@ describe('VulnGroupCard', () => {
 
         expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
         expect(wrapper.find('[data-testid="approval-prefilled-note"]').exists()).toBe(false)
+    })
+
+    it('shows which findings differ, in which fields, and lets a reviewer take one version for all', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        const first = group.affected_versions[0].components[0]
+        first.analysis_state = 'NOT_AFFECTED'
+        first.analysis_details = '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        group.affected_versions.push({
+            ...group.affected_versions[0],
+            project_version: '2.0',
+            project_uuid: 'p2',
+            components: [
+                { ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f2' },
+                {
+                    ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f3',
+                    component_name: 'worker', component_uuid: 'c3',
+                    analysis_state: 'EXPLOITABLE',
+                    analysis_details: '--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] ---\nReachable in the worker.',
+                },
+            ],
+        })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }), teamMapping: ref({}) } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const matrix = wrapper.get('[data-testid="finding-matrix"]')
+        expect(matrix.get('[data-testid="finding-matrix-summary"]').text()).toBe('2 components · 2 versions')
+        // The card says once, above every tab, that findings differ and why.
+        expect(matrix.find('[data-testid="finding-differences-banner"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="card-differences-variants"]').text()).toContain('1 of 3')
+        const cells = matrix.findAll('[data-testid="finding-matrix-cell"]')
+        expect(cells.map(cell => cell.attributes('data-differs'))).toEqual(['false', 'false', 'true'])
+        expect(cells[2]!.text()).toContain('Exploitable')
+
+        // On another tab the card says so and leads back to the comparison.
+        ;(wrapper.vm as any).setDetailTab('analysis')
+        await wrapper.vm.$nextTick()
+        const banner = wrapper.get('[data-testid="card-differences-banner"]')
+        expect(banner.text()).toContain('2 different assessments')
+        expect(wrapper.findAll('[data-testid="card-differences-open"]')).toHaveLength(1)
+        expect(banner.findAll('[data-testid="card-inconsistency-reason"]').map(reason => reason.text()).join(' '))
+            .toContain('Analysis states differ')
+        await wrapper.get('[data-testid="card-differences-open"]').trigger('click')
+        await flushPromises()
+        expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+
+        const differences = wrapper.get('[data-testid="finding-differences"]')
+        const rows = differences.findAll('[data-testid="finding-difference-row"]')
+        expect(rows.map(row => row.get('th').text())).toEqual(['State', 'Global · state', 'Global · justification', 'Global · rationale'])
+        expect(rows[3]!.text()).toContain('Not shipped.')
+        expect(rows[3]!.text()).toContain('Reachable in the worker.')
+
+        await differences.findAll('[data-testid="finding-variant-apply"]')[1]!.trigger('click')
+        await flushPromises()
+        expect((wrapper.vm as any).activeDetailTab).toBe('review')
+        expect((wrapper.vm as any).selectedTeam).toBe('')
+        expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
+        expect((wrapper.vm as any).details).toBe('Reachable in the worker.')
+        expect(updateAssessment).not.toHaveBeenCalled()
+    })
+
+    it('says which teams disagree when one finding holds conflicting team assessments', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        group.affected_versions[0].components[0].analysis_state = 'IN_TRIAGE'
+        group.affected_versions[0].components[0].analysis_details =
+            '--- [Team: Platform] [State: IN_TRIAGE] [Assessed By: ana] ---\nLooking.\n\n'
+            + '--- [Team: Edge] [State: NOT_AFFECTED] [Assessed By: ben] [Justification: CODE_NOT_PRESENT] ---\nNot reachable.'
+        const wrapper = mount(VulnGroupCard, { props: { group } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const banner = wrapper.get('[data-testid="card-differences-banner"]')
+        expect(banner.text()).toContain('Why this is inconsistent')
+        expect(banner.get('[data-testid="card-team-states"]').text()).toContain('Platform in triage')
+        expect(banner.get('[data-testid="card-team-states"]').text()).toContain('Edge not affected')
+        // One finding, one assessment: nothing to compare between findings.
+        expect(banner.find('[data-testid="card-differences-open"]').exists()).toBe(false)
     })
 
     it('marks a suppressed vulnerability in the header', async () => {

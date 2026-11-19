@@ -40,7 +40,7 @@ The lifecycle view shows Open, Incomplete, Conflicting, Ready for approval, and 
 
 ![Vulnerability card overview](screenshots/vuln-card-overview.png)
 
-The Context tab uses four clearly separated sections in a fixed reading order: advisory description and references; project-version, team, finding, and exact component scope; dependency context; and existing assessment evidence. Exact affected components remain visible for both analysts and reviewers and follow the active Team scope.
+The Context tab uses three clearly separated sections in a fixed reading order: advisory description and references; where the vulnerability was found, as a matrix of components by project versions with the assessment state of each finding (a component row opens its dependency chains); and the existing assessment evidence.
 
 ### Assignee Chips And Approval
 
@@ -76,7 +76,13 @@ The Assessment tab uses the same section hierarchy as Context and Code Evidence:
 
 ![Conflicting assessment](screenshots/inconsistent-assessment.png)
 
-Existing assessment evidence in Context shows conflicting team blocks so reviewers can compare states and resolve the mismatch in Assessment.
+A banner above the tabs states why the vulnerability is inconsistent and what each team decided. Existing assessment evidence in Context shows the conflicting team blocks.
+
+### Differences Between Findings
+
+![Differences between findings](screenshots/assessment-differences.png)
+
+When findings carry different assessments, each one has a letter in the matrix and "Show differences" compares them field by field.
 
 ### Rescored CVSS
 

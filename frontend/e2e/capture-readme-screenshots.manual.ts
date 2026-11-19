@@ -1327,8 +1327,11 @@ test.describe('Capture README screenshots', () => {
         await expect(card.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('PlatformTeam', { exact: true }).first()).toBeVisible({ timeout: 10000 })
 
-        const chainsButton = page.getByRole('button', { name: /^chains$/ }).first()
-        await chainsButton.click()
+        // The dependency chains of a component open from its row in the matrix.
+        await card.getByTestId('finding-matrix-row-toggle').first().click()
+        await expect(card.getByTestId('finding-matrix-chains').first()).toBeVisible({ timeout: 10000 })
+        const chainsButton = card.getByRole('button', { name: /^chains$/ }).first()
+        if (await chainsButton.count() > 0) await chainsButton.click()
         await expect(page.getByText('platform-gateway').first()).toBeVisible({ timeout: 10000 })
 
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/project-view.png')
@@ -1341,6 +1344,12 @@ test.describe('Capture README screenshots', () => {
         }
 
         await captureWithPadding(card, '../docs/screenshots/vuln-card-overview.png')
+
+        // Which findings differ, and in which fields.
+        await card.getByTestId('finding-matrix-row-toggle').first().click()
+        await card.getByTestId('card-differences-open').click()
+        await expect(card.getByTestId('finding-differences')).toBeVisible({ timeout: 10000 })
+        await captureWithPadding(card.getByTestId('where-found'), '../docs/screenshots/assessment-differences.png')
     })
 
     test('capture global review CVSS and rescoring screenshot', async ({ page }) => {
@@ -1616,6 +1625,7 @@ test.describe('Capture README screenshots', () => {
         // Should show the conflicting team blocks (PlatformTeam: IN_TRIAGE vs EdgeTeam: NOT_AFFECTED)
         await expect(card.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
 
+        await expect(card.getByTestId('card-differences-banner')).toBeVisible({ timeout: 10000 })
         await captureWithPadding(card, '../docs/screenshots/inconsistent-assessment.png')
     })
 

@@ -160,7 +160,7 @@ The detail workspace provides:
 
 | Tab | Purpose |
 | :--- | :--- |
-| Context | Four ordered sections: advisory and references; finding/team/component scope with affected components visible to analysts and reviewers; dependency context; existing assessment evidence |
+| Context | Three ordered sections: advisory and references; where it was found, a matrix of components by project versions with the assessment state of each finding and the dependency chains of a component behind its row; existing assessment evidence |
 | Code Evidence | A semantic run list with an expandable new-analysis control; selected rows own indented outcome and evidence disclosures; a worst-case combined decision with the shared advisory shown once and rationale grouped into per-target cards |
 | Assessment | Consistent scope and decision/rationale sections with Save/Submit and reload controls in the second section header; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage; inconsistent team decisions remain explicit for manual resolution; global CVSS/rescoring controls |
 
@@ -172,6 +172,21 @@ All actions of a card sit in one place, the sticky bar next to the tabs:
 Approve (reviewers, while a review is pending), Save or Submit, Reload, and the
 "More" menu. They share one button shape; the one that completes the current
 work is filled, the others are outlined.
+
+### Inconsistencies and differences
+
+When a vulnerability is inconsistent, or its findings carry different
+assessments, a banner above every tab says why: the reasons, how many findings
+differ from the most common assessment, and the decision of each team when the
+teams disagree. In the matrix every distinct assessment has a letter (A is the
+most common one) and the findings that differ are outlined.
+
+"Show differences" opens a comparison of the assessments field by field
+(state, rescoring, and per team the state, justification, rationale, ticket,
+assessor, reviewer and date). Only the fields that differ are listed unless
+"Show equal fields too" is ticked. A reviewer can put one of them into the
+Global assessment form with "Use for all findings"; it applies to every
+finding once saved.
 
 ### Approving
 
