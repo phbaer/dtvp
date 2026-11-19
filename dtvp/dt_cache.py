@@ -15,7 +15,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 import httpx
 
 from .assessment_model import canonical_assessment_text, parse_assessment
-from .cyclonedx_export import VARIANT_INVENTORY, build_inventory, build_vdr
+from .cyclonedx_export import (
+    VARIANT_INVENTORY,
+    build_inventory,
+    build_vdr,
+    complete_findings,
+)
 from .assessment_outbox_services import (
     AssessmentOutboxConflictError,
     AssessmentOutboxStore,
@@ -1596,6 +1601,8 @@ class CacheManager:
         assessment_source: str,
         property_prefix: str,
         tool_version: str = "",
+        unowned_teams: Tuple[str, ...] = (),
+        ticket_prefixes: Tuple[str, ...] = (),
     ) -> Optional[Dict[str, Any]]:
         """A CycloneDX document of one project version, from local state.
 
@@ -1612,6 +1619,22 @@ class CacheManager:
         ]
         if variant == VARIANT_INVENTORY:
             return build_inventory(bom, findings, property_prefix=property_prefix)
+
+        # A finding carries a summary of its vulnerability. The complete
+        # records have every CVSS version, the dates, and the recommendation.
+        advisories_read = True
+        try:
+            advisories = await self.get_project_vulnerabilities(client, project_uuid)
+            if not isinstance(advisories, list):
+                raise TypeError("Unexpected vulnerability records")
+            findings = complete_findings(findings, advisories)
+        except Exception as exc:
+            advisories_read = False
+            logger.warning(
+                "CycloneDX export of %s without complete vulnerability records: %s",
+                project_uuid,
+                exc,
+            )
 
         def assemble() -> Dict[str, Any]:
             assessments = []
@@ -1633,7 +1656,18 @@ class CacheManager:
                 assessment_source=assessment_source,
                 property_prefix=property_prefix,
                 tool_version=tool_version,
+                unowned_teams=unowned_teams,
+                ticket_prefixes=ticket_prefixes,
             )
+            if not advisories_read:
+                # Ratings, dates, and recommendations are those of the
+                # findings alone: say so.
+                document["metadata"]["properties"].append(
+                    {
+                        "name": f"{property_prefix}:export_advisory_records",
+                        "value": "unavailable",
+                    }
+                )
             if incomplete:
                 # Assessed findings whose text could not be read from the
                 # source: say so instead of exporting them as if empty.

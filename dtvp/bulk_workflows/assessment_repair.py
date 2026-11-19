@@ -17,6 +17,7 @@ import re
 import time
 from typing import Any, Callable
 
+from ..assessment_model import FORMER_TEAM_NOTE, SEE_GLOBAL_ASSESSMENT
 from ..grouped_vuln_services import _normalize_group_tags
 from ..logic import STATE_PRIORITY, calculate_aggregated_state
 from ..rescore_rule_services import (
@@ -61,8 +62,6 @@ REPAIR_TOPICS = {
     REPAIR_RESCORING: "Rescoring",
 }
 
-SEE_GLOBAL_ASSESSMENT = "See global assessment."
-FORMER_TEAM_NOTE = "Former team assessment"
 _PENDING_RE = re.compile(r"\[Status: Pending Review\]", re.I)
 _IDENTITY_KEYS = ("project_uuid", "component_uuid", "vulnerability_uuid")
 _RESCORED_RE = re.compile(r"\[Rescored:\s*([\d.]+)\]")
@@ -79,6 +78,26 @@ def _state(instance: dict[str, Any]) -> str:
 
 def _lifecycle(group: dict[str, Any]) -> str:
     return str((group.get("list_metadata") or {}).get("lifecycle") or "").upper()
+
+
+def _copied_date(
+    decisive: dict[str, Any], sources: list[dict[str, Any]], now_ms: int
+) -> str:
+    """The date of the assessment a General decision is taken from.
+
+    The repair copies a decision; it does not make one. The date stays that
+    of the assessment that decides, else the latest among those it is taken
+    from. Only when none of them has a date is it the moment of the repair.
+    """
+    def date_of(block: dict[str, Any]) -> int:
+        value = str(block["tags"].get("Date") or "").strip()
+        return int(value) if value.isdigit() else 0
+
+    return str(
+        date_of(decisive)
+        or max((date_of(block) for block in sources), default=0)
+        or now_ms
+    )
 
 
 def _is_historical(block: dict[str, Any]) -> bool:
@@ -223,7 +242,7 @@ def _repair_former_teams(
             {
                 "State": decisive["tags"]["State"],
                 "Assessed By": user,
-                "Date": str(now_ms),
+                "Date": _copied_date(decisive, former, now_ms),
                 "Justification": decisive["tags"].get("Justification", "NOT_SET"),
             }
         )
@@ -324,7 +343,7 @@ def _combine_conflict(
             "Team": "General",
             "State": decisive["tags"]["State"],
             "Assessed By": user,
-            "Date": str(now_ms),
+            "Date": _copied_date(decisive, sources, now_ms),
             "Justification": decisive["tags"].get("Justification", "NOT_SET"),
         }
     )

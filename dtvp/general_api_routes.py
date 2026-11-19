@@ -27,7 +27,9 @@ from .cyclonedx_export import (
     DEFAULT_ASSESSMENT_SOURCE,
     DEFAULT_PROPERTY_PREFIX,
     valid_property_prefix,
+    valid_ticket_prefix,
 )
+from .team_mapping import normalize_team_values
 from .version import get_app_version
 from .assessment_outbox_services import assessment_key
 from .assessment_use_cases import (
@@ -2958,6 +2960,14 @@ def cyclonedx_defaults() -> tuple[str, str]:
     )
 
 
+def cyclonedx_ticket_prefixes(value: str | None = None) -> tuple[str, ...]:
+    """Project keys of ticket references, as requested or configured."""
+    text = value if value is not None and value.strip() else os.getenv(
+        "DTVP_CYCLONEDX_TICKET_PREFIXES", ""
+    )
+    return tuple(dict.fromkeys(part.strip() for part in text.split(",") if part.strip()))
+
+
 def _register_cyclonedx_routes(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
@@ -2970,6 +2980,7 @@ def _register_cyclonedx_routes(
         variant: str,
         assessment_source: str | None,
         property_prefix: str | None,
+        ticket_prefixes: str | None,
         download: bool,
         label: str,
     ) -> Response:
@@ -2981,6 +2992,17 @@ def _register_cyclonedx_routes(
                 status_code=422,
                 detail="property_prefix may contain letters, digits, '.', '_' and '-'",
             )
+        tickets = cyclonedx_ticket_prefixes(ticket_prefixes)
+        if not all(valid_ticket_prefix(item) for item in tickets):
+            raise HTTPException(
+                status_code=422,
+                detail="ticket_prefixes is a comma-separated list of project keys "
+                "(a letter, then letters, digits and '_')",
+            )
+        # The names the team mapping gives to components no team owns.
+        load_team_mapping = getattr(deps, "load_team_mapping", None)
+        team_mapping = load_team_mapping() if callable(load_team_mapping) else {}
+        unowned = normalize_team_values((team_mapping or {}).get("*"))
         try:
             document = await deps.cache_manager.export_cyclonedx(
                 client,
@@ -2989,6 +3011,8 @@ def _register_cyclonedx_routes(
                 assessment_source=source,
                 property_prefix=prefix,
                 tool_version=get_app_version(),
+                unowned_teams=unowned,
+                ticket_prefixes=tickets,
             )
         except Exception as exc:
             deps.logger.error("CycloneDX export of %s failed: %s", project_uuid, exc)
@@ -3019,6 +3043,7 @@ def _register_cyclonedx_routes(
         variant: str = Query("vdr", pattern="^(inventory|vdr)$"),
         assessment_source: str | None = Query(None, max_length=200),
         property_prefix: str | None = Query(None, max_length=100),
+        ticket_prefixes: str | None = Query(None, max_length=500),
         download: bool = False,
         *,
         client: Annotated[DTClient, Depends(client_dependency)],
@@ -3028,7 +3053,7 @@ def _register_cyclonedx_routes(
         ``vdr`` (the BOM with every finding and its assessment)."""
         return await export(
             client, project_uuid, variant, assessment_source, property_prefix,
-            download, project_uuid,
+            ticket_prefixes, download, project_uuid,
         )
 
     @router.get("/cyclonedx")
@@ -3038,6 +3063,7 @@ def _register_cyclonedx_routes(
         variant: str = Query("vdr", pattern="^(inventory|vdr)$"),
         assessment_source: str | None = Query(None, max_length=200),
         property_prefix: str | None = Query(None, max_length=100),
+        ticket_prefixes: str | None = Query(None, max_length=500),
         download: bool = False,
         *,
         client: Annotated[DTClient, Depends(client_dependency)],
@@ -3065,7 +3091,7 @@ def _register_cyclonedx_routes(
             )
         return await export(
             client, str(match["uuid"]), variant, assessment_source, property_prefix,
-            download, f"{name}-{version}",
+            ticket_prefixes, download, f"{name}-{version}",
         )
 
 

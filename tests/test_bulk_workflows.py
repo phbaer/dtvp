@@ -19,6 +19,7 @@ from dtvp.bulk_workflows.automatic_assessments import (
     build_automatic_assessment_payloads,
     build_automatic_assessment_preview,
 )
+from dtvp.assessment_model import parse_assessment
 from dtvp.bulk_workflows.assessment_repair import (
     _apply_payloads,
     build_assessment_repair_payloads,
@@ -1882,6 +1883,24 @@ def test_repair_promotes_approved_former_team_to_global_and_refers_open_teams():
     assert applied["list_metadata"]["lifecycle"] == "ASSESSED"
     assert applied["list_metadata"]["assessed_teams"] == ["TeamB", "TeamC"]
     assert _repair(applied)[0]["items"] == []
+
+
+def test_repair_dates_the_global_decision_like_the_assessment_it_copies():
+    dated = _FORMER.replace("[Justification:", "[Date: 1794000000000] [Justification:")
+    group = _repair_group([("NOT_AFFECTED", dated)], tags=["TeamB"])
+
+    details = _repair(group)[1][0][1]["details"]
+    general = parse_assessment("NOT_AFFECTED", details, False)["teams"][0]
+
+    # The repair copies a decision: its date stays that of the former team's
+    # assessment, not the moment of the repair.
+    assert (general["team"], general["state"]) == ("General", "NOT_AFFECTED")
+    assert general["assessed_at_ms"] == 1794000000000
+
+    # An undated assessment has nothing to copy: the repair's own time.
+    undated = _repair(_repair_group([("NOT_AFFECTED", _FORMER)], tags=["TeamB"]))[1][0][1]["details"]
+    stamped = parse_assessment("NOT_AFFECTED", undated, False)["teams"][0]["assessed_at_ms"]
+    assert stamped and stamped != 1794000000000
 
 
 def test_repair_keeps_pending_former_team_decision_open_for_current_teams():

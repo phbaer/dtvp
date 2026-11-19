@@ -1,9 +1,16 @@
 """CycloneDX inventory and VDR built from DTVP's records."""
 
+import json
 from datetime import UTC, datetime
 
 from dtvp.assessment_model import parse_assessment
-from dtvp.cyclonedx_export import build_inventory, build_vdr, valid_property_prefix
+from dtvp.cyclonedx_export import (
+    build_inventory,
+    build_vdr,
+    complete_findings,
+    valid_property_prefix,
+    valid_ticket_prefix,
+)
 
 VECTOR = "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N"
 ASSESSED = (
@@ -84,6 +91,8 @@ def test_an_assessment_is_written_in_standard_fields():
         "state": "not_affected",
         "justification": "code_not_reachable",
         "detail": "The parser is never called.",
+        # The General assessment has no date here; the Core team's has.
+        "lastUpdated": "2026-11-13T09:14:49.026000+00:00",
     }
     advisory, own = entry["ratings"]
     assert advisory == {
@@ -101,9 +110,13 @@ def test_an_assessment_is_written_in_standard_fields():
         {"name": "acme:spr", "value": "EXP-1001"},
         {"name": "acme:pending_review", "value": "true"},
         {"name": "acme:team_state", "value": "Core=NOT_AFFECTED"},
+        {
+            "name": "acme:historical_assessment",
+            "value": '{"team": "Old", "state": "EXPLOITABLE", "text": "Outdated."}',
+        },
     ]
     # One annotation per current team; General is the analysis itself and
-    # historical blocks are left out.
+    # historical blocks are a property, not an annotation.
     assert document["annotations"] == [
         {
             "subjects": ["v1"],
@@ -169,6 +182,8 @@ def test_free_text_is_the_rationale_or_a_property():
 def test_property_prefix_must_be_an_identifier():
     assert valid_property_prefix("acme.sec-1")
     assert not valid_property_prefix("a:b") and not valid_property_prefix("")
+    assert valid_ticket_prefix("SEC_OPS2")
+    assert not valid_ticket_prefix("A-B") and not valid_ticket_prefix("1A")
 
 
 def test_a_component_only_a_finding_names_is_added_to_both_documents():
@@ -227,8 +242,11 @@ SCHEMA_BOM = {
 def test_the_documents_are_valid_cyclonedx():
     stray = {"uuid": "c9", "name": "lib-z", "version": "3.1", "purl": "pkg:npm/lib-z@3.1"}
     findings = [
-        _finding(C1),
-        _finding(C2),
+        # The dates as Dependency-Track delivers them.
+        _finding(C1, published="1777058234490", updated=1777144634000,
+                 recommendation="Upgrade."),
+        _finding(C2, published="1777058234490", updated=1777144634000,
+                 recommendation="Upgrade."),
         _finding(C1, "CVE-2026-2", "v2", aliases=[], severity="UNASSIGNED",
                  cvssV3BaseScore=None, cvssV3Vector=None),
         _finding(stray, "GHSA-aaaa-bbbb-cccc", "v3", source="GITHUB",
@@ -252,6 +270,8 @@ def test_the_documents_are_valid_cyclonedx():
 
     assert _schema_errors(inventory) is None
     assert _schema_errors(vdr) is None
+    assert vdr["vulnerabilities"][0]["published"] == "2026-04-24T19:17:14.490000+00:00"
+    assert vdr["vulnerabilities"][0]["updated"] == "2026-04-25T19:17:14+00:00"
     # The validator does reject what the schema forbids.
     broken = {**vdr, "annotations": [{**vdr["annotations"][0], "annotator": {
         "organization": {"name": "Core"}, "individual": {"name": "bob"},
@@ -267,3 +287,341 @@ def test_a_bom_of_an_older_specification_becomes_a_valid_1_5_document():
     )
     assert vdr["specVersion"] == "1.5" and _schema_errors(vdr) is None
 
+
+# -- gaps a consumer found ---------------------------------------------------
+
+V4 = "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"
+V31 = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+
+
+def _entry(text, state="NOT_AFFECTED", finding=None, **options):
+    document = _vdr([finding or _finding(C1)], [(state, text)], **options)
+    [entry] = document["vulnerabilities"]
+    return entry, document
+
+
+def _property(entry, name):
+    return [item["value"] for item in entry.get("properties", []) if item["name"] == name]
+
+
+def _valid(document):
+    """The findings and annotations of ``document`` in a BOM the schema accepts."""
+    parts = {key: document[key] for key in ("vulnerabilities", "annotations") if key in document}
+    return _schema_errors({**SCHEMA_BOM, **parts}) is None
+
+
+def test_every_cvss_version_of_the_advisory_is_a_rating_with_its_score():
+    # As the finding record has it: a CVSS 4 vector without a score, and
+    # CVSS 3.1 with one. The severity of the advisory is the overall one.
+    finding = _finding(
+        C1, severity="HIGH", cvssV4Vector=V4, cvssV3BaseScore=7.5, cvssV3Vector=V31,
+        cvssV2Vector="(AV:N/AC:L/Au:N/C:P/I:P/A:P)",
+    )
+    entry, document = _entry("", "NOT_SET", finding)
+
+    assert entry["ratings"] == [
+        {"source": {"name": "NVD"}, "score": 8.7, "severity": "high",
+         "method": "CVSSv4", "vector": V4},
+        {"source": {"name": "NVD"}, "score": 7.5, "severity": "high",
+         "method": "CVSSv31", "vector": V31},
+        {"source": {"name": "NVD"}, "score": 7.5, "severity": "high",
+         "method": "CVSSv2", "vector": "(AV:N/AC:L/Au:N/C:P/I:P/A:P)"},
+    ]
+    assert all("score" in rating for rating in entry["ratings"] if "vector" in rating)
+    assert _valid(document)
+
+
+def test_a_rating_has_the_severity_of_its_own_score():
+    finding = _finding(
+        C1, severity="MEDIUM", cvssV3BaseScore=9.8,
+        cvssV3Vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    )
+    [rating] = _entry("", "NOT_SET", finding)[0]["ratings"]
+    assert (rating["score"], rating["severity"]) == (9.8, "critical")
+
+    # A vector nobody can read keeps its place, without an invented score.
+    unreadable = _finding(C1, cvssV3BaseScore=None, cvssV3Vector="CVSS:3.1/AV:N")
+    [rating] = _entry("", "NOT_SET", unreadable)[0]["ratings"]
+    assert rating == {"source": {"name": "NVD"}, "method": "CVSSv31", "vector": "CVSS:3.1/AV:N"}
+
+
+def test_the_complete_vulnerability_record_completes_a_finding():
+    finding = _finding(
+        C1, cvssV3BaseScore=None, cvssV3Vector=None, cvssV4Vector=V4, description="",
+    )
+    record = {
+        "uuid": "v1", "vulnId": "CVE-2026-1", "source": "NVD",
+        "cvssV3BaseScore": 7.5, "cvssV3Vector": V31, "cvssV4Vector": "ignored",
+        "published": 1777058234490, "updated": 1777144634000,
+        "recommendation": "Upgrade to 1.1.", "description": "From the record.",
+    }
+    by_id = {**record, "uuid": "another"}
+    for records in ([record], [by_id]):
+        [completed] = complete_findings([finding], records)
+        vulnerability = completed["vulnerability"]
+        assert vulnerability["cvssV4Vector"] == V4  # the finding's value is kept
+        assert vulnerability["cvssV3BaseScore"] == 7.5
+        assert vulnerability["recommendation"] == "Upgrade to 1.1."
+        assert vulnerability["description"] == "From the record."
+    assert "recommendation" not in finding["vulnerability"]  # not changed in place
+    assert complete_findings([finding], []) == [finding]
+    assert complete_findings([finding], [{"uuid": "other", "vulnId": "CVE-1"}]) == [finding]
+
+    entry, _document = _entry("", "NOT_SET", completed)
+    assert [rating["method"] for rating in entry["ratings"]] == ["CVSSv4", "CVSSv31"]
+    assert entry["recommendation"] == "Upgrade to 1.1."
+
+
+def test_published_and_updated_are_date_times():
+    # Dependency-Track delivers milliseconds since 1970, as number or text.
+    finding = _finding(C1, published="1777058234490", updated=1777144634000)
+    entry, document = _entry("", "NOT_SET", finding)
+    assert entry["published"] == "2026-04-24T19:17:14.490000+00:00"
+    assert entry["updated"] == "2026-04-25T19:17:14+00:00"
+
+    iso = _finding(C1, published="2026-04-24T19:17:14Z", updated="2026-04-24 21:17:14+02:00")
+    entry, _ = _entry("", "NOT_SET", iso)
+    assert entry["published"] == entry["updated"] == "2026-04-24T19:17:14+00:00"
+
+    unreadable, _ = _entry("", "NOT_SET", _finding(C1, published="soon", updated=""))
+    assert "published" not in unreadable and "updated" not in unreadable
+
+    assert _valid(document)
+    # The validation checks the format: the value DTVP wrote before fails.
+    former = [{**document["vulnerabilities"][0], "published": "1777058234490"}]
+    assert not _valid({"vulnerabilities": former})
+
+
+def test_ticket_keys_in_the_texts_of_assessments_are_exported():
+    text = (
+        "Tracked in EXP-7, see also ABC-12 and CVE-2026-1.\n\n"
+        "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] ---\n"
+        "Fix planned with EXP-2001 and EXP-1001.\n\n"
+        "Former team assessment (Old; EXPLOITABLE; assessed by olaf):\nWas EXP-9.\n\n"
+        "--- [Team: Core] [State: EXPLOITABLE] [Assessed By: bob] [Ticket: EXP-1001] ---\n"
+        "Patch is SEC_OPS-5; not NEXP-3 or EXP-x.\n\n"
+        "--- [Team: Gone] [State: EXPLOITABLE] [Historical: yes] ---\nEXP-8."
+    )
+    entry, document = _entry(text, "EXPLOITABLE", ticket_prefixes=["EXP", "SEC_OPS"])
+    # The recorded ticket first, then what the texts mention, also those of
+    # former and historical assessments: a ticket is about the vulnerability,
+    # not about who owned the component. No key of another project.
+    assert _property(entry, "dtvp:spr") == [
+        "EXP-1001, EXP-2001, SEC_OPS-5, EXP-9, EXP-8, EXP-7"
+    ]
+    metadata = document["metadata"]["properties"]
+    assert {"name": "dtvp:export_ticket_prefixes", "value": "EXP, SEC_OPS"} in metadata
+    assert {"name": "dtvp:export_text_only_tickets", "value": "1"} in metadata
+
+    # Without configured keys DTVP recognises none and says nothing about it.
+    entry, document = _entry(text, "EXPLOITABLE")
+    assert _property(entry, "dtvp:spr") == ["EXP-1001"]
+    assert not any("ticket" in item["name"] for item in document["metadata"]["properties"])
+
+
+def test_a_reviewer_named_inside_the_text_is_exported():
+    text = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Justification: CODE_NOT_PRESENT] ---\n"
+        "Not shipped.\n[Reviewed by: rita]\n[Assessed by: alice]"
+    )
+    entry, _ = _entry(text)
+    assert _property(entry, "dtvp:reviewed_by") == ["rita"]
+    assert _property(entry, "dtvp:assessed_by") == ["alice"]
+    assert entry["analysis"]["detail"] == "Not shipped."
+
+    legacy, _ = _entry("Not shipped. [Reviewed By: rita] [Rescored: 0.0]")
+    assert _property(legacy, "dtvp:reviewed_by") == ["rita"]
+    assert legacy["analysis"]["detail"] == "Not shipped."
+    assert legacy["ratings"][-1]["justification"] == "Not shipped."
+
+
+def test_an_assessment_without_a_team_names_no_team():
+    text = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] ---\nReason.\n\n"
+        "--- [Team: Unknown] [State: NOT_AFFECTED] [Assessed By: rita] "
+        "[Date: 1794561289026] ---\nSee global assessment.\n\n"
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] ---\n"
+        "See global  assessment."
+    )
+    entry, document = _entry(text, unowned_teams=["unknown"])
+    # A text that only points to the General assessment is no annotation; a
+    # team the project has keeps its state.
+    assert "annotations" not in document
+    assert _property(entry, "dtvp:team_state") == ["Core=NOT_AFFECTED"]
+    assert "Unknown" not in str(document)
+
+    own = (
+        "--- [Team: Unknown] [State: EXPLOITABLE] [Assessed By: rita] "
+        "[Date: 1794561289026] ---\nReachable.\n\n"
+        "--- [Team: Core] [State: EXPLOITABLE] [Assessed By: bob] ---\nYes."
+    )
+    entry, document = _entry(own, "EXPLOITABLE", unowned_teams=["Unknown"])
+    assert [item["annotator"] for item in document["annotations"]] == [
+        {"individual": {"name": "rita"}},
+        {"organization": {"name": "Core", "contact": [{"name": "bob"}]}},
+    ]
+    assert _property(entry, "dtvp:team_state") == ["Core=EXPLOITABLE"]
+    assert "Unknown" not in str(document)
+    assert _valid(document)
+
+    anonymous = "--- [Team: Unknown] [State: EXPLOITABLE] ---\nReachable."
+    entry, document = _entry(anonymous, "EXPLOITABLE", unowned_teams=["Unknown"])
+    assert "annotations" not in document
+    assert _property(entry, "dtvp:unassigned_assessment") == ["Reachable."]
+
+    # A project that has a team of this name keeps it.
+    entry, document = _entry(own, "EXPLOITABLE")
+    assert "Unknown=EXPLOITABLE" in _property(entry, "dtvp:team_state")
+
+
+def test_former_team_assessments_are_not_part_of_the_rationale():
+    first = (
+        "Former team assessment (TeamA; NOT_AFFECTED; justification "
+        "CODE_NOT_REACHABLE; assessed by alice):\nNot reachable.\n\n"
+        "CVSS 3.1: 7.5 -> 0.0"
+    )
+    second = "Former team assessment (TeamZ; NOT_AFFECTED; assessed by zoe)."
+    text = (
+        "[Rescored: 0.0] [Rescored Vector: " + VECTOR + "]\n\n"
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] ---\n"
+        f"The parser is never called.\n\n{first}\n\n{second}"
+    )
+    entry, _ = _entry(text)
+    assert entry["analysis"]["detail"] == "The parser is never called."
+    assert entry["ratings"][-1]["justification"] == "The parser is never called."
+    assert _property(entry, "dtvp:former_assessment") == [first, second]
+
+    # Only former assessments: there is no rationale.
+    only, _ = _entry(
+        f"--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] ---\n{second}"
+    )
+    assert "detail" not in only["analysis"]
+    assert _property(only, "dtvp:former_assessment") == [second]
+
+
+def test_the_repair_writes_the_former_team_note_the_export_recognises():
+    from dtvp.bulk_workflows.assessment_repair import _former_team_note
+
+    note = _former_team_note([
+        {"team": "TeamA", "details": "Not reachable.",
+         "tags": {"State": "NOT_AFFECTED", "Assessed By": "alice"}},
+    ])
+    entry, _ = _entry(
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] ---\n"
+        f"Approved.\n\n{note}"
+    )
+    assert entry["analysis"]["detail"] == "Approved."
+    assert _property(entry, "dtvp:former_assessment") == [note]
+
+
+def test_a_rescoring_without_a_vector_says_so():
+    entry, document = _entry("[Rescored: 5.3]\n\nLower in this product.")
+    assert entry["ratings"][-1] == {
+        "source": {"name": "DTVP"}, "score": 5.3, "severity": "medium",
+        "method": "other", "justification": "Lower in this product.",
+    }
+    assert _valid(document)
+
+    # A vector alone states its score.
+    entry, _ = _entry(f"[Rescored Vector: {V31}]")
+    own = entry["ratings"][-1]
+    assert (own["score"], own["severity"], own["method"]) == (7.5, "high", "CVSSv31")
+
+
+def test_the_general_assessment_has_its_date():
+    text = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Date: 1794561289026] ---\nReason."
+    )
+    entry, document = _entry(text)
+    assert entry["analysis"] == {
+        "state": "not_affected", "detail": "Reason.",
+        "lastUpdated": "2026-11-13T09:14:49.026000+00:00",
+    }
+    assert _valid(document)
+
+    undated, _ = _entry("--- [Team: General] [State: NOT_AFFECTED] ---\nReason.")
+    assert "lastUpdated" not in undated["analysis"]
+
+
+# -- second reading by the consumer -----------------------------------------
+
+
+def test_a_historical_team_assessment_is_exported_with_its_ticket():
+    text = (
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] "
+        "[Date: 1794561289026] ---\nNot reachable.\n\n"
+        "--- [Team: D-Web] [State: NOT_AFFECTED] [Assessed By: dana] "
+        "[Reviewed By: rita] [Date: 1794000000000] "
+        "[Justification: CODE_NOT_PRESENT] [Ticket: VP-4711] [Historical: yes] ---\n"
+        "Not shipped in the web client."
+    )
+    entry, document = _entry(text)
+
+    # The former owner's assessment is neither a live team state nor an
+    # annotation, and it is not lost either.
+    assert _property(entry, "dtvp:team_state") == ["Core=NOT_AFFECTED"]
+    assert [item["annotator"]["organization"]["name"] for item in document["annotations"]] == ["Core"]
+    (historical,) = _property(entry, "dtvp:historical_assessment")
+    assert json.loads(historical) == {
+        "team": "D-Web",
+        "state": "NOT_AFFECTED",
+        "justification": "CODE_NOT_PRESENT",
+        "assessed_by": "dana",
+        "reviewed_by": "rita",
+        "date": "2026-11-06T21:20:00+00:00",
+        "ticket": "VP-4711",
+        "text": "Not shipped in the web client.",
+    }
+    # Its recorded ticket still tracks the vulnerability, with or without
+    # configured ticket prefixes.
+    assert _property(entry, "dtvp:spr") == ["VP-4711"]
+    assert {"name": "dtvp:export_historical_assessments", "value": "1"} in (
+        document["metadata"]["properties"]
+    )
+    assert _valid(document)
+
+    _, plain = _entry("--- [Team: Core] [State: NOT_AFFECTED] ---\nNot reachable.")
+    assert not any(
+        "historical" in item["name"] for item in plain["metadata"]["properties"]
+    )
+
+
+def test_an_analysis_without_a_general_date_has_the_latest_team_date():
+    text = (
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] "
+        "[Date: 1794561289026] ---\nNot reachable.\n\n"
+        "--- [Team: Edge] [State: NOT_AFFECTED] [Assessed By: eve] "
+        "[Date: 1794000000000] ---\nNot shipped.\n\n"
+        "--- [Team: Old] [State: EXPLOITABLE] [Date: 1799999999999] "
+        "[Historical: yes] ---\nOutdated."
+    )
+    entry, document = _entry(text)
+    # No General assessment: the state comes from the teams, and so does the
+    # date. A former owner's later date does not count.
+    assert entry["analysis"]["lastUpdated"] == "2026-11-13T09:14:49.026000+00:00"
+    assert _valid(document)
+
+    # An undated General assessment beside dated teams.
+    entry, _ = _entry(
+        "--- [Team: General] [State: NOT_AFFECTED] ---\nReason.\n\n" + text
+    )
+    assert entry["analysis"]["lastUpdated"] == "2026-11-13T09:14:49.026000+00:00"
+
+    # The General assessment's own date wins.
+    entry, _ = _entry(
+        "--- [Team: General] [State: NOT_AFFECTED] [Date: 1794000000000] ---\n"
+        "Reason.\n\n" + text
+    )
+    assert entry["analysis"]["lastUpdated"] == "2026-11-06T21:20:00+00:00"
+
+    # No date anywhere: none is stated.
+    entry, _ = _entry("--- [Team: Core] [State: NOT_AFFECTED] ---\nNot reachable.")
+    assert "lastUpdated" not in entry["analysis"]
+
+
+def test_the_document_names_its_property_prefix():
+    _, document = _entry("", "NOT_SET", property_prefix="acme")
+    assert {"name": "acme:export_property_prefix", "value": "acme"} in (
+        document["metadata"]["properties"]
+    )

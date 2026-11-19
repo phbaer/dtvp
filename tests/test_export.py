@@ -287,6 +287,8 @@ def test_vdr_carries_the_local_assessments_not_yet_exported(client, queued, monk
     assert set(entries) == {"CVE-2026-0001", "CVE-2026-0002"}
     first = entries["CVE-2026-0001"]
     # DTVP's value, although Dependency-Track does not hold it yet.
+    # When the General assessment was saved.
+    assert first["analysis"].pop("lastUpdated").startswith("20")
     assert first["analysis"] == {"state": "not_affected", "detail": "Decision 1"}
     assert first["affects"] == [{"ref": "component-1"}]
     assert {"name": "dtvp:assessed_by", "value": "rita"} in first["properties"]
@@ -302,4 +304,89 @@ def test_vdr_carries_the_local_assessments_not_yet_exported(client, queued, monk
     assert inventory.status_code == 200 and "vulnerabilities" not in inventory.json()
     assert bad_prefix.status_code == 422
     assert unknown.status_code == 404
+
+
+def test_vdr_uses_vulnerability_records_ticket_keys_and_the_team_mapping(
+    client, queued, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    queued.get_bom.return_value = {
+        "bomFormat": "CycloneDX", "specVersion": "1.5",
+        "components": [
+            {"bom-ref": "component-1", "name": "library-a", "version": "2.0"},
+            {"bom-ref": "component-2", "name": "library-a", "version": "2.0"},
+        ],
+    }
+    records = [
+        {
+            "uuid": "vuln-1", "vulnId": "CVE-2026-0001", "source": "NVD",
+            "cvssV3BaseScore": 7.5,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "cvssV4Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+            "published": 1777058234490, "updated": 1777144634000,
+            "recommendation": "Upgrade.",
+        }
+    ]
+    monkeypatch.setenv("DTVP_CYCLONEDX_TICKET_PREFIXES", "EXP, SEC")
+    with patch("dtvp.main.DTClient", return_value=queued), patch(
+        "dtvp.main.get_user_role", return_value="REVIEWER"
+    ), patch("dtvp.app_wiring.load_team_mapping", return_value={"*": "Unknown"}):
+        # The component has no team: the fallback name of the mapping.
+        saved = client.post(
+            "/api/assessment",
+            json={
+                "instances": [_instance(1)], "state": "NOT_AFFECTED",
+                "details": "See EXP-12.", "team": "Unknown",
+            },
+        )
+        with patch.object(
+            main.cache_manager, "get_project_vulnerabilities",
+            AsyncMock(return_value=records),
+        ):
+            response = client.get("/api/project/p1/cyclonedx")
+            requested = client.get(
+                "/api/project/p1/cyclonedx", params={"ticket_prefixes": "ABC"}
+            )
+            bad = client.get(
+                "/api/project/p1/cyclonedx", params={"ticket_prefixes": "EXP,a-b"}
+            )
+        with patch.object(
+            main.cache_manager, "get_project_vulnerabilities",
+            AsyncMock(side_effect=RuntimeError("down")),
+        ):
+            without = client.get("/api/project/p1/cyclonedx")
+
+    assert saved.status_code == 200 and response.status_code == 200
+    document = response.json()
+    first = next(e for e in document["vulnerabilities"] if e["id"] == "CVE-2026-0001")
+    assert [(r["method"], r["score"]) for r in first["ratings"]] == [
+        ("CVSSv4", 8.7), ("CVSSv31", 7.5),
+    ]
+    assert first["published"] == "2026-04-24T19:17:14.490000+00:00"
+    assert first["updated"] == "2026-04-25T19:17:14+00:00"
+    assert first["recommendation"] == "Upgrade."
+    properties = {item["name"]: item["value"] for item in first["properties"]}
+    assert properties["dtvp:spr"] == "EXP-12"
+    assert "dtvp:team_state" not in properties
+    [annotation] = document["annotations"]
+    assert annotation["annotator"] == {"individual": {"name": "rita"}}
+    assert annotation["text"] == "See EXP-12."
+    metadata = {item["name"]: item["value"] for item in document["metadata"]["properties"]}
+    assert metadata["dtvp:export_ticket_prefixes"] == "EXP, SEC"
+    assert metadata["dtvp:export_text_only_tickets"] == "1"
+    assert "dtvp:export_advisory_records" not in metadata
+
+    # The request names other keys than the configuration.
+    assert requested.json()["metadata"]["properties"][-2:] == [
+        {"name": "dtvp:export_ticket_prefixes", "value": "ABC"},
+        {"name": "dtvp:export_text_only_tickets", "value": "0"},
+    ]
+    assert bad.status_code == 422
+
+    # Without the vulnerability records the document says so.
+    assert without.status_code == 200
+    assert {"name": "dtvp:export_advisory_records", "value": "unavailable"} in (
+        without.json()["metadata"]["properties"]
+    )
 
