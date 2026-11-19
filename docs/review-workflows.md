@@ -182,7 +182,7 @@ teams disagree. In the matrix every distinct assessment has a letter (A is the
 most common one) and the findings that differ are outlined.
 
 "Show differences" opens a comparison of the assessments field by field
-(state, rescoring, and per team the state, justification, rationale, ticket,
+(state, rescoring, response, and per team the state, justification, rationale, ticket,
 assessor, reviewer and date). Only the fields that differ are listed unless
 "Show equal fields too" is ticked. A reviewer can put one of them into the
 Global assessment form with "Use for all findings"; it applies to every

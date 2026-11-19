@@ -104,6 +104,23 @@ describe('compareVariants', () => {
         expect(rows.map(row => row.label)).toContain('Security · rationale')
     })
 
+    it('names the response when it is all that differs', () => {
+        const general = block('General', 'EXPLOITABLE', 'Reachable.')
+        const matrix = buildFindingMatrix([
+            finding({ project_version: '1.0', analysis_state: 'EXPLOITABLE', analysis_details: `[Response: UPDATE]\n\n${general}` }),
+            finding({ project_version: '2.0', analysis_state: 'EXPLOITABLE', analysis_details: `[Response: UPDATE]\n\n${general}` }),
+            finding({ project_version: '3.0', analysis_state: 'EXPLOITABLE', analysis_details: general }),
+        ])
+        const rows = compareVariants(matrix.variants)
+
+        expect(matrix.variants).toHaveLength(2)
+        expect(rows.filter(row => row.differs)).toEqual([
+            { key: 'response', label: 'Response', values: ['Update', ''], differs: true },
+        ])
+        // The response is not part of the text outside the team assessments.
+        expect(rows.find(row => row.key === 'free_text')).toBeUndefined()
+    })
+
     it('shows a team assessment that only one version has', () => {
         const matrix = buildFindingMatrix([
             finding({ project_version: '1.0', analysis_state: 'IN_TRIAGE', analysis_details: block('Security', 'IN_TRIAGE', 'Looking.') }),
