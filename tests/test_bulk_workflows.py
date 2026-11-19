@@ -2588,3 +2588,60 @@ def test_restoring_a_ticket_keeps_the_response():
     assert analysis_response(details) == "UPDATE"
     general = parse_assessment("NOT_AFFECTED", details, False)["teams"][0]
     assert (general["team"], general["ticket"]) == ("General", "VP-101, SR-7")
+
+
+_UNOWNED_MAPPING = {"*": "Unknown", "library-a": "TeamB"}
+_UNOWNED_REFERENCE = (
+    "--- [Team: Unknown] [State: NOT_AFFECTED] [Assessed By: reviewer] "
+    "[Justification: CODE_NOT_PRESENT] ---\nSee global assessment."
+)
+_UNOWNED_OWN = (
+    "--- [Team: Unknown] [State: NOT_AFFECTED] [Assessed By: rita] "
+    "[Justification: CODE_NOT_PRESENT] ---\nChecked by hand: not shipped."
+)
+_APPROVED_GENERAL = (
+    "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] "
+    "[Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+)
+
+
+def test_repair_leaves_an_assessment_of_a_component_no_team_owns():
+    # Not a former team: the name stands for components without a team.
+    for tags in (["TeamB", "Unknown"], ["Unknown"]):
+        group = _repair_group(
+            [("NOT_AFFECTED", f"{_UNOWNED_OWN}\n\n{_CURRENT}")], tags=tags, lifecycle="ASSESSED",
+        )
+        preview, payloads, _ = _repair(group, team_mapping=_UNOWNED_MAPPING)
+        assert preview["items"] == [] and payloads == []
+
+
+def test_repair_removes_a_reference_to_the_global_assessment_that_no_team_stands_behind():
+    for tags in (["TeamB", "Unknown"], ["Unknown"]):
+        text = f"{_APPROVED_GENERAL}\n\n{_CURRENT}\n\n{_UNOWNED_REFERENCE}"
+        group = _repair_group([("NOT_AFFECTED", text)], tags=tags, lifecycle="ASSESSED")
+
+        preview, payloads, _ = _repair(group, team_mapping=_UNOWNED_MAPPING)
+
+        assert preview["items"][0]["repairs"] == [{
+            "id": "unowned_references",
+            "label": "Remove the reference to the global assessment under Unknown: "
+                     "no team owns the component",
+        }]
+        assert preview["items"][0]["requires_review"] is False
+        details = payloads[0][1]["details"]
+        assert "[Team: Unknown]" not in details
+        assert "[Team: General] [State: NOT_AFFECTED]" in details and "Not shipped." in details
+        assert "[Team: TeamB]" in details
+        assert payloads[0][1]["state"] == "NOT_AFFECTED"
+        applied = _repair_group([("NOT_AFFECTED", details)], tags=tags, lifecycle="ASSESSED")
+        assert _repair(applied, team_mapping=_UNOWNED_MAPPING)[0]["items"] == []
+
+
+def test_repair_does_not_combine_a_conflict_with_an_assessment_no_team_owns():
+    exploitable = _UNOWNED_OWN.replace("NOT_AFFECTED", "EXPLOITABLE")
+    group = _repair_group(
+        [("EXPLOITABLE", exploitable), ("NOT_AFFECTED", _APPROVED_GENERAL)],
+        tags=["TeamB", "Unknown"], lifecycle="INCONSISTENT",
+    )
+    preview, payloads, _ = _repair(group, team_mapping=_UNOWNED_MAPPING)
+    assert preview["items"] == [] and payloads == []
