@@ -34,6 +34,7 @@ means the integration or override is disabled.
 | `DTVP_EXPORT_MODE` | `auto` exports assessments in the background as they are saved; `manual` keeps them local until a reviewer exports them. See [Import and export](import-export.md) | `auto` |
 | `DTVP_CYCLONEDX_ASSESSMENT_SOURCE` | `source.name` of DTVP's own rating in [CycloneDX VDR exports](cyclonedx-export.md); a request parameter overrides it | `DTVP` |
 | `DTVP_CYCLONEDX_PROPERTY_PREFIX` | Namespace of the properties in CycloneDX VDR exports; a request parameter overrides it | `dtvp` |
+| `DTVP_CYCLONEDX_TICKET_PREFIXES` | Comma-separated project keys of ticket references (`EXP` for `EXP-123`) that CycloneDX VDR exports recognise in assessment texts; the request parameter `ticket_prefixes` overrides it | unset: only recorded ticket fields are exported |
 | `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
 | `DTVP_ASSESSMENT_STRICT_DT_CONFLICTS` | Perform live Dependency-Track conflict reads before accepting assessment saves | `false` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |

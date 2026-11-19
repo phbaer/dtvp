@@ -207,3 +207,31 @@ def test_a_text_is_left_alone_when_more_than_its_layout_would_change(text):
 
     assert canonical_assessment_text("IN_TRIAGE", text) == text
 
+
+def test_people_named_inside_a_text_stay_part_of_the_stored_text():
+    """A text from before the team blocks names people as ``[Reviewed by: …]``.
+
+    Reading it into fields leaves it as written: Dependency-Track holds the
+    same text, and changing it would be a local change to export. The
+    CycloneDX export reads these names when it builds a document
+    (``tests/test_cyclonedx_export.py``), so stored fields need no re-read.
+    """
+    from dtvp.assessment_model import canonical_assessment_text
+
+    text = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: unknown] "
+        "[Justification: NOT_SET] ---\nNot shipped. [Reviewed by: rita]"
+    )
+    [general] = parse_assessment("NOT_AFFECTED", text, False)["teams"]
+    assert general["details"] == "Not shipped. [Reviewed by: rita]"
+    assert general["reviewed_by"] is None
+    assert canonical_assessment_text("NOT_AFFECTED", text) == text
+
+
+def test_the_texts_dtvp_writes_itself_are_named_once():
+    from dtvp import assessment_model
+    from dtvp.bulk_workflows import assessment_repair
+
+    assert assessment_repair.SEE_GLOBAL_ASSESSMENT is assessment_model.SEE_GLOBAL_ASSESSMENT
+    assert assessment_repair.FORMER_TEAM_NOTE is assessment_model.FORMER_TEAM_NOTE
+

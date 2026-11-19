@@ -19,6 +19,10 @@ FORM_STRUCTURED = "structured"  # at least one team block
 FORM_TEXT = "text"  # text without team blocks (legacy or plain)
 FORM_EMPTY = "empty"
 
+# Texts DTVP itself writes into an assessment; readers recognise them by these.
+SEE_GLOBAL_ASSESSMENT = "See global assessment."  # a team referring to General
+FORMER_TEAM_NOTE = "Former team assessment"  # starts a note about a former team
+
 _SCORE = re.compile(r"\[Rescored:\s*([\d.]+)\]")
 _VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
 _PENDING = re.compile(r"\[Status: Pending Review\]", re.IGNORECASE)
