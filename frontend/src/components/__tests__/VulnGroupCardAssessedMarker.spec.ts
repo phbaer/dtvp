@@ -51,6 +51,8 @@ vi.mock('@lucide/vue', () => ({
     Ban: { template: '<span />' },
     FileText: { template: '<span />' },
     Trash2: { template: '<span />' },
+    MoreHorizontal: { template: '<span />' },
+    EyeOff: { template: '<span />' },
     X: { template: '<span />' }
 }))
 

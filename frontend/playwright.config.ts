@@ -1,6 +1,10 @@
 /// <reference types="node" />
 import { defineConfig, devices } from '@playwright/test';
 
+// Another project may already use the default port; set DTVP_E2E_PORT then.
+const port = Number(process.env.DTVP_E2E_PORT || 5173);
+const baseURL = `http://localhost:${port}`;
+
 export default defineConfig({
     testDir: './e2e',
     fullyParallel: true,
@@ -9,7 +13,7 @@ export default defineConfig({
     workers: process.env.CI ? 1 : 3,
     reporter: 'html',
     use: {
-        baseURL: 'http://localhost:5173',
+        baseURL,
         trace: 'on-first-retry',
         screenshot: 'only-on-failure',
     },
@@ -31,9 +35,9 @@ export default defineConfig({
     // module it transforms and was OOM-killed on the runner mid-suite.
     webServer: {
         command: process.env.CI
-            ? 'npm run build && npm run preview -- --port 5173 --strictPort'
-            : 'npm run dev',
-        url: 'http://localhost:5173',
+            ? `npm run build && npm run preview -- --port ${port} --strictPort`
+            : `npm run dev -- --port ${port} --strictPort`,
+        url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 180000,
     },

@@ -30,7 +30,9 @@ in the same change. The regular, manual, and real-stack Playwright
 configurations cover Chromium, Firefox, and WebKit desktop browsers.
 With `CI` set, the regular configuration builds the frontend and serves it
 with `vite preview` instead of the dev server, which exhausted runner memory;
-local runs keep using (and reusing) the dev server on port 5173.
+local runs keep using (and reusing) the dev server on port 5173. If another
+project already uses that port, set `DTVP_E2E_PORT` to a free one; otherwise
+the tests run against the wrong application.
 
 Each test job appends a Markdown job summary through `scripts/ci-summary.mjs`:
 pass/fail totals, failing or flaky tests with their first error, coverage

@@ -78,12 +78,6 @@ The Assessment tab uses the same section hierarchy as Context and Code Evidence:
 
 Existing assessment evidence in Context shows conflicting team blocks so reviewers can compare states and resolve the mismatch in Assessment.
 
-### Team Mapping
-
-![Team mapping](screenshots/vuln-card-team-mapping.png)
-
-The Team Mapping tab gives reviewers one scrollable component list for adding or editing ownership tags for components seen in the vulnerability.
-
 ### Rescored CVSS
 
 ![Rescored CVSS](screenshots/rescored-cvss.png)

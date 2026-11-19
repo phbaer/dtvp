@@ -304,7 +304,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('1.0') // Version should be shown
     })
 
-    it('keeps the sticky detail bar focused on tabs and renders the next action only once', async () => {
+    it('keeps the sticky detail bar focused on tabs and shows no next-action banner or team mapping tab', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
         })
@@ -317,36 +317,14 @@ describe('VulnGroupCard', () => {
         expect(stickyBar.text()).toContain('Assessment')
         expect(stickyBar.text()).not.toContain('Review context')
         expect(stickyBar.find('[data-testid="sticky-tab-apply-button"]').exists()).toBe(false)
-        expect(wrapper.findAll('[data-testid="analyst-next-action"]')).toHaveLength(1)
-        expect(wrapper.findAll('[data-testid="workflow-primary-action"]').length).toBeLessThanOrEqual(1)
+        expect(stickyBar.text()).not.toContain('Team Mapping')
+        expect(wrapper.find('[data-testid="analyst-next-action"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="workflow-primary-action"]').exists()).toBe(false)
         expect(stickyBar.text()).not.toContain('CVSS & Rescoring')
         expect(stickyBar.text()).not.toContain('Global')
         expect(stickyBar.text()).not.toContain('Synced')
         expect(stickyBar.text()).not.toContain('CVSS 9.8')
         expect(stickyBar.text()).not.toContain('1 target')
-    })
-
-    it('turns next-action navigation into concrete guidance at the destination tab', async () => {
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup },
-            global: {
-                provide: {
-                    user: ref({ role: 'ANALYST', username: 'analyst' }),
-                    teamMapping: ref({ lib: ['Security'] }),
-                },
-            },
-        })
-
-        await wrapper.find('.cursor-pointer').trigger('click')
-        expect(wrapper.get('[data-testid="workflow-primary-action"]').text()).toContain('Open code evidence')
-
-        await wrapper.get('[data-testid="workflow-primary-action"]').trigger('click')
-        await wrapper.vm.$nextTick()
-
-        expect((wrapper.vm as any).activeDetailTab).toBe('analysis')
-        expect(wrapper.find('[data-testid="workflow-primary-action"]').exists()).toBe(false)
-        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('You are at the next step')
-        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('Expand Run new analysis')
     })
 
     it('orders Context from description through scope and dependencies to assessment evidence', async () => {
@@ -527,9 +505,6 @@ describe('VulnGroupCard', () => {
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
         expect(wrapper.get('[data-testid="assessment-persistence-status"]').text())
             .toContain('Saved locally — syncing to Dependency-Track')
-        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('Assessment submitted for review')
-        await wrapper.get('[data-testid="workflow-primary-action"]').trigger('click')
-        expect(wrapper.emitted('request-next')).toHaveLength(1)
         expect((wrapper.vm as any).originalAnalysis.f1).toEqual(expect.objectContaining({
             dtvpRevision: 1,
             dtvpSyncStatus: 'pending',
@@ -891,7 +866,6 @@ describe('VulnGroupCard', () => {
         expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text()))
             .toEqual(['Security'])
         expect(assessmentTab?.text()).toContain('Needed')
-        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('Gather code evidence')
     })
 
     it('focuses reviewers on the filtered team while keeping an explicit all-team view', async () => {
@@ -1294,10 +1268,10 @@ describe('VulnGroupCard', () => {
 
         expect(wrapper.find('#assessment-comment-textarea').exists()).toBe(false)
 
-        const checkboxes = wrapper.findAll('input[type="checkbox"]')
-        if (checkboxes.length > 0) {
-            await checkboxes[checkboxes.length - 1]?.setValue(true) // Suppression is last
-        }
+        // Suppression sits in the "More" menu, not on the form.
+        expect(wrapper.find('[data-testid="assessment-more-menu"]').exists()).toBe(false)
+        await wrapper.get('[data-testid="assessment-more-button"]').trigger('click')
+        await wrapper.get('[data-testid="assessment-more-menu"] input[type="checkbox"]').setValue(true)
 
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         await applyBtn.trigger('click')
@@ -1812,7 +1786,37 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(false)
-        expect(wrapper.text()).toContain('Suppress this vulnerability')
+        expect(wrapper.text()).not.toContain('Suppress')
+        await wrapper.get('[data-testid="assessment-more-button"]').trigger('click')
+        expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Suppress in Dependency-Track')
+        expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Delete assessment')
+    })
+
+    it('marks a suppressed vulnerability in the header', async () => {
+        const suppressedGroup = JSON.parse(JSON.stringify(mockGroup))
+        suppressedGroup.affected_versions[0].components[0].is_suppressed = true
+        const plain = mount(VulnGroupCard, { props: { group: mockGroup } })
+        const wrapper = mount(VulnGroupCard, { props: { group: suppressedGroup } })
+
+        expect(plain.find('[data-testid="suppressed-chip"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="suppressed-chip"]').attributes('title'))
+            .toContain('1 finding is suppressed in Dependency-Track')
+    })
+
+    it('offers an Unassigned team when no component belongs to a team', async () => {
+        const untagged = JSON.parse(JSON.stringify({ ...mockGroup, tags: [] }))
+        untagged.affected_versions[0].components[0].tags = []
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: untagged },
+            global: { provide: { user: ref({ role: 'ANALYST', username: 'analyst' }), teamMapping: ref({}) } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        const assessmentTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text())).toEqual(['Unassigned'])
+        expect((wrapper.vm as any).selectedTeam).toBe('Unassigned')
     })
 
     it('extracts team-specific state and details from aggregated string', async () => {

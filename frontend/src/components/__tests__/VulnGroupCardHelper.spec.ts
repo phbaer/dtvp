@@ -44,6 +44,8 @@ vi.mock('@lucide/vue', () => ({
     Bot: { template: '<span />' },
     Tags: { template: '<span />' },
     Trash2: { template: '<span />' },
+    MoreHorizontal: { template: '<span />' },
+    EyeOff: { template: '<span />' },
     X: { template: '<span />' }
 }))
 

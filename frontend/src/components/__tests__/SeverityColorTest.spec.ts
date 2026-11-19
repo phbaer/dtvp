@@ -29,7 +29,9 @@ vi.mock('@lucide/vue', () => ({
     Eye: { template: '<span />' },
     ClipboardCopy: { template: '<span />' },
     Plus: { template: '<span />' },
-    Trash2: { template: '<span />' }
+    Trash2: { template: '<span />' },
+    MoreHorizontal: { template: '<span />' },
+    EyeOff: { template: '<span />' },
 }))
 
 vi.mock('../../lib/api', () => ({

@@ -759,19 +759,6 @@ const sortedItems = computed(() =>
 
 const sortedGroupLookup = computed(() => deriveVulnListGroupLookup(sortedItems.value))
 
-const nextWorkflowItem = computed(() => {
-    if (!selectedGroupId.value || sortedItems.value.length === 0) return null
-    const currentIndex = sortedItems.value.findIndex(item => item.id === selectedGroupId.value)
-    if (currentIndex >= 0) return sortedItems.value[currentIndex + 1] || null
-    return sortedItems.value.find(item => item.id !== selectedGroupId.value) || null
-})
-
-const openNextWorkflowItem = async () => {
-    const next = nextWorkflowItem.value
-    if (!next) return
-    await selectGroupWithDraftGuard(next.group)
-}
-
 const filteredGroups = computed(() => sortedGroupLookup.value.groups)
 
 const filteredGroupCount = computed(() =>
@@ -1903,10 +1890,8 @@ watch(currentUserRole, (role) => {
                 :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
                 :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
                 :activeTeamFilter="tagFilter"
-                :hasNextVulnerability="!!nextWorkflowItem"
                 class="h-full"
                 @close="closeSelectedGroupWithDraftGuard"
-                @request-next="openNextWorkflowItem"
                 @update="handleTeamMappingUpdated"
                 @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
             />
@@ -1931,9 +1916,7 @@ watch(currentUserRole, (role) => {
                 :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
                 :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
                 :activeTeamFilter="tagFilter"
-                :hasNextVulnerability="!!nextWorkflowItem"
                 @close="closeSelectedGroupWithDraftGuard"
-                @request-next="openNextWorkflowItem"
                 @update="handleTeamMappingUpdated"
                 @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
             />

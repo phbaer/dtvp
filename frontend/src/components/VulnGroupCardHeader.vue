@@ -32,6 +32,7 @@ const props = defineProps<{
   scoreTitle?: string
   hasUnsavedDraft?: boolean
   instanceCountOverride?: number
+  suppressedCount?: number
   oldestAttributedOnMsOverride?: number | null
   componentSummaryOverride?: string
   hasAutomaticAssessment?: boolean
@@ -189,6 +190,10 @@ const instanceCount = computed(() =>
 )
 
 // Findings added after the vulnerability was assessed and still unassessed.
+const suppressedCount = computed(() => props.suppressedCount ?? 0)
+const suppressedTitle = computed(() => (
+  `${suppressedCount.value} finding${suppressedCount.value === 1 ? ' is' : 's are'} suppressed in Dependency-Track`
+))
 const newFindings = computed(() =>
   (group.value.affected_versions || []).flatMap(version =>
     (version.components || [])
@@ -372,6 +377,9 @@ const componentSummary = computed(() => {
           Age {{ attributionAgeLabel }}
         </span>
 
+        <span v-if="suppressedCount > 0" class="inline-flex items-center gap-1 rounded border border-gray-500/40 bg-gray-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-300 shrink-0 tabular-nums" data-testid="suppressed-chip" :title="suppressedTitle">
+          Suppressed
+        </span>
         <span v-if="newFindings.length > 0" class="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-300 shrink-0 tabular-nums" data-testid="new-findings-chip" :title="newFindingsTitle">
           {{ newFindings.length }} new
         </span>
