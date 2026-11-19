@@ -57,6 +57,7 @@ REPAIR_RESTORE_TICKETS = "restore_tickets"
 REPAIR_SYNC_FINDINGS = "sync_findings"
 REPAIR_FORMER_TEAMS = "former_teams"
 REPAIR_REFER_TEAMS = "refer_teams"
+REPAIR_UNOWNED_REFERENCES = "unowned_references"
 REPAIR_COMBINE_CONFLICT = "combine_conflict"
 REPAIR_RESCORING = "rescoring"
 
@@ -67,6 +68,7 @@ REPAIR_TOPICS = {
     REPAIR_SYNC_FINDINGS: "Synchronize",
     REPAIR_FORMER_TEAMS: "Former teams",
     REPAIR_REFER_TEAMS: "Refer to global",
+    REPAIR_UNOWNED_REFERENCES: "No-team references",
     REPAIR_COMBINE_CONFLICT: "Combine conflicts",
     REPAIR_RESCORING: "Rescoring",
 }
@@ -121,10 +123,19 @@ def _header_value(value: Any) -> str:
     return re.sub(r"[\r\n\[\]]+", " ", str(value or "")).strip()
 
 
+def _unowned_keys(team_mapping: dict[str, Any]) -> set[str]:
+    """The names under which components that no team owns are assessed."""
+    return {"unassigned", *(_team_key(name) for name in normalize_team_values(team_mapping.get("*")))}
+
+
+def _is_reference(block: dict[str, Any]) -> bool:
+    return _normalized(strip_ssvc_details(block["details"])) == _normalized(SEE_GLOBAL_ASSESSMENT)
+
+
 def _current_teams(group: dict[str, Any], team_mapping: dict[str, Any]) -> dict[str, str]:
     # The name the mapping gives to components no team owns is not a team:
     # nobody is there to refer to the global assessment.
-    unowned = {"unassigned", *(_team_key(name) for name in normalize_team_values(team_mapping.get("*")))}
+    unowned = _unowned_keys(team_mapping)
     return {
         _team_key(team): team
         for team in _normalize_group_tags(group.get("tags") or [], team_mapping)
@@ -243,9 +254,27 @@ def _repair_former_teams(
     without an assessment refer to the global one once that is approved,
     also when there is no former team at all.
     """
+    # An assessment under the name for components no team owns is that of a
+    # person for such a component, not a former team's: it stays. Only a
+    # reference to the global assessment under that name says nothing, and
+    # nobody stands behind it.
+    unowned = _unowned_keys(team_mapping)
+    stale = [
+        block for block in blocks
+        if _team_key(block["team"]) in unowned and _is_assessed(block) and _is_reference(block)
+    ]
+    if stale:
+        stale_ids = {id(block) for block in stale}
+        blocks = [block for block in blocks if id(block) not in stale_ids]
+    removed = sorted({block["team"] for block in stale}, key=str.casefold)
+    nothing = (blocks, {
+        "former_teams": [], "promoted_to_global_decision": False,
+        "referred_teams": [], "open_teams": [], "removed_references": removed,
+    }) if stale else (blocks, None)
+
     if not current:
         # Unknown ownership is not the same as no ownership.
-        return blocks, None
+        return nothing
 
     def canonical_key(team: str) -> str:
         return _team_key((_normalize_group_tags([team], team_mapping) or [team])[0])
@@ -256,7 +285,9 @@ def _repair_former_teams(
     former = [
         block
         for block in blocks
-        if not is_general(block) and _is_assessed(block) and canonical_key(block["team"]) not in current
+        if not is_general(block) and _is_assessed(block)
+        and canonical_key(block["team"]) not in current
+        and _team_key(block["team"]) not in unowned
     ]
     former_ids = {id(block) for block in former}
     remaining = [block for block in blocks if id(block) not in former_ids]
@@ -276,7 +307,7 @@ def _repair_former_teams(
     ):
         # Without former teams the only repair is pointing teams that have no
         # assessment at a global decision that is already approved.
-        return blocks, None
+        return nothing
     if general is None:
         general = {
             "team": "General",
@@ -344,6 +375,7 @@ def _repair_former_teams(
         "promoted_to_global_decision": promoted,
         "referred_teams": referred,
         "open_teams": [team for team in uncovered if team not in referred],
+        "removed_references": removed,
     }
 
 
@@ -367,6 +399,7 @@ def _combine_conflict(
     def canonical_key(team: str) -> str:
         return _team_key((_normalize_group_tags([team], team_mapping) or [team])[0])
 
+    unowned = _unowned_keys(team_mapping)
     generals: list[dict[str, Any]] = []
     former: list[dict[str, Any]] = []
     historical: dict[str, dict[str, Any]] = {}
@@ -380,6 +413,11 @@ def _combine_conflict(
                 generals.append(block)
             elif canonical_key(block["team"]) in current:
                 return None
+            elif _team_key(block["team"]) in unowned:
+                if not _is_reference(block):
+                    # A person's assessment of a component no team owns
+                    # is not a former team's: a human decides.
+                    return None
             else:
                 former.append(block)
     sources = generals + former
@@ -693,7 +731,7 @@ def _team_stage(
                 if former is None:
                     former = {**result}
                 else:
-                    for key in ("former_teams", "referred_teams", "open_teams"):
+                    for key in ("former_teams", "referred_teams", "open_teams", "removed_references"):
                         former[key] = sorted({*former[key], *result[key]}, key=str.casefold)
                     former["promoted_to_global_decision"] |= result["promoted_to_global_decision"]
 
@@ -871,7 +909,19 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
             "id": REPAIR_SYNC_FINDINGS,
             "label": f"Synchronize assessment to {_plural(team['synchronized'], 'finding')}",
         })
-    if team.get("former"):
+    stale_references = (team.get("former") or {}).get("removed_references") or []
+    if stale_references:
+        repairs.append({
+            "id": REPAIR_UNOWNED_REFERENCES,
+            "label": (
+                f"Remove the reference to the global assessment under {', '.join(stale_references)}: "
+                "no team owns the component"
+            ),
+        })
+    if team.get("former") and (
+        team["former"]["former_teams"] or team["former"]["referred_teams"]
+        or team["former"]["open_teams"]
+    ):
         repairs.append({
             "id": REPAIR_FORMER_TEAMS if team["former"]["former_teams"] else REPAIR_REFER_TEAMS,
             "label": _former_team_label(team["former"]),
