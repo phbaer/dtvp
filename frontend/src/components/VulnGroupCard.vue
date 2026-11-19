@@ -21,7 +21,7 @@ import CvssVectorDisplay from './CvssVectorDisplay.vue'
 import CustomSelect from './CustomSelect.vue'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import VulnGroupAssessmentDetails from './VulnGroupAssessmentDetails.vue'
-import VulnGroupCardDependencies from './VulnGroupCardDependencies.vue'
+import FindingMatrix from './FindingMatrix.vue'
 import CalculatorModal from './CalculatorModal.vue'
 import SsvcCalculator from './SsvcCalculator.vue'
 import { summarizeSsvc, ssvcReviewText, stripSsvcDocumentation, type SsvcSelection } from '../lib/ssvc'
@@ -237,6 +237,49 @@ const actionButton = 'inline-flex h-8 items-center gap-1.5 rounded border px-3 t
 const actionButtonPrimary = 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
 const actionButtonApprove = 'border-green-600 bg-green-600 text-white hover:bg-green-700'
 const actionButtonSecondary = 'border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
+const findingMatrixRef = ref<{ openDifferences: () => void } | null>(null)
+const assessmentVariantCount = computed(() => groupedAssessments.value.length)
+const differingFindingCount = computed(() => visibleInstances.value.length - Math.max(
+    0,
+    ...groupedAssessments.value.map(assessment => assessment.instances.length),
+))
+const inconsistencyIssues = computed(() => assessmentSyncIssues.value.filter(issue => issue.kind === 'inconsistent'))
+/** The decision of every team, when the teams do not agree. */
+const conflictingTeamStates = computed(() => {
+    const entries = mergedAssessmentData.value.blocks
+        .filter(block => block.team.toLocaleLowerCase() !== 'general' && block.state && block.state !== 'NOT_SET')
+        .map(block => ({ team: block.team, state: block.state }))
+    return new Set(entries.map(entry => entry.state)).size > 1 ? entries : []
+})
+/** The findings in scope, each with the project version it belongs to. */
+const matrixInstances = computed(() => {
+    const versionOf = new Map<unknown, string>()
+    for (const version of props.group.affected_versions || []) {
+        for (const component of version.components || []) versionOf.set(component, version.project_version || '')
+    }
+    return visibleInstances.value.map(instance => (
+        instance.project_version
+            ? instance
+            : { ...instance, project_version: versionOf.get(instance) || '' }
+    ))
+})
+
+/** Shows, on the Context tab, which findings differ and in which fields. */
+const openDifferences = async () => {
+    setDetailTab('overview')
+    await nextTick()
+    findingMatrixRef.value?.openDifferences()
+    await nextTick()
+    detailsEl.value?.querySelector?.('[data-testid="finding-differences"]')
+        ?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+}
+
+/** Puts one version of the assessment into the Global form; saving applies it to every finding. */
+const applyFindingVariant = async (variantDetails: string, variantState: string) => {
+    await handleApplyAllAssessment(variantDetails, variantState, '')
+    setDetailTab('review', true)
+}
+
 const showMoreMenu = ref(false)
 const canChangeSuppression = computed(() => (
     isReviewer.value && (!activeTeamScope.value || showAllAssessmentTeams.value || !selectedTeam.value)
@@ -2506,14 +2549,6 @@ const hiddenTeamScopeInstanceCount = computed(() => Math.max(
     0,
     allInstances.value.length - visibleInstances.value.length,
 ))
-const scopedAffectedProjectVersions = computed(() => {
-    const versions = new Set<string>()
-    for (const instance of visibleInstances.value) {
-        const version = String((instance as Record<string, any>).project_version || '').trim()
-        if (version) versions.add(version)
-    }
-    return [...versions].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
-})
 
 const scopedHeaderTags = computed(() => activeTeamScope.value
     ? [activeTeamScope.value]
@@ -2916,6 +2951,49 @@ const teamBlockStateColor = (state?: string): string => {
             </div>
         </div>
 
+        <div
+            v-if="inconsistencyIssues.length > 0 || assessmentVariantCount > 1"
+            data-testid="card-differences-banner"
+            class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded border border-indigo-500/40 bg-indigo-950/30 px-3 py-2 text-xs text-indigo-100"
+            role="status"
+        >
+            <div class="flex min-w-0 flex-1 items-start gap-2">
+                <AlertTriangle :size="14" class="mt-0.5 shrink-0 text-indigo-300" />
+                <div class="min-w-0 space-y-1">
+                    <div class="font-bold">
+                        {{ inconsistencyIssues.length > 0 ? 'Why this is inconsistent' : 'The findings carry different assessments' }}
+                    </div>
+                    <div v-if="assessmentVariantCount > 1" data-testid="card-differences-variants">
+                        <strong>{{ differingFindingCount }} of {{ visibleInstances.length }}</strong>
+                        findings carry a different assessment than the rest
+                        ({{ assessmentVariantCount }} different assessments).
+                    </div>
+                    <div v-for="issue in inconsistencyIssues" :key="issue.code" data-testid="card-inconsistency-reason">
+                        <strong class="text-indigo-200">{{ issue.label }}:</strong> {{ issue.detail }}
+                    </div>
+                    <div v-if="conflictingTeamStates.length > 1" class="flex flex-wrap items-center gap-1.5" data-testid="card-team-states">
+                        <span class="text-indigo-200/80">Team decisions:</span>
+                        <span
+                            v-for="entry in conflictingTeamStates"
+                            :key="entry.team"
+                            class="rounded border border-indigo-400/30 bg-black/20 px-1.5 py-0.5"
+                        >
+                            {{ entry.team }} <strong>{{ entry.state.replaceAll('_', ' ').toLowerCase() }}</strong>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <button
+                v-if="assessmentVariantCount > 1"
+                type="button"
+                :class="[actionButton, actionButtonSecondary]"
+                data-testid="card-differences-open"
+                @click="openDifferences"
+            >
+                Show differences
+            </button>
+        </div>
+
         <section
             v-show="activeDetailTab === 'overview'"
             :id="detailTabPanelId('overview')"
@@ -2952,22 +3030,18 @@ const teamBlockStateColor = (state?: string): string => {
 
             <DetailSection
                 step="Context · 2"
-                title="Finding scope & affected components"
-                description="See where the vulnerability was found, which team owns the current scope, and the exact components that require analysis."
+                title="Where it was found"
+                description="Every affected component by project version, with the assessment of each finding. Open a component to see how it enters the product."
+                data-testid="where-found"
                 bodyClass="space-y-3"
             >
-                <div class="flex flex-wrap items-center gap-2 text-[11px]">
-                    <span class="font-bold uppercase tracking-wider text-gray-500">Found in project versions</span>
-                    <span
-                        v-for="version in scopedAffectedProjectVersions"
-                        :key="version"
-                        data-testid="context-project-version"
-                        class="rounded border border-gray-700 bg-gray-950/45 px-2 py-1 font-mono text-gray-300"
-                    >
-                        {{ version }}
-                    </span>
-                    <span v-if="scopedAffectedProjectVersions.length === 0" class="text-gray-600">No matching project versions</span>
-                </div>
+                <FindingMatrix
+                    ref="findingMatrixRef"
+                    :instances="matrixInstances"
+                    :canApply="isReviewer"
+                    :banner="false"
+                    @apply-variant="applyFindingVariant"
+                />
 
                 <div
                     v-if="activeTeamScope"
@@ -2989,8 +3063,8 @@ const teamBlockStateColor = (state?: string): string => {
                 </div>
 
             <div
-                v-if="triggeringTaggedComponents.length > 0 || affectedTaggedComponents.length > 0 || uniqueComponents.length > 0"
-                class="grid gap-4 rounded border border-gray-800/80 bg-gray-950/30 p-3 lg:grid-cols-3"
+                v-if="triggeringTaggedComponents.length > 0 || affectedTaggedComponents.length > 0"
+                class="grid gap-4 rounded border border-gray-800/80 bg-gray-950/30 p-3 lg:grid-cols-2"
             >
                 <div v-if="triggeringTaggedComponents.length > 0" data-testid="triggering-team-components" class="space-y-2">
                     <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Triggering team-mapped components</h4>
@@ -3022,37 +3096,11 @@ const teamBlockStateColor = (state?: string): string => {
                     </div>
                 </div>
 
-                <div v-if="uniqueComponents.length > 0" data-testid="affected-components" class="space-y-2">
-                    <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Affected Components</h4>
-                    <div class="flex flex-wrap gap-1.5">
-                        <span
-                            v-for="comp in uniqueComponents"
-                            :key="comp.name"
-                            class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700"
-                        >
-                            {{ comp.name }}<span class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
-                        </span>
-                    </div>
-                </div>
             </div>
             </DetailSection>
 
             <DetailSection
                 step="Context · 3"
-                title="Dependency context"
-                description="Trace how each affected component enters the product and confirm the dependency relationship used for analysis."
-                data-testid="dependency-context"
-            >
-                <VulnGroupCardDependencies
-                    :instances="visibleInstances"
-                    :embedded="false"
-                    :showTitle="false"
-                    @mapping-updated="handleMappingUpdated"
-                />
-            </DetailSection>
-
-            <DetailSection
-                step="Context · 4"
                 title="Existing assessment evidence"
                 description="Read-only evidence already stored for findings in the current component scope. Create or change the assessment in the Assessment tab."
                 bodyClass="space-y-3"
