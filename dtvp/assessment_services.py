@@ -7,7 +7,11 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import httpx
 
-from .assessment_model import finding_key, render_assessment
+from .assessment_model import (
+    finding_key,
+    render_assessment,
+    with_analysis_response,
+)
 from .dt_client import DTClient
 from .assessment_use_cases import AssessmentRequest
 from .ssvc_services import new_record, preserve_record, write_record
@@ -312,7 +316,7 @@ async def _try_update_assessment_payload(
                 attempt,
                 max_attempts,
             )
-            await client.update_analysis(**payload)
+            await client.update_analysis(**with_analysis_response(payload))
             result = {
                 "status": "success",
                 "uuid": instance.get("finding_uuid"),

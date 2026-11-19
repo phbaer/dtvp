@@ -95,6 +95,7 @@ class Analysis(BaseModel):
     isSuppressed: bool = False
     analysisDetails: Optional[str] = None
     analysisJustification: Optional[str] = None
+    analysisResponse: Optional[str] = None
     comment: Optional[str] = None
     analysisComments: Optional[list] = None
 
@@ -107,6 +108,7 @@ class AnalysisUpdate(BaseModel):
     isSuppressed: bool = False
     analysisDetails: Optional[str] = None
     analysisJustification: Optional[str] = None
+    analysisResponse: Optional[str] = None
     comment: Optional[str] = None
 
 
@@ -1185,6 +1187,8 @@ def update_analysis(update: AnalysisUpdate):
         mock_analysis[key]["analysisDetails"] = update.analysisDetails
     if update.analysisJustification:
         mock_analysis[key]["analysisJustification"] = update.analysisJustification
+    if update.analysisResponse:
+        mock_analysis[key]["analysisResponse"] = update.analysisResponse
     if update.comment:
         # In D-T, comments are usually a list.
         if "analysisComments" not in mock_analysis[key]:

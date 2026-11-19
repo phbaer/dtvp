@@ -45,7 +45,10 @@ TEAM_VARIANTS = [
         [None, *TEAM_VARIANTS[:4]],
         TEAM_VARIANTS,
         [{}, {"free_text": "A note outside the teams.\nSecond line."},
-         {"rescored_score": 2.5, "rescored_vector": VECTOR, "pending_review": True}],
+         {"rescored_score": 2.5, "rescored_vector": VECTOR, "pending_review": True},
+         {"response": "UPDATE"},
+         {"response": "WILL_NOT_FIX", "rescored_score": 2.5, "rescored_vector": VECTOR,
+          "free_text": "A note outside the teams."}],
     )),
 )
 def test_fields_survive_being_written_as_text(general, team, shared):
@@ -161,6 +164,7 @@ def test_every_field_is_stored_as_it_was_sent():
     sent = {
         "free_text": "Agreed with the supplier.", "pending_review": True,
         "rescored_score": 2.5, "rescored_vector": VECTOR, "teams": [team],
+        "response": "WORKAROUND_AVAILABLE",
     }
     stored = normalize_assessment_fields(sent)
     assert stored == {
@@ -235,3 +239,116 @@ def test_the_texts_dtvp_writes_itself_are_named_once():
     assert assessment_repair.SEE_GLOBAL_ASSESSMENT is assessment_model.SEE_GLOBAL_ASSESSMENT
     assert assessment_repair.FORMER_TEAM_NOTE is assessment_model.FORMER_TEAM_NOTE
 
+
+
+# --- The analysis response -------------------------------------------------
+
+
+def test_the_response_is_a_tag_beside_the_rescoring():
+    fields = {
+        "rescored_score": 2.5, "rescored_vector": VECTOR, "response": "UPDATE",
+        "free_text": "Agreed with the supplier.",
+        "teams": [_team("General", assessed_by="alice", details="Fixed in 2.0.")],
+    }
+    text, read = _roundtrip(fields, state="EXPLOITABLE")
+    assert text == (
+        f"[Rescored: 2.5] [Rescored Vector: {VECTOR}] [Response: UPDATE]\n\n"
+        "Agreed with the supplier.\n\n"
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Justification: NOT_SET] ---\nFixed in 2.0."
+    )
+    assert read["response"] == "UPDATE"
+    assert read["free_text"] == "Agreed with the supplier."
+    assert read == _expected(fields, state="EXPLOITABLE")
+
+
+@pytest.mark.parametrize(
+    "response", ["CAN_NOT_FIX", "WILL_NOT_FIX", "UPDATE", "ROLLBACK", "WORKAROUND_AVAILABLE"]
+)
+def test_every_response_survives_being_written_as_text(response):
+    fields = {"response": response, "teams": [_team("General")]}
+    text, read = _roundtrip(fields)
+    assert f"[Response: {response}]" in text
+    assert read["response"] == response and read == _expected(fields)
+    assert render_assessment(read) == text
+
+
+@pytest.mark.parametrize("absent", [{}, {"response": None}, {"response": ""},
+                                    {"response": "NOT_SET"}])
+def test_an_assessment_without_a_response_has_no_tag(absent):
+    fields = {**absent, "teams": [_team("General")]}
+    text, read = _roundtrip(fields)
+    assert "Response" not in text
+    assert read["response"] is None and read == _expected(fields)
+
+
+def test_an_unknown_response_is_dropped_when_fields_are_normalised():
+    fields = {"response": "MAYBE_LATER", "teams": [_team("General")]}
+    assert normalize_assessment_fields(fields)["response"] is None
+    text, read = _roundtrip(fields)
+    assert "Response" not in text and read["response"] is None
+
+
+def test_the_spelling_of_a_response_is_normalised():
+    assert normalize_assessment_fields({"response": "will_not_fix"})["response"] == (
+        "WILL_NOT_FIX"
+    )
+    read = parse_assessment("EXPLOITABLE", "[Response: update]\n\nNote.", False)
+    assert read["response"] == "UPDATE" and read["free_text"] == "Note."
+
+
+def test_a_response_alone_is_an_assessment_text():
+    text, read = _roundtrip({"response": "ROLLBACK"}, state="NOT_SET")
+    assert text == "[Response: ROLLBACK]"
+    assert read["form"] == "text" and read["free_text"] == ""
+    assert read == _expected({"response": "ROLLBACK"}, state="NOT_SET")
+
+
+def test_brackets_that_are_not_a_response_stay_free_text():
+    """Only a tag with a value of the list is the field; nothing a person
+    wrote is removed because it looks similar."""
+    read = parse_assessment("IN_TRIAGE", "[Response: ask the supplier]", False)
+    assert read["response"] is None
+    assert read["free_text"] == "[Response: ask the supplier]"
+
+
+def test_a_response_tag_inside_a_teams_text_is_not_the_findings_response():
+    text = (
+        "--- [Team: Core] [State: EXPLOITABLE] [Assessed By: bob] "
+        "[Justification: NOT_SET] ---\nWe [Response: UPDATE] soon."
+    )
+    read = parse_assessment("EXPLOITABLE", text, False)
+    assert read["response"] is None
+    assert "Response" not in read["teams"][0]["details"]
+
+
+def test_free_text_cannot_carry_a_response():
+    fields = {"free_text": "Note. [Response: UPDATE]"}
+    _text, read = _roundtrip(fields, state="NOT_SET")
+    assert read["response"] is None and read["free_text"] == "Note."
+
+
+def test_the_canonical_layout_keeps_the_response():
+    from dtvp.assessment_model import analysis_response, canonical_assessment_text
+
+    written = (
+        "[Rescored: 4.0]   [Response: UPDATE]\n"
+        "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] "
+        "[Justification: NOT_SET] ---\n\nReachable."
+    )
+    canonical = canonical_assessment_text("EXPLOITABLE", written)
+    assert canonical == (
+        "[Rescored: 4.0] [Response: UPDATE]\n\n"
+        "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] "
+        "[Justification: NOT_SET] ---\nReachable."
+    )
+    assert analysis_response(canonical) == "UPDATE"
+    assert canonical_assessment_text("EXPLOITABLE", canonical) == canonical
+
+
+def test_the_response_goes_into_the_write_to_dependency_track():
+    from dtvp.assessment_model import with_analysis_response
+
+    payload = {"state": "EXPLOITABLE", "details": "[Response: ROLLBACK]\n\nNote."}
+    assert with_analysis_response(payload) == {**payload, "response": "ROLLBACK"}
+    assert with_analysis_response({"details": "Note."})["response"] is None

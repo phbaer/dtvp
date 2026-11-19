@@ -1478,3 +1478,86 @@ def test_tagging_metadata_component_group():
     tags = cache.get_tags_only("u-c", "some-lib")
     # child inherits from root which matches via group:name
     assert tags == ["RootTeam"]
+
+
+# --- The analysis response in a save as text ---------------------------------
+
+from dtvp.logic import process_assessment_details  # noqa: E402
+
+_RESPONSE_EXISTING = (
+    "[Rescored: 4.0] [Response: UPDATE]\n\n"
+    "--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] "
+    "[Justification: NOT_SET] ---\nReachable.\n\n"
+    "--- [Team: Core] [State: EXPLOITABLE] [Assessed By: bob] "
+    "[Justification: NOT_SET] ---\nConfirmed."
+)
+
+
+def test_a_team_save_keeps_the_response():
+    from dtvp.assessment_model import parse_assessment
+
+    text, _state = process_assessment_details(
+        "Still confirmed. [Response: ROLLBACK]", "bob", "ANALYST", "Core",
+        "EXPLOITABLE", _RESPONSE_EXISTING,
+    )
+    read = parse_assessment("EXPLOITABLE", text, False)
+    assert read["response"] == "UPDATE"
+    assert text.startswith("[Rescored: 4.0] [Response: UPDATE]\n\n")
+    core = next(team for team in read["teams"] if team["team"] == "Core")
+    # A tag typed into the text neither sets the response nor stays in it.
+    assert core["details"] == "Still confirmed."
+
+
+def test_a_global_save_as_text_keeps_the_response_and_a_tag_in_it_changes_nothing():
+    from dtvp.assessment_model import analysis_response
+
+    text, _state = process_assessment_details(
+        "Reachable. [Response: ROLLBACK]", "rita", "REVIEWER", None, "EXPLOITABLE",
+        _RESPONSE_EXISTING,
+    )
+    assert analysis_response(text) == "UPDATE" and text.count("[Response:") == 1
+
+
+def test_the_response_of_a_text_is_set_changed_and_removed():
+    from dtvp.assessment_model import analysis_response, with_response
+
+    changed = with_response(_RESPONSE_EXISTING, "WORKAROUND_AVAILABLE")
+    assert analysis_response(changed) == "WORKAROUND_AVAILABLE"
+    assert changed == _RESPONSE_EXISTING.replace("UPDATE", "WORKAROUND_AVAILABLE")
+    removed = with_response(changed, None)
+    assert "Response" not in removed
+    assert removed.startswith("[Rescored: 4.0]\n\n--- [Team: General]")
+    assert with_response(removed, "NOT_SET") == removed
+    assert with_response(removed, "UPDATE") == _RESPONSE_EXISTING
+    blocks = removed.removeprefix("[Rescored: 4.0]\n\n")
+    assert with_response(blocks, "CAN_NOT_FIX") == f"[Response: CAN_NOT_FIX]\n\n{blocks}"
+    assert with_response("", "ROLLBACK") == "[Response: ROLLBACK]"
+    assert with_response("A note.", "ROLLBACK") == "[Response: ROLLBACK]\n\nA note."
+
+
+def test_the_response_is_not_moved_into_a_general_block_with_legacy_text():
+    """Text ahead of the blocks becomes the General assessment when there is
+    none; the response stays the finding's."""
+    from dtvp.assessment_model import parse_assessment
+
+    text, _state = process_assessment_details(
+        "Confirmed.", "bob", "ANALYST", "Core", "EXPLOITABLE",
+        "[Response: ROLLBACK]\n\nAn older note.",
+    )
+    read = parse_assessment("EXPLOITABLE", text, False)
+    assert read["response"] == "ROLLBACK"
+    general = next(team for team in read["teams"] if team["team"] == "General")
+    assert general["details"] == "An older note."
+
+
+def test_deleting_the_general_assessment_removes_the_response():
+    from dtvp.assessment_model import analysis_response
+    from dtvp.logic import remove_assessment_blocks
+
+    without_general = remove_assessment_blocks(_RESPONSE_EXISTING, "General")
+    assert analysis_response(without_general) is None
+    assert without_general.startswith("[Rescored: 4.0]\n\n--- [Team: Core]")
+    # Deleting a team's assessment does not touch it.
+    assert analysis_response(remove_assessment_blocks(_RESPONSE_EXISTING, "Core")) == (
+        "UPDATE"
+    )

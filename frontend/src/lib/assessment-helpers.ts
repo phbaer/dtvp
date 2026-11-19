@@ -54,8 +54,89 @@ export interface AssessmentFields {
     pending_review: boolean;
     rescored_score: number | null;
     rescored_vector: string | null;
+    /**
+     * What is done about the finding; part of the Global assessment. null
+     * removes it. Left out, the server keeps what each finding has, as it
+     * does for every save that is not a reviewer's.
+     */
+    response?: string | null;
     teams: AssessmentTeamFields[];
 }
+
+/**
+ * The responses of Dependency-Track's analysis (CycloneDX
+ * `analysis.response`), in the order the form offers them.
+ */
+export const ANALYSIS_RESPONSE_OPTIONS = [
+    { value: 'NOT_SET', label: 'Not set', description: 'No response recorded.' },
+    { value: 'UPDATE', label: 'Update', description: 'Update the component to a version without the vulnerability.' },
+    { value: 'ROLLBACK', label: 'Rollback', description: 'Go back to a version without the vulnerability.' },
+    { value: 'WORKAROUND_AVAILABLE', label: 'Workaround available', description: 'A workaround avoids the vulnerability.' },
+    { value: 'WILL_NOT_FIX', label: 'Will not fix', description: 'The vulnerability will not be fixed.' },
+    { value: 'CAN_NOT_FIX', label: 'Can not fix', description: 'The vulnerability can not be fixed.' },
+] as const;
+
+const ANALYSIS_RESPONSES: ReadonlySet<string> = new Set(
+    ANALYSIS_RESPONSE_OPTIONS.map(option => option.value).filter(value => value !== 'NOT_SET'),
+);
+
+// Only a tag with a value of the list is the field, as in the backend's
+// `assessment_model.py`; other text in brackets stays text.
+const responseTagPattern = (): RegExp =>
+    new RegExp(String.raw`\[Response:\s*(${[...ANALYSIS_RESPONSES, 'NOT_SET'].join('|')})\s*\]`, 'gi');
+
+/** A response of the list, or null for none, "NOT_SET", and anything else. */
+export const normalizeAssessmentResponse = (value: string | undefined | null): string | null => {
+    const text = String(value ?? '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+    return ANALYSIS_RESPONSES.has(text) ? text : null;
+};
+
+export const analysisResponseLabel = (value: string | undefined | null): string => {
+    const normalized = normalizeAssessmentResponse(value);
+    return ANALYSIS_RESPONSE_OPTIONS.find(option => option.value === normalized)?.label ?? '';
+};
+
+/** Text without response tags: a team's rationale never carries one. */
+export const stripAssessmentResponseTags = (text: string): string =>
+    (text || '').replace(responseTagPattern(), '');
+
+const splitAtFirstTeamBlock = (fullText: string): [string, string] => {
+    const source = fullText || '';
+    const firstHeaderIndex = maskSsvcDetails(source).search(/---(?=\s*\[Team:)/);
+    return firstHeaderIndex === -1
+        ? [source, '']
+        : [source.slice(0, firstHeaderIndex), source.slice(firstHeaderIndex)];
+};
+
+/** The response an assessment text carries beside its team blocks. */
+export const parseAssessmentResponse = (fullText: string | undefined | null): string | null => {
+    const [shared] = splitAtFirstTeamBlock(fullText || '');
+    for (const match of shared.matchAll(responseTagPattern())) {
+        const value = normalizeAssessmentResponse(match[1]);
+        if (value) return value;
+    }
+    return null;
+};
+
+/**
+ * The assessment text with `response` as its response; null or "NOT_SET"
+ * removes the one it has. The tag stands where the server writes it: after
+ * the rescoring tags, ahead of the team blocks.
+ */
+export const setAssessmentResponse = (fullText: string, response: string | undefined | null): string => {
+    const value = normalizeAssessmentResponse(response);
+    if (parseAssessmentResponse(fullText) === value) return fullText || '';
+    const [shared, blocks] = splitAtFirstTeamBlock(fullText || '');
+    const rest = stripAssessmentResponseTags(shared).trim();
+    let head = rest;
+    if (value) {
+        const tag = `[Response: ${value}]`;
+        const lead = /^(?:\s*\[Rescored(?: Vector)?:[^\]]*\])+/.exec(rest);
+        if (lead) head = `${lead[0].trim()} ${tag}${rest.slice(lead[0].length)}`;
+        else head = rest ? `${tag}\n\n${rest}` : tag;
+    }
+    return [head, blocks.trim()].filter(Boolean).join('\n\n');
+};
 
 export const STATE_PRIORITY: Record<string, number> = {
     "EXPLOITABLE": 0,
@@ -267,7 +348,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         // There is something BEFORE the first header.
         // Check if it's just shared tags or real content
         const textBeforeHeader = fullText.slice(0, firstHeaderIndex);
-        const contentBeforeHeader = textBeforeHeader
+        const contentBeforeHeader = stripAssessmentResponseTags(textBeforeHeader)
             .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
             .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
@@ -284,7 +365,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         }
     } else if (firstHeaderIndex === -1) {
         // No headers at all. Check if there's real content (ignoring tags)
-        const content = fullText
+        const content = stripAssessmentResponseTags(fullText)
             .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
             .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
@@ -360,7 +441,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         // Clean up redundant metadata from the display text
         let content = rawContent
         // Cleanup all metadata from content to prevent leakage
-        content = content
+        content = stripAssessmentResponseTags(content)
             .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date|Assigned):\s*[^\]]*\]/g, '')
             .replace(/\[(Evidence Reviewed|Version Coverage|Ticket|Historical|Copied From):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
@@ -449,7 +530,7 @@ export function assessmentTextToFields(fullText: string): AssessmentFields {
     const shared = firstHeaderIndex === -1 ? masked : masked.slice(0, firstHeaderIndex);
     const rescored = SHARED_RESCORED.exec(shared)?.[1];
     const vector = SHARED_RESCORED_VECTOR.exec(shared)?.[1]?.trim();
-    const freeText = shared
+    const freeText = stripAssessmentResponseTags(shared)
         .replace(/\[Rescored:\s*[\d.]+\]/g, '')
         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
         .replace(/\[Status: Pending Review\]/gi, '')
@@ -472,6 +553,7 @@ export function assessmentTextToFields(fullText: string): AssessmentFields {
             ? Number(rescored)
             : null,
         rescored_vector: vector || null,
+        response: parseAssessmentResponse(source),
         teams: deduplicateAssessmentBlocks(blocks).map(blockToTeamFields),
     };
 }
@@ -575,6 +657,8 @@ export function sanitizeAssessmentDetails(
     if (rescoredMatch) tags.push(rescoredMatch[0]);
     const vectorMatch = prose.match(/\[Rescored Vector:\s*[^\]]+\]/);
     if (vectorMatch) tags.push(vectorMatch[0]);
+    const response = parseAssessmentResponse(fullText);
+    if (response) tags.push(`[Response: ${response}]`);
 
     const isPending = prose.includes('[Status: Pending Review]');
 
@@ -742,6 +826,12 @@ export function mergeTeamAssessment(
         const vectorMatch = prose.match(/\[Rescored Vector:\s*[^\]]+\]/);
         if (vectorMatch) tags.push(vectorMatch[0]);
     }
+    // The response is the finding's: saving one team's assessment, with or
+    // without a new rescoring, keeps it.
+    const response = parseAssessmentResponse(currentFullText);
+    if (response && !tags.some(tag => parseAssessmentResponse(tag))) {
+        tags = [...tags, `[Response: ${response}]`];
+    }
 
     // 4. Construct new text
     return constructAssessmentDetails(blocks, tags, isPending);
@@ -818,7 +908,8 @@ export function buildBulkSyncDetails(
     finalBlocks.push(...teamBlocks);
 
     // 7. Construct the final text — NOT pending (this is a reviewer-level bulk action).
-    return constructAssessmentDetails(finalBlocks, [], false);
+    const response = parseAssessmentResponse(existingGeneralText);
+    return constructAssessmentDetails(finalBlocks, response ? [`[Response: ${response}]`] : [], false);
 }
 
 export function hasGlobalAssessment(blocks: AssessmentBlock[]): boolean {

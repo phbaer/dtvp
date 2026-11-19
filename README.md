@@ -7,7 +7,7 @@ and applies consistent decisions across releases.
 [Main repository](https://git.baer.one/phbaer/dtvp/) ·
 [GitHub mirror](https://github.com/phbaer/dtvp/)
 
-- Team and global assessments, CVSS rescoring, SSVC prioritization, and exploitation evidence.
+- Team and global assessments, CVSS rescoring, the analysis response, SSVC prioritization, and exploitation evidence.
 - Bulk assessment repair, audit-backed recovery, and project archive import/export.
 - Optional threat-model rescoring through tmrescore/vscorer and code analysis through Agentyzer.
 - Code-analysis proposals use Agentyzer's compact `assessment.details`, with the

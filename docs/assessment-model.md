@@ -54,6 +54,8 @@ aggregate state follows these rules:
 - Assessment details use structured blocks such as `[Team: ...]`,
   `[State: ...]`, `[Assessed By: ...]`, `[Reviewed By: ...]`,
   `[Rescored Vector: ...]`, and `[Assigned: ...]`.
+- The [response](#response) is a tag of its own ahead of the blocks:
+  `[Response: UPDATE]`.
 - A transferred former-team block remains readable with `[Historical: yes]`;
   historical blocks do not count toward current team coverage or aggregate state.
   The current team's copied block records `[Copied From: TeamA]`, and its
@@ -87,6 +89,53 @@ a bulk apply — the rule is layered on top of the proposed vector and the base
 metrics of the Dependency-Track vector are restored, so an analyzer proposal
 contributes only its extra metrics. States without a transition keep the
 analyzer's proposed vector and score unchanged.
+
+### Response
+
+| | |
+| :--- | :--- |
+| Status | Implemented |
+| Verified | 2026-11-19 against `tests/test_assessment_model.py`, `tests/test_assessment_use_cases.py`, `tests/test_main_assessment.py`, `tests/test_bulk_workflows.py`, and `frontend/src/lib/__tests__/assessmentResponse.spec.ts`. Not checked against a running Dependency-Track |
+
+The response says what is done about a finding. It is Dependency-Track's
+`analysisResponse` and CycloneDX's `analysis.response`, with the same values:
+`CAN_NOT_FIX`, `WILL_NOT_FIX`, `UPDATE`, `ROLLBACK`, `WORKAROUND_AVAILABLE`.
+
+- **One value per finding, part of the Global assessment.** Teams have none.
+  It is optional for every state, also for `EXPLOITABLE`.
+- **In the text** it is the tag `[Response: UPDATE]` ahead of the team
+  blocks, after the rescoring tags:
+  `[Rescored: 2.5] [Rescored Vector: …] [Response: UPDATE]`. No tag means not
+  set; `NOT_SET` is never written.
+- **As a field** it is `response` of the finding (`null` when not set), in
+  `GET /api/assessments/fields` and in `fields` of `POST /api/assessment`.
+- Only a tag with one of the five values is the response. Other text in
+  brackets, such as `[Response: ask the supplier]`, stays free text. A
+  response tag inside a team's text is removed when the text is read; it
+  never sets the field.
+
+Who changes it:
+
+| Save | Response |
+| :--- | :--- |
+| Reviewer, `fields` with `response` | Set to that value; `null` or `NOT_SET` removes it |
+| Reviewer, `fields` without `response` | Each finding keeps its own |
+| Reviewer, text with `response` beside it (General assessment) | Set; `NOT_SET` removes it |
+| Any other save: analysts, team saves as text, MCP agents | Each finding keeps its own, whatever the request's text or fields say |
+| Deleting the General assessment, or the whole assessment | Removed |
+| Bulk workflows (apply automatic assessments, repair) | Each finding keeps its own; a finding without one takes the response the vulnerability's other findings agree on |
+
+The stored record decides what "its own" is, not the text a client says it
+loaded. An unknown value is answered with 422; a `response` beside a text
+from someone who is not a reviewer, or with a team save, with 403.
+
+Findings of one vulnerability that differ only in the response count as
+differing assessments (`ASSESSMENT_DETAILS_MISMATCH`), like any other
+difference in the General assessment.
+
+Dependency-Track receives the response with every export; see
+[Export](import-export.md#export). The VDR carries it as `analysis.response`;
+see [CycloneDX](cyclonedx-export.md#what-the-vdr-contains).
 
 ## SSVC And Original Severity
 

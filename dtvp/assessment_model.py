@@ -27,6 +27,107 @@ _SCORE = re.compile(r"\[Rescored:\s*([\d.]+)\]")
 _VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
 _PENDING = re.compile(r"\[Status: Pending Review\]", re.IGNORECASE)
 
+# What is done about a finding: Dependency-Track's ``analysisResponse`` and
+# CycloneDX's ``analysis.response``. One value per finding, part of the
+# General assessment; ``None`` when not set.
+ANALYSIS_RESPONSES = (
+    "CAN_NOT_FIX",
+    "WILL_NOT_FIX",
+    "UPDATE",
+    "ROLLBACK",
+    "WORKAROUND_AVAILABLE",
+)
+RESPONSE_NOT_SET = "NOT_SET"
+# Only a tag with a value of the list is the field. Anything else in
+# brackets stays the text it is.
+RESPONSE_TAG_PATTERN = (
+    r"\[Response:\s*(" + "|".join((*ANALYSIS_RESPONSES, RESPONSE_NOT_SET)) + r")\s*\]"
+)
+_RESPONSE = re.compile(RESPONSE_TAG_PATTERN, re.IGNORECASE)
+_LEADING_RESCORING = re.compile(r"(?:\s*\[Rescored(?: Vector)?:[^\]]*\])+")
+
+
+def normalize_response(value: Any) -> str | None:
+    """A response of the list in its stored spelling; ``None`` for no value,
+    ``NOT_SET``, and anything that is not a response."""
+    text = re.sub(r"[\s-]+", "_", str(value or "").strip()).upper()
+    return text if text in ANALYSIS_RESPONSES else None
+
+
+def analysis_response(details: Any) -> str | None:
+    """The response an assessment text carries beside its team blocks."""
+    from .logic import parse_assessment_blocks  # logic imports nothing from here
+
+    shared, _blocks = parse_assessment_blocks(str(details or ""))
+    return _shared_response(shared)
+
+
+def agreed_response(texts: Any) -> str | None:
+    """The response of several findings' texts when those that name one
+    name the same; ``None`` when none does or they differ."""
+    named = {value for text in texts if (value := analysis_response(text))}
+    return next(iter(named)) if len(named) == 1 else None
+
+
+def preserve_response(details: Any, existing: Any, shared: Any = None) -> str:
+    """``details`` with the response of ``existing`` when it names none.
+
+    For writers that rebuild a text from its team blocks (bulk workflows):
+    the response stands beside the blocks and would be dropped with
+    everything else there. Each finding keeps its own. One without takes
+    ``shared``, the response the vulnerability's other findings agree on
+    (``agreed_response``), as it takes the rest of their assessment.
+    """
+    text = str(details or "")
+    kept = analysis_response(existing) or normalize_response(shared)
+    if kept is None or analysis_response(text) is not None:
+        return text
+    return with_response(text, kept)
+
+
+def with_response(details: Any, response: Any) -> str:
+    """The assessment text ``details`` with ``response`` as its response;
+    ``None`` removes the one it has. Nothing else of the text changes."""
+    from .ssvc_services import mask_details as mask_ssvc_details
+
+    text = str(details or "")
+    if analysis_response(text) == normalize_response(response):
+        return text
+    first = _BLOCK_START.search(mask_ssvc_details(text))
+    head, blocks = (text[: first.start()], text[first.start():]) if first else (text, "")
+    return "\n\n".join(
+        part for part in (set_shared_response(head, response), blocks.strip()) if part
+    )
+
+
+def with_analysis_response(payload: dict[str, Any]) -> dict[str, Any]:
+    """A stored assessment (``state``, ``details``, ``suppressed`` and the
+    finding's identity) as the arguments of a write to Dependency-Track:
+    the response its text carries goes into the field of its own."""
+    return {**payload, "response": analysis_response(payload.get("details"))}
+
+
+def _shared_response(shared: str) -> str | None:
+    for match in _RESPONSE.finditer(shared):
+        value = normalize_response(match.group(1))
+        if value is not None:
+            return value
+    return None
+
+
+def set_shared_response(shared: str, response: Any) -> str:
+    """The text ahead of the team blocks with ``response`` as its response
+    tag (none for ``None``), placed where ``render_assessment`` writes it."""
+    rest = _RESPONSE.sub("", shared).strip()
+    value = normalize_response(response)
+    if value is None:
+        return rest
+    tag = f"[Response: {value}]"
+    lead = _LEADING_RESCORING.match(rest)
+    if lead:
+        return f"{rest[:lead.end()].strip()} {tag}{rest[lead.end():]}"
+    return f"{tag}\n\n{rest}" if rest else tag
+
 
 def _number(value: Any) -> float | None:
     try:
@@ -80,7 +181,9 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
     score = _SCORE.search(shared)
     vector = _VECTOR.search(shared)
     general = next((b for b in blocks if b.get("team") == "General"), None)
-    free_text = _PENDING.sub("", _VECTOR.sub("", _SCORE.sub("", shared))).strip()
+    free_text = _PENDING.sub(
+        "", _RESPONSE.sub("", _VECTOR.sub("", _SCORE.sub("", shared)))
+    ).strip()
     teams = [team_from_block(block) for block in blocks]
     return {
         "state": str(state or "NOT_SET"),
@@ -93,6 +196,7 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
         "rescored_vector": (
             vector.group(1).strip() if vector else (general or {}).get("vector") or None
         ),
+        "response": _shared_response(shared),
         "free_text": free_text,
         "form": FORM_STRUCTURED if teams else FORM_TEXT if raw.strip() else FORM_EMPTY,
         "teams": teams,
@@ -180,11 +284,17 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
             }
         )
     free_text = _body(
-        _PENDING.sub("", _VECTOR.sub("", _SCORE.sub("", str(fields.get("free_text") or ""))))
+        _PENDING.sub(
+            "",
+            _RESPONSE.sub(
+                "", _VECTOR.sub("", _SCORE.sub("", str(fields.get("free_text") or "")))
+            ),
+        )
     )
     general = next((team for team in teams if team["team"] == "General"), None)
     score = _number(fields.get("rescored_score"))
     vector = _header_value(fields.get("rescored_vector") or "") or None
+    response = normalize_response(fields.get("response"))
     return {
         "state": str(fields.get("state") or "NOT_SET"),
         "suppressed": bool(fields.get("suppressed")),
@@ -193,9 +303,11 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
         # finding's unless one is given beside the teams.
         "rescored_score": score if score is not None else (general or {}).get("rescored_score"),
         "rescored_vector": vector or (general or {}).get("rescored_vector"),
+        "response": response,
         "free_text": free_text,
         "form": FORM_STRUCTURED if teams else FORM_TEXT if (
-            free_text or score is not None or vector or fields.get("pending_review")
+            free_text or score is not None or vector or response
+            or fields.get("pending_review")
         ) else FORM_EMPTY,
         "teams": teams,
     }
@@ -220,6 +332,8 @@ def _render_clean(fields: dict[str, Any]) -> str:
         "rescored_vector"
     ):
         shared.append(f"[Rescored Vector: {fields['rescored_vector']}]")
+    if fields.get("response"):
+        shared.append(f"[Response: {fields['response']}]")
     if shared:
         parts.append(" ".join(shared))
     if fields["free_text"]:

@@ -572,15 +572,15 @@ class AssessmentOutboxStore:
                         project_uuid, component_uuid, vulnerability_uuid,
                         revision, details_digest, state, suppressed,
                         pending_review, rescored_score, rescored_vector,
-                        free_text, form
+                        free_text, form, response
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         *key, int(row["revision"]), digest, fields["state"],
                         int(fields["suppressed"]), int(fields["pending_review"]),
                         fields["rescored_score"], fields["rescored_vector"],
-                        fields["free_text"], fields["form"],
+                        fields["free_text"], fields["form"], fields["response"],
                     ),
                 )
                 connection.executemany(
@@ -670,6 +670,7 @@ class AssessmentOutboxStore:
             "pending_review": bool(row["pending_review"]),
             "rescored_score": row["rescored_score"],
             "rescored_vector": row["rescored_vector"],
+            "response": row["response"],
             "free_text": row["free_text"],
             "form": row["form"],
             "teams": [

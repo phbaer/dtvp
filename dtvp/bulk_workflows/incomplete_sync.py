@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..assessment_model import agreed_response, preserve_response
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..logic import STATE_PRIORITY, calculate_aggregated_state
 from .assessment_restore import selected_groups
@@ -66,6 +67,15 @@ def _render_block(block: dict[str, Any]) -> str:
     header_tags.extend(f"[{key}: {value}]" for key, value in tags.items() if value)
     details = str(block.get("details") or "").strip()
     return f"--- {' '.join(header_tags)} ---" + (f"\n{details}" if details else "")
+
+
+def _keep_finding_values(details: str, existing: str, response: str | None) -> str:
+    """The synchronized text with what each finding keeps of its own: the
+    SSVC record and the response. A finding without a response takes
+    ``response``, the one the other findings agree on."""
+    return preserve_response(
+        preserve_ssvc_record(details, existing), existing, response
+    )
 
 
 def _sync_group(group: dict[str, Any]) -> dict[str, Any]:
@@ -159,6 +169,10 @@ def build_incomplete_sync_payloads(
             skipped["not_incomplete"] += 1
             continue
         change = _sync_group(group)
+        response = agreed_response(
+            instance.get("analysis_details") or instance.get("analysisDetails") or ""
+            for instance in change["instances"]
+        )
         for instance in change["instances"]:
             if not all(instance.get(key) for key in ("project_uuid", "component_uuid", "vulnerability_uuid")):
                 skipped["missing_identity"] += 1
@@ -171,9 +185,10 @@ def build_incomplete_sync_payloads(
                         "component_uuid": instance["component_uuid"],
                         "vulnerability_uuid": instance["vulnerability_uuid"],
                         "state": change["target_state"],
-                        "details": preserve_ssvc_record(
+                        "details": _keep_finding_values(
                             change["target_details"],
                             instance.get("analysis_details") or instance.get("analysisDetails") or "",
+                            response,
                         ),
                         "justification": instance.get("justification"),
                         "suppressed": False,

@@ -5,7 +5,12 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .assessment_model import render_team_block
+from .assessment_model import (
+    RESPONSE_TAG_PATTERN,
+    analysis_response,
+    render_team_block,
+    set_shared_response,
+)
 from .assessment_restore_services import (
     build_missing_rescoring_vector_restore_candidate,
     refresh_group_restore_metadata,
@@ -1334,6 +1339,8 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
             "",
             content,
         )
+        # The response belongs to the finding, never to a team's text.
+        content = re.sub(RESPONSE_TAG_PATTERN, "", content, flags=re.IGNORECASE)
         content = re.sub(
             r"\[Status: Pending Review\]", "", content, flags=re.IGNORECASE
         )
@@ -1431,7 +1438,8 @@ def remove_assessment_blocks(details: str, team: Optional[str] = None) -> str:
 
     ``team`` names the block to remove ("General" for the global one);
     ``None`` removes the whole assessment. The text of the other blocks and
-    anything stored ahead of them is kept exactly as it was. The pending
+    anything stored ahead of them is kept exactly as it was, except the
+    response, which is removed with the General assessment. The pending
     review marker is dropped; the caller decides whether the result needs one.
     """
     if team is None or not details:
@@ -1441,7 +1449,11 @@ def remove_assessment_blocks(details: str, team: Optional[str] = None) -> str:
     if not headers:
         return text.strip()
     wanted = _assessment_team_key(team)
-    kept = [text[: headers[0].start()]]
+    lead = text[: headers[0].start()]
+    if wanted == "general":
+        # The response is part of the General assessment and goes with it.
+        lead = set_shared_response(lead, None)
+    kept = [lead]
     for index, match in enumerate(headers):
         end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
         block = text[match.start():end]
@@ -1474,6 +1486,9 @@ def process_assessment_details(
 
     ``justification`` sets the target team's justification; ``None`` keeps
     the one it has.
+
+    The finding's response is kept as the existing text has it; a tag in
+    ``new_details`` never changes it. Changing it is the save use case's.
     """
     role = role.upper() if role else "ANALYST"
     target_team = team if team else "General"
@@ -1482,6 +1497,10 @@ def process_assessment_details(
     # 1. Parse Existing Blocks
     shared_text, parsed_blocks = _parse_assessment_blocks(existing_details)
     blocks_list = _deduplicate_assessment_blocks(parsed_blocks)
+    # The response stands beside the blocks. It is taken out here so that it
+    # is neither moved into a General block with legacy text nor lost.
+    final_response = analysis_response(existing_details)
+    shared_text = set_shared_response(shared_text, None)
 
     # 2. Extract Metadata from New Content (if Reviewer)
     new_rescored_val = None
@@ -1507,6 +1526,7 @@ def process_assessment_details(
         "",
         content,
     )
+    content = re.sub(RESPONSE_TAG_PATTERN, "", content, flags=re.IGNORECASE)
     content = re.sub(r"\[Status: Pending Review\]", "", content, flags=re.IGNORECASE)
     # Remove trailing metadata like "Assessed -- user" or "-- user"
     content = re.sub(r"\bAssessed\s*--\s*\S+", "", content)
@@ -1599,6 +1619,7 @@ def process_assessment_details(
 
     # 6. Reconstruct Final String
     final_parts = []
+    shared_text = set_shared_response(shared_text, final_response)
     if shared_text:
         final_parts.append(shared_text)
 

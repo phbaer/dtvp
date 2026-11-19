@@ -6,7 +6,7 @@
 | :--- | :--- |
 | Status | Implemented |
 | Decision | [ADR 0002](adr/0002-local-first-database-with-import-and-export.md) for the database and export queue, [ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md) for assessments |
-| Verified | 2026-11-18 against `tests/test_assessment_outbox_services.py`, `tests/test_dt_cache.py`, and `tests/test_export.py`. The run against the mock Dependency-Track dates from 2026-11-17, before assessments became DTVP's record |
+| Verified | 2026-11-18 against `tests/test_assessment_outbox_services.py`, `tests/test_dt_cache.py`, and `tests/test_export.py`. The run against the mock Dependency-Track dates from 2026-11-17, before assessments became DTVP's record. The response (2026-11-19) is checked against `tests/test_dt_cache.py`, `tests/test_dt_client.py`, and `tests/test_project_archive_services.py` only; how a running Dependency-Track treats `analysisResponse` was not checked |
 
 DTVP keeps its own copy of everything it works on. It **imports** projects,
 findings, and vulnerability data from Dependency-Track, you **work** on the
@@ -64,12 +64,19 @@ itself, so its separate justification and response fields and its comment
 trail are not part of the record, and are not restored if Dependency-Track
 loses an assessment.
 
+The [response](assessment-model.md#response) is adopted only as the tag
+`[Response: …]` in the text. A response that exists only in
+Dependency-Track's own `analysisResponse` field is not read: the finding has
+no response in DTVP, and the first export of that finding sets
+Dependency-Track's field to `NOT_SET`. A finding that DTVP adopted and never
+changed is not exported, so its field stays as it is.
+
 On adoption, and on every later change, the text is read into atomic fields
 that are stored in the database:
 
 - per finding: state, suppression, pending review, the rescored score and
-  vector, and `free_text`: everything written outside the team blocks, kept
-  as written;
+  vector, the [response](assessment-model.md#response), and `free_text`:
+  everything written outside the team blocks, kept as written;
 - per team (including General): state, justification, assessor, reviewer,
   date, rescoring, SSVC decision, assignees, ticket reference, the evidence
   and version-coverage confirmations, whether the block is historical, and
@@ -103,6 +110,19 @@ version, assessments that exist only in Dependency-Track are not protected.
   **Settings → Export**.
 
 An export overwrites whatever Dependency-Track holds for the finding.
+
+Besides the state, the text, and the suppression flag, every export writes
+the [response](assessment-model.md#response) to Dependency-Track's
+`analysisResponse`: the value of the exported text, or `NOT_SET` when it has
+none, so a response removed in DTVP is removed there. Restoring a project
+archive writes it the same way, from the archived text. The justification is
+part of each team's assessment and is not written by an export of a saved
+assessment; only bulk workflows and archive restores pass one on.
+
+Whether Dependency-Track holds the exported value is judged by the state,
+the text, and the suppression flag. A response changed only in
+Dependency-Track's own field is therefore not noticed and not corrected
+until the finding is exported again.
 
 **Settings → Export** (reviewers) lists everything that has not reached
 Dependency-Track: the finding, who changed it, the state change, and on
@@ -191,7 +211,8 @@ button next to Save offers:
 
 - **Only the open team's assessment** (or the General assessment, on the
   General tab). The other teams' text is kept exactly as it was. Deleting the
-  General assessment also removes the SSVC decision stored with it.
+  General assessment also removes the SSVC decision and the response stored
+  with it.
 - **The whole assessment**: every team, the General assessment, rescoring,
   SSVC, and suppression. The vulnerability is open again.
 

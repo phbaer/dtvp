@@ -682,6 +682,7 @@ My Policy Comment: track this carefully`
                 pending_review: true,
                 rescored_score: 2.5,
                 rescored_vector: VECTOR,
+                response: null,
                 teams: [
                     {
                         team: 'General', state: 'NOT_AFFECTED', justification: 'CODE_NOT_REACHABLE',
@@ -716,10 +717,10 @@ My Policy Comment: track this carefully`
         it('treats text without team blocks as free text, not as a General assessment', () => {
             expect(assessmentTextToFields('Legacy note.\n[Status: Pending Review]')).toEqual({
                 free_text: 'Legacy note.', pending_review: true,
-                rescored_score: null, rescored_vector: null, teams: [],
+                rescored_score: null, rescored_vector: null, response: null, teams: [],
             });
             expect(assessmentTextToFields('')).toEqual({
-                free_text: '', pending_review: false, rescored_score: null, rescored_vector: null, teams: [],
+                free_text: '', pending_review: false, rescored_score: null, rescored_vector: null, response: null, teams: [],
             });
         });
 

@@ -199,6 +199,22 @@ vector where needed and presses Approve, which saves the Global assessment and
 removes the pending status in one step. On a collapsed card the Approve button
 in the header opens this view; it does not approve by itself.
 
+### Response
+
+The form of the Global assessment has a **Response** select below the
+analysis state and justification: Not set, Update, Rollback, Workaround
+available, Will not fix, Can not fix. It records what is done about the
+finding and is optional for every state. Team assessments have no response,
+and analysts do not see the field.
+
+The response is saved with the Global assessment, for all findings of the
+vulnerability. A choice that is not saved yet stays while team tabs are
+switched; a team tab then says to return to the Global assessment to save
+it. Discarding the draft or loading the assessment again shows the stored
+value. Where the Global assessment is displayed, the response is shown with
+it. See [Response](assessment-model.md#response) for the rules and the text
+markup.
+
 Component ownership is edited in Settings → Team Mapping, not in the card. A
 vulnerability whose components belong to no team offers the team `Unassigned`,
 so it can be assessed without a mapping.
@@ -279,7 +295,7 @@ label per applicable repair and count only the findings that change.
 | :--- | :--- | :--- |
 | Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
 | Restore tickets | Findings whose history shows that a workflow removed a ticket | See below |
-| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one |
+| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one. The [response](assessment-model.md#response) is kept as well; a finding without one takes the response the other findings agree on |
 | Move former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
 | Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset |
 | Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |

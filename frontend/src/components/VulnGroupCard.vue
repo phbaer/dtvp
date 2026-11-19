@@ -6,7 +6,7 @@ import { marked } from 'marked'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff } from '@lucide/vue'
 
-import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
+import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
@@ -127,6 +127,8 @@ const JUSTIFICATION_OPTIONS = [
     { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control', description: 'Protected by other mitigating controls.' },
 ]
 
+const RESPONSE_OPTIONS = ANALYSIS_RESPONSE_OPTIONS.map(option => ({ ...option }))
+
 let openCardCount = 0
 let bodyScrollLockY = 0
 
@@ -165,6 +167,10 @@ const activeDetailTab = ref<DetailTab>('overview')
 const state = ref('NOT_SET')
 const details = ref('')
 const justification = ref('NOT_SET')
+// What is done about the finding. One value for the Global assessment,
+// edited on its form only; like SSVC it survives a switch to a team tab.
+const response = ref('NOT_SET')
+const responseTouched = ref(false)
 const suppressed = ref(false)
 const selectedTeam = ref('')
 const showAllAssessmentTeams = ref(false)
@@ -568,8 +574,15 @@ defineExpose({
     confirmApplyDraftBeforeLeave,
 })
 
+const changeResponse = (value: string) => {
+    response.value = value
+    responseTouched.value = true
+    formTouched.value = true
+}
+
 const discardUnsavedDraft = () => {
     ssvcTouched.value = false
+    responseTouched.value = false
     pendingSsvc.value = savedSsvc.value.record
     teamDrafts.value.clear()
     takeoverSources.value.clear()
@@ -1660,6 +1673,11 @@ const updateFormFromGroup = (force = true) => {
         state.value = formValues.state
         details.value = stripSsvcDocumentation(formValues.details).trim()
         justification.value = formValues.justification
+        // An unsaved choice stays while team tabs are switched or the group
+        // is loaded again; a reload or discard without one shows the stored.
+        if (!responseTouched.value) {
+            response.value = mergedAssessmentData.value.response || 'NOT_SET'
+        }
 
         // Initialize assigned users from the current team block
         const teamKey = selectedTeam.value || 'General'
@@ -2024,6 +2042,8 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             evidenceReviewed: evidenceReviewed.value,
             versionCoverageChecked: versionCoverageChecked.value,
             ticket: ticketReference.value,
+            // Saved with the Global assessment only, like SSVC.
+            response: selectedTeam.value ? undefined : response.value,
             teamDrafts: teamDrafts.value,
             takeoverSources: takeoverSources.value,
             isReviewer: isReviewer.value,
@@ -2198,7 +2218,7 @@ const assessmentScoreTitle = computed(() => {
     const vector = pendingVector.value || props.group.rescored_vector || props.group.cvss_vector || ''
     return vector ? `CVSS vector: ${vector}` : 'No CVSS vector available'
 })
-const hasUnsavedDraft = computed(() => formTouched.value || rawDetailsTouched.value || ssvcTouched.value)
+const hasUnsavedDraft = computed(() => formTouched.value || rawDetailsTouched.value || ssvcTouched.value || responseTouched.value)
 const assessmentMissingFields = computed(() => {
     if (isReviewer.value) return []
     const missing: string[] = []
@@ -2214,7 +2234,7 @@ const canApplyAssessment = computed(() => (
     !updating.value
     && !loadingDetails.value
     && totalTargeted.value > 0
-    && (formTouched.value || rawDetailsTouched.value || (ssvcTouched.value && !selectedTeam.value))
+    && (formTouched.value || rawDetailsTouched.value || ((ssvcTouched.value || responseTouched.value) && !selectedTeam.value))
     && assessmentMissingFields.value.length === 0
 ))
 const assessmentActionLabel = computed(() => {
@@ -2646,6 +2666,12 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
     takeoverSources.value.clear()
     formTouched.value = false
     rawDetailsTouched.value = false
+    // What was stored is what the form shows from here on. A choice made
+    // on the Global form and not saved there yet stays.
+    if (!selectedTeam.value || !responseTouched.value) {
+        responseTouched.value = false
+        response.value = parseAssessmentResponse(success.new_details || finalText) || 'NOT_SET'
+    }
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
@@ -3414,6 +3440,7 @@ const teamBlockStateColor = (state?: string): string => {
                         </div>
                     </div>
                     <p v-if="ssvcTouched && selectedTeam" class="mb-3 text-xs text-amber-300">Unsaved SSVC changes: return to the global assessment to save them.</p>
+                    <p v-if="responseTouched && selectedTeam" class="mb-3 text-xs text-amber-300" data-testid="unsaved-response-hint">Unsaved response: return to the global assessment to save it.</p>
                     <div :class="isReviewer && !selectedTeam ? 'grid items-start gap-4 xl:grid-cols-2' : ''">
                         <section
                             v-if="isReviewer && !selectedTeam"
@@ -3593,6 +3620,19 @@ const teamBlockStateColor = (state?: string): string => {
                                         :modelValue="justification"
                                         @update:modelValue="justification = $event; formTouched = true; markSelectedTeamAssessmentManual()"
                                         :options="JUSTIFICATION_OPTIONS"
+                                        size="sm"
+                                    />
+                                </div>
+
+                                <!-- The response is the Global assessment's: one value for the finding. -->
+                                <div v-if="!selectedTeam && isReviewer" data-testid="analysis-response-field">
+                                    <label id="response-label" for="response-select" class="block text-xs font-semibold text-gray-400 mb-1">Response</label>
+                                    <CustomSelect
+                                        id="response-select"
+                                        aria-labelledby="response-label"
+                                        :modelValue="response"
+                                        @update:modelValue="changeResponse($event)"
+                                        :options="RESPONSE_OPTIONS"
                                         size="sm"
                                     />
                                 </div>

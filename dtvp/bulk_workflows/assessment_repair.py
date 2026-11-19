@@ -18,7 +18,12 @@ import time
 from datetime import UTC, datetime
 from typing import Any, Callable
 
-from ..assessment_model import FORMER_TEAM_NOTE, SEE_GLOBAL_ASSESSMENT
+from ..assessment_model import (
+    FORMER_TEAM_NOTE,
+    SEE_GLOBAL_ASSESSMENT,
+    agreed_response,
+    preserve_response,
+)
 from ..grouped_vuln_services import _normalize_group_tags
 from ..logic import STATE_PRIORITY, calculate_aggregated_state
 from ..rescore_rule_services import (
@@ -468,9 +473,13 @@ def _with_rescoring(merged: str, instances: list[dict[str, Any]]) -> Callable[[s
     Rebuilding from blocks drops tags stored ahead of them. A finding keeps
     its own; one without takes the group's most severe complete rescoring,
     as a synchronized finding takes the rest of the assessment.
+
+    The response stands ahead of the blocks as well. Each finding keeps its
+    own; one without takes the response the other findings agree on.
     """
+    response = agreed_response(_details(instance) for instance in instances)
     if _RESCORED_RE.search(merged) or _RESCORED_VECTOR_RE.search(merged):
-        return lambda _old: merged
+        return lambda old: preserve_response(merged, old, response)
 
     def rank(preamble: str) -> tuple[bool, float]:
         score = _RESCORED_RE.search(preamble)
@@ -481,7 +490,8 @@ def _with_rescoring(merged: str, instances: list[dict[str, Any]]) -> Callable[[s
 
     def apply(old: str) -> str:
         preamble = _rescoring_preamble(old) or shared
-        return f"{preamble}\n\n{merged}" if preamble and merged else merged or preamble
+        rebuilt = f"{preamble}\n\n{merged}" if preamble and merged else merged or preamble
+        return preserve_response(rebuilt, old, response)
 
     return apply
 

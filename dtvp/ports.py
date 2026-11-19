@@ -58,8 +58,10 @@ class AssessmentSink(Protocol):
         comment: Optional[str] = None,
         justification: Optional[str] = None,
         suppressed: bool = False,
+        response: Optional[str] = None,
     ) -> Any:
-        """Store an assessment. Raises on failure."""
+        """Store an assessment. Raises on failure. ``response`` is the
+        finding's analysis response; ``None`` means not set."""
 
     async def get_analysis(
         self,

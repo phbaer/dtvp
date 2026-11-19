@@ -532,3 +532,26 @@ async def test_get_analysis_http_error(dt_client, respx_mock):
 
     with pytest.raises(httpx.HTTPStatusError):
         await dt_client.get_analysis("p1", "c1", "v1")
+
+
+@pytest.mark.asyncio
+async def test_update_analysis_always_writes_the_response(dt_client, respx_mock):
+    import json
+
+    respx_mock.put("http://dt.example.com/api/v1/analysis").respond(
+        json={"status": "updated"}
+    )
+    common = dict(
+        project_uuid="p1", component_uuid="c1", vulnerability_uuid="v1",
+        state="EXPLOITABLE", details="Reachable",
+    )
+
+    await dt_client.update_analysis(**common, response="WORKAROUND_AVAILABLE")
+    sent = json.loads(respx_mock.calls.last.request.content)
+    assert sent["analysisResponse"] == "WORKAROUND_AVAILABLE"
+
+    # Without one the field is cleared, not left as it was.
+    await dt_client.update_analysis(**common)
+    sent = json.loads(respx_mock.calls.last.request.content)
+    assert sent["analysisResponse"] == "NOT_SET"
+    assert "analysisJustification" not in sent

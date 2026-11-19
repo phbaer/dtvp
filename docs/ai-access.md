@@ -83,7 +83,7 @@ claude mcp add --transport http dtvp https://dtvp.example.com/dtvp/mcp \
 | :--- | :--- | :--- |
 | `list_projects` | read | Projects and their versions |
 | `search_vulnerabilities` | read | Filter one project's vulnerabilities by text, lifecycle, team, severity, or analysis state; at most 100 rows per call. `new_findings` counts the [findings added after the assessment](review-workflows.md#new-findings) |
-| `get_vulnerability` | read | Description, scores, every finding with its revision and responsible teams (and `new_finding` when it was added after the assessment), dependency paths, exploitation evidence, and the current team assessments |
+| `get_vulnerability` | read | Description, scores, every finding with its revision and responsible teams (and `new_finding` when it was added after the assessment), dependency paths, exploitation evidence, and the current team assessments with the finding's [response](assessment-model.md#response). Agents cannot set the response; their saves keep it |
 | `get_sync_status` | read | Local changes waiting for export, how many exports keep failing, and the time of the last import |
 | `preview_assessment` | read | The assessment `save_assessment` would store, without saving, plus the revisions to pass on |
 | `save_assessment` | write | Record one team's assessment for every finding of a vulnerability |

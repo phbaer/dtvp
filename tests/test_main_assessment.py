@@ -326,3 +326,50 @@ def test_ineligible_component_blocks_assessment_write(override_deps, mock_client
         response = TestClient(main.app).post("/api/assessment", json=payload)
     assert response.status_code == 422
     persist.assert_not_called()
+
+
+def test_the_response_is_saved_validated_and_returned_as_a_field(override_deps, mock_client):
+    client = TestClient(main.app)
+    instance = {"project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1", "finding_uuid": "f1"}
+    general = {"team": "General", "state": "EXPLOITABLE", "assessed_by": "testuser", "details": "Reachable."}
+    payload = {"instances": [instance], "state": "EXPLOITABLE",
+               "fields": {"response": "UPDATE", "teams": [general]}}
+    query = {key: instance[key] for key in ("project_uuid", "component_uuid", "vulnerability_uuid")}
+
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        # An unknown value is refused, in the fields and beside a text.
+        for bad in (
+            {**payload, "fields": {"response": "MAYBE_LATER", "teams": [general]}},
+            {"instances": [instance], "state": "EXPLOITABLE", "details": "Reachable.",
+             "response": "MAYBE_LATER"},
+        ):
+            assert client.post("/api/assessment", json=bad).status_code == 422
+        assert main.cache_manager._load_pending_updates() == []
+
+        saved = client.post("/api/assessment", json=payload)
+        assert saved.status_code == 200
+        assert saved.json()[0]["new_details"].startswith("[Response: UPDATE]\n\n--- [Team: General]")
+        assert client.get("/api/assessments/fields", params=query).json()["response"] == "UPDATE"
+
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        # A team save cannot change it, and cannot name one beside a text.
+        team = {"team": "Team A", "state": "EXPLOITABLE", "details": "Confirmed."}
+        kept = client.post("/api/assessment", json={
+            **payload, "team": "Team A",
+            "fields": {"response": None, "pending_review": True, "teams": [general, team]},
+        })
+        assert kept.status_code == 200
+        assert client.get("/api/assessments/fields", params=query).json()["response"] == "UPDATE"
+        assert client.post("/api/assessment", json={
+            "instances": [instance], "state": "EXPLOITABLE", "details": "Confirmed.",
+            "team": "Team A", "response": "ROLLBACK",
+        }).status_code == 403
+
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        cleared = client.post("/api/assessment", json={
+            **payload, "fields": {"response": None, "teams": [general]},
+        })
+        assert cleared.status_code == 200
+        assert "Response" not in cleared.json()[0]["new_details"]
+        assert client.get("/api/assessments/fields", params=query).json()["response"] is None
+    mock_client.update_analysis.assert_not_called()
