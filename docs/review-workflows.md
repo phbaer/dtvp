@@ -108,7 +108,7 @@ classified as `INCOMPLETE`. Before approval, a pending item with missing team or
 classified as `INCOMPLETE`, while complete-but-pending work remains
 `NEEDS_APPROVAL`, displayed as Ready for approval. The `READY_FOR_APPROVAL`
 filter selects only that complete pending subset. The tab badges
-and Next action state use assessment coverage from the selected team's visible findings.
+use assessment coverage from the selected team's visible findings.
 The card reports how many findings are inside the
 active team scope, and stale asynchronous history loads are discarded when the
 selected scope changes. The top search result count is the final number of
@@ -163,17 +163,20 @@ The detail workspace provides:
 | Context | Four ordered sections: advisory and references; finding/team/component scope with affected components visible to analysts and reviewers; dependency context; existing assessment evidence |
 | Code Evidence | A semantic run list with an expandable new-analysis control; selected rows own indented outcome and evidence disclosures; a worst-case combined decision with the shared advisory shown once and rationale grouped into per-target cards |
 | Assessment | Consistent scope and decision/rationale sections with Save/Submit and reload controls in the second section header; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage; inconsistent team decisions remain explicit for manual resolution; global CVSS/rescoring controls |
-| Team Mapping | Reviewer-only ownership editor |
 
 Compact vulnerability rows expose the current workflow state, such as mapping
 needed, analysis running, result ready, assessment needed, awaiting review, or
-complete. Inside the card, tab status badges and one Next action guide lead to
-the relevant tab. The guide's navigation control disappears after reaching its
-destination and is replaced by concrete in-tab instructions, leaving the real
-run, draft, save, or submit control as the next action instead of repeating the
-same button. The sticky bar contains only navigation and persistence state.
-After a successful assessment save or analyst submission, the guide advances
-to the next vulnerability in the current filtered and sorted result set.
+complete. Inside the card, the tab status badges say what is still missing; the
+sticky bar contains only navigation and persistence state.
+
+Component ownership is edited in Settings → Team Mapping, not in the card. A
+vulnerability whose components belong to no team offers the team `Unassigned`,
+so it can be assessed without a mapping.
+
+The "More" menu next to Save holds the rarely used actions: deleting the
+assessment and, for reviewers on the Global assessment, suppressing the
+finding in Dependency-Track. A suppressed vulnerability carries a `Suppressed`
+chip in its header.
 
 CVSS and rescoring controls appear in the reviewer-only Global subview of
 Assessment so the score and assessment can be evaluated and saved together.

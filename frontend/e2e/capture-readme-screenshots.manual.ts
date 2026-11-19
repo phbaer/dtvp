@@ -1321,7 +1321,7 @@ test.describe('Capture README screenshots', () => {
 
         await expect(card.getByRole('tab', { name: 'Assessment' })).toBeVisible({ timeout: 10000 })
         await expect(card.getByRole('tab', { name: 'CVSS & Rescoring' })).toHaveCount(0)
-        await expect(card.getByRole('tab', { name: 'Team Mapping' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('tab', { name: 'Team Mapping' })).toHaveCount(0)
         await expect(card.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('PlatformTeam', { exact: true }).first()).toBeVisible({ timeout: 10000 })
 
@@ -1792,20 +1792,6 @@ test.describe('Capture README screenshots', () => {
         await expect(card.getByTestId('ticket-requirement-badge')).toHaveText('Required', { timeout: 10000 })
 
         await captureWithPadding(card, '../docs/screenshots/vuln-card-review-context.png')
-    })
-
-    test('capture team mapping screenshot', async ({ page }) => {
-        await page.setViewportSize({ width: 2200, height: 1800 })
-        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
-        await page.waitForLoadState('networkidle')
-
-        const card = await openProjectCard(page, 'CVE-2024-9999')
-        await selectDetailTab(card, 'Team Mapping')
-        await expect(card.getByText('Component Team Mapping')).toBeVisible({ timeout: 10000 })
-        await expect(card.getByTestId('component-team-mapping-row').first()).toBeVisible({ timeout: 10000 })
-        await expect(card.getByText('platform-gateway').first()).toBeVisible({ timeout: 10000 })
-
-        await captureWithPadding(card, '../docs/screenshots/vuln-card-team-mapping.png')
     })
 
     test('capture code analysis dashboard screenshot', async ({ page }) => {

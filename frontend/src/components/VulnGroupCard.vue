@@ -4,7 +4,7 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot, Trash2 } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff } from '@lucide/vue'
 
 import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
@@ -41,7 +41,6 @@ const props = defineProps<{
     hasAutomaticAssessment?: boolean
     automaticAssessmentStatus?: AutomaticAssessmentStatus | null
     activeTeamFilter?: string
-    hasNextVulnerability?: boolean
 }>()
 
 const DESCRIPTION_FALLBACK = 'No description available.'
@@ -103,7 +102,6 @@ const emit = defineEmits([
     'update:assessment',
     'toggle-expand',
     'close',
-    'request-next',
 ])
 
 const ANALYSIS_STATES = [
@@ -161,7 +159,7 @@ const unlockBodyScroll = () => {
 }
 
 const expanded = ref(props.inModal ? true : false)
-type DetailTab = 'overview' | 'analysis' | 'review' | 'mapping'
+type DetailTab = 'overview' | 'analysis' | 'review'
 const activeDetailTab = ref<DetailTab>('overview')
 const state = ref('NOT_SET')
 const details = ref('')
@@ -231,6 +229,12 @@ const assessedTeamNames = computed(() => {
     }
     return Array.from(names.values())
 })
+
+const showMoreMenu = ref(false)
+const canChangeSuppression = computed(() => (
+    isReviewer.value && (!activeTeamScope.value || showAllAssessmentTeams.value || !selectedTeam.value)
+))
+const suppressedInstanceCount = computed(() => allInstances.value.filter(instance => instance.is_suppressed).length)
 
 const openDeleteModal = () => {
     deleteAssessmentError.value = ''
@@ -2145,7 +2149,6 @@ const detailTabs = computed<Array<{ id: DetailTab, label: string, icon: Componen
     { id: 'overview', label: 'Context', icon: FileText },
     { id: 'analysis', label: 'Code Evidence', icon: Bot },
     { id: 'review', label: 'Assessment', icon: ShieldCheck },
-    ...(isReviewer.value ? [{ id: 'mapping' as DetailTab, label: 'Team Mapping', icon: Tags }] : []),
 ])
 
 const detailTabStatus = (tab: DetailTab) => {
@@ -2195,6 +2198,7 @@ const uniqueComponents = dependencyInfo.uniqueComponents
 const affectedTaggedComponents = dependencyInfo.affectedTaggedComponents
 const triggeringTaggedComponents = dependencyInfo.triggeringTaggedComponents
 const normalizedTags = dependencyInfo.normalizedTags
+const UNASSIGNED_TEAM = 'Unassigned'
 const allAssessmentTeams = computed(() => {
     const teams = normalizedTags.value.filter(team => team.toLocaleLowerCase() !== 'automation')
     for (const team of teamDrafts.value.keys()) {
@@ -2206,6 +2210,8 @@ const allAssessmentTeams = computed(() => {
             teams.push(team)
         }
     }
+    // A finding whose components belong to no team can still be assessed.
+    if (teams.length === 0) teams.push(UNASSIGNED_TEAM)
     return teams
 })
 const previousTeamAssessments = computed(() => {
@@ -2449,165 +2455,6 @@ const scopedAffectedProjectVersions = computed(() => {
     return [...versions].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
 })
 
-type WorkflowActionId = 'mapping' | 'analysis' | 'assessment' | 'submit' | 'waiting' | 'done'
-type WorkflowAction = {
-    id: WorkflowActionId
-    title: string
-    detail: string
-    label: string
-    tone: 'amber' | 'cyan' | 'blue' | 'green' | 'purple'
-}
-
-const workflowAction = computed<WorkflowAction>(() => {
-    const canMoveNext = Boolean(props.hasNextVulnerability)
-    if (assessmentSubmitted.value) {
-        return {
-            id: isReviewer.value ? 'done' : 'waiting',
-            title: isReviewer.value ? 'Assessment saved' : 'Assessment submitted for review',
-            detail: isReviewer.value
-                ? 'The assessment changes were saved successfully.'
-                : 'No further analyst action is required for this vulnerability right now.',
-            label: canMoveNext ? 'Next vulnerability' : '',
-            tone: isReviewer.value ? 'green' : 'purple',
-        }
-    }
-    if (pendingReviewForScope.value) {
-        return {
-            id: 'waiting',
-            title: 'Waiting for reviewer',
-            detail: 'The analyst assessment is pending reviewer approval.',
-            label: canMoveNext ? 'Next vulnerability' : '',
-            tone: 'purple',
-        }
-    }
-    if (assessmentCompleteForScope.value) {
-        return {
-            id: 'done',
-            title: 'Assessment complete',
-            detail: 'This vulnerability is complete for the current workflow.',
-            label: canMoveNext ? 'Next vulnerability' : '',
-            tone: 'green',
-        }
-    }
-    if (activeTeamScope.value && visibleInstances.value.length === 0) {
-        return {
-            id: 'mapping',
-            title: 'Component mapping needs attention',
-            detail: isReviewer.value
-                ? `No component in this vulnerability resolves to ${activeTeamScope.value}. Review the mapping before continuing.`
-                : `No component resolves to ${activeTeamScope.value}. Ask a reviewer to correct the team mapping.`,
-            label: isReviewer.value ? 'Review team mapping' : 'View mapping details',
-            tone: 'amber',
-        }
-    }
-    if (hasUnsavedDraft.value) {
-        if (assessmentMissingFields.value.length > 0) {
-            return {
-                id: 'assessment',
-                title: 'Complete the assessment draft',
-                detail: `Still needed: ${assessmentMissingFields.value.join(', ')}.`,
-                label: 'Complete assessment',
-                tone: 'amber',
-            }
-        }
-        return {
-            id: 'submit',
-            title: isReviewer.value ? 'Assessment changes are ready' : 'Assessment draft is ready',
-            detail: isReviewer.value
-                ? 'Review the changed fields, then save the assessment.'
-                : `Review the draft, then submit it for ${selectedTeam.value || 'team'} review.`,
-            label: assessmentActionLabel.value,
-            tone: 'blue',
-        }
-    }
-    if (codeAnalysisAvailableForScope.value) {
-        return {
-            id: 'analysis',
-            title: 'Code-analysis result available',
-            detail: 'Review the latest scoped result before starting another run, then use it as an assessment draft if it is suitable.',
-            label: 'Review code evidence',
-            tone: 'cyan',
-        }
-    }
-    if (!activeTeamScope.value && technicalState.value !== 'NOT_SET') {
-        return {
-            id: 'assessment',
-            title: 'Record the team assessment',
-            detail: 'The current evidence is ready to be turned into a team assessment.',
-            label: 'Open assessment',
-            tone: 'blue',
-        }
-    }
-    return {
-        id: codeAnalysisComponents.value.length ? 'analysis' : 'mapping',
-        title: codeAnalysisComponents.value.length ? 'Gather code evidence' : 'Component mapping needs attention',
-        detail: codeAnalysisComponents.value.length
-            ? `Review existing history or analyze ${codeAnalysisComponents.value.length} scoped component${codeAnalysisComponents.value.length === 1 ? '' : 's'}.`
-            : 'No team-assigned analysis target is available. Review the dependency context and mapping.',
-        label: codeAnalysisComponents.value.length
-            ? 'Open code evidence'
-            : isReviewer.value ? 'Review team mapping' : 'Review context',
-        tone: codeAnalysisComponents.value.length ? 'cyan' : 'amber',
-    }
-})
-
-const workflowActionClass = computed(() => ({
-    amber: 'border-amber-700/45 bg-amber-950/20 text-amber-100',
-    cyan: 'border-cyan-700/45 bg-cyan-950/20 text-cyan-100',
-    blue: 'border-blue-700/45 bg-blue-950/20 text-blue-100',
-    green: 'border-green-700/45 bg-green-950/20 text-green-100',
-    purple: 'border-purple-700/45 bg-purple-950/20 text-purple-100',
-}[workflowAction.value.tone]))
-
-const workflowActionTargetTab = computed<DetailTab | null>(() => {
-    if (workflowAction.value.id === 'analysis') return 'analysis'
-    if (workflowAction.value.id === 'assessment' || workflowAction.value.id === 'submit') return 'review'
-    if (workflowAction.value.id === 'mapping') return isReviewer.value ? 'mapping' : 'overview'
-    return null
-})
-const workflowActionAtDestination = computed(() => (
-    workflowActionTargetTab.value !== null
-    && activeDetailTab.value === workflowActionTargetTab.value
-))
-const workflowActionDetail = computed(() => {
-    if (!workflowActionAtDestination.value) return workflowAction.value.detail
-    if (workflowAction.value.id === 'analysis') {
-        return codeAnalysisAvailableForScope.value
-            ? 'Choose a target run below, review its outcome, then use it as an assessment draft when the evidence is suitable.'
-            : 'Expand Run new analysis or review the latest stored run for each affected target below.'
-    }
-    if (workflowAction.value.id === 'assessment' || workflowAction.value.id === 'submit') {
-        return assessmentMissingFields.value.length
-            ? `Complete the highlighted assessment fields below: ${assessmentMissingFields.value.join(', ')}.`
-            : `Review the ${selectedTeam.value || 'current'} assessment below, then ${isReviewer.value ? 'save it' : 'submit it for review'}.`
-    }
-    if (workflowAction.value.id === 'mapping') {
-        return isReviewer.value
-            ? 'Review the affected component mappings below and assign the missing team ownership.'
-            : 'Review the affected component and dependency context below, then ask a reviewer to update ownership.'
-    }
-    return workflowAction.value.detail
-})
-const showWorkflowPrimaryAction = computed(() => (
-    Boolean(workflowAction.value.label)
-    && !workflowActionAtDestination.value
-))
-
-const handleWorkflowAction = () => {
-    if (workflowAction.value.id === 'submit') {
-        void handleUpdate(false)
-        return
-    }
-    if (workflowAction.value.id === 'waiting' || workflowAction.value.id === 'done') {
-        emit('request-next')
-        return
-    }
-    if (workflowAction.value.id === 'mapping') {
-        setDetailTab(isReviewer.value ? 'mapping' : 'overview')
-        return
-    }
-    setDetailTab(workflowAction.value.id === 'analysis' ? 'analysis' : 'review')
-}
 const scopedHeaderTags = computed(() => activeTeamScope.value
     ? [activeTeamScope.value]
     : normalizedTags.value
@@ -2859,6 +2706,7 @@ const teamBlockStateColor = (state?: string): string => {
             :scoreTitle="assessmentScoreTitle"
             :hasUnsavedDraft="hasUnsavedDraft"
             :instanceCountOverride="visibleInstances.length"
+            :suppressedCount="suppressedInstanceCount"
             :oldestAttributedOnMsOverride="scopedOldestAttributedOnMs"
             :componentSummaryOverride="scopedComponentSummary"
             @approve-assessment="approveAssessment"
@@ -2920,37 +2768,6 @@ const teamBlockStateColor = (state?: string): string => {
                 </div>
             </div>
         </div>
-
-        <section
-            data-testid="analyst-next-action"
-            class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-3"
-            :class="workflowActionClass"
-        >
-            <div class="flex min-w-0 flex-1 items-start gap-2.5">
-                <CircleDot :size="16" class="mt-0.5 shrink-0 opacity-80" />
-                <div class="min-w-0">
-                    <div class="text-[10px] font-black uppercase tracking-widest opacity-65">Next action</div>
-                    <div class="mt-0.5 text-sm font-bold">{{ workflowAction.title }}</div>
-                    <p class="mt-0.5 text-xs leading-relaxed opacity-75">{{ workflowActionDetail }}</p>
-                    <div v-if="workflowActionAtDestination" class="mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide opacity-65">
-                        <CheckCircle :size="11" />
-                        You are at the next step
-                    </div>
-                </div>
-            </div>
-            <button
-                v-if="showWorkflowPrimaryAction"
-                type="button"
-                data-testid="workflow-primary-action"
-                class="inline-flex shrink-0 items-center gap-1.5 rounded border border-current/30 bg-black/20 px-3 py-2 text-xs font-bold transition-colors hover:bg-black/35 disabled:cursor-not-allowed disabled:opacity-45"
-                :disabled="workflowAction.id === 'submit' && !canApplyAssessment"
-                @click="handleWorkflowAction"
-            >
-                <Loader2 v-if="updating" :size="13" class="animate-spin" />
-                <ArrowRight v-else :size="13" />
-                {{ workflowAction.label }}
-            </button>
-        </section>
 
         <section
             v-show="activeDetailTab === 'overview'"
@@ -3363,17 +3180,58 @@ const teamBlockStateColor = (state?: string): string => {
                             >
                                 <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
                             </button>
-                            <button
-                                type="button"
-                                @click="openDeleteModal"
-                                :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
-                                class="rounded border border-red-900 bg-gray-800 px-3 py-2 text-red-300 transition-colors hover:bg-red-950/60 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
-                                title="Delete this assessment"
-                                aria-label="Delete assessment"
-                                data-testid="assessment-delete-button"
-                            >
-                                <Trash2 :size="14" />
-                            </button>
+                            <div class="relative">
+                                <button
+                                    type="button"
+                                    class="rounded border border-gray-600 bg-gray-800 px-3 py-2 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                                    title="More actions"
+                                    aria-label="More actions"
+                                    aria-haspopup="menu"
+                                    :aria-expanded="showMoreMenu ? 'true' : 'false'"
+                                    data-testid="assessment-more-button"
+                                    @click="showMoreMenu = !showMoreMenu"
+                                >
+                                    <MoreHorizontal :size="14" />
+                                </button>
+                                <div v-if="showMoreMenu" class="fixed inset-0 z-40" aria-hidden="true" @click="showMoreMenu = false"></div>
+                                <div
+                                    v-if="showMoreMenu"
+                                    role="menu"
+                                    data-testid="assessment-more-menu"
+                                    class="absolute right-0 z-50 mt-1 w-64 rounded border border-gray-700 bg-gray-900 py-1 text-left text-xs shadow-xl"
+                                    @keydown.esc="showMoreMenu = false"
+                                >
+                                    <label
+                                        v-if="canChangeSuppression"
+                                        :for="`suppress-${group.id}`"
+                                        role="menuitemcheckbox"
+                                        :aria-checked="suppressed ? 'true' : 'false'"
+                                        class="flex cursor-pointer items-start gap-2 px-3 py-2 text-gray-300 hover:bg-gray-800"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            :id="`suppress-${group.id}`"
+                                            v-model="suppressed"
+                                            class="mt-0.5 h-3.5 w-3.5 rounded"
+                                            @change="formTouched = true"
+                                        />
+                                        <span>
+                                            <span class="flex items-center gap-1.5 font-semibold"><EyeOff :size="12" /> Suppress in Dependency-Track</span>
+                                            <span class="mt-0.5 block text-[10px] leading-snug text-gray-500">Takes effect when the assessment is saved.</span>
+                                        </span>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        role="menuitem"
+                                        :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
+                                        class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-red-300 hover:bg-red-950/50 disabled:cursor-not-allowed disabled:opacity-40"
+                                        data-testid="assessment-delete-button"
+                                        @click="showMoreMenu = false; openDeleteModal()"
+                                    >
+                                        <Trash2 :size="12" /> Delete assessment…
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </template>
                     <div
@@ -3722,10 +3580,10 @@ const teamBlockStateColor = (state?: string): string => {
                     <!-- No-Team Section (Prompt for non-reviewers) -->
                     <div v-if="!selectedTeam && !isReviewer" class="p-4 rounded border border-gray-700 bg-gray-800/50 flex flex-col items-center justify-center text-center space-y-2">
                         <Shield :size="32" class="text-blue-500/50" />
-                        <h4 class="text-sm font-bold text-gray-300">{{ activeTeamScope ? 'Team Mapping Required' : 'Select a Team Tab' }}</h4>
+                        <h4 class="text-sm font-bold text-gray-300">{{ activeTeamScope ? `Nothing here for ${activeTeamScope}` : 'Select a Team Tab' }}</h4>
                         <p class="text-xs text-gray-400 max-w-xs">
                           {{ activeTeamScope
-                              ? `No component assessment target currently resolves to ${activeTeamScope}. Ask a reviewer to correct the mapping.`
+                              ? `No component of this vulnerability belongs to ${activeTeamScope}. Clear the team filter to assess it, or ask a reviewer to change the team mapping in Settings.`
                               : 'Global assessments are restricted to reviewers. Select a team tab above to provide an assessment.' }}
                         </p>
                     </div>
@@ -3749,16 +3607,6 @@ const teamBlockStateColor = (state?: string): string => {
                         </div>
                     </div>
 
-                    <div v-if="isReviewer && (!activeTeamScope || showAllAssessmentTeams || !selectedTeam)" class="flex items-center gap-2">
-                        <input
-                            type="checkbox"
-                            :id="`suppress-${group.id}`"
-                            v-model="suppressed"
-                            class="w-4 h-4 rounded"
-                            @change="formTouched = true"
-                        />
-                        <label :for="`suppress-${group.id}`" class="text-sm">Suppress this vulnerability</label>
-                    </div>
 
                     <div
                         v-if="isReviewer && !selectedTeam && mergedAssessmentData.blocks.length > 0 && (assessmentSyncIssues.length > 0 || displayState === 'INCOMPLETE')"
@@ -3816,35 +3664,6 @@ const teamBlockStateColor = (state?: string): string => {
             </div>
         </section>
 
-        <section
-            v-if="isReviewer"
-            v-show="activeDetailTab === 'mapping'"
-            :id="detailTabPanelId('mapping')"
-            :aria-labelledby="detailTabId('mapping')"
-            class="space-y-3"
-            role="tabpanel"
-        >
-            <div class="rounded-lg border border-purple-800/40 bg-purple-950/10 px-4 py-3">
-                <h3 class="flex items-center gap-2 text-sm font-bold text-purple-100">
-                    <Tags :size="15" class="text-purple-400" />
-                    Team mapping
-                </h3>
-                <p class="mt-1 max-w-4xl text-xs leading-relaxed text-gray-500">
-                    Confirm component ownership so Context, Code Evidence, and Assessment use the same team scope.
-                </p>
-            </div>
-            <DetailSection
-                step="Team mapping · 1"
-                title="Affected component ownership"
-                description="Review or change the mapping for components visible in this vulnerability."
-            >
-                <VulnGroupCardDependencies
-                    :instances="visibleInstances"
-                    mode="mapping"
-                    @mapping-updated="handleMappingUpdated"
-                />
-            </DetailSection>
-        </section>
     </div>
 
     <!-- Grouped Calculator Modal -->
