@@ -523,6 +523,37 @@ class LocalStore:
                     }
         return described
 
+    def stored_findings(self) -> Iterable[tuple[str, dict[str, Any], str]]:
+        """Every stored finding as ``(project UUID, finding, read at)``, with
+        just the fields that identify its component and vulnerability."""
+        rows = self._connection().execute(
+            """
+            SELECT f.project_uuid, f.component_uuid, f.vulnerability_uuid,
+                   f.vuln_id, f.component_name, f.component_version,
+                   json_extract(f.payload_json, '$.component.purl'),
+                   s.updated_at
+            FROM source_findings f
+            JOIN source_snapshots s
+              ON s.kind = ? AND s.project_uuid = f.project_uuid
+            ORDER BY f.project_uuid, f.position
+            """,
+            (KIND_FINDINGS,),
+        )
+        for row in rows:
+            yield (
+                row[0],
+                {
+                    "component": {
+                        "uuid": row[1],
+                        "name": row[4],
+                        "version": row[5],
+                        "purl": row[6] if isinstance(row[6], str) else None,
+                    },
+                    "vulnerability": {"uuid": row[2], "vulnId": row[3]},
+                },
+                row[7],
+            )
+
     def read_project_analyses(
         self, project_uuid: str
     ) -> dict[tuple[str, str], Any]:

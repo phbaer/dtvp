@@ -104,6 +104,19 @@ DTVP's markup out of the text, which is lossy.
   send any. The form cannot edit it yet.
 - The database is the system of record for reviewed assessments: backup,
   restore, and retention are operational requirements, not conveniences.
+- *Changed 2026-11-20 (implementation of the CycloneDX gap analysis):*
+  DTVP follows the source's findings on every read. A read taken while the
+  source still re-analyses a project after a BOM upload may lack findings for
+  a while; that heals on the next read, so DTVP does not wait for it. A
+  finding it stops reporting is kept as gone, with a
+  reason (replaced, component removed, no longer matched), and its record
+  becomes inactive, never deleted. The assessment of a replaced component is
+  carried over to its successor from the record, not from the previous
+  snapshot, as a new revision marked pending review and exported; the old
+  record becomes `superseded`. This concerns recreated components within one
+  project version; it is not decision 6, which keeps new project versions
+  unassessed. See
+  [Findings that disappear](../import-export.md#findings-that-disappear).
 
 ## Confirmation
 
@@ -111,6 +124,11 @@ DTVP's markup out of the text, which is lossy.
   adoption, the source never changing a local value, re-export of lost
   values, bounded retries, the upgrade of former conflicts, and the atomic
   fields of adopted, changed, and existing assessments.
+- `tests/test_dt_cache.py` (`test_a_replaced_component_keeps_its_assessment_across_the_reanalysis`,
+  `test_a_vulnerability_no_longer_matched_goes_and_comes_back`,
+  `test_a_pending_export_to_a_gone_finding_is_dropped_with_its_reason`) and
+  `tests/test_finding_lifecycle_services.py`: findings followed only after
+  the analysis, gone findings kept with a reason, carry-over from the record.
 - A CycloneDX VDR from DTVP that the generator reads without its text
   parser: checked by hand on 2026-11-18 with the generator's reader; not an
   automated test.
@@ -123,3 +141,4 @@ DTVP's markup out of the text, which is lossy.
 | 4 Structured fields | Implemented 2026-11-18; the response added 2026-11-19. The web form sends the assessment as fields and the server renders the text. A save that names one team (the MCP tools) renders its blocks with the same renderer and keeps every tag. Every text gets the same layout where it is stored. Open: bulk workflows, deletion, and repair still edit text, which is read into fields; the form has no input for free text |
 | 5 CycloneDX inventory and VDR | Implemented 2026-11-18 in DTVP; see [CycloneDX inventory and VDR](../cyclonedx-export.md). Open: the generator reads from DTVP instead of Dependency-Track |
 | 6 New-finding mark | Implemented 2026-11-18 (separate change) |
+| Following findings (Consequences, changed 2026-11-20) | Implemented 2026-11-20: the analysis gate, gone findings with reasons, inactive and superseded records, carry-over from the record, the project's gone-findings list, and the VDR counts. Open: carrying over the records of the affected production project is a one-time operator check after deployment |

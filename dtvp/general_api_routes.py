@@ -29,6 +29,7 @@ from .cyclonedx_export import (
     valid_property_prefix,
     valid_ticket_prefix,
 )
+from .finding_lifecycle_services import describe_gone_findings
 from .team_mapping import normalize_team_values
 from .version import get_app_version
 from .assessment_outbox_services import assessment_key
@@ -3098,6 +3099,62 @@ def _register_cyclonedx_routes(
         )
 
 
+def _register_gone_findings_routes(
+    router: APIRouter,
+    deps: GeneralApiRouteDeps,
+    current_user_dependency: Callable[..., Any],
+    client_dependency: Callable[..., Any],
+) -> None:
+    def describe(project_uuid: str) -> dict[str, Any] | None:
+        manager = deps.cache_manager
+        return describe_gone_findings(
+            manager.finding_lifecycle, manager.assessment_outbox, project_uuid
+        )
+
+    @router.get("/project/{project_uuid}/gone-findings")
+    async def get_gone_findings(
+        project_uuid: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Findings of a project version Dependency-Track no longer reports,
+        with why and when, and the last read of its findings."""
+        described = await asyncio.to_thread(describe, project_uuid)
+        return described or {
+            "project_uuid": project_uuid,
+            "last_read": None,
+            "gone": {},
+            "findings": [],
+        }
+
+    @router.get("/gone-findings")
+    async def get_named_gone_findings(
+        name: str = Query(..., min_length=1, max_length=500),
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """The same for every version of a project. Versions DTVP has no
+        record of are left out."""
+        try:
+            projects = await deps.cache_manager.get_projects(client, name)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Dependency-Track unavailable for project search.",
+            ) from exc
+        versions = []
+        for project in projects or []:
+            if project.get("name") != name or not project.get("uuid"):
+                continue
+            described = await asyncio.to_thread(describe, str(project["uuid"]))
+            if described is None:
+                continue
+            versions.append({"version": str(project.get("version") or ""), **described})
+        versions.sort(key=lambda item: item["version"])
+        return {"name": name, "versions": versions}
+
+
 def create_general_api_router(
     deps: GeneralApiRouteDeps,
     *,
@@ -3116,4 +3173,7 @@ def create_general_api_router(
         router, deps, current_user_dependency, client_dependency
     )
     _register_dependency_route(router, deps, client_dependency)
+    _register_gone_findings_routes(
+        router, deps, current_user_dependency, client_dependency
+    )
     return router

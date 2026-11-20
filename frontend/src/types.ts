@@ -99,7 +99,7 @@ export interface Instance {
     dtvp_sync_status?: string;
     dtvp_update_id?: string | null;
     dtvp_sync_error?: string | null;
-    /** Set for findings assessed in DTVP: synced, pending, error, inactive, or cancelled. */
+    /** Set for findings assessed in DTVP: synced, pending, error, inactive, superseded, or cancelled. */
     sync_status?: string;
     /** What Dependency-Track holds while an export is waiting or failing and it differs. */
     source_assessment?: SourceAssessment | null;
@@ -467,4 +467,53 @@ export interface TMRescoreProposalSnapshot {
     analyzed_versions: string[];
     generated_at?: string | null;
     proposals: Record<string, TMRescoreProposal>;
+}
+
+/** Why Dependency-Track no longer reports a finding. */
+export type GoneReason =
+    | 'replaced'
+    | 'component_removed'
+    | 'no_longer_matched'
+    | 'undetermined'
+    | 'missing_at_export';
+
+export interface GoneFinding {
+    component_uuid: string;
+    component_name: string | null;
+    component_version: string | null;
+    component_purl: string | null;
+    vulnerability_uuid: string;
+    vuln_id: string | null;
+    reason: GoneReason | string;
+    gone_at: string | null;
+    last_seen_at: string | null;
+    /** What became of its assessment: carried, conflict, own_assessment, undetermined, or null. */
+    carry_over: string | null;
+    successor: {
+        component_uuid: string;
+        component_name: string | null;
+        component_version: string | null;
+    } | null;
+    assessment: { sync_status: string; state: string; revision: number } | null;
+}
+
+export interface FindingsReadSummary {
+    read_at: string;
+    went: Record<string, number>;
+    returned: number;
+    carried_over: number;
+    not_carried: number;
+}
+
+export interface GoneFindingsOfVersion {
+    version: string;
+    project_uuid: string;
+    last_read: FindingsReadSummary | null;
+    gone: Record<string, number>;
+    findings: GoneFinding[];
+}
+
+export interface GoneFindingsOfProject {
+    name: string;
+    versions: GoneFindingsOfVersion[];
 }

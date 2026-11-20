@@ -1099,3 +1099,29 @@ def test_a_whole_vdr_with_derived_recommendations_is_valid_and_keeps_the_invento
         _metadata(derived)["dtvp:export_inventory"].removeprefix("urn:cdx:")
         .removesuffix("/1").join(["urn:uuid:", ""])
     )
+
+
+def test_findings_the_source_no_longer_reports_are_counted_by_reason():
+    gone = {"replaced": 2, "component_removed": 1, "no_longer_matched": 0}
+    document = build_vdr(
+        SCHEMA_BOM,
+        [_finding(C1)],
+        [parse_assessment("NOT_SET", "", False)],
+        generated_at=NOW,
+        property_prefix="acme",
+        findings_gone=gone,
+    )
+
+    counted = [
+        item["value"] for item in document["metadata"]["properties"]
+        if item["name"] == "acme:export_findings_gone"
+    ]
+    assert counted == ["component_removed=1", "replaced=2"]
+    assert _schema_errors(document) is None
+
+    for nothing in (None, {}, {"replaced": 0}):
+        quiet = _vdr([_finding(C1)], [("NOT_SET", "")], findings_gone=nothing)
+        assert not any(
+            item["name"].endswith(":export_findings_gone")
+            for item in quiet["metadata"]["properties"]
+        )

@@ -43,6 +43,18 @@ class AssessmentRevisionConflictError(Exception):
         )
 
 
+class AssessmentRecordChangedError(Exception):
+    """A record changed since the caller read it: it was created, saved
+    again, discarded or superseded in the meantime."""
+
+    def __init__(self, key: AssessmentKey, expected: str, found: str) -> None:
+        self.key = key
+        super().__init__(
+            f"Assessment record of {'/'.join(key)} changed: expected {expected}, "
+            f"found {found}"
+        )
+
+
 LEGACY_FILE_IMPORT_KEY = "legacy_outbox_file_imported"
 LEGACY_STATE_COLUMNS = (
     "project_uuid, component_uuid, vulnerability_uuid, revision, "
@@ -87,6 +99,8 @@ SYNC_ERROR = "error"
 SYNC_CANCELLED = "cancelled"
 # The finding is no longer reported by the source; its assessment is kept.
 SYNC_INACTIVE = "inactive"
+# Carried over to the finding that replaced this one; kept as history.
+SYNC_SUPERSEDED = "superseded"
 
 ORIGIN_USER = "user"
 ORIGIN_IMPORT = "import"
@@ -719,12 +733,27 @@ class AssessmentOutboxStore:
         origin: str = ORIGIN_USER,
         author: str | None = None,
         bases: dict[AssessmentKey, dict[str, Any]] | None = None,
+        supersedes: dict[AssessmentKey, list[AssessmentKey]] | None = None,
+        expected_records: dict[AssessmentKey, int | None] | None = None,
+        skip_changed: bool = False,
     ) -> list[dict[str, Any]]:
         """Record local assessment values and queue them for export.
 
         ``bases`` gives, for findings without a local assessment yet, the
         value the source is believed to hold. It becomes the reference an
         import later compares the source against.
+
+        ``supersedes`` names, per saved finding, the records its value was
+        carried over from. In the same transaction their queued exports are
+        dropped and they become ``superseded``: kept, but no longer active.
+
+        ``expected_records`` is what the caller read, checked in the same
+        transaction: ``None`` for a finding that had no record, else the
+        revision of a record that was neither discarded nor superseded. It
+        covers saved findings and the records they supersede. A mismatch
+        raises ``AssessmentRecordChangedError``; with ``skip_changed`` that
+        finding is left out instead (as is one with a queued export when
+        ``replace`` is false), and the rest is saved.
         """
         self._ensure_initialized()
         deduplicated: dict[AssessmentKey, dict[str, Any]] = {}
@@ -785,9 +814,22 @@ class AssessmentOutboxStore:
                             key,
                         ).fetchone()
                         if existing_pending is not None and not replace:
+                            if skip_changed:
+                                continue
                             raise AssessmentOutboxConflictError(
                                 "A pending update already exists for this finding."
                             )
+                        if expected_records is not None:
+                            try:
+                                for checked in [key, *(supersedes or {}).get(key, [])]:
+                                    if checked in expected_records:
+                                        self._check_expected_record(
+                                            connection, checked, expected_records[checked]
+                                        )
+                            except AssessmentRecordChangedError:
+                                if skip_changed:
+                                    continue
+                                raise
 
                         revision = current_revision + 1
                         update_id = str(uuid.uuid4())
@@ -917,7 +959,18 @@ class AssessmentOutboxStore:
                             "payload": copy.deepcopy(payload),
                         }
                         records.append((key, pending))
-                self._reload_keys(connection, [key for key, _pending in records])
+                    superseded = [
+                        old
+                        for key, _pending in records
+                        for old in (supersedes or {}).get(key, [])
+                        if old != key
+                    ]
+                    for old in superseded:
+                        self._supersede(connection, old, now)
+                self._reload_keys(
+                    connection,
+                    [key for key, _pending in records] + superseded,
+                )
 
             return [copy.deepcopy(pending) for _key, pending in records]
 
@@ -1316,6 +1369,10 @@ class AssessmentOutboxStore:
     ) -> str | None:
         ours = self._local_value(state)
         status = state["sync_status"]
+        # A finding that is reported again (inactive or superseded record)
+        # is handled like a synchronised one below. Its value did not
+        # change, so no revision is written: when and why it went and came
+        # back is kept on the finding (finding_lifecycle_services).
 
         if same_assessment(theirs, ours):
             # Both sides agree, whatever happened before.
@@ -1632,6 +1689,136 @@ class AssessmentOutboxStore:
                     )
                 self._reload_keys(connection, [key])
             return True
+
+    @staticmethod
+    def _check_expected_record(
+        connection: sqlite3.Connection, key: AssessmentKey, expected: int | None
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT revision, sync_status FROM assessment_state
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            key,
+        ).fetchone()
+        if expected is None:
+            if row is not None:
+                raise AssessmentRecordChangedError(
+                    key, "no record", f"revision {int(row['revision'])}"
+                )
+            return
+        if row is None:
+            raise AssessmentRecordChangedError(key, f"revision {expected}", "no record")
+        if int(row["revision"]) != expected or row["sync_status"] in (
+            SYNC_CANCELLED, SYNC_SUPERSEDED,
+        ):
+            raise AssessmentRecordChangedError(
+                key,
+                f"revision {expected}",
+                f"revision {int(row['revision'])} ({row['sync_status']})",
+            )
+
+    @staticmethod
+    def _supersede(
+        connection: sqlite3.Connection, key: AssessmentKey, now: str
+    ) -> None:
+        connection.execute(
+            """
+            DELETE FROM assessment_outbox
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            key,
+        )
+        connection.execute(
+            """
+            UPDATE assessment_state
+            SET sync_status = ?, update_id = NULL, updated_at = ?
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            (SYNC_SUPERSEDED, now, *key),
+        )
+
+    def project_states(self, project_uuid: str) -> dict[AssessmentKey, dict[str, Any]]:
+        """The local records of one project's findings, by finding."""
+        self._ensure_initialized()
+        with self._lock:
+            return {
+                key: copy.deepcopy(state)
+                for key, state in self._states.items()
+                if key[0] == project_uuid
+            }
+
+    def retire_missing(
+        self,
+        project_uuid: str,
+        gone: dict[AssessmentKey, str],
+        *,
+        fetched_at: datetime,
+    ) -> list[AssessmentKey]:
+        """Stop following the records of findings the source no longer
+        reports. ``gone`` maps each such finding to why it went.
+
+        Synchronised, pending and failed records become ``inactive``: the
+        value is kept, a queued export is dropped. A record changed after
+        ``fetched_at`` is left alone, as the read may predate the change. A
+        cancelled record (a discarded export) stays cancelled, so the
+        discarded value is not revived should the finding return. The reason
+        is kept with the finding, not here. Returns the retired findings.
+        """
+        self._ensure_initialized()
+        fetched = fetched_at.astimezone(UTC)
+        now = _utc_now_iso()
+        with self._lock:
+            targets: list[AssessmentKey] = []
+            dropped: dict[str, int] = {}
+            for key, reason in gone.items():
+                if key[0] != project_uuid:
+                    continue
+                state = self._states.get(key)
+                if state is None or state.get("sync_status") not in (
+                    SYNC_SYNCED, SYNC_PENDING, SYNC_ERROR,
+                ):
+                    continue
+                updated_at = _parse_time(state.get("updated_at"))
+                if updated_at is None or updated_at >= fetched:
+                    continue
+                targets.append(key)
+                if key in self._pending:
+                    dropped[reason] = dropped.get(reason, 0) + 1
+            if not targets:
+                return []
+            with closing(self._connect()) as connection:
+                with connection:
+                    for key in targets:
+                        connection.execute(
+                            """
+                            DELETE FROM assessment_outbox
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            key,
+                        )
+                        connection.execute(
+                            """
+                            UPDATE assessment_state
+                            SET sync_status = ?, update_id = NULL,
+                                last_error = NULL, updated_at = ?
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            (SYNC_INACTIVE, now, *key),
+                        )
+                self._reload_keys(connection, targets)
+        if self.logger:
+            for reason, count in sorted(dropped.items()):
+                self.logger.info(
+                    "%d queued export(s) of %s dropped: finding gone (%s)",
+                    count, project_uuid, reason,
+                )
+        return targets
 
     def mark_inactive(
         self,

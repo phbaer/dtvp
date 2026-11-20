@@ -19,8 +19,10 @@ and applies consistent decisions across releases.
   read vulnerabilities, draft team assessments that stay pending review, and
   add code evidence that a person reviews beside the Agentyzer runs.
 - Local-first: DTVP imports from Dependency-Track, works on its own database,
-  and exports assessments back automatically or on request. Changes made on
-  both sides become a visible conflict instead of one overwriting the other.
+  which is the record for assessments, and exports them back automatically or
+  on request. Findings Dependency-Track stops reporting are kept as gone, with
+  a reason, once its analysis of a BOM upload finished; the assessment of a
+  replaced component is carried over to its successor, pending review.
 - Mock services for local development and testing.
 
 [Quick start](#quick-start) · [Deployment](#docker-deployment) ·
@@ -209,7 +211,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | Guide | Contents |
 | :--- | :--- |
 | [Assessment model](docs/assessment-model.md) | Lifecycle rules, team ownership, SSVC, original severity, and official evidence |
-| [Review workflows](docs/review-workflows.md) | Search, filters, assessments, bulk changes, and project archives |
+| [Review workflows](docs/review-workflows.md) | Search, filters, assessments, gone findings, bulk changes, and project archives |
 | [Analysis integrations](docs/analysis-integrations.md) | Threat-model rescoring, code analysis, live analysis progress, full assessment reports, downloads, and job IDs, follow-ups, and automatic scanning |
 | [Runtime and capacity](docs/runtime.md) | Module map, background tasks, caching, concurrency, and benchmarks |
 | [Development and testing](docs/development.md) | Separate processes, test guidance, toolchain constraints, and CI |
@@ -217,7 +219,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Configuration](docs/configuration.md) | Environment variables and defaults |
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
-| [Import and export](docs/import-export.md) | The local database as the record for assessments, adoption on import, automatic and manual export, failing exports, vanished findings, and history |
+| [Import and export](docs/import-export.md) | The local database as the record for assessments, adoption on import, automatic and manual export, failing exports, gone findings and carry-over to replacing components, and history |
 | [CycloneDX inventory and VDR](docs/cyclonedx-export.md) | Downloading the BOM and a VDR with assessments in standard fields per project version, the recommendation derived from the fixed versions Dependency-Track holds, the field mapping, and its limits |
 | [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, agent code evidence, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |

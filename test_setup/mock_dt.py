@@ -287,6 +287,23 @@ def get_projects(request: Request, name: Optional[str] = None):
     return mock_projects
 
 
+# A BOM import and the analysis that followed it, so DTVP follows findings.
+MOCK_BOM_IMPORTED_MS = 1_767_225_600_000  # 2026-01-01T00:00:00Z
+
+
+@app.get("/api/v1/project/{project_uuid}")
+def get_project(request: Request, project_uuid: str):
+    check_auth(request)
+    for project in mock_projects:
+        if project.uuid == project_uuid:
+            return {
+                **project.model_dump(),
+                "lastBomImport": MOCK_BOM_IMPORTED_MS,
+                "lastVulnerabilityAnalysis": MOCK_BOM_IMPORTED_MS + 60_000,
+            }
+    raise HTTPException(status_code=404, detail="The project could not be found.")
+
+
 @app.post("/api/v1/bom")
 async def upload_bom(
     request: Request,
