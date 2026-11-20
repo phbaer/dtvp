@@ -56,6 +56,10 @@ Nothing is copied automatically: the same component may be used differently in
 the new version. Assess the finding by hand, or apply the existing assessment
 with a bulk workflow. The mark disappears once the finding is assessed.
 
+A BOM uploaded again to the **same** version that recreates a component is
+different: the assessment of the replaced component is carried over, pending
+review, and the finding is not new. See [Gone findings](#gone-findings).
+
 The Filters sidebar provides a searchable checkbox list of canonical **Teams**
 from the complete task. Multiple selections match vulnerabilities owned by any
 selected team. Exact names and aliases are case-insensitive. `team:` tokens
@@ -180,6 +184,34 @@ All actions of a card sit in one place, the sticky bar next to the tabs:
 Approve (reviewers, while a review is pending), Save or Submit, Reload, and the
 "More" menu. They share one button shape; the one that completes the current
 work is filled, the others are outlined.
+
+### Gone findings
+
+Dependency-Track can stop reporting a finding: its component was replaced by
+a new one with the same package URL, removed from the BOM, or no longer
+matches the vulnerability. DTVP keeps such a finding as **gone**, with the
+reason and dates. Right after a BOM upload a finding can be gone for one read
+and come back, or be replaced, at the next; see [Findings that disappear](import-export.md#findings-that-disappear).
+
+**Gone findings** in the project view's toolbar, beside **CycloneDX**, shows
+how many findings of all versions are gone; it is disabled when there are
+none. Opened, it lists per version:
+
+- the last read: "Last read *time*: N went (2 replaced, 1 component removed)";
+- each gone finding: vulnerability, component and version, reason
+  (**Replaced by** *component@version*, **Component removed**, **No longer
+  matched**, **Not yet determined**, **Missing at export**), gone since, last
+  seen, what became of its assessment (**Carried over, pending review**,
+  **Assessments differ, not carried**, **Successor has its own assessment**,
+  **Component unknown, not carried**),
+  and the record's status (`inactive`, or `superseded` once carried over).
+
+A carried-over assessment appears on the replacing finding marked
+`[Status: Pending Review]` and in **Settings → Export** with origin
+`carried-over`; review and approve it as any other. Where the old assessments
+differ, or the component of an old record is unknown, assess the new finding
+by hand. The panel is read-only and loads with
+the project; `GET /api/gone-findings?name=<project name>` returns the same.
 
 ### Inconsistencies and differences
 

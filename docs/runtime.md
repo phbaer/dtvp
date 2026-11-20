@@ -35,6 +35,7 @@ Important backend components:
 | `dtvp/bulk_workflows/` | Registry-backed bulk-change plug-ins |
 | `dtvp/dt_client.py` and `dt_cache.py` | Dependency-Track access, in-memory document cache, overlays, and pending writes |
 | `dtvp/local_store.py` | SQLite database for imported source data and the one-time JSON cache import |
+| `dtvp/finding_lifecycle_services.py` | What happened to findings: the analysis gate of a read, gone findings with reasons, carry-over from the record (`finding_lifecycle` migrations, same database file as the assessments) |
 | `dtvp/ports.py` | The source and sink interfaces the cache manager is written against; Dependency-Track implements both |
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
 | `dtvp/tmrescore_*` | Threat-model integration, inventory, cache, execution, and task state |
@@ -161,7 +162,8 @@ Important frontend components:
   project/component/vulnerability tuple is absent removes the queued export.
   A deleted project counts as such a response when the project lookup answers
   404 too while the API's version endpoint answers normally;
-  the assessment itself is kept and marked inactive. Failed checks and
+  the assessment itself is kept and marked inactive, and the finding gone
+  (`missing_at_export`). Failed checks and
   findings that still exist keep retrying. Assessments read from
   Dependency-Track are merged with local ones rather than replacing or being
   shadowed by them, and each export first reads the value it would replace;

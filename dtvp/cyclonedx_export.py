@@ -819,6 +819,7 @@ def build_vdr(
     ticket_prefixes: Iterable[str] = (),
     findings_read_at: str = "",
     fixed_versions: Mapping[tuple[str, str], dict[str, Any]] | None = None,
+    findings_gone: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """The BOM with its findings and their assessments.
 
@@ -834,6 +835,8 @@ def build_vdr(
     ``fixed_versions`` are the stored version ranges per (source, vuln ID),
     as ``LocalStore.fixed_version_entries`` returns them; ``None`` when they
     were not looked up, so that no entry counts as unread.
+    ``findings_gone`` counts, by reason, the findings of the project version
+    the source no longer reports; they are not listed.
     """
     moment = (generated_at or datetime.now(UTC)).astimezone(UTC).isoformat()
     document = build_inventory(bom, findings, property_prefix=property_prefix)
@@ -996,6 +999,14 @@ def build_vdr(
                 "value": str(historical_assessments),
             }
         )
+
+    # Findings the source stopped reporting are not listed; say how many
+    # went and why, so a reader need not compare exports to notice.
+    metadata["properties"] += [
+        {"name": f"{property_prefix}:export_findings_gone", "value": f"{reason}={count}"}
+        for reason, count in sorted((findings_gone or {}).items())
+        if int(count) > 0
+    ]
 
     document["vulnerabilities"] = vulnerabilities
     if annotations:

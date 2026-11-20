@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { AxiosProgressEvent } from 'axios';
 import type {
+    GoneFindingsOfProject,
     Project,
     GroupedVuln,
     AssessmentPayload,
@@ -201,6 +202,12 @@ export const applyProjectArchiveImport = async (
 
 export const listProjectArchiveSnapshots = async (): Promise<ProjectArchiveSnapshot[]> => {
     const res = await api.get('/project-archives/snapshots');
+    return res.data;
+};
+
+/** Findings Dependency-Track no longer reports, per version of a project. */
+export const getGoneFindings = async (name: string): Promise<GoneFindingsOfProject> => {
+    const res = await api.get('/gone-findings', { params: { name } });
     return res.data;
 };
 

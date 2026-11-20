@@ -2,7 +2,6 @@ import asyncio
 import copy
 import json
 import os
-import re
 import tempfile
 import threading
 import time
@@ -35,6 +34,19 @@ from .assessment_outbox_services import (
 )
 from .dt_client import DTClient, DTSettings
 from .fixed_versions import slim_affected_components
+from .finding_lifecycle_services import (
+    ORIGIN_CARRIED_OVER,
+    ORIGIN_CARRIED_OVER_BY_VULNERABILITY,
+    REASON_MISSING_AT_EXPORT,
+    BomIndex,
+    FindingLifecycleStore,
+    FindingsImport,
+    component_identity as _component_cache_identity,
+    follow_findings_plan,
+    index_bom,
+    read_summary,
+    record_carry_over,
+)
 from .ports import AffectedVersionSource, AssessmentSink, VulnerabilitySource
 from .local_store import (
     KIND_ANALYSIS,
@@ -311,27 +323,6 @@ def _has_meaningful_assessment(analysis: Optional[Dict[str, Any]]) -> bool:
     return bool(_get_analysis_details(analysis))
 
 
-def _one_assessment(
-    candidates: List[Tuple[Tuple[str, str, str], Dict[str, Any]]],
-) -> Optional[Dict[str, Any]]:
-    """The assessment the earlier findings of one component and vulnerability
-    agree on; ``None`` when there is none or they differ.
-
-    A BOM can list the same component several times. When the source replaces
-    them all, each earlier finding is a candidate; as long as they say the
-    same there is nothing to choose between.
-    """
-    values = {
-        (
-            _get_analysis_state(analysis),
-            _get_analysis_details(analysis),
-            _get_analysis_suppressed(analysis),
-        )
-        for _key, analysis in candidates
-    }
-    return candidates[0][1] if len(values) == 1 else None
-
-
 def _mark_assessment_for_review(analysis: Dict[str, Any]) -> Dict[str, Any]:
     details = _get_analysis_details(analysis)
     if not details:
@@ -392,18 +383,6 @@ def _mark_assessment_for_review_with_threadmodel_change(
         details = f"{details}\n\n{change_note}"
     marked["analysisDetails"] = details
     return marked
-
-
-def _component_cache_identity(component: Dict[str, Any]) -> Optional[str]:
-    purl = (component.get("purl") or "").strip().lower()
-    if purl:
-        return re.sub(r"@[^?]+", "", purl, count=1)
-
-    name = (component.get("name") or "").strip().lower()
-    if name:
-        return name
-
-    return None
 
 
 def _vulnerability_cache_identity(vulnerability: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
@@ -543,6 +522,11 @@ class CacheManager:
             legacy_path=get_legacy_assessment_outbox_path(self.base_path),
         )
         self._import_legacy_pending_updates()
+        # What happened to findings: DTVP's record, next to the assessments.
+        self.finding_lifecycle = FindingLifecycleStore(
+            get_assessment_outbox_path(self.base_path), logger=logger
+        )
+        self.finding_lifecycle.backfill_once(self.store.stored_findings)
 
     def _ensure_directories(self) -> None:
         os.makedirs(self.base_path, exist_ok=True)
@@ -1628,58 +1612,7 @@ class CacheManager:
         if findings is None:
 
             async def fetch_findings() -> List[Dict[str, Any]]:
-                async with self.lock:
-                    cached_findings = self._load_project_cache(path, None)
-                fetch_started_at = datetime.now(timezone.utc)
-                fresh_findings = await client.get_vulnerabilities(
-                    project_uuid,
-                    cve=None,
-                )
-                await self._read_texts_without_state(
-                    client, project_uuid, fresh_findings
-                )
-                source_analyses = {
-                    key: finding.get("analysis")
-                    for finding in fresh_findings or []
-                    if isinstance(finding, dict)
-                    and (key := self._finding_analysis_key(project_uuid, finding))
-                }
-                await self._merge_source_assessments(
-                    source_analyses,
-                    fetch_started_at,
-                )
-                if isinstance(fresh_findings, list):
-                    # Findings the source no longer reports keep their
-                    # assessments, marked inactive, in case they return.
-                    inactive = await asyncio.to_thread(
-                        self.assessment_outbox.mark_inactive,
-                        project_uuid,
-                        set(source_analyses),
-                        fetched_at=fetch_started_at,
-                    )
-                    if inactive:
-                        logger.info(
-                            "%d assessment(s) of %s kept for findings the "
-                            "source no longer reports",
-                            len(inactive),
-                            project_uuid,
-                        )
-                fresh_findings = self._restore_recreated_finding_assessments(
-                    project_uuid,
-                    fresh_findings,
-                    cached_findings or [],
-                )
-                fresh_findings = self._overlay_local_analysis(
-                    project_uuid,
-                    fresh_findings,
-                )
-                async with self.lock:
-                    self._save_project_cache(
-                        path,
-                        fresh_findings,
-                        project_uuid=project_uuid,
-                    )
-                return fresh_findings
+                return (await self.import_findings(client, project_uuid)).findings
 
             findings = await self._singleflight_fetch(
                 ("vulnerabilities", project_uuid),
@@ -1708,6 +1641,217 @@ class CacheManager:
             findings = filtered
 
         return findings
+
+    async def import_findings(
+        self,
+        client: VulnerabilitySource,
+        project_uuid: str,
+    ) -> FindingsImport:
+        """Read a project's findings from the source and follow them.
+
+        The assessments the source holds are compared with the record.
+        Findings the source no longer has are kept as gone, with a reason,
+        their records are retired, and an assessment of a replaced finding
+        is carried over to its successor. Every read is acted on: a read
+        taken while the source still re-analyses the project heals on the
+        next one (``finding_lifecycle_services``).
+        """
+        path = self._findings_path(project_uuid)
+        fetch_started_at = datetime.now(timezone.utc)
+        fresh_findings = await client.get_vulnerabilities(project_uuid, cve=None)
+        await self._read_texts_without_state(client, project_uuid, fresh_findings)
+        source_analyses = {
+            key: finding.get("analysis")
+            for finding in fresh_findings or []
+            if isinstance(finding, dict)
+            and (key := self._finding_analysis_key(project_uuid, finding))
+        }
+        await self._merge_source_assessments(source_analyses, fetch_started_at)
+
+        result = FindingsImport(
+            findings=fresh_findings,
+            read_at=fetch_started_at.isoformat(),
+        )
+        plan = None
+        if isinstance(fresh_findings, list):
+            plan = await self._follow_findings(
+                client, project_uuid, fresh_findings, source_analyses,
+                fetch_started_at,
+            )
+            result.went = dict(plan.presence.went)
+            result.returned = plan.presence.returned
+            result.carried_over = [carry.target for carry in plan.carried]
+            result.not_carried = plan.carry.not_carried
+            # Before the overlay, which shows why a finding went.
+            await asyncio.to_thread(
+                self.finding_lifecycle.record_read,
+                project_uuid,
+                [plan.presence.rows[key] for key in plan.presence.changed],
+            )
+        fresh_findings = self._restore_recreated_finding_assessments(
+            project_uuid, fresh_findings
+        )
+        fresh_findings = self._overlay_local_analysis(project_uuid, fresh_findings)
+        async with self.lock:
+            self._save_project_cache(path, fresh_findings, project_uuid=project_uuid)
+        result.findings = fresh_findings
+        if plan is not None:
+            await asyncio.to_thread(
+                self.finding_lifecycle.record_read, project_uuid, [], read_summary(plan)
+            )
+            changed = sorted(
+                set(plan.retired)
+                | {carry.target for carry in plan.carried}
+                | {key for carry in plan.carried for key in carry.candidates}
+            )
+            if changed:
+                async with self.lock:
+                    self.pending_updates = self._load_pending_updates()
+                    self._invalidate_cache_status()
+                    self._touch_cache_meta(project_uuids={project_uuid})
+                await self._notify_assessments_changed(changed)
+        return result
+
+    async def _stored_bom_index(self, project_uuid: str) -> Optional[BomIndex]:
+        async with self.lock:
+            bom = self._load_project_cache(self._bom_path(project_uuid), None)
+        return index_bom(bom)
+
+    async def _read_bom_for_lifecycle(
+        self, client: VulnerabilitySource, project_uuid: str
+    ) -> Optional[BomIndex]:
+        try:
+            bom = await client.get_bom(project_uuid)
+        except Exception as exc:
+            logger.warning("Could not read the BOM of %s: %s", project_uuid, exc)
+            return None
+        if not isinstance(bom, dict):
+            return None
+        async with self.lock:
+            self._save_project_cache(
+                self._bom_path(project_uuid), bom, project_uuid=project_uuid
+            )
+        return index_bom(bom)
+
+    async def _follow_findings(
+        self,
+        client: VulnerabilitySource,
+        project_uuid: str,
+        findings: List[Any],
+        source_analyses: Dict[AssessmentKey, Any],
+        started_at: datetime,
+    ) -> Any:
+        """Record the findings of a read, mark what went and carry
+        assessments over. See ``finding_lifecycle_services``."""
+        loop = asyncio.get_running_loop()
+        bom_state: Dict[str, Optional[BomIndex]] = {}
+
+        def previous_bom() -> Optional[BomIndex]:
+            # The BOM stored before this read, which may still list
+            # components the source no longer has.
+            if "previous" not in bom_state:
+                bom_state["previous"] = asyncio.run_coroutine_threadsafe(
+                    self._stored_bom_index(project_uuid), loop
+                ).result()
+            return bom_state["previous"]
+
+        def read_bom() -> Optional[BomIndex]:
+            # Called from the worker thread; read once, only when needed.
+            if "index" not in bom_state:
+                previous_bom()  # before the read replaces it
+                bom_state["index"] = asyncio.run_coroutine_threadsafe(
+                    self._read_bom_for_lifecycle(client, project_uuid), loop
+                ).result()
+            return bom_state["index"]
+
+        def has_source_value(key: AssessmentKey) -> bool:
+            analysis = source_analyses.get(key)
+            if _is_incomplete_source_assessment(analysis):
+                return True
+            value = _source_assessment_value(analysis)
+            return not (
+                value["state"] == "NOT_SET"
+                and not value["details"].strip()
+                and not value["suppressed"]
+            )
+
+        plan = await asyncio.to_thread(
+            lambda: follow_findings_plan(
+                project_uuid=project_uuid,
+                findings=findings,
+                has_source_value=has_source_value,
+                started_at=started_at,
+                lifecycle=self.finding_lifecycle,
+                outbox=self.assessment_outbox,
+                bom=read_bom,
+                previous_bom=previous_bom,
+            )
+        )
+        carried = []
+        for origin in (ORIGIN_CARRIED_OVER, ORIGIN_CARRIED_OVER_BY_VULNERABILITY):
+            group = [carry for carry in plan.carry.carries if carry.origin == origin]
+            if not group:
+                continue
+            payloads = [
+                {
+                    "project_uuid": carry.target[0],
+                    "component_uuid": carry.target[1],
+                    "vulnerability_uuid": carry.target[2],
+                    "state": carry.value["state"],
+                    "details": _mark_assessment_for_review(
+                        {
+                            "analysisState": carry.value["state"],
+                            "analysisDetails": carry.value["details"],
+                            "isSuppressed": carry.value["suppressed"],
+                        }
+                    )["analysisDetails"],
+                    "suppressed": carry.value["suppressed"],
+                }
+                for carry in group
+            ]
+            # The plan was made from a snapshot of the records. A target
+            # assessed, or a candidate saved again, since then keeps its
+            # value: that carry is left out, for the next read to decide.
+            expected: Dict[AssessmentKey, Optional[int]] = {}
+            for carry in group:
+                expected[carry.target] = None
+                for candidate in carry.candidates:
+                    expected[candidate] = int(
+                        (plan.records.get(candidate) or {}).get("revision") or 0
+                    )
+            entries = await self.persist_assessment_updates(
+                payloads,
+                origin=origin,
+                author=None,
+                replace=False,
+                supersedes={carry.target: carry.candidates for carry in group},
+                expected_records=expected,
+                skip_changed=True,
+            )
+            saved = {
+                (
+                    str(entry["payload"]["project_uuid"]),
+                    str(entry["payload"]["component_uuid"]),
+                    str(entry["payload"]["vulnerability_uuid"]),
+                )
+                for entry in entries
+            }
+            skipped = [carry.target for carry in group if carry.target not in saved]
+            if skipped:
+                logger.warning(
+                    "%d assessment(s) of %s not carried over: the finding or "
+                    "the record changed during the read",
+                    len(skipped), project_uuid,
+                )
+            carried.extend(carry for carry in group if carry.target in saved)
+        if carried:
+            logger.info(
+                "Carried %d assessment(s) of %s over to the findings that "
+                "replaced theirs, pending review",
+                len(carried), project_uuid,
+            )
+        record_carry_over(plan, carried, has_source_value=has_source_value)
+        return plan
 
     async def get_project_vulnerabilities(
         self,
@@ -1891,6 +2035,11 @@ class CacheManager:
         findings_read_at = self.store.snapshot_updated_at(
             DocumentRef(KIND_FINDINGS, project_uuid=project_uuid)
         )
+        # Every finding of the version gone now, not only those of the last
+        # read, so two exports in a row agree.
+        findings_gone = await asyncio.to_thread(
+            self.finding_lifecycle.gone_counts, project_uuid
+        )
 
         def assemble() -> Dict[str, Any]:
             # The version ranges as the background read stored them; an
@@ -1927,6 +2076,7 @@ class CacheManager:
                 ticket_prefixes=ticket_prefixes,
                 findings_read_at=findings_read_at or "",
                 fixed_versions=fixed_versions,
+                findings_gone=findings_gone,
             )
             if not advisories_read:
                 # Ratings, dates, and recommendations are those of the
@@ -2174,9 +2324,8 @@ class CacheManager:
         component_uuid: str,
         vulnerability_uuid: str,
     ) -> Optional[Dict[str, Any]]:
-        overlay = self.assessment_outbox.get_overlay(
-            (project_uuid, component_uuid, vulnerability_uuid)
-        )
+        key = (project_uuid, component_uuid, vulnerability_uuid)
+        overlay = self.assessment_outbox.get_overlay(key)
         if overlay is None:
             return None
         if (
@@ -2187,18 +2336,22 @@ class CacheManager:
             # analysis is the same value and carries the source's other
             # fields (justification, response, comments) as well.
             return None
+        fields = self._overlay_fields(overlay)
         remote = overlay.get("remote")
         if remote is not None and overlay.get("sync_status") in ("pending", "error"):
-            return {
-                **self._overlay_fields(overlay),
-                # What the source holds while the local value waits for export.
-                "dtvpRemote": {
-                    "analysisState": remote["state"],
-                    "analysisDetails": remote["details"],
-                    "isSuppressed": remote["suppressed"],
-                },
+            # What the source holds while the local value waits for export.
+            fields["dtvpRemote"] = {
+                "analysisState": remote["state"],
+                "analysisDetails": remote["details"],
+                "isSuppressed": remote["suppressed"],
             }
-        return self._overlay_fields(overlay)
+        gone = self.finding_lifecycle.gone_row(key)
+        if gone is not None:
+            # The source no longer reports the finding: why, and where its
+            # assessment went.
+            fields["dtvpGoneReason"] = gone.get("gone_reason")
+            fields["dtvpSupersededBy"] = gone.get("successor_component_uuid")
+        return fields
 
     @staticmethod
     def _overlay_fields(overlay: Dict[str, Any]) -> Dict[str, Any]:
@@ -2306,37 +2459,19 @@ class CacheManager:
         self,
         project_uuid: str,
         findings: List[Dict[str, Any]],
-        previous_findings: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        if not findings or not previous_findings:
+        """Mark stored assessments of a finding for review where the source
+        sent none, or changed a threat-model rescoring.
+
+        Assessments of replaced findings are carried over from the record
+        (``import_findings``), not from the previous snapshot.
+        """
+        if not findings:
             return findings
 
-        previous_candidates: Dict[
-            Tuple[str, Tuple[str, ...]], List[Tuple[Tuple[str, str, str], Dict[str, Any]]]
-        ] = {}
         read_analysis = self._project_analysis_reader(project_uuid)
-
-        for previous_finding in previous_findings:
-            identity = self._finding_cache_identity(previous_finding)
-            analysis_key = self._finding_analysis_key(project_uuid, previous_finding)
-            if not identity or not analysis_key:
-                continue
-
-            previous_analysis = read_analysis(
-                analysis_key[1],
-                analysis_key[2],
-                previous_finding.get("analysis"),
-            )
-            if not _has_meaningful_assessment(previous_analysis):
-                continue
-
-            previous_candidates.setdefault(identity, []).append(
-                (analysis_key, previous_analysis)
-            )
-
         for finding in findings:
             source_analysis = finding.get("analysis") or {}
-            identity = self._finding_cache_identity(finding)
             analysis_key = self._finding_analysis_key(project_uuid, finding)
             if not analysis_key:
                 continue
@@ -2347,19 +2482,9 @@ class CacheManager:
             )
 
             if _get_analysis_details(source_analysis):
-                previous_analysis = (
-                    current_cached_analysis
-                    if _has_meaningful_assessment(current_cached_analysis)
-                    else None
-                )
-                if previous_analysis is None and identity:
-                    previous_analysis = _one_assessment(
-                        previous_candidates.get(identity, [])
-                    )
-
-                if previous_analysis:
+                if _has_meaningful_assessment(current_cached_analysis):
                     changed, previous_score, current_score = _threadmodel_score_changed(
-                        previous_analysis, source_analysis
+                        current_cached_analysis, source_analysis
                     )
                     if changed:
                         marked = _mark_assessment_for_review_with_threadmodel_change(
@@ -2371,27 +2496,10 @@ class CacheManager:
                             project_uuid=project_uuid,
                         )
                         finding["analysis"] = marked
-                        continue
                 continue
 
             if _has_meaningful_assessment(current_cached_analysis):
                 finding["analysis"] = _mark_assessment_for_review(current_cached_analysis)
-                continue
-
-            if not identity:
-                continue
-
-            previous_analysis = _one_assessment(previous_candidates.get(identity, []))
-            if previous_analysis is None:
-                continue
-
-            preserved_analysis = _mark_assessment_for_review(previous_analysis)
-            self._save_project_cache(
-                current_path,
-                preserved_analysis,
-                project_uuid=project_uuid,
-            )
-            finding["analysis"] = preserved_analysis
 
         return findings
 
@@ -2455,6 +2563,9 @@ class CacheManager:
         author: str | None = None,
         origin: str = "user",
         seen: dict[AssessmentKey, Dict[str, Any]] | None = None,
+        supersedes: dict[AssessmentKey, List[AssessmentKey]] | None = None,
+        expected_records: dict[AssessmentKey, int | None] | None = None,
+        skip_changed: bool = False,
     ) -> List[Dict[str, Any]]:
         """Record local assessments and queue them for export.
 
@@ -2462,6 +2573,11 @@ class CacheManager:
         caller knows it. It is the reference for conflict detection on a
         first edit; without it the stored source value is used, which can be
         newer than what the author was looking at.
+
+        ``supersedes`` names the records a value was carried over from; they
+        become ``superseded`` in the same transaction. ``expected_records``
+        and ``skip_changed`` guard against records that changed since the
+        caller read them; see ``AssessmentOutboxStore.enqueue_many``.
         """
         if not payloads:
             return []
@@ -2481,6 +2597,9 @@ class CacheManager:
                 expected_revisions=expected_revisions,
                 author=author,
                 origin=origin,
+                supersedes=supersedes,
+                expected_records=expected_records,
+                skip_changed=skip_changed,
             )
         except AssessmentOutboxConflictError as exc:
             raise PendingUpdateExistsError(str(exc)) from exc
@@ -2650,6 +2769,12 @@ class CacheManager:
                                             "confirming its exact finding no "
                                             "longer exists",
                                             entry.get("id"),
+                                        )
+                                        await asyncio.to_thread(
+                                            self.finding_lifecycle.mark_gone,
+                                            key,
+                                            reason=REASON_MISSING_AT_EXPORT,
+                                            at=datetime.now(timezone.utc).isoformat(),
                                         )
                                     continue
                                 failure_message = (

@@ -781,38 +781,32 @@ async def test_refresh_project_marks_review_when_threadmodel_score_changes(tmp_p
     client = AsyncMock()
     project_uuid = "project-1"
 
-    old_finding = {
-        "component": {
-            "uuid": "component-old",
-            "name": "log4j-core",
-            "version": "2.16.0",
-            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.16.0",
-        },
-        "vulnerability": {
-            "uuid": "vuln-old",
-            "vulnId": "CVE-2021-44228",
-            "name": "CVE-2021-44228",
-        },
-        "analysis": {
-            "analysisState": "EXPLOITABLE",
-            "analysisDetails": "[Rescored: 3.5]\nPrevious TM review.",
-            "isSuppressed": False,
-        },
+    component = {
+        "uuid": "component-1",
+        "name": "log4j-core",
+        "version": "2.17.0",
+        "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
     }
-    manager._save_project_cache(manager._findings_path(project_uuid), [old_finding])
+    vulnerability = {
+        "uuid": "vuln-1",
+        "vulnId": "CVE-2021-44228",
+        "name": "CVE-2021-44228",
+    }
+    # The stored assessment of the same finding, rescored earlier.
+    manager._save_local_analysis(
+        {
+            "project_uuid": project_uuid,
+            "component_uuid": "component-1",
+            "vulnerability_uuid": "vuln-1",
+            "state": "EXPLOITABLE",
+            "details": "[Rescored: 3.5]\nPrevious TM review.",
+            "suppressed": False,
+        }
+    )
 
     new_finding = {
-        "component": {
-            "uuid": "component-new",
-            "name": "log4j-core",
-            "version": "2.17.0",
-            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
-        },
-        "vulnerability": {
-            "uuid": "vuln-new",
-            "vulnId": "CVE-2021-44228",
-            "name": "CVE-2021-44228",
-        },
+        "component": component,
+        "vulnerability": vulnerability,
         "analysis": {
             "analysisState": "EXPLOITABLE",
             "analysisDetails": "[Rescored: 4.0]\nUpdated TM review.",
@@ -820,7 +814,7 @@ async def test_refresh_project_marks_review_when_threadmodel_score_changes(tmp_p
         },
     }
     client.get_vulnerabilities.return_value = [new_finding]
-    client.get_project_vulnerabilities.return_value = [{"uuid": "vuln-new"}]
+    client.get_project_vulnerabilities.return_value = [{"uuid": "vuln-1"}]
     client.get_bom.return_value = {"components": []}
 
     await manager.refresh_project(project_uuid, client)
@@ -837,7 +831,7 @@ async def test_refresh_project_marks_review_when_threadmodel_score_changes(tmp_p
     assert "TM rescoring changed from 3.5 to 4.0." in saved_analysis["analysisDetails"]
 
     persisted_analysis = manager._load_project_cache(
-        manager._analysis_path(project_uuid, "component-new", "vuln-new"), None
+        manager._analysis_path(project_uuid, "component-1", "vuln-1"), None
     )
     assert persisted_analysis == saved_analysis
 
@@ -882,6 +876,10 @@ async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
     project_uuid = "project-1"
+    text = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\n"
+        "Historical assessment."
+    )
 
     old_finding = {
         "component": {
@@ -897,22 +895,15 @@ async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding
         },
         "analysis": {
             "analysisState": "NOT_AFFECTED",
-            "analysisDetails": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\nHistorical assessment.",
+            "analysisDetails": text,
             "isSuppressed": False,
         },
     }
-    manager._save_project_cache(manager._findings_path(project_uuid), [old_finding])
-    manager._save_local_analysis(
-        {
-            "project_uuid": project_uuid,
-            "component_uuid": "component-old",
-            "vulnerability_uuid": "vuln-old",
-            "state": "NOT_AFFECTED",
-            "details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\nHistorical assessment.",
-            "suppressed": False,
-        }
-    )
+    client.get_vulnerabilities.return_value = [old_finding]
+    await manager.get_vulnerabilities(client, project_uuid, refresh=True)
 
+    # Recreated in another version and under a new vulnerability UUID with
+    # the same identifier: the package URL without version still matches.
     new_finding = {
         "component": {
             "uuid": "component-new",
@@ -932,6 +923,8 @@ async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding
         },
     }
     client.get_vulnerabilities.return_value = [new_finding]
+    # The BOM says the old component is gone.
+    client.get_bom.return_value = {"components": [{"bom-ref": "component-new"}]}
 
     findings = await manager.get_vulnerabilities(client, project_uuid, refresh=True)
 
@@ -940,12 +933,12 @@ async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding
     assert analysis["analysisState"] == "NOT_AFFECTED"
     assert "Historical assessment." in analysis["analysisDetails"]
     assert "[Status: Pending Review]" in analysis["analysisDetails"]
-
-    migrated = manager._load_project_cache(
-        manager._analysis_path(project_uuid, "component-new", "vuln-new"),
-        None,
-    )
-    assert migrated == analysis
+    assert analysis["dtvpSyncStatus"] == "pending"
+    history = manager.get_assessment_history(project_uuid, "component-new", "vuln-new")
+    assert history[0]["origin"] == "carried-over"
+    old = manager.assessment_outbox.get_overlay((project_uuid, "component-old", "vuln-old"))
+    assert old["sync_status"] == "superseded"
+    await manager.close()
 
 
 @pytest.mark.asyncio
@@ -961,9 +954,9 @@ async def test_recreated_findings_of_a_component_listed_twice_keep_a_shared_asse
         return {
             "component": {
                 "uuid": component_uuid,
-                "name": "netty-codec-http",
+                "name": "lib-b",
                 "version": "4.1.100",
-                "purl": "pkg:maven/io.netty/netty-codec-http@4.1.100",
+                "purl": "pkg:maven/org.example/lib-b@4.1.100",
             },
             "vulnerability": {"uuid": "vuln-1", "vulnId": "CVE-2026-1", "name": "CVE-2026-1"},
             "analysis": {
@@ -972,23 +965,17 @@ async def test_recreated_findings_of_a_component_listed_twice_keep_a_shared_asse
         }
 
     def block(text):
-        return f"--- [Team: K-Core] [State: NOT_AFFECTED] [Assessed By: kim] ---\n{text}"
+        return f"--- [Team: Alpha] [State: NOT_AFFECTED] [Assessed By: kim] ---\n{text}"
 
     # The BOM lists the component twice, each with the team's assessment.
-    old = [finding("old-1", "NOT_AFFECTED", block("Same.")),
-           finding("old-2", "NOT_AFFECTED", block(second_text))]
-    manager._save_project_cache(manager._findings_path(project_uuid), old)
-    for item in old:
-        manager._save_local_analysis({
-            "project_uuid": project_uuid,
-            "component_uuid": item["component"]["uuid"],
-            "vulnerability_uuid": "vuln-1",
-            "state": "NOT_AFFECTED",
-            "details": item["analysis"]["analysisDetails"],
-            "suppressed": False,
-        })
+    client.get_vulnerabilities.return_value = [
+        finding("old-1", "NOT_AFFECTED", block("Same.")),
+        finding("old-2", "NOT_AFFECTED", block(second_text)),
+    ]
+    await manager.get_vulnerabilities(client, project_uuid, refresh=True)
     # A BOM upload replaces both components; the source has no analysis.
     client.get_vulnerabilities.return_value = [finding("new-1"), finding("new-2")]
+    client.get_bom.return_value = {"components": [{"bom-ref": "new-1"}, {"bom-ref": "new-2"}]}
 
     findings = await manager.get_vulnerabilities(client, project_uuid, refresh=True)
 
@@ -996,11 +983,16 @@ async def test_recreated_findings_of_a_component_listed_twice_keep_a_shared_asse
         details = item["analysis"]["analysisDetails"]
         if carried:
             assert item["analysis"]["analysisState"] == "NOT_AFFECTED"
-            assert "[Team: K-Core]" in details and "Same." in details
+            assert "[Team: Alpha]" in details and "Same." in details
             assert "[Status: Pending Review]" in details
         else:
             # Two different assessments: which one applies is not ours to say.
             assert not details
+    presence = manager.finding_lifecycle.presence(project_uuid)
+    assert {presence[(c, "vuln-1")]["carry_over"] for c in ("old-1", "old-2")} == {
+        "carried" if carried else "conflict"
+    }
+    await manager.close()
 
 
 @pytest.mark.asyncio
@@ -1009,35 +1001,27 @@ async def test_get_vulnerabilities_marks_review_when_threadmodel_score_changes(t
     client = AsyncMock()
     project_uuid = "project-1"
 
-    old_finding = {
-        "component": {
-            "uuid": "component-old",
-            "name": "log4j-core",
-            "version": "2.16.0",
-            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.16.0",
-        },
-        "vulnerability": {
-            "uuid": "vuln-old",
-            "vulnId": "CVE-2021-44228",
-            "name": "CVE-2021-44228",
-        },
-        "analysis": {
-            "analysisState": "EXPLOITABLE",
-            "analysisDetails": "[Rescored: 3.5]\nPrevious TM review.",
-            "isSuppressed": False,
-        },
-    }
-    manager._save_project_cache(manager._findings_path(project_uuid), [old_finding])
+    # The stored assessment of the same finding, rescored earlier.
+    manager._save_local_analysis(
+        {
+            "project_uuid": project_uuid,
+            "component_uuid": "component-1",
+            "vulnerability_uuid": "vuln-1",
+            "state": "EXPLOITABLE",
+            "details": "[Rescored: 3.5]\nPrevious TM review.",
+            "suppressed": False,
+        }
+    )
 
     new_finding = {
         "component": {
-            "uuid": "component-new",
+            "uuid": "component-1",
             "name": "log4j-core",
             "version": "2.17.0",
             "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
         },
         "vulnerability": {
-            "uuid": "vuln-new",
+            "uuid": "vuln-1",
             "vulnId": "CVE-2021-44228",
             "name": "CVE-2021-44228",
         },
@@ -1644,3 +1628,473 @@ def test_the_range_table_is_added_to_an_existing_database(tmp_path):
     assert store.fixed_version_entries([("NVD", "CVE-1")])[("NVD", "CVE-1")]["payload"] == []
     assert store.describe_projects(["p1"])["p1"]["name"] == "App"
     store.close()
+
+
+# -- following the source's findings: gone, carried over, back again --------
+
+
+_ALPHA = "--- [Team: Alpha] [State: NOT_AFFECTED] [Assessed By: alex] ---\nNot reachable."
+_BETA = "--- [Team: Beta] [State: EXPLOITABLE] [Assessed By: bea] ---\nReachable."
+
+
+def _lib(component_uuid, version, state="NOT_SET", details="", vuln="v1"):
+    return {
+        "component": {
+            "uuid": component_uuid,
+            "name": "lib-a",
+            "version": version,
+            "purl": f"pkg:maven/org.example/lib-a@{version}",
+        },
+        "vulnerability": {"uuid": vuln, "vulnId": "CVE-2026-1" if vuln == "v1" else "CVE-2026-2"},
+        "analysis": {"analysisState": state, "analysisDetails": details, "isSuppressed": False},
+    }
+
+
+def _bom(*component_uuids, version="1.1"):
+    return {
+        "components": [
+            {"bom-ref": uuid, "name": "lib-a", "purl": f"pkg:maven/org.example/lib-a@{version}"}
+            for uuid in component_uuids
+        ]
+    }
+
+
+async def test_a_replaced_component_keeps_its_assessment_across_the_reanalysis(tmp_path):
+    """A read taken while the source re-analyses a BOM upload is acted on;
+    the next read heals it (no waiting for the source's analysis)."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+
+    # Read 1: the old component with an assessment, adopted as the record.
+    client.get_vulnerabilities.return_value = [_lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA)]
+    await manager.import_findings(client, "p1")
+    assert manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))["sync_status"] == "synced"
+    revision_before = manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))["revision"]
+
+    # Read 2: a new BOM replaced the component; the source has not reported
+    # the new one's findings yet. The finding is gone, its record inactive.
+    client.get_vulnerabilities.return_value = []
+    client.get_bom.return_value = _bom()
+    second = await manager.import_findings(client, "p1")
+    assert second.went == {"component_removed": 1}
+    presence = manager.finding_lifecycle.presence("p1")
+    assert presence[("c-old", "v1")]["gone_reason"] == "component_removed"
+    old_record = manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))
+    assert old_record["sync_status"] == "inactive"
+    # Retiring changes no value, so it writes no revision.
+    assert old_record["revision"] == revision_before
+
+    # Read 3: the component is back under a new UUID and version.
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1")]
+    client.get_bom.return_value = _bom("c-new")
+    third = await manager.import_findings(client, "p1")
+
+    assert third.carried_over == [("p1", "c-new", "v1")]
+    analysis = (await manager.get_vulnerabilities(client, "p1"))[0]["analysis"]
+    assert analysis["analysisState"] == "NOT_AFFECTED"
+    assert "Not reachable." in analysis["analysisDetails"]
+    assert "[Status: Pending Review]" in analysis["analysisDetails"]
+    assert analysis["dtvpSyncStatus"] == "pending"
+    assert analysis["dtvpRevision"] == 1
+    assert [entry["origin"] for entry in manager.get_assessment_history("p1", "c-new", "v1")] == [
+        "carried-over"
+    ]
+    assert [item["component_uuid"] for item in manager.list_export_queue()] == ["c-new"]
+    assert manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))["sync_status"] == "superseded"
+    # The earlier gone mark is resolved: replaced, with the successor.
+    old = manager.finding_lifecycle.presence("p1")[("c-old", "v1")]
+    assert (old["status"], old["gone_reason"], old["successor_component_uuid"], old["carry_over"]) == (
+        "gone", "replaced", "c-new", "carried",
+    )
+    gone = manager.get_assessment_overlay("p1", "c-old", "v1")
+    assert (gone["dtvpGoneReason"], gone["dtvpSupersededBy"]) == ("replaced", "c-new")
+
+    await manager.flush_pending_updates(client)
+    assert client.update_analysis.await_args.kwargs["component_uuid"] == "c-new"
+    await manager.close()
+
+
+async def test_the_import_needs_nothing_but_the_source_protocol(tmp_path):
+    """A source that offers only what dtvp/ports.py asks for, with no
+    Dependency-Track project fields, gets the whole gone/carry-over flow."""
+
+    class Source:
+        def __init__(self):
+            self.findings = [_lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA)]
+            self.bom = _bom("c-old", version="1.0")
+
+        async def get_projects(self, name=None):
+            return [{"uuid": "p1", "name": "Product", "version": "1.0"}]
+
+        async def get_vulnerabilities(self, project_uuid, cve=None):
+            return [dict(item) for item in self.findings]
+
+        async def get_project_vulnerabilities(self, project_uuid):
+            return []
+
+        async def get_bom(self, project_uuid):
+            return self.bom
+
+        async def get_analysis(self, project_uuid, component_uuid, vulnerability_uuid):
+            return None
+
+    manager = CacheManager(base_path=str(tmp_path))
+    source = Source()
+    await manager.import_findings(source, "p1")
+    source.findings, source.bom = [], _bom()
+    await manager.import_findings(source, "p1")
+    source.findings, source.bom = [_lib("c-new", "1.1")], _bom("c-new")
+    result = await manager.import_findings(source, "p1")
+
+    assert result.carried_over == [("p1", "c-new", "v1")]
+    assert manager.finding_lifecycle.presence("p1")[("c-old", "v1")]["gone_reason"] == "replaced"
+    await manager.close()
+
+
+async def test_a_replaced_component_whose_old_assessments_differ_is_not_carried(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [
+        _lib("c-old-1", "1.0", "NOT_AFFECTED", _ALPHA),
+        _lib("c-old-2", "1.0", "EXPLOITABLE", _BETA),
+    ]
+    await manager.import_findings(client, "p1")
+
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1")]
+    client.get_bom.return_value = _bom("c-new")
+    result = await manager.import_findings(client, "p1")
+
+    assert result.carried_over == [] and result.not_carried == 1
+    assert manager.assessment_outbox.get_overlay(("p1", "c-new", "v1")) is None
+    presence = manager.finding_lifecycle.presence("p1")
+    for component in ("c-old-1", "c-old-2"):
+        assert presence[(component, "v1")]["carry_over"] == "conflict"
+        assert manager.assessment_outbox.get_overlay(("p1", component, "v1"))["sync_status"] == "inactive"
+    await manager.close()
+
+
+async def test_an_assessment_from_before_findings_were_recorded_is_carried_by_vulnerability(
+    tmp_path,
+):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    # A record whose finding DTVP never recorded; only the BOM DTVP stored
+    # earlier still names its component.
+    await manager.persist_assessment_updates(
+        [{
+            "project_uuid": "p1", "component_uuid": "c-gone", "vulnerability_uuid": "v1",
+            "state": "NOT_AFFECTED", "details": _ALPHA, "suppressed": False,
+        }]
+    )
+    await manager.flush_pending_updates(client)
+    client.update_analysis.reset_mock()
+    manager._save_project_cache(
+        manager._bom_path("p1"), _bom("c-gone", version="1.0"), project_uuid="p1"
+    )
+
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1")]
+    client.get_bom.return_value = _bom("c-new")
+    result = await manager.import_findings(client, "p1")
+
+    assert result.carried_over == [("p1", "c-new", "v1")]
+    history = manager.get_assessment_history("p1", "c-new", "v1")
+    assert history[0]["origin"] == "carried-over-by-vulnerability"
+    assert manager.assessment_outbox.get_overlay(("p1", "c-gone", "v1"))["sync_status"] == "superseded"
+    row = manager.finding_lifecycle.presence("p1")[("c-gone", "v1")]
+    assert (row["gone_reason"], row["carry_over"]) == ("replaced", "carried")
+    # What the stored BOM said of the component is kept with the finding.
+    assert (row["component_name"], row["component_version"]) == ("lib-a", None)
+    await manager.close()
+
+
+@pytest.mark.parametrize("source_keeps_value", [True, False])
+async def test_a_vulnerability_no_longer_matched_goes_and_comes_back(
+    tmp_path, source_keeps_value
+):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    assessed = _lib("c1", "1.0", "NOT_AFFECTED", _ALPHA)
+    other = _lib("c1", "1.0", vuln="v2")
+    client.get_vulnerabilities.return_value = [assessed, other]
+    await manager.import_findings(client, "p1")
+
+    # The component stays; the source no longer matches v1 against it.
+    client.get_vulnerabilities.return_value = [other]
+    went = await manager.import_findings(client, "p1")
+
+    assert went.went == {"no_longer_matched": 1}
+    client.get_bom.assert_not_awaited()  # the findings alone decide
+    assert manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))["sync_status"] == "inactive"
+    overlay = manager.get_assessment_overlay("p1", "c1", "v1")
+    assert overlay["dtvpGoneReason"] == "no_longer_matched"
+    gone = manager.finding_lifecycle.presence("p1")[("c1", "v1")]
+    assert gone["status"] == "gone" and gone["gone_at"] and gone["last_seen_at"]
+
+    returning = assessed if source_keeps_value else _lib("c1", "1.0")
+    client.get_vulnerabilities.return_value = [returning, other]
+    back = await manager.import_findings(client, "p1")
+
+    assert back.returned == 1
+    row = manager.finding_lifecycle.presence("p1")[("c1", "v1")]
+    assert row["status"] == "reported" and row["returned_at"]
+    assert row["gone_reason"] == "no_longer_matched"  # when and why it went stays
+    record = manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))
+    assert record["sync_status"] == ("synced" if source_keeps_value else "pending")
+    # Active again with the same value: no new revision, the history only
+    # lists changes of the value.
+    assert record["revision"] == 0
+    history = manager.get_assessment_history("p1", "c1", "v1")
+    assert [(entry["revision"], entry["origin"]) for entry in history] == [(0, "import")]
+    assert "Not reachable." in history[0]["analysisDetails"]
+    if not source_keeps_value:
+        assert [item["revision"] for item in manager.list_export_queue()] == [0]
+    analysis = next(
+        item["analysis"] for item in back.findings
+        if item["vulnerability"]["uuid"] == "v1"
+    )
+    # It has its assessment, so it is not a new finding.
+    assert analysis["analysisState"] == "NOT_AFFECTED"
+    assert "dtvpGoneReason" not in analysis
+    await manager.close()
+
+
+async def test_a_pending_export_to_a_gone_finding_is_dropped_with_its_reason(tmp_path):
+    manager, client = await _manager_with_source(tmp_path)
+    await manager.persist_assessment_updates([_local_payload("Never sent")])
+
+    client.get_vulnerabilities.return_value = []
+    client.get_bom.return_value = {"components": [{"bom-ref": "c-other", "name": "lib-z"}]}
+    result = await manager.import_findings(client, "p1")
+
+    assert result.went == {"component_removed": 1}
+    assert manager.assessment_outbox.pending_count() == 0
+    record = manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))
+    assert (record["sync_status"], record["analysisDetails"]) == ("inactive", "Never sent")
+    assert manager.finding_lifecycle.presence("p1")[("c1", "v1")]["gone_reason"] == "component_removed"
+    assert manager.list_export_queue() == []
+    await manager.flush_pending_updates(client)
+    client.update_analysis.assert_not_awaited()
+    await manager.close()
+
+
+async def test_a_pending_export_rejected_as_missing_records_the_reason(tmp_path):
+    manager, client = await _manager_with_source(tmp_path)
+    await manager.persist_assessment_updates([_local_payload("Sent too late")])
+    request = httpx.Request("PUT", "http://dt/api/v1/analysis")
+    client.update_analysis.side_effect = httpx.HTTPStatusError(
+        "404", request=request, response=httpx.Response(404, request=request)
+    )
+    client.finding_exists.return_value = False
+
+    await manager.flush_pending_updates(client)
+
+    row = manager.finding_lifecycle.presence("p1")[("c1", "v1")]
+    assert (row["status"], row["gone_reason"]) == ("gone", "missing_at_export")
+    assert manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))["sync_status"] == "inactive"
+    await manager.close()
+
+
+async def test_the_vdr_counts_the_findings_that_are_gone_now(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c1", "1.0"), _lib("c1", "1.0", vuln="v2")]
+    client.get_bom.return_value = _bom("c1", version="1.0")
+    await manager.import_findings(client, "p1")
+    client.get_vulnerabilities.return_value = [_lib("c1", "1.0", vuln="v2")]
+    await manager.import_findings(client, "p1")
+    client.get_project_vulnerabilities.return_value = []
+
+    for _ in range(2):  # two exports in a row agree
+        document = await manager.export_cyclonedx(
+            client, "p1", "vdr", assessment_source="DTVP", property_prefix="acme"
+        )
+        assert [
+            item["value"] for item in document["metadata"]["properties"]
+            if item["name"] == "acme:export_findings_gone"
+        ] == ["no_longer_matched=1"]
+        assert [entry["id"] for entry in document["vulnerabilities"]] == ["CVE-2026-2"]
+    await manager.close()
+
+
+@pytest.mark.parametrize(
+    "stored_name, outcome",
+    [("lib-a", "carried"), ("lib-z", None), (None, "undetermined")],
+)
+async def test_an_inactive_record_from_before_the_upgrade_is_carried_by_vulnerability(
+    tmp_path, stored_name, outcome
+):
+    """Carried by vulnerability only to a component of the same name; when
+    the name of the record's component is not known, a person decides."""
+    from datetime import UTC, datetime, timedelta
+
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    # Retired by an import before findings were recorded: inactive, and no
+    # finding row of its own.
+    await manager.persist_assessment_updates(
+        [{
+            "project_uuid": "p1", "component_uuid": "c-gone", "vulnerability_uuid": "v1",
+            "state": "NOT_AFFECTED", "details": _ALPHA, "suppressed": False,
+        }]
+    )
+    await manager.flush_pending_updates(client)
+    manager.assessment_outbox.mark_inactive(
+        "p1", set(), fetched_at=datetime.now(UTC) + timedelta(seconds=5)
+    )
+    assert manager.finding_lifecycle.presence("p1") == {}
+    if stored_name:
+        manager._save_project_cache(
+            manager._bom_path("p1"),
+            {"components": [{"bom-ref": "c-gone", "name": stored_name}]},
+            project_uuid="p1",
+        )
+
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1"), _lib("c-new", "1.1", vuln="v2")]
+    client.get_bom.return_value = _bom("c-new")
+    result = await manager.import_findings(client, "p1")
+
+    assert result.went == {}  # it did not go at this read
+    record = manager.assessment_outbox.get_overlay(("p1", "c-gone", "v1"))
+    row = manager.finding_lifecycle.presence("p1").get(("c-gone", "v1"))
+    if outcome == "carried":
+        assert result.carried_over == [("p1", "c-new", "v1")]
+        assert manager.get_assessment_history("p1", "c-new", "v1")[0]["origin"] == (
+            "carried-over-by-vulnerability"
+        )
+        assert (row["status"], row["gone_reason"], row["successor_component_uuid"], row["carry_over"]) == (
+            "gone", "replaced", "c-new", "carried",
+        )
+        assert row["vuln_id"] == "CVE-2026-1"
+        assert record["sync_status"] == "superseded"
+        return await manager.close()
+
+    # Another package's assessment, or one of an unknown package: not taken.
+    assert result.carried_over == []
+    assert manager.assessment_outbox.get_overlay(("p1", "c-new", "v1")) is None
+    assert record["sync_status"] == "inactive"
+    assert manager.list_export_queue() == []
+    if outcome == "undetermined":
+        assert result.not_carried == 1
+        assert (row["status"], row["gone_reason"], row["carry_over"]) == (
+            "gone", "component_removed", "undetermined",
+        )
+    else:
+        assert result.not_carried == 0 and row is None
+    await manager.close()
+
+
+async def test_a_successor_with_its_own_assessment_takes_nothing_over(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA)]
+    await manager.import_findings(client, "p1")
+
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1", "EXPLOITABLE", _BETA)]
+    client.get_bom.return_value = _bom("c-new")
+    result = await manager.import_findings(client, "p1")
+
+    assert result.carried_over == []
+    row = manager.finding_lifecycle.presence("p1")[("c-old", "v1")]
+    assert (row["gone_reason"], row["carry_over"]) == ("replaced", "own_assessment")
+    assert manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))["sync_status"] == "inactive"
+    assert "Reachable." in manager.assessment_outbox.get_overlay(("p1", "c-new", "v1"))["analysisDetails"]
+    await manager.close()
+
+
+async def test_another_version_still_in_the_bom_does_not_take_the_assessment(tmp_path):
+    """Two versions of a component in the BOM: the vulnerability moves from
+    one to the other. The first was not replaced; its assessment stays."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [
+        _lib("c1", "1.0", "NOT_AFFECTED", _ALPHA),
+        _lib("c2", "2.0"),
+    ]
+    await manager.import_findings(client, "p1")
+
+    client.get_vulnerabilities.return_value = [_lib("c2", "2.0")]
+    client.get_bom.return_value = {
+        "components": [
+            {"bom-ref": "c1", "name": "lib-a", "purl": "pkg:maven/org.example/lib-a@1.0"},
+            {"bom-ref": "c2", "name": "lib-a", "purl": "pkg:maven/org.example/lib-a@2.0"},
+        ]
+    }
+    result = await manager.import_findings(client, "p1")
+
+    assert result.went == {"no_longer_matched": 1}
+    assert result.carried_over == []
+    row = manager.finding_lifecycle.presence("p1")[("c1", "v1")]
+    assert (row["gone_reason"], row["successor_component_uuid"], row["carry_over"]) == (
+        "no_longer_matched", None, None,
+    )
+    assert manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))["sync_status"] == "inactive"
+    assert manager.assessment_outbox.get_overlay(("p1", "c2", "v1")) is None
+    assert manager.list_export_queue() == []
+    await manager.close()
+
+
+async def test_a_replacement_the_bom_cannot_confirm_is_undetermined(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA)]
+    await manager.import_findings(client, "p1")
+
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1")]
+    client.get_bom.side_effect = httpx.ConnectError("down")
+    result = await manager.import_findings(client, "p1")
+
+    assert result.went == {"undetermined": 1} and result.carried_over == []
+    assert manager.assessment_outbox.get_overlay(("p1", "c-new", "v1")) is None
+
+    # Once the BOM can be read, the replacement is confirmed and carried.
+    client.get_bom.side_effect = None
+    client.get_bom.return_value = _bom("c-new")
+    result = await manager.import_findings(client, "p1")
+
+    assert result.carried_over == [("p1", "c-new", "v1")]
+    row = manager.finding_lifecycle.presence("p1")[("c-old", "v1")]
+    assert (row["gone_reason"], row["carry_over"]) == ("replaced", "carried")
+    await manager.close()
+
+
+@pytest.mark.parametrize("saved", ["target", "candidate"])
+async def test_a_save_during_the_read_is_not_overwritten_by_a_carry_over(
+    tmp_path, monkeypatch, saved
+):
+    import dtvp.dt_cache as dt_cache_module
+
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA)]
+    await manager.import_findings(client, "p1")
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1")]
+    client.get_bom.return_value = _bom("c-new")
+
+    key = ("p1", "c-new", "v1") if saved == "target" else ("p1", "c-old", "v1")
+    planned = dt_cache_module.follow_findings_plan
+
+    def plan_then_save(**options):
+        plan = planned(**options)
+        assert [carry.target for carry in plan.carry.carries] == [("p1", "c-new", "v1")]
+        # Someone saves while the plan waits to be persisted, and the
+        # export worker sends it at once.
+        manager.assessment_outbox.enqueue_many(
+            [{
+                "project_uuid": key[0], "component_uuid": key[1], "vulnerability_uuid": key[2],
+                "state": "EXPLOITABLE", "details": "Saved meanwhile.", "suppressed": False,
+            }]
+        )
+        manager.assessment_outbox.mark_synced(key, manager.assessment_outbox.get_overlay(key)["revision"])
+        return plan
+
+    monkeypatch.setattr(dt_cache_module, "follow_findings_plan", plan_then_save)
+    result = await manager.import_findings(client, "p1")
+
+    assert result.carried_over == []
+    record = manager.assessment_outbox.get_overlay(key)
+    assert (record["analysisState"], record["analysisDetails"]) == ("EXPLOITABLE", "Saved meanwhile.")
+    assert record["sync_status"] == "synced"
+    if saved == "candidate":
+        assert manager.assessment_outbox.get_overlay(("p1", "c-new", "v1")) is None
+    assert manager.list_export_queue() == []
+    await manager.close()

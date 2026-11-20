@@ -1048,3 +1048,115 @@ def test_the_response_is_stored_as_a_field_and_read_again_after_the_upgrade(tmp_
         )
     upgraded = AssessmentOutboxStore(store.path)
     assert upgraded.get_fields(KEY)["response"] == "WILL_NOT_FIX"
+
+
+# -- following the source: retired and superseded records -------------------
+
+
+def test_records_of_gone_findings_are_retired_with_their_exports_dropped(tmp_path):
+    store = _store(tmp_path)
+    pending = ("project", "pending", "vulnerability")
+    failed = ("project", "failed", "vulnerability")
+    cancelled = ("project", "cancelled", "vulnerability")
+    store.enqueue_many([{**_payload(details="Waiting"), "component_uuid": "pending"}])
+    record = store.enqueue_many([{**_payload(details="Failing"), "component_uuid": "failed"}])[0]
+    store.mark_failed(failed, record["revision"], "boom")
+    record = store.enqueue_many([{**_payload(details="Discarded"), "component_uuid": "cancelled"}])[0]
+    store.discard(record["id"])
+
+    retired = store.retire_missing(
+        "project",
+        {pending: "component_removed", failed: "replaced", cancelled: "undetermined"},
+        fetched_at=_later(),
+    )
+
+    assert sorted(retired) == sorted([pending, failed])
+    assert store.pending_count() == 0
+    for key, details in ((pending, "Waiting"), (failed, "Failing")):
+        overlay = store.get_overlay(key)
+        assert (overlay["sync_status"], overlay["analysisDetails"]) == ("inactive", details)
+        assert overlay["update_id"] is None and overlay["last_error"] is None
+    # A discarded export stays discarded: the finding returning does not
+    # revive it.
+    assert store.get_overlay(cancelled)["sync_status"] == "cancelled"
+    # A read that started before the last change proves nothing.
+    store.enqueue_many([{**_payload(details="New"), "component_uuid": "pending"}])
+    assert store.retire_missing(
+        "project", {pending: "component_removed"},
+        fetched_at=datetime.now(UTC) - timedelta(minutes=1),
+    ) == []
+
+
+def test_a_carried_over_value_supersedes_its_origins_atomically(tmp_path):
+    store = _store(tmp_path)
+    old = ("project", "old", "vulnerability")
+    store.enqueue_many([{**_payload(details="Kept"), "component_uuid": "old"}])
+    new_payload = {**_payload(details="Kept"), "component_uuid": "new"}
+    new = ("project", "new", "vulnerability")
+
+    # A failure inside the transaction leaves the origin untouched.
+    with pytest.raises(AssessmentRevisionConflictError):
+        store.enqueue_many(
+            [new_payload], supersedes={new: [old]}, expected_revisions={new: 7}
+        )
+    assert store.get_overlay(old)["sync_status"] == "pending"
+    assert store.get_overlay(new) is None
+
+    store.enqueue_many([new_payload], supersedes={new: [old]}, origin="carried-over")
+
+    superseded = store.get_overlay(old)
+    assert (superseded["sync_status"], superseded["analysisDetails"]) == ("superseded", "Kept")
+    assert store.pending_revision(old) is None
+    assert store.get_overlay(new)["sync_status"] == "pending"
+    assert [item["payload"]["component_uuid"] for item in store.list_pending()] == ["new"]
+    # Reported again, a superseded record is active again.
+    outcomes = store.reconcile_remote(
+        {old: {"state": "NOT_SET", "details": "", "suppressed": False}},
+        fetched_at=_later(),
+    )
+    assert outcomes["requeued"] == [old]
+
+
+def test_expected_records_guard_a_save_and_what_it_supersedes(tmp_path):
+    from dtvp.assessment_outbox_services import AssessmentRecordChangedError
+
+    store = AssessmentOutboxStore(str(tmp_path / "assessment_outbox.sqlite"))
+    old = ("project", "old", "vulnerability")
+    new = ("project", "component", "vulnerability")
+    store.enqueue_many([{**_payload("NOT_AFFECTED", "Old"), "component_uuid": "old"}])
+
+    # The old record was saved again after the caller read revision 1.
+    store.enqueue_many([{**_payload("EXPLOITABLE", "Newer"), "component_uuid": "old"}])
+    with pytest.raises(AssessmentRecordChangedError):
+        store.enqueue_many(
+            [_payload("NOT_AFFECTED", "Old")],
+            supersedes={new: [old]},
+            expected_records={new: None, old: 1},
+        )
+    assert store.get_overlay(new) is None
+    assert store.enqueue_many(
+        [_payload("NOT_AFFECTED", "Old")],
+        supersedes={new: [old]},
+        expected_records={new: None, old: 1},
+        skip_changed=True,
+    ) == []
+    assert store.get_overlay(old)["sync_status"] == "pending"
+
+    # As read: saved, and the old record is superseded.
+    [saved] = store.enqueue_many(
+        [_payload("EXPLOITABLE", "Newer")],
+        supersedes={new: [old]},
+        expected_records={new: None, old: 2},
+        skip_changed=True,
+    )
+    assert saved["revision"] == 1
+    assert store.get_overlay(old)["sync_status"] == "superseded"
+
+    # The finding has a record now: a second carry-over is left out.
+    assert store.enqueue_many(
+        [_payload("IN_TRIAGE", "Again")],
+        expected_records={new: None},
+        skip_changed=True,
+        replace=True,
+    ) == []
+    assert store.get_overlay(new)["analysisDetails"] == "Newer"

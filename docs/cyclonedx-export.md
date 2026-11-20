@@ -134,6 +134,7 @@ the property prefix, and the DTVP version (`<prefix>:export`,
 | `<prefix>:export_ticket_prefixes` | The ticket prefixes the texts were searched for. Absent: no text was searched |
 | `<prefix>:export_text_only_tickets` | Number of entries with a ticket key that only a text mentions; their records lack the ticket field |
 | `<prefix>:export_historical_assessments` | Number of historical team assessments in the document. Absent: none |
+| `<prefix>:export_findings_gone` | Findings of this project version Dependency-Track no longer reports, one property per reason with `<reason>=<count>`, sorted by reason: `replaced`, `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export`. Counts every finding gone now, not only at the last read, so two exports in a row agree. Those findings are not listed. Absent: none. See [Findings that disappear](import-export.md#findings-that-disappear) |
 | `<prefix>:export_advisory_records` | `unavailable`: the vulnerability records could not be read, see [Limits](#limits) |
 | `<prefix>:export_incomplete_findings` | Number of assessed findings whose text could not be read, see [Limits](#limits) |
 | `<prefix>:export_derived_recommendations`, `<prefix>:export_fixed_versions_unread`, `<prefix>:export_fixed_versions_read_at` | Derived recommendations, see [Recommendation](#recommendation) |

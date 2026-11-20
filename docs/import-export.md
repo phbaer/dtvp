@@ -6,7 +6,7 @@
 | :--- | :--- |
 | Status | Implemented |
 | Decision | [ADR 0002](adr/0002-local-first-database-with-import-and-export.md) for the database and export queue, [ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md) for assessments |
-| Verified | 2026-11-18 against `tests/test_assessment_outbox_services.py`, `tests/test_dt_cache.py`, and `tests/test_export.py`. The run against the mock Dependency-Track dates from 2026-11-17, before assessments became DTVP's record. The response (2026-11-19) is checked against `tests/test_dt_cache.py`, `tests/test_dt_client.py`, and `tests/test_project_archive_services.py` only; how a running Dependency-Track treats `analysisResponse` was not checked |
+| Verified | 2026-11-20: [Findings that disappear](#findings-that-disappear) against `tests/test_dt_cache.py`, `tests/test_finding_lifecycle_services.py`, and `tests/test_assessment_outbox_services.py` with a simulated Dependency-Track (synthetic findings and project times); not against a running Dependency-Track. 2026-11-18 against `tests/test_assessment_outbox_services.py`, `tests/test_dt_cache.py`, and `tests/test_export.py`. The run against the mock Dependency-Track dates from 2026-11-17, before assessments became DTVP's record. The response (2026-11-19) is checked against `tests/test_dt_cache.py`, `tests/test_dt_client.py`, and `tests/test_project_archive_services.py` only; how a running Dependency-Track treats `analysisResponse` was not checked |
 
 DTVP keeps its own copy of everything it works on. It **imports** projects,
 findings, and vulnerability data from Dependency-Track, you **work** on the
@@ -135,7 +135,8 @@ or all. Failed exports show their last error; in `auto` mode they are retried
 with increasing delay (up to a minute for the first ten attempts, then up to
 15 minutes), in `manual` mode on the next export. An export whose project or
 finding no longer exists in Dependency-Track is removed from the queue and
-its assessment kept as inactive.
+its assessment kept as inactive; the finding is marked gone with reason
+`missing_at_export`.
 
 ### When exports fail
 
@@ -235,15 +236,94 @@ to delete and 409 when a finding changed in the meantime.
 
 ## Findings That Disappear
 
-When Dependency-Track stops reporting a finding, its assessment is kept and
-marked inactive. If the finding is reported again under the same identifiers,
-the assessment is active again, and it is exported again if Dependency-Track
-no longer has it. A change that was still waiting for export when the finding
-vanished is treated as a waiting change when it returns and is exported.
+DTVP follows the source's findings on every read. Dependency-Track
+re-analyses a project asynchronously after a BOM upload, so a read in between
+can miss findings that return on recreated components a moment later. DTVP
+does not wait for that: what such a read misses is marked gone, and the next
+read heals it. A finding that returns is active again (step 5); a finding
+that returns on a recreated component takes its assessment over (step 4), and
+the earlier gone mark becomes `replaced`. Only a read whose findings could not
+be read at all is not acted on.
 
-A finding that returns under **new** identifiers is matched by component and
-vulnerability identity against the previous import only, as before, and its
-restored assessment is marked for review.
+1. **Every read counts.** There is no waiting for the source's analysis and
+   no Dependency-Track-specific signal in this logic; any source that reports
+   findings works the same way.
+2. **Keep the finding, mark it gone.** A finding a read no longer
+   has stays in DTVP as *gone*, with the read that first missed it
+   (`gone_at`), the last read that had it (`last_seen_at`), and a
+   reason:
+
+   | Reason | Meaning |
+   | :--- | :--- |
+   | `replaced` | The vulnerability is now reported on another component with the same identity (package URL without version, else name), and the BOM no longer has the old component. The successor is recorded |
+   | `no_longer_matched` | The component, or one of the same identity, is still there; the vulnerability is no longer reported on it (an analyser or mirror change) |
+   | `component_removed` | The project's BOM no longer has the component |
+   | `undetermined` | The findings do not tell, or suggest a replacement, and the BOM could not be read |
+   | `missing_at_export` | An export was rejected and Dependency-Track confirmed the finding no longer exists |
+
+   The BOM is read when the findings alone do not decide, and to confirm a
+   replacement: a component still in the BOM was not replaced, even when it
+   has no finding left and another version of it has the vulnerability. A
+   later read looks at earlier reasons again: a successor found
+   later makes a finding `replaced` (again only once the BOM confirms it),
+   and an `undetermined` reason is replaced once it can be told. Otherwise
+   the first reason stays.
+3. **The record follows.** The assessment record of a gone finding becomes
+   `inactive` with its value kept, whether it was synchronised, waiting for
+   export, or failing; a queued export is dropped and logged with the
+   reason. A change saved after the read started is left alone. An export
+   that was discarded (`cancelled`) stays discarded.
+4. **Carry over from the record.** On every read, a reported finding
+   without a record and without an assessment in Dependency-Track takes over
+   the assessment of a gone finding of the same vulnerability (same UUID or
+   identifier) that was `replaced`: its component had the same identity and
+   the BOM no longer has it. A finding that is `no_longer_matched` keeps its
+   record, inactive. Records count when inactive, waiting, failing, or
+   synchronised. One such record, or several
+   that agree apart from the pending-review marker, is saved as a new
+   revision with origin `carried-over`, marked `[Status: Pending Review]`,
+   and queued for export like any other change; the old records become
+   `superseded`. If the records disagree, nothing is carried over and the
+   gone findings say so ("assessments differ"). If the new finding already
+   has an assessment, nothing is carried over ("successor has its own
+   assessment").
+
+   The plan is made from the records as they were after the gone findings
+   were retired, and saved in one transaction that checks them again. A
+   replacing finding assessed in the meantime keeps its assessment, and a
+   gone finding's record saved again in the meantime is not superseded:
+   that carry-over is left out and logged, and the next read decides.
+
+   Records of findings that went before DTVP recorded findings (before this
+   behaviour existed) have no identity. They are carried over by
+   vulnerability, with origin `carried-over-by-vulnerability`, when exactly
+   one reported finding of that vulnerability has no record, the BOM no
+   longer has the record's component, and that component had the same name
+   (case-insensitive) as the reported finding's. The name comes from the
+   BOM DTVP stored before the read, the only place that may still list the
+   component; it is kept with the gone finding. When the name cannot be
+   told, nothing is carried over and the gone finding says so ("component
+   unknown"): assess the new finding by hand. A component of another name is
+   a different package and takes nothing.
+5. **A returning finding comes back.** Reported again under the same
+   identifiers, the finding is active again (`returned_at`; when and why it
+   went stays on the finding), and so is its assessment: `synced` if
+   Dependency-Track still holds it, otherwise `pending` and exported. Its
+   value did not change, so no revision is written; the history of an
+   assessment only lists changes of its value. A finding that returns under
+   new identifiers is a replacement (step 4); it has an assessment and so is
+   not marked new.
+
+**Gone findings** of a project are listed in the project view; see
+[Gone findings](review-workflows.md#gone-findings). `GET
+/api/project/{project_uuid}/gone-findings` returns them for one version, and
+`GET /api/gone-findings?name=<project name>` for every version of a project:
+the last read (time, how many went by reason, returned,
+carried over, not carried), the current counts by reason, and per finding the
+component, vulnerability, reason, dates, carry-over, successor, and the
+assessment record's status. The VDR states the counts in
+`<prefix>:export_findings_gone`; see
+[CycloneDX inventory and VDR](cyclonedx-export.md).
 
 A finding that appears for the first time in a **new project version** has no
 assessment. DTVP marks it as new instead of copying one; see
@@ -260,7 +340,9 @@ vulnerabilities with more than 30 findings only the first 30 are loaded.
 
  Origins are `before-history`, `individual-assessment` (a save in the UI),
 `mcp-assessment` (an agent), `bulk-workflow`, `assessment-deletion`,
-`export-discarded`, `import` (adopted from Dependency-Track), and
+`export-discarded`, `import` (adopted from Dependency-Track), `carried-over`
+and `carried-over-by-vulnerability` (taken over from a replaced finding; see
+[Findings that disappear](#findings-that-disappear)), and
 `conflict-resolution` (only in history written before conflicts were removed). Bulk workflows and imports
 record no author. `GET /api/assessments/history` with `project_uuid`,
 `component_uuid`, and `vulnerability_uuid` returns it, newest first.
@@ -279,5 +361,6 @@ Findings with a record in DTVP carry a status (`dtvpSyncStatus` on an analysis,
 | `synced` | Dependency-Track holds the local value |
 | `pending` | Waiting for export |
 | `error` | The last export failed, or Dependency-Track did not keep it; it is retried |
-| `inactive` | Dependency-Track no longer reports the finding |
+| `inactive` | Dependency-Track no longer reports the finding; the value is kept |
+| `superseded` | The value was carried over to the finding that replaced this one; kept as history. Active again if the finding returns |
 | `cancelled` | A queued export was discarded and the previous value was not known; the next import replaces the value |

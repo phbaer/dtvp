@@ -393,3 +393,44 @@ def test_vdr_uses_vulnerability_records_ticket_keys_and_the_team_mapping(
         without.json()["metadata"]["properties"]
     )
 
+
+
+# -- gone findings -------------------------------------------------------------
+
+
+async def test_gone_findings_are_listed_per_version_and_by_name(client, queued):
+    # Dependency-Track stops reporting the second finding; its BOM has no
+    # component left.
+    queued.get_vulnerabilities.return_value = [_finding(1)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+
+    with patch("dtvp.main.DTClient", return_value=queued):
+        one = client.get("/api/project/p1/gone-findings")
+        named = client.get("/api/gone-findings", params={"name": "TestApp"})
+        unknown = client.get("/api/project/nothing/gone-findings")
+        missing_name = client.get("/api/gone-findings")
+
+    assert one.status_code == 200
+    body = one.json()
+    assert body["project_uuid"] == "p1"
+    assert body["gone"] == {"component_removed": 1}
+    assert "complete" not in body["last_read"]
+    assert body["last_read"]["went"] == {"component_removed": 1}
+    [gone] = body["findings"]
+    assert (gone["vuln_id"], gone["component_name"], gone["reason"]) == (
+        "CVE-2026-0002", "library-a", "component_removed",
+    )
+    assert gone["gone_at"] and gone["successor"] is None
+    # The saved assessment is kept, no longer exported.
+    assert gone["assessment"]["sync_status"] == "inactive"
+    assert gone["assessment"]["state"] == "NOT_AFFECTED"
+
+    assert named.status_code == 200
+    assert named.json()["name"] == "TestApp"
+    assert [(v["version"], v["gone"]) for v in named.json()["versions"]] == [
+        ("1.0", {"component_removed": 1})
+    ]
+    assert unknown.json() == {
+        "project_uuid": "nothing", "last_read": None, "gone": {}, "findings": [],
+    }
+    assert missing_name.status_code == 422

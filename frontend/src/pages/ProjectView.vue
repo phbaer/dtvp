@@ -73,6 +73,7 @@ import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
 import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from '@lucide/vue'
 import CycloneDxExportMenu from '../components/CycloneDxExportMenu.vue'
+import GoneFindingsPanel from '../components/GoneFindingsPanel.vue'
 
 const TASK_LIST_WINDOW_LIMIT = 250
 
@@ -1542,6 +1543,7 @@ watch(currentUserRole, (role) => {
                         </button>
                     </div>
                 </div>
+                <GoneFindingsPanel :project-name="($route.params.name as string)" />
                 <CycloneDxExportMenu :project-name="($route.params.name as string)" />
                 <button
                     v-if="currentUserRole === 'REVIEWER'"
