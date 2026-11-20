@@ -448,7 +448,10 @@ def test_an_assessment_without_a_team_names_no_team():
     # team the project has keeps its state.
     assert "annotations" not in document
     assert _property(entry, "dtvp:team_state") == ["Core=NOT_AFFECTED"]
+    # Its state is exported without the name, keyed by the assessor.
+    assert _property(entry, "dtvp:unassigned_state") == ["rita=NOT_AFFECTED"]
     assert "Unknown" not in str(document)
+    assert _valid(document)
 
     own = (
         "--- [Team: Unknown] [State: EXPLOITABLE] [Assessed By: rita] "
@@ -461,6 +464,7 @@ def test_an_assessment_without_a_team_names_no_team():
         {"organization": {"name": "Core", "contact": [{"name": "bob"}]}},
     ]
     assert _property(entry, "dtvp:team_state") == ["Core=EXPLOITABLE"]
+    assert _property(entry, "dtvp:unassigned_state") == ["rita=EXPLOITABLE"]
     assert "Unknown" not in str(document)
     assert _valid(document)
 
@@ -468,10 +472,70 @@ def test_an_assessment_without_a_team_names_no_team():
     entry, document = _entry(anonymous, "EXPLOITABLE", unowned_teams=["Unknown"])
     assert "annotations" not in document
     assert _property(entry, "dtvp:unassigned_assessment") == ["Reachable."]
+    assert _property(entry, "dtvp:unassigned_state") == ["-=EXPLOITABLE"]
+    assert "Unknown" not in str(document)
+    assert _valid(document)
 
     # A project that has a team of this name keeps it.
     entry, document = _entry(own, "EXPLOITABLE")
     assert "Unknown=EXPLOITABLE" in _property(entry, "dtvp:team_state")
+    assert _property(entry, "dtvp:unassigned_state") == []
+
+    # Several names for no team: one state each, in block order.
+    two = (
+        "--- [Team: Unknown] [State: EXPLOITABLE] [Assessed By: rita] ---\nReachable.\n\n"
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] ---\nNo.\n\n"
+        "--- [Team: Nobody] [State: IN_TRIAGE] ---\nLooking."
+    )
+    entry, document = _entry(two, "EXPLOITABLE", unowned_teams=["Unknown", "Nobody"])
+    assert _property(entry, "dtvp:unassigned_state") == ["rita=EXPLOITABLE", "-=IN_TRIAGE"]
+    assert _property(entry, "dtvp:team_state") == ["Core=NOT_AFFECTED"]
+    assert "Unknown" not in str(document) and "Nobody" not in str(document)
+    assert _valid(document)
+
+
+def test_the_state_of_an_assessment_without_a_team_pairs_with_its_text():
+    # The block without an assessor comes first: block order alone would
+    # pair its state with the assessor's annotation.
+    text = (
+        "--- [Team: Nobody] [State: IN_TRIAGE] ---\nLooking.\n\n"
+        "--- [Team: Unknown] [State: EXPLOITABLE] [Assessed By: rita] ---\nReachable."
+    )
+    entry, document = _entry(text, "EXPLOITABLE", unowned_teams=["Unknown", "Nobody"])
+    states = dict(
+        value.split("=", 1) for value in _property(entry, "dtvp:unassigned_state")
+    )
+    texts = {
+        item["annotator"]["individual"]["name"]: item["text"]
+        for item in document["annotations"]
+    }
+    # The assessor's state goes with the assessor's annotation ...
+    assert states["rita"] == "EXPLOITABLE" and texts["rita"] == "Reachable."
+    # ... and the state without an assessor with the text without one.
+    assert states["-"] == "IN_TRIAGE"
+    assert _property(entry, "dtvp:unassigned_assessment") == ["Looking."]
+    assert "Unknown" not in str(document) and "Nobody" not in str(document)
+    assert _valid(document)
+
+
+def test_findings_that_differ_in_the_state_without_a_team_are_separate_entries():
+    def text(state):
+        return (
+            "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] ---\nReason.\n\n"
+            f"--- [Team: Unknown] [State: {state}] ---\nSee global assessment."
+        )
+
+    document = _vdr(
+        [_finding(C1), _finding(C2)],
+        [("EXPLOITABLE", text("EXPLOITABLE")), ("EXPLOITABLE", text("NOT_AFFECTED"))],
+        unowned_teams=["Unknown"],
+    )
+    first, second = document["vulnerabilities"]
+    assert (first["bom-ref"], second["bom-ref"]) == ("v1", "v1#2")
+    assert _property(first, "dtvp:unassigned_state") == ["-=EXPLOITABLE"]
+    assert _property(second, "dtvp:unassigned_state") == ["-=NOT_AFFECTED"]
+    assert "Unknown" not in str(document)
+    assert _valid(document)
 
 
 def test_former_team_assessments_are_not_part_of_the_rationale():
@@ -618,6 +682,105 @@ def test_an_analysis_without_a_general_date_has_the_latest_team_date():
     # No date anywhere: none is stated.
     entry, _ = _entry("--- [Team: Core] [State: NOT_AFFECTED] ---\nNot reachable.")
     assert "lastUpdated" not in entry["analysis"]
+
+
+def _timestamps(document):
+    """The timestamp of each annotation, by its annotator's name."""
+    return {
+        (item["annotator"].get("organization") or item["annotator"]["individual"])["name"]:
+            item["timestamp"]
+        for item in document["annotations"]
+    }
+
+
+def test_an_undated_annotation_takes_the_date_of_the_assessment():
+    undated_core = "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] ---\nNot reachable."
+    general = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Date: 1794561289026] ---\nReason.\n\n"
+    )
+    # A dated General assessment dates the team's undated annotation.
+    entry, document = _entry(general + undated_core)
+    assert _timestamps(document)["Core"] == entry["analysis"]["lastUpdated"] == (
+        "2026-11-13T09:14:49.026000+00:00"
+    )
+    assert _property(entry, "dtvp:undated_annotation") == []
+    # The date is the assessment's, not the team's own: the team is named.
+    assert _property(entry, "dtvp:annotation_dated_by_assessment") == ["Core"]
+    assert _valid(document)
+
+    # Without a General assessment, the latest date of the live teams.
+    edge = (
+        "--- [Team: Edge] [State: NOT_AFFECTED] [Assessed By: eve] "
+        "[Date: 1794000000000] ---\nNot shipped.\n\n"
+    )
+    entry, document = _entry(edge + undated_core)
+    assert _timestamps(document) == {
+        "Edge": "2026-11-06T21:20:00+00:00", "Core": "2026-11-06T21:20:00+00:00",
+    }
+    assert _property(entry, "dtvp:undated_annotation") == []
+    # Another team's date is not Core's own; Edge has its own.
+    assert _property(entry, "dtvp:annotation_dated_by_assessment") == ["Core"]
+    assert _valid(document)
+
+    # A dated team annotation keeps its own date, also beside a later General one.
+    entry, document = _entry(general + edge)
+    assert entry["analysis"]["lastUpdated"] == "2026-11-13T09:14:49.026000+00:00"
+    assert _timestamps(document)["Edge"] == "2026-11-06T21:20:00+00:00"
+    assert _property(entry, "dtvp:annotation_dated_by_assessment") == []
+    assert _valid(document)
+
+    # A former owner's later date is not the assessment's.
+    historical = (
+        "\n\n--- [Team: Old] [State: EXPLOITABLE] [Date: 1799999999999] "
+        "[Historical: yes] ---\nOutdated."
+    )
+    entry, document = _entry(edge + undated_core + historical)
+    assert _timestamps(document)["Core"] == "2026-11-06T21:20:00+00:00"
+    assert _property(entry, "dtvp:undated_annotation") == []
+    assert _valid(document)
+
+
+def test_an_annotation_without_any_date_is_named():
+    undated_core = "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] ---\nNot reachable."
+    entry, document = _entry(undated_core)
+    # The schema requires a timestamp: the export time, and the vulnerability
+    # says whose annotation has no date of its own.
+    assert _timestamps(document)["Core"] == document["metadata"]["timestamp"] == NOW.isoformat()
+    assert _property(entry, "dtvp:undated_annotation") == ["Core"]
+    assert _property(entry, "dtvp:annotation_dated_by_assessment") == []
+    assert "lastUpdated" not in entry["analysis"]
+    assert _valid(document)
+    assert _schema_errors({**SCHEMA_BOM, "specVersion": "1.6", **{
+        key: document[key] for key in ("vulnerabilities", "annotations")
+    }}, "1.6") is None
+
+    # Without a team, the assessor is named, never the fallback team name.
+    unowned = (
+        "--- [Team: Unknown] [State: EXPLOITABLE] [Assessed By: rita] ---\nReachable."
+    )
+    entry, document = _entry(unowned, "EXPLOITABLE", unowned_teams=["Unknown"])
+    assert _property(entry, "dtvp:undated_annotation") == ["rita"]
+    assert _timestamps(document)["rita"] == NOW.isoformat()
+    assert "Unknown" not in str(document)
+    assert _valid(document)
+
+    # The property has the configured prefix.
+    entry, document = _entry(undated_core, property_prefix="acme")
+    assert _property(entry, "acme:undated_annotation") == ["Core"]
+    assert _property(entry, "dtvp:undated_annotation") == []
+    assert _valid(document)
+
+    # Without an analysis, a General date still dates the annotation.
+    dated_general = (
+        "--- [Team: General] [State: NOT_SET] [Date: 1794561289026] ---\n\n"
+        + undated_core
+    )
+    entry, document = _entry(dated_general, "NOT_SET")
+    assert "analysis" not in entry
+    assert _timestamps(document)["Core"] == "2026-11-13T09:14:49.026000+00:00"
+    assert _property(entry, "dtvp:undated_annotation") == []
+    assert _valid(document)
 
 
 def test_the_document_names_its_property_prefix():
