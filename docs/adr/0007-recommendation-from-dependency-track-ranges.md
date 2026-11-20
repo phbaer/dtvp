@@ -36,6 +36,7 @@ first fixed version. Read in the 4.13.x and 4.14.x sources on 2026-11-20:
 
 - No new outside service: DTVP sends nothing about the deployment anywhere
   but Dependency-Track.
+  *Amended 2026-11-20 by [ADR 0009](0009-native-vulnerability-matcher.md):* bulk feed downloads from listed feed hosts are allowed; they reveal no component data.
 - An export stays a local read: no Dependency-Track call per request.
 - What is stored must not hold portfolio-wide data of other projects.
 - No guessed fix: a wrong recommendation is worse than none.

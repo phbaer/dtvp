@@ -14,3 +14,4 @@ Decision status and implementation status are tracked separately in each record.
 | [0006: Agent code evidence is applied by a person](0006-agent-code-evidence-is-applied-by-a-person.md) | Proposed | Implemented |
 | [0007: The VDR recommendation comes from the ranges Dependency-Track holds](0007-recommendation-from-dependency-track-ranges.md) | Proposed | Implemented |
 | [0008: Expiring, revocable session tokens](0008-expiring-revocable-session-tokens.md) | Accepted | Implemented |
+| [0009: DTVP matches vulnerabilities itself from mirrored advisories](0009-native-vulnerability-matcher.md) | Accepted | Not started |
