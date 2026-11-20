@@ -191,6 +191,11 @@ class DumpReader:
             raise
 
     @property
+    def declared_bytes(self) -> int:
+        """The declared uncompressed size of all members."""
+        return self._zip.total_declared
+
+    @property
     def manifest(self) -> dict[str, Any]:
         return self.checked.manifest
 

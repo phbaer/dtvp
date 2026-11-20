@@ -24,7 +24,7 @@ def _print_err(message: str) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m dtvp.backup",
-        description="Export, inspect and verify DTVP instance dumps (dtvp.dump/1).",
+        description="Export, inspect, verify and restore DTVP instance dumps (dtvp.dump/1).",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -47,6 +47,37 @@ def _parser() -> argparse.ArgumentParser:
 
     verify = commands.add_parser("verify", help="check every record of a dump")
     verify.add_argument("file")
+    verify.add_argument(
+        "--deep",
+        action="store_true",
+        help="also stage the dump in a temporary directory and prove the round trip",
+    )
+
+    restore = commands.add_parser(
+        "restore", help="restore a dump into this instance; the backend must be stopped"
+    )
+    restore.add_argument("file")
+    restore.add_argument("--dry-run", action="store_true", help="check and report; change nothing")
+    restore.add_argument("--replace", action="store_true", help="move the target's records aside")
+    restore.add_argument("--new-instance", action="store_true", help="no backend has run here yet")
+    restore.add_argument("--accept-dt-url-change", action="store_true")
+    restore.add_argument("--accept-pruning", action="store_true")
+    restore.add_argument("--accept-path-change", action="store_true")
+    restore.add_argument(
+        "--allow-unknown",
+        action="store_true",
+        help="drop entities and fields of a newer minor format version",
+    )
+
+    prune = commands.add_parser("prune", help="delete the oldest dumps in a directory")
+    prune.add_argument("dir")
+    prune.add_argument("--keep", type=int, required=True, help="how many dumps to keep (at least 1)")
+    prune.add_argument("--label", default="dtvp", help="only dumps with this label (default dtvp)")
+
+    recover = commands.add_parser("recover", help="complete or undo an interrupted restore")
+    mode = recover.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--resume", action="store_true")
+    mode.add_argument("--abort", action="store_true")
     return parser
 
 
@@ -106,6 +137,17 @@ def _inspect(args: argparse.Namespace) -> int:
 def _verify(args: argparse.Namespace) -> int:
     from .verify import verify_dump
 
+    if args.deep:
+        from .restore import verify_deep
+
+        deep = verify_deep(args.file)
+        for warning in deep["warnings"]:
+            _print_err(f"Warning: {warning}")
+        print(
+            f"OK: dump {deep['dump_id']}, {sum(deep['records'].values())} records, "
+            "staged and read back identically"
+        )
+        return EXIT_OK
     result = verify_dump(args.file)
     for warning in result.warnings:
         _print_err(f"Warning: {warning}")
@@ -120,7 +162,76 @@ def _verify(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-COMMANDS = {"export": _export, "inspect": _inspect, "verify": _verify}
+def _restore(args: argparse.Namespace) -> int:
+    from .restore import RestoreOptions, restore_dump
+
+    options = RestoreOptions(
+        replace=args.replace,
+        new_instance=args.new_instance,
+        accept_dt_url_change=args.accept_dt_url_change,
+        accept_pruning=args.accept_pruning,
+        accept_path_change=args.accept_path_change,
+        allow_unknown=args.allow_unknown,
+    )
+    result = restore_dump(args.file, options=options, dry_run=args.dry_run)
+    for warning in result.warnings:
+        _print_err(f"Warning: {warning}")
+    if result.dry_run:
+        print(f"Dry run of dump {result.dump_id}; nothing was changed.")
+        print(f"Instance lock currently held: {'yes' if result.lock_held else 'no'}")
+        print("Planned actions:")
+        for action in result.actions:
+            if not action["original_existed"] and not action["staged"]:
+                continue
+            steps = []
+            if action["original_existed"]:
+                steps.append(f"move {action['target']} to {action['aside']}")
+            if action["staged"]:
+                steps.append(f"put the restored file at {action['target']}")
+            print("  " + "; ".join(steps))
+        for refusal in result.refusals:
+            _print_err(f"Refused: {refusal}")
+        return EXIT_FAILED if result.refusals else EXIT_OK
+    print(f"Restored dump {result.dump_id}: {sum(result.records.values())} records.")
+    print(
+        "The replaced files are kept as *.pre-restore-" + result.run_id + "; remove "
+        "them once the restored instance is checked."
+    )
+    print(
+        "Note: browser sessions stay valid only if DTVP_SESSION_SECRET_KEY is the "
+        "same as on the source; access tokens exist only if the dump included them."
+    )
+    return EXIT_OK
+
+
+def _recover(args: argparse.Namespace) -> int:
+    from .restore import recover
+
+    outcome = recover("resume" if args.resume else "abort")
+    verb = "completed" if args.resume else "undone"
+    print(f"Restore of dump {outcome['dump_id']} {verb}.")
+    return EXIT_OK
+
+
+def _prune(args: argparse.Namespace) -> int:
+    from .schedule import prune_dumps
+
+    if args.keep < 1:
+        _print_err("--keep must be at least 1")
+        return EXIT_USAGE
+    for path in prune_dumps(args.dir, args.keep, label=args.label):
+        print(f"Removed {path}")
+    return EXIT_OK
+
+
+COMMANDS = {
+    "prune": _prune,
+    "export": _export,
+    "inspect": _inspect,
+    "verify": _verify,
+    "restore": _restore,
+    "recover": _recover,
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

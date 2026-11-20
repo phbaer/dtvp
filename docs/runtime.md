@@ -39,6 +39,7 @@ Important backend components:
 | `dtvp/local_store.py` | SQLite database for imported source data and the one-time JSON cache import |
 | `dtvp/finding_lifecycle_services.py` | What happened to findings: the analysis gate of a read, gone findings with reasons, carry-over from the record (`finding_lifecycle` migrations, same database file as the assessments) |
 | `dtvp/backup/` | The instance dump `dtvp.dump/1`: online export from database snapshots, inspect and verify (`python -m dtvp.backup`); the published JSON Schemas are in `dtvp/resources/dump-schemas/1/` |
+| `dtvp/backup/` | The instance dump `dtvp.dump/1`: online export from database snapshots, inspect, verify, and the offline restore with staged files and a journaled swap (`python -m dtvp.backup`); the published JSON Schemas are in `dtvp/resources/dump-schemas/1/` |
 | `dtvp/instance_stores.py` | The registry of every file an instance persists (records, settings, caches, legacy inputs) and the instance lock |
 | `dtvp/ports.py` | The source and sink interfaces the cache manager is written against; Dependency-Track implements both |
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
@@ -120,11 +121,18 @@ Important frontend components:
   Follow-up pages and full-result drains omit facet counts they do not consume;
   a Team-filter request renders its card window without facet counts, then
   refreshes complete task-wide and filtered counts in the background.
-- The cache manager takes the instance lock (`flock` on
-  `<DTVP_DT_CACHE_PATH>/.dtvp-instance.lock`) before it opens or migrates a
-  database, at import time, and holds it until it is closed. Opening stores
-  on the same directory again in one process shares the lock; another
-  process fails with `InstanceBusyError`, and an unfinished restore journal
+- Scheduled instance dumps (`dtvp/backup/schedule.py`) are off by default.
+  With `DTVP_BACKUP_INTERVAL_SECONDS` set, a background task exports in a
+  worker thread after each interval, verifies and prunes, and reports the
+  outcome in the `backup` block of `/api/performance-status`. It takes the
+  export lock only, so the backend keeps serving requests.
+- The cache manager takes the instance locks (`flock` on
+  `<DTVP_DT_CACHE_PATH>/.dtvp-instance.lock` and on `.dtvp-instance.lock`
+  in every other directory holding a record database, the proposals file or
+  a cache; settings directories are not locked) before it opens or migrates
+  a database, at import time, and holds them until it is closed. Opening
+  stores on the same directories again in one process shares the locks;
+  another process fails with `InstanceBusyError`, and an unfinished restore journal
   raises `RestoreInProgressError`. Both show on the startup failure page.
 - The local database (`DTVP_DATABASE_PATH`, by default
   `<DTVP_DT_CACHE_PATH>/dtvp.sqlite3`) stores projects, findings,
@@ -443,3 +451,36 @@ Not measured: the HTTP layer, grouping tasks, concurrent users, and a real
 Dependency-Track. The sizing example above was measured before the text was
 reduced to two copies; expect a smaller database.
 
+
+### Instance Dump
+
+The [instance dump](deployment.md) was measured on 2026-11-20 on the same
+20-CPU host with CPython 3.15, using the synthetic assessments of the
+benchmark above (about 2 KB of text each, adopted on import, so every record
+has one history entry):
+
+```bash
+uv run python scripts/benchmark_backup.py --assessments 10000 50000
+```
+
+| | 10,000 assessments | 50,000 assessments |
+| :--- | ---: | ---: |
+| Database before the export | 72 MiB | 361 MiB |
+| Export (snapshot, records, compression) | 5.1 s | 20.3 s |
+| Dump file | 1.1 MiB | 5.7 MiB |
+| Verify | 4.3 s | 19.7 s |
+| Restore into an empty instance, in total | 10.4 s | 50.0 s |
+| of which staging the records | 5.4 s | 27.3 s |
+| of which reading them into fields | 1.0 s | 5.1 s |
+| of which the round-trip proof | 0.3 s | 1.5 s |
+| of which the swap | 0.01 s | 0.01 s |
+| Database after the restore | 71 MiB | 358 MiB |
+
+Export, verify and restore grow linearly with the number of records. The
+synthetic texts repeat a great deal, so they compress far better than real
+ones; plan the dump size of a real instance from a real export (`python -m
+dtvp.backup inspect` shows it). The swap, the only step during which the
+instance is not consistent on disk, takes milliseconds whatever the size.
+The restore writes its staged databases without fsync per statement
+(`synchronous=OFF`) and syncs each file once when it is complete; a crash
+before that discards the staged files, never the live ones.

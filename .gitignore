@@ -13,6 +13,7 @@ htmlcov/
 .ruff_cache/
 .coverage/
 data/dt_cache/
+data/.dtvp-instance.lock
 data/backups/
 
 # Virtual environments

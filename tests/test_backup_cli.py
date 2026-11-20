@@ -73,3 +73,20 @@ def test_module_entry_point(tmp_path):
     )
     assert completed.returncode == 0, completed.stderr
     assert "OK" in completed.stdout
+
+
+def test_restore_and_recover_commands(instance, capsys, tmp_path, monkeypatch):
+    assert main(["export", "--include-access-tokens"]) == 0
+    path = capsys.readouterr().out.strip()
+    configure_instance(monkeypatch, tmp_path / "target")
+    assert main(["restore", path, "--dry-run"]) == 1
+    out, err = capsys.readouterr()
+    assert "Dry run" in out and "T7" in err
+    assert main(["restore", path, "--new-instance"]) == 0
+    out, _err = capsys.readouterr()
+    assert "Restored dump" in out and "DTVP_SESSION_SECRET_KEY" in out
+    assert main(["recover", "--resume"]) == 1
+    assert "T2" in capsys.readouterr().err
+    assert main(["recover"]) == 2
+    assert main(["verify", path, "--deep"]) == 0
+    assert "read back identically" in capsys.readouterr().out

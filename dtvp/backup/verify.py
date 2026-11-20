@@ -3,7 +3,7 @@ record against its schema, and the referential and semantic rules."""
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from ..settings_files import SETTINGS_FILE_NAMES, validate_settings_document
 from . import schemas
@@ -45,7 +45,12 @@ def config_warnings(config: dict[str, bytes | None]) -> list[Finding]:
     return warnings
 
 
-def read_all(reader: DumpReader, *, allow_unknown: bool) -> VerifyResult:
+def read_all(
+    reader: DumpReader,
+    *,
+    allow_unknown: bool,
+    observe: Callable[[str, dict[str, Any]], None] | None = None,
+) -> VerifyResult:
     """Stream every record once (C6-C11, S1, R, W). Raises ``DumpError`` on
     the first container, format or schema refusal; referential errors are
     collected."""
@@ -56,6 +61,8 @@ def read_all(reader: DumpReader, *, allow_unknown: bool) -> VerifyResult:
         count = 0
         for record in reader.iter_records(name, stripped=stripped):
             checker.add(name, record)
+            if observe is not None:
+                observe(name, record)
             count += 1
         records[name] = count
     for name in reader.checked.unknown_entities:

@@ -5,7 +5,7 @@
 | | |
 | :--- | :--- |
 | Decision status | Accepted (2026-11-20, repository owner) |
-| Implementation status | Partly implemented (2026-11-20): export, inspect, verify; see [Implementation progress](#implementation-progress) |
+| Implementation status | Implemented (2026-11-20); see [Implementation progress](#implementation-progress) |
 | Amends | [ADR 0002](0002-local-first-database-with-import-and-export.md), consequence "Backups and project archives must cover the database file": the instance dump is the backup; the project archive is not a backup |
 | Related | [ADR 0002](0002-local-first-database-with-import-and-export.md), [ADR 0003](0003-dtvp-is-the-record-for-assessments.md), ADR 0004 (background sync), which reserves the event-log high-water mark in the manifest |
 
@@ -130,8 +130,9 @@ Dependency-Track, not to DTVP's record.
 - Every migration that changes rows needs an entry in the migration-effects
   table, and every migration that touches a dumped table updates the entity
   mapping and its schema in the same change. Coverage tests enforce both.
-- One DTVP process per data directory, enforced by the instance lock; the
-  lock needs a local filesystem.
+- One DTVP process per data directory, enforced by the instance locks (one
+  in `dt_cache` and one in each other directory of a record database,
+  record file or cache); the locks need a local filesystem.
 - A move to a *different* Dependency-Track instance is not supported: every
   key is one of its UUIDs.
 - ADR 0004 (background sync) starts a new event-log epoch after a restore.
@@ -168,6 +169,7 @@ Dependency-Track, not to DTVP's record.
 | :--- | :--- |
 | 1, 2, 5, 6, 9: format, schemas, versioning, credentials | Implemented (2026-11-20): `dtvp/resources/dump-schemas/1/`, `dtvp/backup/schemas.py`, `tests/test_dump_schemas.py` |
 | 3: online export | Implemented (2026-11-20): `dtvp/backup/export.py`, `sqlite_source.py`; `tests/test_backup_export.py` |
-| 4: offline restore | Not implemented |
-| 7: ports | `DumpSource` implemented by `SqliteDumpSource`; `DumpTarget` declared, not implemented |
-| 8: CLI | `export`, `inspect`, `verify` implemented; `restore`, `recover`, `prune` not implemented |
+| 4: offline restore | Implemented (2026-11-20): `dtvp/backup/restore.py`, `sqlite_target.py`; round trip, crash injection at every rename with resume and abort, and every target and staging rule in `tests/test_backup_restore.py` |
+| 7: ports | Implemented: `SqliteDumpSource` and `SqliteDumpTarget` |
+| 8: CLI | Implemented: `export`, `inspect`, `verify [--deep]`, `restore`, `recover`, `prune` |
+| 9: scheduled dumps in the backend, off by default; cron documented as equal | Implemented (2026-11-20): `dtvp/backup/schedule.py`, `tests/test_backup_schedule.py` |

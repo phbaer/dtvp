@@ -648,6 +648,12 @@ class AssessmentOutboxStore:
             )
         return written
 
+    def rebuild_derived_fields(self, connection: sqlite3.Connection) -> int:
+        """Read every assessment into its atomic fields. A restore calls
+        this on its staged database; the connection needs ``sqlite3.Row``
+        rows."""
+        return self._sync_fields(connection, None)
+
     @staticmethod
     def _delete_fields(connection: sqlite3.Connection, key: AssessmentKey) -> None:
         for table in ("assessment_team_fields", "assessment_fields"):

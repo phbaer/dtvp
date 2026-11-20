@@ -553,6 +553,34 @@ def build_code_analysis_result_record(
     return record
 
 
+def code_analysis_result_row(record: dict[str, Any]) -> Optional[tuple[Any, ...]]:
+    """The ``code_analysis_results`` row of a stored record: its run id, the
+    lookup columns derived from it and the canonical JSON. ``None`` without a
+    run id. Pure: the record is not changed and nothing else is written."""
+    run_id = _normalize_text(
+        record.get("analysis_run_id") or record.get("run_id") or record.get("queue_id")
+    )
+    if not run_id:
+        return None
+    assessment_metadata = _build_record_assessment_metadata(record)
+    project_names = assessment_metadata.get("project_names") or []
+    return (
+        run_id,
+        _lower(record.get("project_name"))
+        or (project_names[0] if project_names else ""),
+        _lower(record.get("vuln_id")) or _lower(assessment_metadata.get("vuln_id")),
+        _lower(record.get("component_name"))
+        or _lower(assessment_metadata.get("scan_target")),
+        _lower(record.get("source")),
+        _normalize_text(record.get("context_fingerprint")),
+        _normalize_text(record.get("finished_at")),
+        _normalize_text(record.get("submitted_at")),
+        _normalize_text(record.get("recorded_at")),
+        _record_timestamp_text(record),
+        _record_payload_json(record),
+    )
+
+
 @dataclass
 class CodeAnalysisResultStore:
     path_provider: Callable[[], str] = get_code_analysis_results_path
@@ -659,8 +687,7 @@ class CodeAnalysisResultStore:
         if not run_id:
             return
         record["analysis_run_id"] = run_id
-        assessment_metadata = _build_record_assessment_metadata(record)
-        project_names = assessment_metadata.get("project_names") or []
+        row = code_analysis_result_row(record)
         connection.execute(
             """
             INSERT OR REPLACE INTO code_analysis_results (
@@ -678,27 +705,12 @@ class CodeAnalysisResultStore:
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                run_id,
-                _lower(record.get("project_name"))
-                or (project_names[0] if project_names else ""),
-                _lower(record.get("vuln_id"))
-                or _lower(assessment_metadata.get("vuln_id")),
-                _lower(record.get("component_name"))
-                or _lower(assessment_metadata.get("scan_target")),
-                _lower(record.get("source")),
-                _normalize_text(record.get("context_fingerprint")),
-                _normalize_text(record.get("finished_at")),
-                _normalize_text(record.get("submitted_at")),
-                _normalize_text(record.get("recorded_at")),
-                _record_timestamp_text(record),
-                _record_payload_json(record),
-            ),
+            row,
         )
         self._upsert_assessment_metadata_locked(
             connection,
             run_id,
-            assessment_metadata,
+            _build_record_assessment_metadata(record),
         )
 
     def _upsert_assessment_metadata_locked(
@@ -788,6 +800,11 @@ class CodeAnalysisResultStore:
                 "Backfilled code-analysis assessment metadata for %d result records",
                 updated,
             )
+
+    def rebuild_assessment_metadata(self, connection: sqlite3.Connection) -> None:
+        """Derive the assessment metadata of every stored result that has
+        none; a restore calls this on its staged database."""
+        self._backfill_assessment_metadata_locked(connection)
 
     def _prune_locked(self, connection: sqlite3.Connection) -> None:
         retention_days = get_code_analysis_results_retention_days()
