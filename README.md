@@ -71,9 +71,14 @@ cp .env.dist .env
 docker compose up -d
 ```
 
-Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and a
-strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
-`DTVP_HTTP_PORT` controls the host port. Persistent data lives in `./data`.
+Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and
+`DTVP_SESSION_SECRET_KEY`: at least 32 random bytes, for example from
+`openssl rand -base64 48`. DTVP refuses to start without such a key; see
+[Deployment](docs/deployment.md) for the file-based alternative. Compose
+serves DTVP under `/dtvp` by default; `DTVP_HTTP_PORT` controls the host port.
+Persistent data lives in `./data`. Sign-ins expire after at most 12 hours without use
+and one week in total, logout ends all of a user's sessions, and reviewers can
+revoke a user's sessions; see [Deployment](docs/deployment.md).
 
 The published DTVP image uses Python 3.14 free threading. Code analysis uses
 a separately deployed Agentyzer service; set `DTVP_CODE_ANALYSIS_URL` to its

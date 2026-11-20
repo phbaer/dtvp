@@ -48,6 +48,56 @@ def test_create_returns_plain_value_once_and_stores_only_a_digest(store):
     assert store.list_for_user("bob") == []
 
 
+def test_session_version_starts_at_zero_and_revocation_raises_it(store):
+    assert store.session_version("alice") == 0
+
+    assert store.revoke_sessions("alice") == 1
+    assert store.revoke_sessions("alice") == 2
+    assert store.session_version("alice") == 2
+    assert store.session_version("bob") == 0
+
+
+def test_session_version_persists_across_store_instances(tmp_path):
+    path = str(tmp_path / "tokens.sqlite")
+    AccessTokenStore(path).revoke_sessions("alice")
+
+    assert AccessTokenStore(path).session_version("alice") == 1
+
+
+def test_session_version_migration_applies_to_a_database_with_only_the_first(
+    tmp_path,
+):
+    import sqlite3
+    from contextlib import closing
+
+    from dtvp.access_token_services import get_access_token_migrations_path
+    from dtvp.sqlite_migration_services import run_sqlite_migrations
+
+    path = tmp_path / "tokens.sqlite"
+    only_first = tmp_path / "migrations"
+    only_first.mkdir()
+    (only_first / "0001_initial.sql").write_text(
+        (get_access_token_migrations_path() / "0001_initial.sql").read_text()
+    )
+    with closing(sqlite3.connect(path)) as connection:
+        run_sqlite_migrations(
+            connection, namespace="access_tokens", migrations_path=only_first
+        )
+        connection.commit()
+    legacy = AccessTokenStore(str(path))
+    with closing(sqlite3.connect(path)) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert "session_versions" not in tables
+
+    assert legacy.session_version("alice") == 0
+    assert legacy.revoke_sessions("alice") == 1
+
+
 def test_write_scope_implies_read(store):
     record, _plain = store.create(username="alice", name="a", scopes=["write"])
     assert record.scopes == ("read", "write")

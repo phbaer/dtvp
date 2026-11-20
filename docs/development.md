@@ -118,11 +118,15 @@ export DTVP_OIDC_REDIRECT_URI=http://localhost:5173/auth/callback
 export DTVP_FRONTEND_URL=http://localhost:5173
 export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
 export DTVP_CODE_ANALYSIS_URL=http://127.0.0.1:8095
+export DTVP_SESSION_SECRET_KEY=dtvp-dev-only-local-mock-stack-session-key
+export DTVP_SESSION_ALLOW_DEV_KEY=true
 uv run uvicorn dtvp.boot:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Use `DTVP_DEV_DISABLE_AUTH=true` to make `/auth/me` resolve to local `devuser`,
-which maps to `REVIEWER` in `data/user_roles.json`. Start the frontend with
+which maps to `REVIEWER` in `data/user_roles.json`. The session signing key is
+required even with `DTVP_DEV_DISABLE_AUTH`; the backend refuses to start
+without a key of at least 32 bytes (see [Deployment](deployment.md)). Start the frontend with
 `cd frontend && npm run dev`.
 
 ## Testing Notes

@@ -72,7 +72,13 @@ from .app_wiring import (
 )
 from .access_token_routes import create_access_token_router
 from .access_token_services import access_token_store
-from .auth import auth_settings, get_current_user, get_session_user
+from .auth import (
+    apply_session_refresh,
+    auth_settings,
+    get_current_user,
+    get_session_user,
+    session_config,
+)
 from .auth import router as auth_router
 from .auto_analysis_services import (
     AutoAnalysisSweepDeps,
@@ -427,7 +433,7 @@ app.add_middleware(
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=auth_settings.SESSION_SECRET_KEY,
+    secret_key=session_config.secret_key,
     session_cookie="oidc_state",
     max_age=10 * 60,
     path=auth_settings.oidc_cookie_path,
@@ -457,6 +463,16 @@ async def runtime_startup_gate(request: Request, call_next):
         ),
         headers=headers,
     )
+
+
+@app.middleware("http")
+async def refresh_session_cookie(request: Request, call_next):
+    # Authentication renews a session cookie past half its lifetime by
+    # leaving the new token on request.state; set it on whatever response
+    # the route produced, including routes that build their own Response.
+    response = await call_next(request)
+    apply_session_refresh(request, response)
+    return response
 
 
 @app.middleware("http")
