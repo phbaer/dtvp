@@ -269,6 +269,46 @@ async def test_explicit_role_overrides_the_configured_role(deps):
     assert "[Status: Pending Review]" in stored["analysisDetails"]
 
 
+@pytest.mark.parametrize("how", ["fields", "replace"])
+async def test_an_analysts_save_always_waits_for_review(deps, how):
+    """Only a reviewer approves: an analyst's client cannot leave the marker
+    out, neither in fields nor in a whole text."""
+    text = (
+        "--- [Team: Team A] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+    )
+    if how == "fields":
+        request = _request(team="Team A", state="NOT_AFFECTED", fields={
+            "pending_review": False,
+            "teams": [{"team": "Team A", "state": "NOT_AFFECTED", "assessed_by": "alice",
+                       "justification": "CODE_NOT_PRESENT", "details": "Not shipped."}],
+        })
+    else:
+        request = _request(team="Team A", state="NOT_AFFECTED", details=text,
+                           comparison_mode="REPLACE")
+
+    await save_assessment(deps, request, user="alice", client=None, role="ANALYST")
+
+    stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+    assert "[Status: Pending Review]" in stored["analysisDetails"]
+    assert parse_assessment(
+        stored["analysisState"], stored["analysisDetails"], False
+    )["pending_review"] is True
+
+
+async def test_a_reviewers_save_can_approve(deps):
+    request = _request(team=None, state="NOT_AFFECTED", fields={
+        "pending_review": False,
+        "teams": [{"team": "General", "state": "NOT_AFFECTED", "assessed_by": "rita",
+                   "justification": "CODE_NOT_PRESENT", "details": "Not shipped."}],
+    })
+
+    await save_assessment(deps, request, user="rita", client=None, role="REVIEWER")
+
+    stored = dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1")
+    assert "[Status: Pending Review]" not in stored["analysisDetails"]
+
+
 async def test_ssvc_requires_a_reviewer(deps):
     with pytest.raises(AssessmentPermissionError):
         await save_assessment(

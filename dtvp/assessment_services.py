@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 import httpx
 
 from .assessment_model import (
+    PENDING_REVIEW_MARKER,
     finding_key,
     render_assessment,
     with_analysis_response,
@@ -290,6 +291,17 @@ def build_assessment_payloads(
         )
         if kept_details != final_details_str:
             final_details_str = kept_details
+            aggregated_state = deps.calculate_aggregated_state(final_details_str)
+
+        # Only a reviewer approves. Whatever an analyst's client sends (fields
+        # with pending_review false, a whole text without the marker), the
+        # saved assessment waits for review, as a text save always did.
+        if (
+            str(role or "").upper() != "REVIEWER"
+            and final_details_str.strip()
+            and PENDING_REVIEW_MARKER.casefold() not in final_details_str.casefold()
+        ):
+            final_details_str = f"{final_details_str.rstrip()}\n\n{PENDING_REVIEW_MARKER}"
             aggregated_state = deps.calculate_aggregated_state(final_details_str)
 
         final_details_str = (
