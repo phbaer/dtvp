@@ -784,3 +784,155 @@ def test_findings_that_differ_only_in_the_response_are_separate_entries():
         [("EXPLOITABLE", f"[Response: UPDATE]\n\n{_GENERAL_EXPLOITABLE}")] * 2,
     )
     assert len(same["vulnerabilities"]) == 1
+
+
+# -- recommendation from fixed versions ---------------------------------------
+
+PA = {"uuid": "c1", "name": "lib-a", "version": "1.0", "purl": "pkg:npm/lib-a@1.0"}
+PB = {"uuid": "ref-b", "name": "lib-b", "version": "2.0", "purl": "pkg:npm/lib-b@2.0"}
+READ_AT = "2026-11-17T08:00:00+00:00"
+
+
+def _ranges(*entries, status="read", read_at=READ_AT):
+    return {"status": status, "payload": list(entries), "vuln_updated": "",
+            "read_at": read_at, "attempted_at": read_at}
+
+
+def _excluding(package, end, *sources, start=None):
+    entry = {"identityType": "PURL", "identity": f"pkg:npm/{package}",
+             "versionType": "RANGE", "versionEndExcluding": end, "sources": list(sources)}
+    if start:
+        entry["versionStartIncluding"] = start
+    return entry
+
+
+def _metadata(document):
+    return {item["name"]: item["value"] for item in document["metadata"]["properties"]}
+
+
+def test_a_recommendation_is_derived_from_the_fixed_version():
+    fixed = {("NVD", "CVE-2026-1"): _ranges(
+        _excluding("lib-a", "1.2.3", "GITHUB", "OSV"),
+        _excluding("lib-a", "2.0.1", "GITHUB", start="2.0.0"),
+    )}
+    entry, document = _entry("", "NOT_SET", _finding(PA), fixed_versions=fixed)
+
+    assert entry["recommendation"] == (
+        "Upgrade lib-a to 1.2.3 or later. Later versions are affected too: >=2.0.0 <2.0.1."
+    )
+    assert _property(entry, "dtvp:recommendation_source") == ["fixed_version"]
+    assert _property(entry, "dtvp:recommendation_fixed_by") == ["GITHUB", "OSV"]
+    metadata = _metadata(document)
+    assert metadata["dtvp:export_derived_recommendations"] == "1"
+    assert metadata["dtvp:export_fixed_versions_read_at"] == READ_AT
+    assert "dtvp:export_fixed_versions_unread" not in metadata
+    assert _valid(document)
+
+
+def test_the_recommendation_dependency_track_has_is_kept():
+    fixed = {("NVD", "CVE-2026-1"): _ranges(_excluding("lib-a", "1.2.3", "GITHUB"))}
+    entry, document = _entry(
+        "", "NOT_SET", _finding(PA, recommendation="Apply the vendor patch."),
+        fixed_versions=fixed,
+    )
+    assert entry["recommendation"] == "Apply the vendor patch."
+    assert _property(entry, "dtvp:recommendation_source") == ["advisory"]
+    assert _property(entry, "dtvp:recommendation_fixed_by") == []
+    assert _metadata(document)["dtvp:export_derived_recommendations"] == "0"
+    assert _valid(document)
+
+
+def test_without_a_fix_there_is_no_recommendation():
+    fixed = {("NVD", "CVE-2026-1"): _ranges(
+        {"identityType": "PURL", "identity": "pkg:npm/lib-a", "versionType": "RANGE",
+         "versionEndIncluding": "1.0"},
+    )}
+    entry, document = _entry("", "NOT_SET", _finding(PA), fixed_versions=fixed)
+    assert "recommendation" not in entry
+    assert _property(entry, "dtvp:recommendation_source") == []
+    assert _metadata(document)["dtvp:export_derived_recommendations"] == "0"
+    assert _valid(document)
+
+
+def test_several_affected_components_have_one_sentence_each():
+    fixed = {("NVD", "CVE-2026-1"): _ranges(
+        _excluding("lib-b", "2.1", "OSV"), _excluding("lib-a", "1.1", "GITHUB"),
+    )}
+    document = _vdr([_finding(PB), _finding(PA)], [("NOT_SET", "")] * 2,
+                    fixed_versions=fixed)
+    [entry] = document["vulnerabilities"]
+    assert entry["affects"] == [{"ref": "ref-b"}, {"ref": "c1"}]
+    # Sorted by component name.
+    assert entry["recommendation"] == (
+        "Upgrade lib-a to 1.1 or later. Upgrade lib-b to 2.1 or later."
+    )
+    assert _property(entry, "dtvp:recommendation_fixed_by") == ["GITHUB", "OSV"]
+    assert _valid(document)
+
+
+def test_the_document_counts_derived_and_unread_entries():
+    fixed = {
+        ("NVD", "CVE-2026-1"): _ranges(_excluding("lib-a", "1.1", "GITHUB")),
+        ("NVD", "CVE-2026-3"): _ranges(read_at="2026-11-10T00:00:00+00:00"),
+        # Failed before any good read: still unread.
+        ("NVD", "CVE-2026-4"): {"status": "failed", "payload": None, "vuln_updated": None,
+                                "read_at": READ_AT, "attempted_at": READ_AT},
+    }
+    findings = [
+        _finding(PA),
+        _finding(PA, "CVE-2026-2", "v2"),  # never read
+        _finding(PA, "CVE-2026-3", "v3"),  # read, nothing for lib-a
+        _finding(PA, "CVE-2026-4", "v4"),
+        _finding(PA, "CVE-2026-5", "v5", recommendation="Upgrade."),  # not needed
+        # Trivy's patched versions, without ranges: a hint only.
+        _finding(PB, "CVE-2026-6", "v6", patchedVersions="2.0.4"),
+    ]
+    document = _vdr(findings, [("NOT_SET", "")] * len(findings), fixed_versions=fixed)
+    metadata = _metadata(document)
+    assert metadata["dtvp:export_derived_recommendations"] == "1"
+    assert metadata["dtvp:export_fixed_versions_unread"] == "3"
+    assert metadata["dtvp:export_fixed_versions_read_at"] == "2026-11-10T00:00:00+00:00"
+    trivy = next(e for e in document["vulnerabilities"] if e["id"] == "CVE-2026-6")
+    assert "recommendation" not in trivy
+    assert _property(trivy, "dtvp:recommendation_source") == []
+    assert _property(trivy, "dtvp:patched_versions") == ["2.0.4"]
+    assert _valid(document)
+
+    # Without looked-up ranges nothing counts as unread.
+    without = _vdr(findings, [("NOT_SET", "")] * len(findings))
+    assert "dtvp:export_fixed_versions_unread" not in _metadata(without)
+    assert _metadata(without)["dtvp:export_derived_recommendations"] == "0"
+
+
+def test_a_whole_vdr_with_derived_recommendations_is_valid_and_keeps_the_inventory():
+    findings = [
+        _finding(PA), _finding(PB),
+        _finding(PA, "GHSA-aaaa-bbbb-cccc", "v3", source="GITHUB"),
+    ]
+    assessments = [
+        parse_assessment("NOT_AFFECTED", ASSESSED, False),
+        parse_assessment("EXPLOITABLE", "Reachable here.", False),
+        parse_assessment("NOT_SET", "", False),
+    ]
+    fixed = {
+        ("NVD", "CVE-2026-1"): _ranges(
+            _excluding("lib-a", "1.1", "NVD"), _excluding("lib-b", "2.1", "OSV"),
+        ),
+        ("GITHUB", "GHSA-aaaa-bbbb-cccc"): _ranges(_excluding("lib-a", "1.0.5", "GITHUB")),
+    }
+    plain = build_vdr(SCHEMA_BOM, findings, assessments, generated_at=NOW)
+    derived = build_vdr(SCHEMA_BOM, findings, assessments, generated_at=NOW,
+                        fixed_versions=fixed)
+
+    assert _schema_errors(derived) is None
+    assert [entry.get("recommendation") for entry in derived["vulnerabilities"]] == [
+        "Upgrade lib-a to 1.1 or later.",
+        "Upgrade lib-b to 2.1 or later.",
+        "Upgrade lib-a to 1.0.5 or later.",
+    ]
+    # The inventory does not change with the recommendation.
+    assert _metadata(derived)["dtvp:export_inventory"] == _metadata(plain)["dtvp:export_inventory"]
+    assert build_inventory(SCHEMA_BOM, findings)["serialNumber"] == (
+        _metadata(derived)["dtvp:export_inventory"].removeprefix("urn:cdx:")
+        .removesuffix("/1").join(["urn:uuid:", ""])
+    )

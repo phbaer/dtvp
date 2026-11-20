@@ -23,7 +23,7 @@ exported to Dependency-Track yet is already in the VDR.
 - [What The VDR Contains](#what-the-vdr-contains)
 - [Naming The Rating Source And Properties](#naming-the-rating-source-and-properties)
 - [Limits](#limits)
-- [Planned](#planned)
+- [Recommendation](#recommendation)
 
 ## Getting The Documents
 
@@ -98,7 +98,8 @@ separate entries as well.
 
 | DTVP | CycloneDX |
 | :--- | :--- |
-| Vulnerability ID, source, aliases, description, recommendation, CWEs | `id`, `source.name`, `references`, `description`, `recommendation`, `cwes` |
+| Vulnerability ID, source, aliases, description, CWEs | `id`, `source.name`, `references`, `description`, `cwes` |
+| Recommendation: Dependency-Track's, else derived from the fixed version of the range that contains the component's version | `recommendation`, see [Recommendation](#recommendation) |
 | Publication and last change of the advisory | `published`, `updated`, as date-times in UTC (`2026-04-24T19:17:14+00:00`) |
 | Advisory scores and vectors | One `ratings` entry per CVSS version the advisory has (4.0, 3.x, 2.0, in this order), with the advisory's `source.name`, `method`, `vector`, `score`, and the `severity` of that score. A version with a vector and no score gets the score its vector states. An advisory without CVSS data has one rating with its severity only |
 | Affected component | `affects[].ref`, the component's `bom-ref` in the BOM |
@@ -116,6 +117,7 @@ separate entries as well.
 | SSVC decision | Property `<prefix>:ssvc` |
 | Free text beside a General assessment | Property `<prefix>:free_text` |
 | Assessments of teams that no longer own the component, as the repair noted them in the General assessment | One property `<prefix>:former_assessment` per note, as written ("Former team assessment (…)…") |
+| Where the recommendation comes from | Property `<prefix>:recommendation_source` (`advisory`, `fixed_version`), and for a derived one `<prefix>:recommendation_fixed_by` per mirror, see [Recommendation](#recommendation) |
 | Team assessments marked historical (the team no longer owns the component) | One property `<prefix>:historical_assessment` per assessment. The value is a JSON object with `team`, `state`, and where recorded `justification`, `assessed_by`, `reviewed_by`, `date`, `ticket`, `text`. Not a `team_state` and not an annotation |
 
 The document's `metadata.properties` name the variant, the assessment source,
@@ -131,6 +133,7 @@ the property prefix, and the DTVP version (`<prefix>:export`,
 | `<prefix>:export_historical_assessments` | Number of historical team assessments in the document. Absent: none |
 | `<prefix>:export_advisory_records` | `unavailable`: the vulnerability records could not be read, see [Limits](#limits) |
 | `<prefix>:export_incomplete_findings` | Number of assessed findings whose text could not be read, see [Limits](#limits) |
+| `<prefix>:export_derived_recommendations`, `<prefix>:export_fixed_versions_unread`, `<prefix>:export_fixed_versions_read_at` | Derived recommendations, see [Recommendation](#recommendation) |
 
 ### Assessments Without A Team
 
@@ -174,7 +177,7 @@ both per product (`assessment_source` and `sbom_property_prefix` in its
   `<prefix>-<number>`; without them only the ticket fields are exported.
   Former and historical assessments are searched too.
 - **Advisory data** beyond a finding's summary (every CVSS version, `updated`,
-  `recommendation`) comes from Dependency-Track's vulnerability records of
+  `recommendation`, `patchedVersions`) comes from Dependency-Track's vulnerability records of
   the project. If they are neither stored nor readable, the document has the
   finding's values only and says so with `<prefix>:export_advisory_records`.
   A CVSS vector that cannot be read is exported without a score.
@@ -196,35 +199,131 @@ both per product (`assessment_source` and `sbom_property_prefix` in its
   comment fields is not read. The justification and the response in the VDR
   are those of DTVP's record.
 
-## Planned
+## Recommendation
 
 | | |
 | :--- | :--- |
-| Status | Proposed; not implemented |
-| Recorded | 2026-11-19 |
+| Status | Implemented; checked against `tests/test_fixed_versions.py`, `tests/test_cyclonedx_export.py` and `tests/test_dt_cache.py` only. No consumer has read a derived recommendation yet |
+| Decision | [ADR 0007](adr/0007-recommendation-from-dependency-track-ranges.md) |
+| Source read | 2026-11-20: Dependency-Track 4.13.x and 4.14.x sources (`VulnerabilityResource`, `AffectedComponent`, `ComponentVersion`, `AbstractVulnerableSoftwareAnalysisTask`, `OsvAdvisoryParser`); the deployed 4.14.2 was not queried |
 
-### A Recommendation From Published Fixed Versions
+Dependency-Track fills a vulnerability's `recommendation` only for
+vulnerabilities maintained by hand; its NVD, GitHub advisory and OSV mirrors
+do not set it. They do store, per vulnerability, the affected packages with
+version ranges. DTVP derives the recommendation from those ranges.
 
-**Why.** `recommendation` is exported when Dependency-Track's vulnerability
-record has one. Dependency-Track fills it only for manually maintained
-vulnerabilities: its importers for NVD, GitHub advisories and OSV do not set
-it (read in the 4.13.x sources on 2026-11-19; the deployed 4.14.2 was not read
-separately). A real project version therefore has none.
+**Where the ranges come from.** `GET /api/v1/vulnerability/source/{source}/vuln/{vulnId}`
+(permission `VIEW_PORTFOLIO`, which DTVP's API key already needs) returns
+them as `affectedComponents`: an identity (package URL or CPE), either an
+exact `version` or the bounds `versionStartIncluding`,
+`versionStartExcluding`, `versionEndIncluding`, `versionEndExcluding`, and
+`affectedVersionAttributions` naming the mirrors that reported the range.
+Only these fields are kept, with the distinct mirror names. The answer also
+lists the components of every project the vulnerability affects; they are
+dropped in the client before anything is stored.
 
-**What.** Derive it from the fixed versions that GitHub advisories and OSV
-publish per package and version range, for example "Upgrade lib-a to 1.2.3 or
-later". A recommendation Dependency-Track has stays as it is.
+**When they are read.** In the background only, as the last step of a
+project refresh (see [Runtime](runtime.md)):
 
-**To decide.**
+- for the vulnerabilities of the project's records whose `recommendation` is
+  empty;
+- when the database has no ranges for the vulnerability yet, the record's
+  `updated` differs from the one stored with the ranges, or the ranges are
+  older than `DTVP_FIXED_VERSIONS_REFRESH_DAYS` (default 7). An answer of 404
+  is stored as not found and asked again after the same time. A failed read
+  keeps the ranges read before and is retried after a delay that doubles
+  with each failure in a row: one minute, two, four, up to one day. A good
+  read or a 404 resets it;
+- at most `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` (default 200) reads per
+  refresh cycle, four at a time. Vulnerabilities never read come first, then
+  changed or stale ones, then failed ones whose delay has passed, the
+  longest waiting first, so reads that keep failing cannot use up the cycle.
+  The rest follows in later cycles;
+- once per vulnerability for all projects: the ranges are stored per
+  (source, vulnerability ID), and one read of a vulnerability is in flight
+  at a time.
 
-- Which source is asked, and how results are cached and refreshed. It is a
-  new outbound data source.
-- With several fix lines, which one applies to the component version in the
-  product.
-- Without a fix: say so, or leave the field out.
-- Whether a reviewer can overwrite the derived text per finding.
-- How the document states where the recommendation comes from.
+An export reads the stored ranges and never asks Dependency-Track for them.
+The table `source_vulnerability_ranges` holds rebuildable source data and is
+not part of a project archive.
 
-**Done when** a vulnerability with a published fixed version has
-`recommendation` in the VDR, the export says which entries have a derived one,
-and this page describes the mapping.
+**Which range applies.** Per affected component of an entry:
+
+1. The candidates are the ranges whose identity is the component's: a
+   package URL with the same type, namespace and name (case-insensitive
+   except for Maven; PyPI names normalised); if both name a `distro`
+   qualifier it must be the same, other qualifiers are ignored. Or a CPE
+   (2.3 or 2.2) with the same vendor and product, and no other attribute
+   (part, update, edition, language, software edition, target software,
+   target hardware, other) that both name with different values; a `*` on
+   either side matches, as in Dependency-Track's CPE matching. A component
+   with neither identity gets no recommendation.
+2. The ranges among them that contain the component's version, compared as
+   Dependency-Track compares versions (a port of its `ComponentVersion`).
+   This holds for a single range too: that the finding was reported does
+   not say which range applies, since OSS Index, Trivy and Snyk report
+   findings as well, and a range under a package URL without a `distro`
+   qualifier may be another release's. A component without a version that
+   can be compared (none, `*`, `-`) gets no fix.
+3. If every containing range ends with the same `versionEndExcluding`, and
+   that version is above the component's, it is the fixed version. An end
+   that is included, an open end, ends that differ, exact versions only, or
+   no containing range: no fix.
+4. If another range of the component contains the fixed version, the fixed
+   version moves to that range's end, as often as needed; if that range has
+   an included or open end, or an exact version of the component is the
+   fixed version, there is no fix.
+
+**The text.**
+
+| Case | `recommendation` |
+| :--- | :--- |
+| A fixed version | `Upgrade <name> to <version> or later.` |
+| Another range or an exact version of the package starts at or above the fixed version | `… Later versions are affected too: >=3.0.0 <3.0.2, 3.1.4.` (each range or version, in version order, comma-separated) |
+| No fix | No `recommendation` |
+
+The record's `patchedVersions` is never the recommendation. Trivy sets it
+once, from the package and distribution of whichever project created the
+record, and Dependency-Track does not update it, so it says nothing about
+another component. It is exported as the property
+`<prefix>:patched_versions`, unchecked.
+
+`<name>` is `group:name` for Maven, `group/name` for other packages with a
+group or namespace (`@scope/name`), else the name. An entry that affects
+several components has one sentence per component, distinct, sorted by name
+and joined with a space. Dependency-Track's own recommendation is always
+kept as it is.
+
+**Provenance.**
+
+| Property | Where | Meaning |
+| :--- | :--- | :--- |
+| `<prefix>:recommendation_source` | Entry | `advisory`: Dependency-Track's text. `fixed_version`: derived here |
+| `<prefix>:recommendation_fixed_by` | Entry, derived only | One per mirror that reported a range the fixed version comes from (`GITHUB`, `OSV`, `NVD`, …) |
+| `<prefix>:patched_versions` | Entry without Dependency-Track's own text | The record's `patchedVersions` as it is: a hint, not checked against the component's version, package or distribution |
+| `<prefix>:export_derived_recommendations` | Metadata, always | Number of entries with a derived text, possibly `0` |
+| `<prefix>:export_fixed_versions_unread` | Metadata | Number of entries without a recommendation whose ranges have not been read yet (no read, or only failed ones). Absent when `0` |
+| `<prefix>:export_fixed_versions_read_at` | Metadata | The oldest read of the ranges the document used |
+
+The inventory does not change: its serial number is the same with and
+without derived recommendations.
+
+**Limits.**
+
+- OSV's `limit` event is stored by Dependency-Track as
+  `versionEndExcluding`, like `fixed`. A range that ends at a limit reads as
+  fixed there.
+- Findings that only OSS Index reports have no ranges in Dependency-Track:
+  no derived recommendation.
+- Ranges of different mirrors that disagree about the fix give none; nothing
+  is guessed.
+- Dependency-Track does not compare the Ubuntu suffix of a deb version
+  (`3.0.2-0ubuntu1.10` equals `3.0.2-0ubuntu1.12`). A fix within the same
+  upstream version of an Ubuntu package is therefore not found.
+- A failed read is asked again after its delay, up to once a day, for as
+  long as it fails.
+- No fix means no field. A reviewer cannot overwrite the derived text per
+  finding.
+- The first export of a project after the feature, or of a vulnerability
+  that is new, may come before the background read: the entry has no
+  derived text yet, and `export_fixed_versions_unread` counts it.

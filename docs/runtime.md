@@ -127,7 +127,19 @@ Important frontend components:
   project list has a short freshness TTL across clients, and API-key requests
   reuse one application-lifetime HTTP connection pool. The background cache
   sync also retains its client between refreshes. Each caller still receives an
-  isolated mutable snapshot. Cold finding loads use
+  isolated mutable snapshot. The last step of a project refresh reads the
+  affected version ranges of the project's vulnerabilities that have no
+  recommendation and are missing or stale in the table
+  `source_vulnerability_ranges` (rebuildable source data, shared by all
+  projects): at most `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` per refresh
+  cycle, four at a time, one read per vulnerability across projects, and
+  again after `DTVP_FIXED_VERSIONS_REFRESH_DAYS` or when the record changed.
+  A failed read backs off, from one minute doubling to a day per failure in
+  a row, and failed reads come after never-read and stale ones, so they
+  cannot use up a cycle's reads.
+  Its failure does not fail the refresh, and a CycloneDX export only reads
+  what is stored ([Recommendation](cyclonedx-export.md#recommendation)).
+  Cold finding loads use
   Dependency-Track's Finding Packaging Format export so assessment state and
   details arrive in one request instead of issuing one analysis request per
   finding. Older Dependency-Track versions fall back to the legacy endpoint.

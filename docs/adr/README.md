@@ -9,4 +9,5 @@ Decision status and implementation status are tracked separately in each record.
 | [0001: AI access through MCP and personal access tokens](0001-ai-access-through-mcp-and-access-tokens.md) | Accepted | Implemented |
 | [0002: Local-first database with import and export](0002-local-first-database-with-import-and-export.md) | Accepted; merge and conflict handling superseded by 0003 | Implemented, with listed limits |
 | [0003: DTVP is the record for assessments](0003-dtvp-is-the-record-for-assessments.md) | Accepted | Partly implemented |
-| [0006: Agent code evidence is applied by a person](0006-agent-code-evidence-is-applied-by-a-person.md) | Proposed | Implemented on `feat/code-evidence-mcp`, not merged |
+| [0006: Agent code evidence is applied by a person](0006-agent-code-evidence-is-applied-by-a-person.md) | Proposed | Implemented |
+| [0007: The VDR recommendation comes from the ranges Dependency-Track holds](0007-recommendation-from-dependency-track-ranges.md) | Proposed | Implemented |

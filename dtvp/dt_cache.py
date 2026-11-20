@@ -34,7 +34,8 @@ from .assessment_outbox_services import (
     get_legacy_assessment_outbox_path,
 )
 from .dt_client import DTClient, DTSettings
-from .ports import AssessmentSink, VulnerabilitySource
+from .fixed_versions import slim_affected_components
+from .ports import AffectedVersionSource, AssessmentSink, VulnerabilitySource
 from .local_store import (
     KIND_ANALYSIS,
     KIND_BOM,
@@ -168,6 +169,97 @@ def _refresh_seconds_from_env() -> int:
     except ValueError:
         logger.warning("DTVP_DT_CACHE_REFRESH_SECONDS is not a whole number; using 60")
         return 60
+
+
+def _whole_number_from_env(name: str, default: int) -> int:
+    """A positive whole number from the environment; an unusable value falls
+    back to the default instead of stopping the start."""
+    try:
+        return max(1, int(os.getenv(name, str(default)).strip()))
+    except ValueError:
+        logger.warning("%s is not a whole number; using %s", name, default)
+        return default
+
+
+def _fixed_versions_refresh_days_from_env() -> int:
+    """After how many days the version ranges of a vulnerability are read
+    again; a changed record is read again at once."""
+    return _whole_number_from_env("DTVP_FIXED_VERSIONS_REFRESH_DAYS", 7)
+
+
+def _fixed_versions_reads_per_cycle_from_env() -> int:
+    """How many vulnerabilities' version ranges one refresh cycle reads."""
+    return _whole_number_from_env("DTVP_FIXED_VERSIONS_READS_PER_CYCLE", 200)
+
+
+FIXED_VERSIONS_CONCURRENCY = 4
+
+
+class ReadBudget:
+    """How many reads one refresh cycle may still make."""
+
+    def __init__(self, reads: int) -> None:
+        self.remaining = max(0, reads)
+
+    def take(self, wanted: int) -> int:
+        granted = min(self.remaining, max(0, wanted))
+        self.remaining -= granted
+        return granted
+
+
+def _updated_text(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def _parse_time(value: Any) -> Optional[datetime]:
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def fixed_versions_retry_delay(failures: int) -> timedelta:
+    """How long a vulnerability waits after its n-th failed range read in a
+    row: one minute, doubling up to a day."""
+    return timedelta(seconds=min(86400, 60 * 2 ** min(max(failures, 1) - 1, 11)))
+
+
+def fixed_versions_due(
+    row: Optional[Dict[str, Any]],
+    updated: str,
+    now: datetime,
+    ttl: timedelta,
+) -> bool:
+    """Whether the version ranges of one vulnerability are to be read.
+
+    Never read, a record changed since the read, or a read (or a not-found
+    answer) older than the TTL. After a failed read only once the retry
+    delay since that attempt has passed.
+    """
+    if row is None:
+        return True
+    if row.get("status") == "failed":
+        attempted = _parse_time(row.get("attempted_at"))
+        delay = fixed_versions_retry_delay(int(row.get("failures") or 0))
+        return attempted is None or now - attempted >= delay
+    if (row.get("vuln_updated") or "") != updated:
+        return True
+    read_at = _parse_time(row.get("read_at"))
+    return read_at is None or now - read_at >= ttl
+
+
+def fixed_versions_order(
+    key: Tuple[str, str], row: Optional[Dict[str, Any]]
+) -> Tuple[int, str, Tuple[str, str]]:
+    """Never read first, then changed or stale ones, then failed ones, the
+    longest waiting first: reads that keep failing cannot use up a cycle's
+    budget ahead of the others."""
+    if row is None:
+        return (0, "", key)
+    if row.get("status") == "failed":
+        return (2, str(row.get("attempted_at") or ""), key)
+    return (1, "", key)
 
 
 def get_export_mode() -> str:
@@ -351,6 +443,8 @@ class CacheManager:
         active_project_limit: int = None,
         memory_cache_max_entries: int = None,
         project_query_cache_max_entries: int = None,
+        fixed_versions_refresh_days: int = None,
+        fixed_versions_reads_per_cycle: int = None,
     ):
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
@@ -386,6 +480,16 @@ class CacheManager:
             _positive_int_env("DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES", 128)
             if project_query_cache_max_entries is None
             else max(1, project_query_cache_max_entries)
+        )
+        self.fixed_versions_refresh_days = (
+            _fixed_versions_refresh_days_from_env()
+            if fixed_versions_refresh_days is None
+            else max(1, fixed_versions_refresh_days)
+        )
+        self.fixed_versions_reads_per_cycle = (
+            _fixed_versions_reads_per_cycle_from_env()
+            if fixed_versions_reads_per_cycle is None
+            else max(0, fixed_versions_reads_per_cycle)
         )
         self.lock = asyncio.Lock()
         self.pending_updates: List[Dict[str, Any]] = []
@@ -1257,16 +1361,136 @@ class CacheManager:
                 self._save_active_projects(self._active_project_last_access)
         if changed:
             await self.flush_cache_writes()
+        # One cap on the version-range reads for the whole cycle.
+        budget = ReadBudget(self.fixed_versions_reads_per_cycle)
         for project_uuid in active:
             try:
-                await self.refresh_project(project_uuid, client)
+                await self.refresh_project(
+                    project_uuid, client, fixed_versions_budget=budget
+                )
             except Exception as exc:
                 logger.debug("Failed to refresh project %s: %s", project_uuid, exc)
 
-    async def refresh_project(self, project_uuid: str, client: VulnerabilitySource) -> None:
+    async def refresh_project(
+        self,
+        project_uuid: str,
+        client: VulnerabilitySource,
+        *,
+        fixed_versions_budget: Optional[ReadBudget] = None,
+    ) -> None:
+        """Read a project version again from the source, in the background.
+
+        The last step reads the version ranges of its vulnerabilities that
+        are missing or stale, for the VDR's recommendation; its failure does
+        not fail the refresh.
+        """
         await self.get_vulnerabilities(client, project_uuid, refresh=True)
         await self.get_project_vulnerabilities(client, project_uuid, refresh=True)
         await self.get_bom(client, project_uuid, refresh=True)
+        try:
+            await self.refresh_fixed_versions(
+                client, project_uuid, budget=fixed_versions_budget
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to read the fixed versions of project %s: %s", project_uuid, exc
+            )
+
+    async def refresh_fixed_versions(
+        self,
+        client: Any,
+        project_uuid: str,
+        *,
+        budget: Optional[ReadBudget] = None,
+    ) -> int:
+        """Read the version ranges of the project's vulnerabilities that have
+        no recommendation and are missing or stale in the local database.
+
+        Background only: an export reads the stored rows and never calls
+        the source. The rows are shared by all projects, and one read per
+        vulnerability is in flight at a time. Returns the number of reads.
+        """
+        if not isinstance(client, AffectedVersionSource):
+            return 0
+        async with self.lock:
+            records = self._load_project_cache(
+                self._project_vulns_path(project_uuid), None
+            )
+        wanted: Dict[Tuple[str, str], str] = {}
+        for record in records if isinstance(records, list) else []:
+            if not isinstance(record, dict):
+                continue
+            source = str(record.get("source") or "").strip()
+            vuln_id = str(record.get("vulnId") or "").strip()
+            if source and vuln_id and not str(record.get("recommendation") or "").strip():
+                wanted[(source, vuln_id)] = _updated_text(record.get("updated"))
+        if not wanted:
+            return 0
+        rows = await asyncio.to_thread(self.store.fixed_version_entries, wanted)
+        now = datetime.now(timezone.utc)
+        ttl = timedelta(days=self.fixed_versions_refresh_days)
+        due = sorted(
+            (
+                key for key in wanted
+                if fixed_versions_due(rows.get(key), wanted[key], now, ttl)
+            ),
+            key=lambda key: fixed_versions_order(key, rows.get(key)),
+        )
+        if budget is None:
+            budget = ReadBudget(self.fixed_versions_reads_per_cycle)
+        due = due[: budget.take(len(due))]
+        if not due:
+            return 0
+        semaphore = asyncio.Semaphore(FIXED_VERSIONS_CONCURRENCY)
+
+        async def read(key: Tuple[str, str]) -> None:
+            async with semaphore:
+                await self._singleflight_fetch(
+                    ("fixed_versions", *key),
+                    lambda: self._read_fixed_versions(client, key, wanted[key], ttl),
+                )
+
+        await asyncio.gather(*(read(key) for key in due))
+        return len(due)
+
+    async def _read_fixed_versions(
+        self,
+        client: Any,
+        key: Tuple[str, str],
+        updated: str,
+        ttl: timedelta,
+    ) -> str:
+        source, vuln_id = key
+        # Another project may have read it since this one looked.
+        rows = await asyncio.to_thread(self.store.fixed_version_entries, [key])
+        now = datetime.now(timezone.utc)
+        if not fixed_versions_due(rows.get(key), updated, now, ttl):
+            return "fresh"
+        at = now.isoformat()
+        try:
+            answer = await client.get_vulnerability_affected(source, vuln_id)
+            if answer is not None and not isinstance(answer, dict):
+                raise TypeError("Unexpected answer for the affected versions")
+        except Exception as exc:
+            logger.info(
+                "Could not read the affected versions of %s %s: %s", source, vuln_id, exc
+            )
+            await asyncio.to_thread(
+                self.store.save_fixed_version_entry,
+                source, vuln_id, status="failed", at=at,
+            )
+            return "failed"
+        if answer is None:
+            status, payload = "not_found", None
+        else:
+            status = "read"
+            payload = slim_affected_components(answer.get("affectedComponents"))
+        await asyncio.to_thread(
+            self.store.save_fixed_version_entry,
+            source, vuln_id, status=status, payload=payload,
+            vuln_updated=updated, at=at,
+        )
+        return status
 
     async def record_project_access(self, project_uuid: str) -> None:
         project_uuid = str(project_uuid or "").strip()
@@ -1669,6 +1893,17 @@ class CacheManager:
         )
 
         def assemble() -> Dict[str, Any]:
+            # The version ranges as the background read stored them; an
+            # export never asks the source for them.
+            fixed_versions = self.store.fixed_version_entries(
+                {
+                    (
+                        str((finding.get("vulnerability") or {}).get("source") or ""),
+                        str((finding.get("vulnerability") or {}).get("vulnId") or ""),
+                    )
+                    for finding in findings
+                }
+            )
             assessments = []
             incomplete = 0
             for finding in findings:
@@ -1691,6 +1926,7 @@ class CacheManager:
                 unowned_teams=unowned_teams,
                 ticket_prefixes=ticket_prefixes,
                 findings_read_at=findings_read_at or "",
+                fixed_versions=fixed_versions,
             )
             if not advisories_read:
                 # Ratings, dates, and recommendations are those of the

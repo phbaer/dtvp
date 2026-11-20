@@ -5,9 +5,12 @@ import logging
 import json
 import threading
 from typing import List, Dict, Any, Optional, AsyncGenerator
+from urllib.parse import quote
 from fastapi import Request
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .fixed_versions import slim_affected_components
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +353,30 @@ class DTClient:
         )
         response.raise_for_status()
         return response.json()
+
+    async def get_vulnerability_affected(
+        self, source: str, vuln_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The affected version ranges Dependency-Track holds for one
+        vulnerability, as ``{"affectedComponents": [...]}``, or None when it
+        does not know the vulnerability.
+
+        Uses ``/api/v1/vulnerability/source/{source}/vuln/{vulnId}``
+        (permission VIEW_PORTFOLIO). Its answer also lists the components of
+        every project the vulnerability affects; only the slim
+        ``affectedComponents`` leave this method.
+        """
+        response = await self.client.get(
+            f"{self.base_url}/api/v1/vulnerability/source/"
+            f"{quote(str(source), safe='')}/vuln/{quote(str(vuln_id), safe='')}",
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        body = response.json()
+        if not isinstance(body, dict):
+            raise ValueError("Unexpected Dependency-Track vulnerability response")
+        return {"affectedComponents": slim_affected_components(body.get("affectedComponents"))}
 
     async def finding_exists(
         self,

@@ -538,6 +538,108 @@ class LocalStore:
         ).fetchall()
         return {(row[0], row[1]): json.loads(row[2]) for row in rows}
 
+    # -- affected version ranges per vulnerability ------------------------
+
+    def fixed_version_entries(
+        self, keys: Iterable[tuple[str, str]]
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        """The stored ranges of vulnerabilities, keyed by (source, vuln ID).
+
+        Each row has ``status`` (``read``, ``not_found``, ``failed``),
+        ``payload`` (the slim affected-component list, None unless read
+        once), ``vuln_updated``, ``read_at``, ``attempted_at`` and
+        ``failures`` (failed reads since the last good one). A key without
+        a row was never read.
+        """
+        wanted = sorted({(str(source), str(vuln_id)) for source, vuln_id in keys})
+        found: dict[tuple[str, str], dict[str, Any]] = {}
+        connection = self._connection()
+        for start in range(0, len(wanted), 400):
+            chunk = wanted[start:start + 400]
+            placeholders = ", ".join("(?, ?)" for _ in chunk)
+            rows = connection.execute(
+                f"""
+                SELECT source, vuln_id, status, payload_json, vuln_updated,
+                       read_at, attempted_at, failures
+                FROM source_vulnerability_ranges
+                WHERE (source, vuln_id) IN (VALUES {placeholders})
+                """,
+                [value for key in chunk for value in key],
+            )
+            for (
+                source, vuln_id, status, payload, updated, read_at, attempted, failures
+            ) in rows:
+                found[(source, vuln_id)] = {
+                    "status": status,
+                    "payload": None if payload is None else json.loads(payload),
+                    "vuln_updated": updated,
+                    "read_at": read_at,
+                    "attempted_at": attempted,
+                    "failures": int(failures or 0),
+                }
+        return found
+
+    def save_fixed_version_entry(
+        self,
+        source: str,
+        vuln_id: str,
+        *,
+        status: str,
+        payload: Any = None,
+        vuln_updated: str | None = None,
+        at: str | None = None,
+    ) -> None:
+        """Record one read of a vulnerability's ranges.
+
+        ``failed`` keeps the payload, ``vuln_updated`` and ``read_at`` of the
+        last good read, notes the attempt and counts it; any other status
+        sets the count back to 0.
+        """
+        if status not in ("read", "not_found", "failed"):
+            raise ValueError(f"Unknown status {status!r}")
+        moment = at or _now()
+        connection = self._connection()
+        with connection:
+            if status == "failed":
+                connection.execute(
+                    """
+                    INSERT INTO source_vulnerability_ranges
+                        (source, vuln_id, status, payload_json, vuln_updated,
+                         read_at, attempted_at, failures)
+                    VALUES (?, ?, 'failed', NULL, NULL, ?, ?, 1)
+                    ON CONFLICT (source, vuln_id) DO UPDATE SET
+                        status = excluded.status,
+                        attempted_at = excluded.attempted_at,
+                        failures = source_vulnerability_ranges.failures + 1
+                    """,
+                    (source, vuln_id, moment, moment),
+                )
+                return
+            connection.execute(
+                """
+                INSERT INTO source_vulnerability_ranges
+                    (source, vuln_id, status, payload_json, vuln_updated,
+                     read_at, attempted_at, failures)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT (source, vuln_id) DO UPDATE SET
+                    status = excluded.status,
+                    payload_json = excluded.payload_json,
+                    vuln_updated = excluded.vuln_updated,
+                    read_at = excluded.read_at,
+                    attempted_at = excluded.attempted_at,
+                    failures = 0
+                """,
+                (
+                    source,
+                    vuln_id,
+                    status,
+                    None if payload is None else _dump(payload),
+                    vuln_updated,
+                    moment,
+                    moment,
+                ),
+            )
+
     # -- one-time import of the JSON cache --------------------------------
 
     def import_legacy_json_cache(self, base_path: str) -> dict[str, int] | None:
