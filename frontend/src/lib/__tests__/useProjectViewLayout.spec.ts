@@ -5,6 +5,7 @@ import {
     DETAIL_INSPECTOR_MIN_VIEWPORT,
     FILTER_RAIL_MIN_VIEWPORT,
     FILTER_RAIL_WITH_DETAIL_MIN_VIEWPORT,
+    WORKSPACE_MIN_VIEWPORT,
     useProjectViewLayout,
 } from '../useProjectViewLayout'
 
@@ -70,6 +71,26 @@ describe('useProjectViewLayout', () => {
         setViewportWidth(DETAIL_INSPECTOR_MIN_VIEWPORT)
         window.dispatchEvent(new Event('resize'))
 
+        expect(layout.isDesktopInspector.value).toBe(true)
+
+        wrapper.unmount()
+    })
+
+    it('offers the assessment workspace from 1280px, independent of the desktop inspector', () => {
+        expect(WORKSPACE_MIN_VIEWPORT).toBe(1280)
+        const { layout, wrapper } = mountHarness({ width: 1279 })
+
+        expect(layout.isWorkspaceViewport.value).toBe(false)
+
+        setViewportWidth(1280)
+        window.dispatchEvent(new Event('resize'))
+        expect(layout.isWorkspaceViewport.value).toBe(true)
+        // The overlay host (below the inspector breakpoint) offers it too.
+        expect(layout.isDesktopInspector.value).toBe(false)
+
+        setViewportWidth(DETAIL_INSPECTOR_MIN_VIEWPORT)
+        window.dispatchEvent(new Event('resize'))
+        expect(layout.isWorkspaceViewport.value).toBe(true)
         expect(layout.isDesktopInspector.value).toBe(true)
 
         wrapper.unmount()

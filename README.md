@@ -163,6 +163,10 @@ dependency paths; independent owners can both appear. The backend's
 resolved finding tags drive the list and detail views. Mapping edits rerun the
 project query so both views use the same ownership.
 
+From a 1280px wide viewport the vulnerability detail can open a full-screen
+[assessment workspace](docs/screens.md#assessment-workspace) with the context
+beside the assessment form.
+
 See [Assessment model](docs/assessment-model.md) for exact state, ownership,
 SSVC, and evidence rules; [Review workflows](docs/review-workflows.md) for
 filtering, editing, bulk operations, and archives; or the

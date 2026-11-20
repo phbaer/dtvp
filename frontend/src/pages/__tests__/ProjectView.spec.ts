@@ -331,6 +331,24 @@ describe('ProjectView.vue', () => {
         }))
     })
 
+    it.each([
+        [1600, true],
+        [1300, true],
+        [1200, false],
+    ])('tells the detail inspector at %ipx whether the assessment workspace fits', async (width, available) => {
+        const mockGroups = [{ id: 'CVE-1', title: 'First', affected_versions: [] }]
+        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject', viewportWidth: width })
+        await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('select', mockGroups[0])
+        await flushPromises()
+
+        // >= 1360 is the side panel, below it the overlay; both offer the workspace from 1280.
+        const inspectors = wrapper.findAllComponents({ name: 'VulnDetailInspector' })
+        expect(inspectors).toHaveLength(1)
+        expect(inspectors[0]!.vm.$attrs.workspaceAvailable).toBe(available)
+    })
+
     it('reloads a vulnerability card assessment without selecting the card', async () => {
         const mockGroup = {
             id: 'CVE-RELOAD',

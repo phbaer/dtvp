@@ -162,7 +162,15 @@ The detail workspace provides:
 | :--- | :--- |
 | Context | Three ordered sections: advisory and references; where it was found, a matrix of components by project versions with the assessment state of each finding and the dependency chains of a component behind its row; existing assessment evidence |
 | Code Evidence | A semantic run list with an expandable new-analysis control; selected rows own indented outcome and evidence disclosures; a worst-case combined decision with the shared advisory shown once and rationale grouped into per-target cards |
-| Assessment | Consistent scope and decision/rationale sections with Save/Submit and reload controls in the second section header; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage; inconsistent team decisions remain explicit for manual resolution; global CVSS/rescoring controls |
+| Assessment | Consistent scope and decision/rationale sections, saved with the actions in the sticky bar; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage; inconsistent team decisions remain explicit for manual resolution; global CVSS/rescoring controls |
+
+From a 1280px wide viewport the detail can also open as a full-screen
+[assessment workspace](screens.md#assessment-workspace): the Context or Code
+Evidence tab on the left and the Assessment form always visible on the right,
+each scrolling on its own. Review checks such as 'Evidence reviewed' and
+'Version coverage checked' can then be ticked while the evidence is in view.
+Leaving the workspace (its button or Esc) keeps every unsaved edit and lands on
+the Assessment tab.
 
 Compact vulnerability rows expose the current workflow state, such as mapping
 needed, analysis running, result ready, assessment needed, awaiting review, or
@@ -186,7 +194,9 @@ most common one) and the findings that differ are outlined.
 assessor, reviewer and date). Only the fields that differ are listed unless
 "Show equal fields too" is ticked. A reviewer can put one of them into the
 Global assessment form with "Use for all findings"; it applies to every
-finding once saved.
+finding once saved. In tab mode this switches to the Assessment tab; in the
+assessment workspace the comparison stays open on the left and the form stays
+visible on the right.
 
 ### Approving
 
@@ -197,7 +207,9 @@ rule for that state applied. An existing Global assessment is never replaced.
 Nothing is saved at this point. The reviewer adjusts the decision or the CVSS
 vector where needed and presses Approve, which saves the Global assessment and
 removes the pending status in one step. On a collapsed card the Approve button
-in the header opens this view; it does not approve by itself.
+in the header opens this view; it does not approve by itself. In the assessment
+workspace the form is always visible, so on the Global form the button reads
+Approve directly.
 
 ### Response
 

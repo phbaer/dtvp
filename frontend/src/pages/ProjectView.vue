@@ -476,7 +476,8 @@ onUnmounted(() => {
     projectHeaderState.bulkWorkflowHandler.value = null
 })
 
-// Expansion tracking removed — now handled by VulnRowCompact click → modal flow
+// Expansion tracking removed: a VulnRowCompact click selects the vulnerability
+// into the detail inspector (side panel or overlay, by viewport width).
 
 const SORT_OPTIONS = [
     { value: 'severity', label: 'Original Criticality' },
@@ -1125,6 +1126,7 @@ const exportCurrentProjectArchive = async () => {
 
 const {
     isDesktopInspector,
+    isWorkspaceViewport,
     isDesktopDetailOpen,
     isFilterRailVisible,
 } = useProjectViewLayout({
@@ -1890,6 +1892,7 @@ watch(currentUserRole, (role) => {
                 :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
                 :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
                 :activeTeamFilter="tagFilter"
+                :workspaceAvailable="isWorkspaceViewport"
                 class="h-full"
                 @close="closeSelectedGroupWithDraftGuard"
                 @update="handleTeamMappingUpdated"
@@ -1916,6 +1919,7 @@ watch(currentUserRole, (role) => {
                 :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
                 :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
                 :activeTeamFilter="tagFilter"
+                :workspaceAvailable="isWorkspaceViewport"
                 @close="closeSelectedGroupWithDraftGuard"
                 @update="handleTeamMappingUpdated"
                 @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"

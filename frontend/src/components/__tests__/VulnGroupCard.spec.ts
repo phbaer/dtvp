@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
@@ -2064,5 +2064,451 @@ describe('VulnGroupCard', () => {
             ['EXPLOITABLE', 2],
             ['NOT_AFFECTED', 1],
         ])
+    })
+
+    it('opens the Assessment tab when Apply in Context · 3 fills the form', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        group.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+        group.affected_versions[0].components[0].analysis_details =
+            '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }), teamMapping: ref({}) } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+        expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+
+        const apply = wrapper.get('[data-testid="vulnerability-assessments"]').findAll('button')
+            .find(button => button.text() === 'Apply')
+        await apply!.trigger('click')
+        await flushPromises()
+
+        expect((wrapper.vm as any).activeDetailTab).toBe('review')
+        expect((wrapper.get('#analysis-details-textarea').element as HTMLTextAreaElement).value).toBe('Not shipped.')
+    })
+
+    describe('assessment workspace', () => {
+        const originalScrollTo = HTMLElement.prototype.scrollTo
+        const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
+        let scrollTo: ReturnType<typeof vi.fn>
+        let scrollIntoView: ReturnType<typeof vi.fn>
+
+        beforeEach(() => {
+            scrollTo = vi.fn()
+            scrollIntoView = vi.fn()
+            HTMLElement.prototype.scrollTo = scrollTo as any
+            HTMLElement.prototype.scrollIntoView = scrollIntoView as any
+        })
+
+        afterEach(() => {
+            HTMLElement.prototype.scrollTo = originalScrollTo
+            HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+        })
+
+        const assessedGroup = () => {
+            const group = JSON.parse(JSON.stringify(mockGroup))
+            group.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+            group.affected_versions[0].components[0].analysis_details =
+                '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+            return group
+        }
+
+        const differingGroup = () => {
+            const group = JSON.parse(JSON.stringify(mockGroup))
+            const first = group.affected_versions[0].components[0]
+            first.analysis_state = 'NOT_AFFECTED'
+            first.analysis_details = '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+            group.affected_versions.push({
+                ...group.affected_versions[0],
+                project_version: '2.0',
+                project_uuid: 'p2',
+                components: [
+                    { ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f2' },
+                    {
+                    ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f3',
+                    component_name: 'worker', component_uuid: 'c3',
+                    analysis_state: 'EXPLOITABLE',
+                    analysis_details: '--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] ---\nReachable in the worker.',
+                    },
+                ],
+            })
+            return group
+        }
+
+        const pendingGroup = () => {
+            const pending = JSON.parse(JSON.stringify(mockGroup))
+            pending.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+            pending.affected_versions[0].components[0].analysis_details =
+                '--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: ana] [Justification: CODE_NOT_PRESENT] ---\nThe parser is not shipped.\n\n[Status: Pending Review]'
+            return pending
+        }
+
+        const mountCard = async (options: {
+            group?: any
+            role?: string
+            workspace?: boolean
+            inModal?: boolean
+            workspaceAvailable?: boolean
+            activeTeamFilter?: string
+            teamMapping?: Record<string, string[]>
+        } = {}) => {
+            const wrapper = mount(VulnGroupCard, {
+                props: {
+                    group: options.group ?? mockGroup,
+                    inModal: options.inModal ?? true,
+                    workspace: options.workspace ?? true,
+                    workspaceAvailable: options.workspaceAvailable ?? true,
+                    ...(options.activeTeamFilter ? { activeTeamFilter: options.activeTeamFilter } : {}),
+                },
+                global: {
+                    provide: {
+                        user: ref({ role: options.role ?? 'ANALYST', username: 'rita' }),
+                        teamMapping: ref(options.teamMapping ?? {}),
+                    },
+                    stubs: { teleport: true },
+                },
+            })
+            await flushPromises()
+            return wrapper
+        }
+
+        const tabLabels = (wrapper: ReturnType<typeof mount>) =>
+            wrapper.findAll('[role="tab"]').map(tab => tab.text())
+        const contextPane = (wrapper: ReturnType<typeof mount>) => wrapper.get('[data-testid="workspace-context-pane"]')
+        const assessmentPane = (wrapper: ReturnType<typeof mount>) => wrapper.get('[data-testid="workspace-assessment-pane"]')
+        const decisionSection = (wrapper: ReturnType<typeof mount>) => wrapper.get('[data-testid="assessment-decision-section"]')
+        const scrolledIntoView = () => scrollIntoView.mock.contexts as HTMLElement[]
+        // v-show hides the review section with an inline display: none.
+        const panelShown = (wrapper: ReturnType<typeof mount>, panel: string) =>
+            !(wrapper.get(`#vuln-${mockGroup.id}-detail-panel-${panel}`).attributes('style') || '').includes('display: none')
+        const reviewShown = (wrapper: ReturnType<typeof mount>) => panelShown(wrapper, 'review')
+
+        it('shows the context and the assessment form side by side', async () => {
+            const wrapper = await mountCard()
+
+            const tabs = tabLabels(wrapper)
+            expect(tabs).toHaveLength(2)
+            expect(tabs[0]).toContain('Context')
+            expect(tabs[1]).toContain('Code Evidence')
+            expect(contextPane(wrapper).find('[data-testid="vuln-description"]').exists()).toBe(true)
+            expect(contextPane(wrapper).find('[data-testid="where-found"]').exists()).toBe(true)
+            expect(assessmentPane(wrapper).find('[data-testid="assessment-decision-section"]').exists()).toBe(true)
+            expect(panelShown(wrapper, 'overview')).toBe(true)
+            expect(reviewShown(wrapper)).toBe(true)
+            expect(wrapper.get('[data-testid="workspace-assessment-heading"]').text()).toContain('Assessment')
+            expect(wrapper.get(`#vuln-${mockGroup.id}-detail-panel-review`).attributes('role')).toBe('region')
+            expect(wrapper.text()).toContain('The context is on the left; save with the action bar above.')
+            expect(wrapper.get('[data-testid="vulnerability-assessments"]').text()).not.toContain('Assessment tab')
+        })
+
+        it('keeps tab mode as it was when the workspace is closed', async () => {
+            const wrapper = await mountCard({ workspace: false })
+
+            expect(tabLabels(wrapper)).toHaveLength(3)
+            for (const testid of ['workspace-columns', 'workspace-context-pane', 'workspace-assessment-pane']) {
+                expect(wrapper.get(`[data-testid="${testid}"]`).classes()).toEqual(['contents'])
+            }
+            expect(wrapper.find('[data-testid="workspace-assessment-heading"]').exists()).toBe(false)
+            expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+            expect(reviewShown(wrapper)).toBe(false)
+            expect(wrapper.get(`#vuln-${mockGroup.id}-detail-panel-review`).attributes('role')).toBe('tabpanel')
+        })
+
+        it('fills the form from Apply in Context · 3 and keeps the context in view', async () => {
+            const wrapper = await mountCard({ group: assessedGroup(), role: 'REVIEWER' })
+
+            const apply = wrapper.get('[data-testid="vulnerability-assessments"]').findAll('button')
+                .find(button => button.text() === 'Apply')
+            await apply!.trigger('click')
+            await flushPromises()
+
+            expect((wrapper.get('#analysis-details-textarea').element as HTMLTextAreaElement).value).toBe('Not shipped.')
+            expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+            expect(scrolledIntoView()).toContain(decisionSection(wrapper).element)
+            expect(decisionSection(wrapper).classes()).toContain('ring-2')
+        })
+
+        it('takes one finding variant into the form without scrolling the context pane', async () => {
+            const wrapper = await mountCard({ group: differingGroup(), role: 'REVIEWER' })
+
+            await wrapper.get('[data-testid="card-differences-open"]').trigger('click')
+            await flushPromises()
+            scrollTo.mockClear()
+            scrollIntoView.mockClear()
+
+            await wrapper.get('[data-testid="finding-differences"]').findAll('[data-testid="finding-variant-apply"]')[1]!.trigger('click')
+            await flushPromises()
+
+            expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+            expect((wrapper.vm as any).details).toBe('Reachable in the worker.')
+            expect(scrolledIntoView()).toContain(decisionSection(wrapper).element)
+            expect(scrollTo.mock.contexts).not.toContain(contextPane(wrapper).element)
+        })
+
+        it('keeps Code Evidence open when an analyzer result fills the form', async () => {
+            const wrapper = await mountCard({ teamMapping: { lib: ['Security'] } })
+            await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Code Evidence'))!.trigger('click')
+            expect((wrapper.vm as any).activeDetailTab).toBe('analysis')
+
+            wrapper.getComponent(CodeAnalysisPanel).vm.$emit(
+                'apply-result',
+                analyzerResult('Not Affected', 'No vulnerable code path was found.', 'The parser is not shipped.'),
+                ['lib'],
+                ['run-1'],
+                'Security',
+            )
+            await flushPromises()
+
+            expect((wrapper.vm as any).activeDetailTab).toBe('analysis')
+            expect((wrapper.vm as any).details).toContain('No vulnerable code path was found.')
+            expect(assessmentPane(wrapper).find('[data-testid="code-analysis-draft-banner"]').exists()).toBe(true)
+            expect(reviewShown(wrapper)).toBe(true)
+            expect(panelShown(wrapper, 'analysis')).toBe(true)
+            expect(scrolledIntoView()).toContain(decisionSection(wrapper).element)
+        })
+
+        it('shows the differences in the context pane and keeps the form visible', async () => {
+            const wrapper = await mountCard({ group: differingGroup(), role: 'REVIEWER' })
+
+            expect(contextPane(wrapper).find('[data-testid="card-differences-banner"]').exists()).toBe(true)
+            await wrapper.get('[data-testid="card-differences-open"]').trigger('click')
+            await flushPromises()
+
+            expect(contextPane(wrapper).find('[data-testid="finding-differences"]').exists()).toBe(true)
+            expect(reviewShown(wrapper)).toBe(true)
+        })
+
+        it('approves the Global form in place and leads from a team to the Global form', async () => {
+            const wrapper = await mountCard({ group: pendingGroup(), role: 'REVIEWER' })
+
+            expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+            expect((wrapper.vm as any).selectedTeam).toBe('')
+            const approve = () => wrapper.get('[data-vuln-card-sticky-nav] [data-testid="assessment-approve-button"]')
+            expect(approve().text()).toBe('Approve')
+
+            ;(wrapper.vm as any).selectedTeam = 'Security'
+            await flushPromises()
+            expect(approve().text()).toBe('Review & approve')
+            await approve().trigger('click')
+            await flushPromises()
+            expect((wrapper.vm as any).selectedTeam).toBe('')
+            expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+            expect(approve().text()).toBe('Approve')
+
+            await approve().trigger('click')
+            await flushPromises()
+            expect(updateAssessment).toHaveBeenCalledTimes(1)
+            const payload = vi.mocked(updateAssessment).mock.calls[0]![0] as any
+            expect(payload.state).toBe('NOT_AFFECTED')
+            expect(payload.fields.pending_review).toBeFalsy()
+        })
+
+        it('activates the SSVC evidence while the form is visible', async () => {
+            const workspace = await mountCard({ role: 'REVIEWER' })
+            expect((workspace.vm as any).activeDetailTab).toBe('overview')
+            expect(workspace.getComponent(SsvcCalculator).props('active')).toBe(true)
+
+            const tabs = await mountCard({ role: 'REVIEWER', workspace: false })
+            expect((tabs.vm as any).activeDetailTab).toBe('overview')
+            expect(tabs.getComponent(SsvcCalculator).props('active')).toBe(false)
+        })
+
+        it('preselects the scoped team on entry and keeps a team chosen on the form', async () => {
+            const scoped = await mountCard({
+                workspace: false,
+                activeTeamFilter: 'Security',
+                teamMapping: { lib: ['Security'] },
+            })
+            ;(scoped.vm as any).selectedTeam = ''
+            await flushPromises()
+            await scoped.setProps({ workspace: true })
+            await flushPromises()
+            expect((scoped.vm as any).selectedTeam).toBe('Security')
+            expect((scoped.vm as any).activeDetailTab).toBe('overview')
+
+            const chosen = await mountCard({
+                role: 'REVIEWER',
+                workspace: false,
+                activeTeamFilter: 'Security',
+                teamMapping: { lib: ['Security'] },
+            })
+            await chosen.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))!.trigger('click')
+            expect((chosen.vm as any).selectedTeam).toBe('Security')
+            ;(chosen.vm as any).selectedTeam = ''
+            await flushPromises()
+            await chosen.setProps({ workspace: true })
+            await flushPromises()
+            expect((chosen.vm as any).selectedTeam).toBe('')
+            expect((chosen.vm as any).activeDetailTab).toBe('overview')
+        })
+
+        it('returns to the scoped team after a save, as on the Assessment tab', async () => {
+            const wrapper = await mountCard({
+                role: 'REVIEWER',
+                activeTeamFilter: 'Security',
+                teamMapping: { lib: ['Security'] },
+            })
+            expect((wrapper.vm as any).selectedTeam).toBe('Security')
+            // The reviewer edits the Global form, then a save clears the draft.
+            ;(wrapper.vm as any).selectedTeam = ''
+            await flushPromises()
+            ;(wrapper.vm as any).formTouched = true
+            await flushPromises()
+            expect((wrapper.vm as any).selectedTeam).toBe('')
+            ;(wrapper.vm as any).formTouched = false
+            await flushPromises()
+
+            expect((wrapper.vm as any).selectedTeam).toBe('Security')
+        })
+
+        it.each([
+            ['evidence Apply', (vm: any) => vm.onEvidenceApplyAll('GLOBAL TEXT', 'NOT_AFFECTED', 'CODE_NOT_PRESENT')],
+            ['evidence Adopt', (vm: any) => vm.onEvidenceAdoptTeam({
+                team: 'Runtime', state: 'NOT_AFFECTED', justification: 'CODE_NOT_PRESENT', details: 'GLOBAL TEXT',
+            })],
+            ['Use for all findings', (vm: any) => vm.applyFindingVariant('GLOBAL TEXT', 'NOT_AFFECTED')],
+        ])('fills the Global form, not the scoped team draft, on %s', async (_label, apply) => {
+            const wrapper = await mountCard({
+                activeTeamFilter: 'Security',
+                teamMapping: { lib: ['Security'] },
+            })
+            const vm = wrapper.vm as any
+            expect(vm.selectedTeam).toBe('Security')
+            await wrapper.get('#analysis-details-textarea').setValue('SEC EDIT')
+            await flushPromises()
+            expect(vm.formTouched).toBe(true)
+
+            await apply(vm)
+            await flushPromises()
+
+            expect(vm.selectedTeam).toBe('')
+            expect(vm.details).toBe('GLOBAL TEXT')
+            expect(vm.teamDrafts.get('Security').details).toBe('SEC EDIT')
+        })
+
+        it('lands on the Assessment tab with every edit kept when the workspace closes', async () => {
+            const wrapper = await mountCard({ role: 'REVIEWER' })
+            ;(wrapper.vm as any).state = 'EXPLOITABLE'
+            await wrapper.get('#analysis-details-textarea').setValue('Reachable through the parser.')
+            ;(wrapper.vm as any).teamDrafts.set('Security', {
+                state: 'IN_TRIAGE', details: 'Team draft', justification: 'NOT_SET', assigned: [],
+                evidenceReviewed: false, versionCoverageChecked: false, ticket: '',
+            })
+            await flushPromises()
+            expect((wrapper.vm as any).formTouched).toBe(true)
+
+            await wrapper.setProps({ workspace: false })
+            await flushPromises()
+
+            expect((wrapper.vm as any).activeDetailTab).toBe('review')
+            expect(tabLabels(wrapper)).toHaveLength(3)
+            expect((wrapper.vm as any).details).toBe('Reachable through the parser.')
+            expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
+            expect((wrapper.vm as any).formTouched).toBe(true)
+            expect((wrapper.vm as any).teamDrafts.get('Security').details).toBe('Team draft')
+            expect(reviewShown(wrapper)).toBe(true)
+        })
+
+        it('still asks about an unsaved edit when the details close', async () => {
+            const wrapper = await mountCard()
+            await wrapper.get('#analysis-details-textarea').setValue('Unsaved local explanation')
+            await flushPromises()
+
+            await wrapper.get('button[title="Close details"]').trigger('click')
+            await flushPromises()
+
+            expect(wrapper.text()).toContain('Submit this assessment before leaving?')
+            expect(wrapper.emitted('close')).toBeUndefined()
+        })
+
+        it('offers the workspace toggle only in the inspector on a wide viewport', async () => {
+            const open = await mountCard()
+            const toggle = open.get('[data-testid="workspace-toggle"]')
+            expect(toggle.attributes('aria-pressed')).toBe('true')
+            expect(toggle.attributes('aria-label')).toBe('Leave assessment workspace')
+            await toggle.trigger('click')
+            expect(open.emitted('toggle-workspace')).toHaveLength(1)
+            expect(open.emitted('close')).toBeUndefined()
+
+            const closed = await mountCard({ workspace: false })
+            expect(closed.get('[data-testid="workspace-toggle"]').attributes('aria-pressed')).toBe('false')
+            expect(closed.get('[data-testid="workspace-toggle"]').attributes('aria-label')).toBe('Open assessment workspace')
+
+            const narrow = await mountCard({ workspace: false, workspaceAvailable: false })
+            expect(narrow.find('[data-testid="workspace-toggle"]').exists()).toBe(false)
+
+            const listCard = await mountCard({ inModal: false, workspace: false })
+            await listCard.find('.cursor-pointer').trigger('click')
+            expect(listCard.find('[data-testid="workspace-toggle"]').exists()).toBe(false)
+        })
+
+        it('ignores the workspace outside the inspector', async () => {
+            const wrapper = await mountCard({ inModal: false })
+            await wrapper.find('.cursor-pointer').trigger('click')
+
+            expect(tabLabels(wrapper)).toHaveLength(3)
+            expect(wrapper.get('[data-testid="workspace-columns"]').classes()).toEqual(['contents'])
+            expect(wrapper.find('[data-testid="workspace-assessment-heading"]').exists()).toBe(false)
+        })
+
+        it('stacks the reviewer Global form in the narrower assessment pane', async () => {
+            const workspace = await mountCard({ role: 'REVIEWER' })
+            const workspaceGrid = workspace.get('[data-testid="global-cvss-rescoring"]').element.parentElement!
+            expect(workspaceGrid.className).toContain('grid')
+            expect(workspaceGrid.className).not.toContain('xl:grid-cols-2')
+
+            const tabs = await mountCard({ role: 'REVIEWER', workspace: false })
+            expect(tabs.get('[data-testid="global-cvss-rescoring"]').element.parentElement!.className).toContain('xl:grid-cols-2')
+        })
+
+        it.each([
+            ['tab mode', false],
+            ['workspace', true],
+        ])('keeps every action in the sticky bar in %s', async (_label, workspace) => {
+            const wrapper = await mountCard({ group: pendingGroup(), role: 'REVIEWER', workspace })
+            const actions = '[data-vuln-card-sticky-nav] [data-testid="assessment-actions"]'
+
+            expect(wrapper.findAll('[data-testid="assessment-submit-button"]')).toHaveLength(1)
+            expect(wrapper.findAll(`${actions} [data-testid="assessment-submit-button"]`)).toHaveLength(1)
+            expect(wrapper.findAll('[data-testid="assessment-approve-button"]')).toHaveLength(1)
+            expect(wrapper.findAll(`${actions} [data-testid="assessment-approve-button"]`)).toHaveLength(1)
+            expect(wrapper.findAll(`${actions} [data-testid="assessment-more-button"]`)).toHaveLength(1)
+        })
+
+        it('reports each open modal and the More menu as an open overlay', async () => {
+            const wrapper = await mountCard({ role: 'REVIEWER' })
+            const vm = wrapper.vm as any
+            expect(vm.hasOpenOverlay()).toBe(false)
+
+            const overlays: Array<[string, () => void, () => void]> = [
+                ['generic modal', () => { vm.genericModal.show = true }, () => { vm.genericModal.show = false }],
+                ['conflict modal', () => { vm.showConflictModal = true }, () => { vm.showConflictModal = false }],
+                ['calculator modal', () => { vm.showCalculatorModal = true }, () => { vm.showCalculatorModal = false }],
+                ['delete modal', () => { vm.showDeleteModal = true }, () => { vm.showDeleteModal = false }],
+                ['review modal', () => { vm.reviewModal.show = true }, () => { vm.reviewModal.show = false }],
+                ['more menu', () => { vm.showMoreMenu = true }, () => { vm.showMoreMenu = false }],
+            ]
+            for (const [label, open, close] of overlays) {
+                open()
+                expect(vm.hasOpenOverlay(), label).toBe(true)
+                close()
+                expect(vm.hasOpenOverlay(), label).toBe(false)
+            }
+        })
+
+        it('closes the More menu with the first Esc in the workspace only', async () => {
+            const workspace = await mountCard({ role: 'REVIEWER' })
+            ;(workspace.vm as any).showMoreMenu = true
+            globalThis.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+            expect((workspace.vm as any).showMoreMenu).toBe(false)
+            workspace.unmount()
+
+            const tabs = await mountCard({ role: 'REVIEWER', workspace: false })
+            ;(tabs.vm as any).showMoreMenu = true
+            globalThis.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+            expect((tabs.vm as any).showMoreMenu).toBe(true)
+            tabs.unmount()
+        })
     })
 })
