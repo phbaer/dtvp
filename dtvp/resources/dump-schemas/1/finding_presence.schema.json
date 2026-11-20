@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:finding_presence",
+  "title": "dtvp.dump.finding_presence/1: when the source reported a finding, when it stopped and why",
+  "type": "object",
+  "properties": {
+    "key": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/key"
+    },
+    "vuln_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string"
+    },
+    "component_name": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string"
+    },
+    "component_version": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string"
+    },
+    "component_purl": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string"
+    },
+    "component_identity": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string"
+    },
+    "first_seen_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "status": {
+      "enum": [
+        "reported",
+        "gone"
+      ]
+    },
+    "gone_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A timestamp exactly as stored, or null."
+    },
+    "last_seen_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A timestamp exactly as stored, or null."
+    },
+    "gone_reason": {
+      "enum": [
+        "replaced",
+        "component_removed",
+        "no_longer_matched",
+        "undetermined",
+        "missing_at_export",
+        null
+      ]
+    },
+    "successor_component_uuid": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string"
+    },
+    "carry_over": {
+      "enum": [
+        "carried",
+        "conflict",
+        "own_assessment",
+        "undetermined",
+        null
+      ]
+    },
+    "returned_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A timestamp exactly as stored, or null."
+    }
+  },
+  "required": [
+    "key",
+    "vuln_id",
+    "component_name",
+    "component_version",
+    "component_purl",
+    "component_identity",
+    "first_seen_at",
+    "status",
+    "gone_at",
+    "last_seen_at",
+    "gone_reason",
+    "successor_component_uuid",
+    "carry_over",
+    "returned_at"
+  ],
+  "additionalProperties": false
+}

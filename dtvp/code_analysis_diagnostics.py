@@ -92,14 +92,15 @@ def safe_snapshot(job_id, value, *, source="agentyzer"):
     }
 
 
-def _path():
+def get_code_analysis_diagnostics_path() -> Path:
+    """Saved failure snapshots, beside the configured results path."""
     return Path(get_code_analysis_results_path() + ".diagnostics.sqlite")
 
 
 def save_failure_snapshot(job_id, status):
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", str(job_id or "")):
         return
-    path = _path()
+    path = get_code_analysis_diagnostics_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC).isoformat()
     payload = safe_snapshot(job_id, status, source="dtvp_saved")
@@ -114,7 +115,7 @@ def save_failure_snapshot(job_id, status):
 
 
 def _load_failure_snapshot(job_id):
-    path = _path()
+    path = get_code_analysis_diagnostics_path()
     if not path.exists():
         return None
     with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)) as db:

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:tmrescore_proposal",
+  "title": "dtvp.dump.tmrescore_proposal/1: the threat-model proposals of a project",
+  "type": "object",
+  "properties": {
+    "project_name": {
+      "type": "string"
+    },
+    "snapshot": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "project_name",
+    "snapshot"
+  ],
+  "additionalProperties": false
+}

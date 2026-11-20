@@ -1,0 +1,4 @@
+{
+  "lib-a": "Core",
+  "viewer-*": "Viewer"
+}

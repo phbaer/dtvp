@@ -6,8 +6,7 @@ from typing import Annotated, Any, Callable
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from .rescore_rule_services import validate_rescore_rule_config
-from .team_group_services import validate_team_group_config
+from .settings_files import write_settings_file as default_write_settings_file
 
 
 @dataclass(frozen=True)
@@ -23,9 +22,9 @@ class SettingsRouteDeps:
     get_auto_analysis_guidance_path: Callable[[], str]
     get_user_roles_path: Callable[[], str]
     get_rescore_rules_path: Callable[[], str]
-    write_bytes: Callable[[str, bytes], None]
-    write_json: Callable[[str, Any], None]
-    write_and_validate_json_bytes: Callable[[str, bytes], None]
+    # Validates the document of a settings file, then writes it atomically
+    # (``dtvp.settings_files.write_settings_file``).
+    write_settings_file: Callable[..., str] = default_write_settings_file
 
 
 def _require_reviewer(deps: SettingsRouteDeps, user: str, detail: str) -> None:
@@ -37,6 +36,30 @@ def _ensure_parent_dir(path: str) -> None:
     dir_path = os.path.dirname(path)
     if dir_path:
         os.makedirs(dir_path, exist_ok=True)
+
+
+async def _write(
+    deps: SettingsRouteDeps,
+    name: str,
+    target_path: str,
+    success_message: str,
+    *,
+    payload: Any = None,
+    content: bytes | None = None,
+    context: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Validate and write a settings file; errors are reported, not raised."""
+    _ensure_parent_dir(target_path)
+    kwargs: dict[str, Any] = {"path": target_path, "context": context}
+    if content is not None:
+        kwargs["content"] = content
+    else:
+        kwargs["payload"] = payload
+    try:
+        await asyncio.to_thread(deps.write_settings_file, name, **kwargs)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    return {"status": "success", "message": success_message}
 
 
 def _register_mapping_routes(
@@ -64,21 +87,17 @@ def _register_mapping_routes(
     ):
         _require_reviewer(deps, user, "Only reviewers can modify team mapping")
         target_path = deps.get_team_mapping_path()
-        _ensure_parent_dir(target_path)
-
         try:
             content = await file.read()
-            await asyncio.to_thread(
-                deps.write_and_validate_json_bytes,
-                target_path,
-                content,
-            )
-            return {
-                "status": "success",
-                "message": f"Team mapping updated at {target_path}",
-            }
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "team_mapping",
+            target_path,
+            f"Team mapping updated at {target_path}",
+            content=content,
+        )
 
     @router.put("/settings/mapping", responses=forbidden_response)
     async def update_team_mapping(
@@ -88,16 +107,13 @@ def _register_mapping_routes(
     ):
         _require_reviewer(deps, user, "Only reviewers can modify team mapping")
         target_path = deps.get_team_mapping_path()
-        _ensure_parent_dir(target_path)
-
-        try:
-            await asyncio.to_thread(deps.write_json, target_path, mapping)
-            return {
-                "status": "success",
-                "message": f"Team mapping updated at {target_path}",
-            }
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "team_mapping",
+            target_path,
+            f"Team mapping updated at {target_path}",
+            payload=mapping,
+        )
 
 
 def _register_team_group_routes(
@@ -120,26 +136,15 @@ def _register_team_group_routes(
         user: CurrentUser,
     ):
         _require_reviewer(deps, user, "Only reviewers can modify team groups")
-        validation_errors = validate_team_group_config(
-            groups,
-            deps.load_team_mapping(),
-        )
-        if validation_errors:
-            return {
-                "status": "error",
-                "message": "; ".join(validation_errors),
-            }
-
         target_path = deps.get_team_groups_path()
-        _ensure_parent_dir(target_path)
-        try:
-            await asyncio.to_thread(deps.write_json, target_path, groups)
-            return {
-                "status": "success",
-                "message": f"Team groups updated at {target_path}",
-            }
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "team_groups",
+            target_path,
+            f"Team groups updated at {target_path}",
+            payload=groups,
+            context={"team_mapping": deps.load_team_mapping()},
+        )
 
 
 def _register_role_routes(
@@ -163,28 +168,17 @@ def _register_role_routes(
     ):
         _require_reviewer(deps, user, "Only reviewers can modify roles")
         target_path = deps.get_user_roles_path()
-        _ensure_parent_dir(target_path)
-
         try:
             content = await file.read()
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                return {"status": "error", "message": "Invalid JSON"}
-            validation_errors = validate_rescore_rule_config(parsed)
-            if validation_errors:
-                return {
-                    "status": "error",
-                    "message": "; ".join(validation_errors),
-                }
-
-            await asyncio.to_thread(deps.write_bytes, target_path, content)
-            return {
-                "status": "success",
-                "message": f"User roles updated at {target_path}",
-            }
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "user_roles",
+            target_path,
+            f"User roles updated at {target_path}",
+            content=content,
+        )
 
     @router.put("/settings/roles", responses=forbidden_response)
     async def update_roles(
@@ -194,16 +188,13 @@ def _register_role_routes(
     ):
         _require_reviewer(deps, user, "Only reviewers can modify roles")
         target_path = deps.get_user_roles_path()
-        _ensure_parent_dir(target_path)
-
-        try:
-            await asyncio.to_thread(deps.write_json, target_path, roles)
-            return {
-                "status": "success",
-                "message": f"User roles updated at {target_path}",
-            }
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "user_roles",
+            target_path,
+            f"User roles updated at {target_path}",
+            payload=roles,
+        )
 
     @router.get("/known-users")
     async def get_known_users(user: CurrentUser):
@@ -242,27 +233,21 @@ def _register_auto_analysis_guidance_routes(
             "Only reviewers can modify auto-analysis guidance",
         )
         target_path = deps.get_auto_analysis_guidance_path()
-        _ensure_parent_dir(target_path)
-
         try:
             content = await file.read()
-            try:
-                payload = json.loads(content)
-            except json.JSONDecodeError:
-                return {"status": "error", "message": "Invalid JSON"}
-            if not isinstance(payload, dict):
-                return {
-                    "status": "error",
-                    "message": "Auto-analysis guidance JSON must be an object",
-                }
-
-            await asyncio.to_thread(deps.write_json, target_path, payload)
-            return {
-                "status": "success",
-                "message": f"Auto-analysis guidance updated at {target_path}",
-            }
+            payload = json.loads(content)
+        except ValueError:
+            return {"status": "error", "message": "Invalid JSON"}
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+        # Stored re-indented, as before, not byte for byte.
+        return await _write(
+            deps,
+            "auto_analysis_guidance",
+            target_path,
+            f"Auto-analysis guidance updated at {target_path}",
+            payload=payload,
+        )
 
     @router.put("/settings/auto-analysis-guidance", responses=forbidden_response)
     async def update_auto_analysis_guidance(
@@ -276,16 +261,13 @@ def _register_auto_analysis_guidance_routes(
             "Only reviewers can modify auto-analysis guidance",
         )
         target_path = deps.get_auto_analysis_guidance_path()
-        _ensure_parent_dir(target_path)
-
-        try:
-            await asyncio.to_thread(deps.write_json, target_path, guidance)
-            return {
-                "status": "success",
-                "message": f"Auto-analysis guidance updated at {target_path}",
-            }
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "auto_analysis_guidance",
+            target_path,
+            f"Auto-analysis guidance updated at {target_path}",
+            payload=guidance,
+        )
 
 
 def _register_rescore_rule_routes(
@@ -311,22 +293,17 @@ def _register_rescore_rule_routes(
     ):
         _require_reviewer(deps, user, "Only reviewers can modify rescore rules")
         target_path = deps.get_rescore_rules_path()
-        _ensure_parent_dir(target_path)
-
         try:
             content = await file.read()
-            try:
-                json.loads(content)
-            except json.JSONDecodeError:
-                return {"status": "error", "message": "Invalid JSON"}
-
-            await asyncio.to_thread(deps.write_bytes, target_path, content)
-            return {
-                "status": "success",
-                "message": f"Rescore rules updated at {target_path}",
-            }
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "rescore_rules",
+            target_path,
+            f"Rescore rules updated at {target_path}",
+            content=content,
+        )
 
     @router.put("/settings/rescore-rules", responses=forbidden_response)
     async def update_rescore_rules(
@@ -336,22 +313,13 @@ def _register_rescore_rule_routes(
     ):
         _require_reviewer(deps, user, "Only reviewers can modify rescore rules")
         target_path = deps.get_rescore_rules_path()
-        _ensure_parent_dir(target_path)
-
-        try:
-            validation_errors = validate_rescore_rule_config(rules)
-            if validation_errors:
-                return {
-                    "status": "error",
-                    "message": "; ".join(validation_errors),
-                }
-            await asyncio.to_thread(deps.write_json, target_path, rules)
-            return {
-                "status": "success",
-                "message": f"Rescore rules updated at {target_path}",
-            }
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        return await _write(
+            deps,
+            "rescore_rules",
+            target_path,
+            f"Rescore rules updated at {target_path}",
+            payload=rules,
+        )
 
 
 def create_settings_router(

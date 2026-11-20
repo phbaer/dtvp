@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:access_token",
+  "title": "dtvp.dump.access_token/1: a personal access token (digest only); feature credentials",
+  "type": "object",
+  "properties": {
+    "token_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "username": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "token_hash": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "read",
+          "write"
+        ]
+      }
+    },
+    "created_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "last_used_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "token_id",
+    "username",
+    "name",
+    "token_hash",
+    "scopes",
+    "created_at",
+    "expires_at",
+    "last_used_at",
+    "revoked_at"
+  ],
+  "additionalProperties": false
+}

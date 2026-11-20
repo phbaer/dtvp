@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:instance_metadata",
+  "title": "dtvp.dump.instance_metadata/1: instance metadata kept as a record",
+  "type": "object",
+  "properties": {
+    "key": {
+      "enum": [
+        "active_projects"
+      ]
+    },
+    "value": {}
+  },
+  "required": [
+    "key",
+    "value"
+  ],
+  "additionalProperties": false
+}

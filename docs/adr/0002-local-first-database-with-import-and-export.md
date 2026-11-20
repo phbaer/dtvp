@@ -71,6 +71,8 @@ finding is really gone before a queued write is dropped.
 - Cache-oriented configuration (`DTVP_DT_CACHE_*`, `DTVP_ASSESSMENT_OUTBOX_PATH`)
   needs a compatibility and deprecation path.
 - Backups and project archives must cover the database file.
+  Amended by [ADR 0005](0005-logical-dump-format.md): the instance dump is
+  the backup; the project archive is not a backup.
 - Pending local changes can now exist for a long time in manual mode; the UI
   must show sync status clearly.
 - Grouped tasks keep their current design and read from the database.

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:code_evidence",
+  "title": "dtvp.dump.code_evidence/1: code evidence an agent added (record data, never pruned with analyzer runs)",
+  "type": "object",
+  "properties": {
+    "evidence_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "schema_version": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "source": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "project_name": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "vuln_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "vuln_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+      },
+      "uniqueItems": true,
+      "description": "Lower-case vulnerability id and aliases the evidence is found under"
+    },
+    "scope": {
+      "enum": [
+        "vulnerability",
+        "components",
+        "findings"
+      ]
+    },
+    "targets": {
+      "description": "The resolved targets, as stored"
+    },
+    "title": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "body_markdown": {
+      "type": "string"
+    },
+    "references": {
+      "type": "array"
+    },
+    "suggested_state": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suggested_justification": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        null
+      ]
+    },
+    "author_username": {
+      "type": "string"
+    },
+    "token_id": {
+      "type": "string"
+    },
+    "agent_label": {
+      "type": "string"
+    },
+    "authority": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "withdrawn_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "withdrawn_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "withdrawn_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "evidence_id",
+    "schema_version",
+    "source",
+    "project_name",
+    "vuln_id",
+    "vuln_ids",
+    "scope",
+    "targets",
+    "title",
+    "body_markdown",
+    "references",
+    "suggested_state",
+    "suggested_justification",
+    "confidence",
+    "author_username",
+    "token_id",
+    "agent_label",
+    "authority",
+    "idempotency_key",
+    "created_at",
+    "withdrawn_at",
+    "withdrawn_by",
+    "withdrawn_reason"
+  ],
+  "additionalProperties": false
+}

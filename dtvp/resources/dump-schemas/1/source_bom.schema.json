@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:source_bom",
+  "title": "dtvp.dump.source_bom/1: the stored BOM of a project",
+  "type": "object",
+  "properties": {
+    "project_uuid": {
+      "type": "string"
+    },
+    "payload": {},
+    "payload_raw": {
+      "type": "string"
+    },
+    "updated_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "project_uuid",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/payload_choice"
+    }
+  ]
+}

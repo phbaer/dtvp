@@ -61,6 +61,20 @@ means the integration or override is disabled.
 | `USER_ROLES_PATH` | User-to-role mapping | `data/user_roles.json` |
 | `RESCORE_RULES_PATH` | CVSS transition rules | `data/rescore_rules.json` |
 
+The settings screen and its upload routes validate a new version of these
+files (and of `DTVP_AUTO_ANALYSIS_GUIDANCE_PATH`) before writing it, then
+replace the file atomically: a rejected or interrupted write leaves the
+previous file unchanged. An uploaded file is stored byte for byte.
+
+## Backup
+
+See [Backup and restore](backup-and-restore.md).
+
+| Variable | Purpose | Default |
+| :--- | :--- | :--- |
+| `DTVP_BACKUP_PATH` | Directory for new instance dumps (`python -m dtvp.backup export` without `--out`); preferably on another disk | `data/backups` |
+| `DTVP_DUMP_MAX_UNCOMPRESSED_BYTES` | Largest declared uncompressed size of a dump that `inspect` and `verify` read | `17179869184` (16 GiB) |
+
 ## Access Tokens And MCP
 
 See [AI and API access](ai-access.md) for behavior and limits.

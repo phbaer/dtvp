@@ -187,6 +187,12 @@ def _sqlite_path_for_configured_path(path: str) -> str:
     return path
 
 
+def get_code_analysis_results_sqlite_path() -> str:
+    """The database file of the results; a configured ``.json`` path names
+    the former JSON file, and the database sits beside it."""
+    return _sqlite_path_for_configured_path(get_code_analysis_results_path())
+
+
 def _legacy_json_path_for_configured_path(path: str) -> str:
     parsed = Path(path)
     if parsed.suffix.lower() == ".json":

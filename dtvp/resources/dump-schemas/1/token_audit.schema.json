@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:token_audit",
+  "title": "dtvp.dump.token_audit/1: one entry of the access-token audit log",
+  "type": "object",
+  "properties": {
+    "audit_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurred_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "username": {
+      "type": "string"
+    },
+    "token_id": {
+      "type": "string"
+    },
+    "agent": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string"
+    },
+    "target": {},
+    "target_raw": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "audit_id",
+    "occurred_at",
+    "username",
+    "token_id",
+    "agent",
+    "action",
+    "outcome",
+    "detail"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/target_choice"
+    }
+  ]
+}

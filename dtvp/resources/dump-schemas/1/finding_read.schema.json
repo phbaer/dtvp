@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:finding_read",
+  "title": "dtvp.dump.finding_read/1: the last read of a project version's findings",
+  "type": "object",
+  "properties": {
+    "project_uuid": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "read_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "went": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "went_raw": {
+      "type": "string",
+      "description": "The stored text when it is not a JSON object."
+    },
+    "returned": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "carried_over": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "not_carried": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "project_uuid",
+    "read_at",
+    "returned",
+    "carried_over",
+    "not_carried"
+  ],
+  "additionalProperties": false
+}

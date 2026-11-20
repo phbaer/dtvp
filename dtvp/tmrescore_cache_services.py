@@ -3,6 +3,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .file_io_services import atomic_write_bytes
+
 
 @dataclass(frozen=True)
 class TMRescoreCacheServiceDeps:
@@ -44,16 +46,13 @@ def load_tmrescore_project_cache(
     }
 
 
-def save_tmrescore_project_cache(cache: dict[str, dict[str, Any]]) -> None:
-    cache_path = get_tmrescore_cache_path()
-    cache_dir = os.path.dirname(cache_path)
-    if cache_dir:
-        os.makedirs(cache_dir, exist_ok=True)
+def serialize_tmrescore_cache(cache: dict[str, dict[str, Any]]) -> bytes:
+    """The stored form of the proposals file; a restore writes it the same way."""
+    return json.dumps(cache, indent=2, sort_keys=True).encode("utf-8")
 
-    temp_path = f"{cache_path}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(cache, handle, indent=2, sort_keys=True)
-    os.replace(temp_path, cache_path)
+
+def save_tmrescore_project_cache(cache: dict[str, dict[str, Any]]) -> None:
+    atomic_write_bytes(get_tmrescore_cache_path(), serialize_tmrescore_cache(cache))
 
 
 def persist_tmrescore_project_snapshot(

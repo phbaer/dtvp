@@ -1,0 +1,418 @@
+{
+  "config": {
+    "auto_analysis_guidance": {
+      "absent": false,
+      "bytes": 51,
+      "path": "config/auto_analysis_guidance.json",
+      "sha256": "2439a86e3520ab376419a45168d45c3adfc7faa398a5cf2e8ce568bc348bfd3f"
+    },
+    "rescore_rules": {
+      "absent": false,
+      "bytes": 183,
+      "path": "config/rescore_rules.json",
+      "sha256": "80eba7d2127749f64eccc14836c9808f8bb463ff44617dc83906f313804e5055"
+    },
+    "team_groups": {
+      "absent": false,
+      "bytes": 61,
+      "path": "config/team_groups.json",
+      "sha256": "3a8f5b0f0770d007ed3fdee04ed70e44a5e4fbbc810343329e6f2fe6a588483f"
+    },
+    "team_mapping": {
+      "absent": false,
+      "bytes": 46,
+      "path": "config/team_mapping.json",
+      "sha256": "552119ef1b6db62a09c5a249fb9e819da259b4d52a4464fe9b5f55da9d6e8105"
+    },
+    "user_roles": {
+      "absent": true
+    }
+  },
+  "contains_credentials": true,
+  "created_at": "2026-11-20T12:00:00+00:00",
+  "created_by": "fixture",
+  "cut_point": {
+    "event_log_high_water_mark": null,
+    "sequences": {
+      "access_token_audit": 2,
+      "assessment_revisions": 9
+    }
+  },
+  "dtvp": {
+    "build_commit": "unknown",
+    "version": "1.0.26"
+  },
+  "dump_id": "5d0c3c2e-7c55-4b8e-9d0e-2f6b5a1c9e01",
+  "entities": {
+    "access_token": {
+      "parts": [
+        {
+          "bytes": 296,
+          "path": "records/access_token/access_token-0001.jsonl",
+          "records": 1,
+          "sha256": "abb44e0d57f2ca10670d5401e3a62fbe6a41a077a6de5f23ae6b8864ac0d7827"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.access_token/1"
+    },
+    "assessment": {
+      "parts": [
+        {
+          "bytes": 3158,
+          "path": "records/assessment/assessment-0001.jsonl",
+          "records": 5,
+          "sha256": "7d3acb09ac8775dddc7068143582c9a6d7acb8e92810e76af8ba23d7c67283f3"
+        }
+      ],
+      "records": 5,
+      "schema": "dtvp.dump.assessment/1"
+    },
+    "code_analysis_application": {
+      "parts": [
+        {
+          "bytes": 258,
+          "path": "records/code_analysis_application/code_analysis_application-0001.jsonl",
+          "records": 1,
+          "sha256": "64a8bf05fa21742564547e741621da95505bb56060c2aa88c820dc1bdbb4dff6"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.code_analysis_application/1"
+    },
+    "code_analysis_result": {
+      "parts": [
+        {
+          "bytes": 471,
+          "path": "records/code_analysis_result/code_analysis_result-0001.jsonl",
+          "records": 1,
+          "sha256": "e08f16d3b40634a94e237a68d3d6a6e9718160ade35aaefdb5bf01b7d200d422"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.code_analysis_result/1"
+    },
+    "code_evidence": {
+      "parts": [
+        {
+          "bytes": 788,
+          "path": "records/code_evidence/code_evidence-0001.jsonl",
+          "records": 1,
+          "sha256": "ffbe12b70959c4be5152bde358d65a95d097b1800b9cb6790c521e57d08f4798"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.code_evidence/1"
+    },
+    "code_evidence_application": {
+      "parts": [
+        {
+          "bytes": 199,
+          "path": "records/code_evidence_application/code_evidence_application-0001.jsonl",
+          "records": 1,
+          "sha256": "638b1ea48a066207586aecb445441bacd4201b91441342960dcb18c2187d49dc"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.code_evidence_application/1"
+    },
+    "finding_presence": {
+      "parts": [
+        {
+          "bytes": 1123,
+          "path": "records/finding_presence/finding_presence-0001.jsonl",
+          "records": 2,
+          "sha256": "3ef7711fa5653954d3913091a00533c388337ddea4cfdae37b393733a74ff5d2"
+        }
+      ],
+      "records": 2,
+      "schema": "dtvp.dump.finding_presence/1"
+    },
+    "finding_read": {
+      "parts": [
+        {
+          "bytes": 162,
+          "path": "records/finding_read/finding_read-0001.jsonl",
+          "records": 1,
+          "sha256": "2997ab82b437d0ca9b7529eb80b2934ea31f5c7cbe2fa8c9190c3cf524e84187"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.finding_read/1"
+    },
+    "instance_metadata": {
+      "parts": [
+        {
+          "bytes": 88,
+          "path": "records/instance_metadata/instance_metadata-0001.jsonl",
+          "records": 1,
+          "sha256": "20688acdee20ca4e56a81cc2e5ea8828d3667f9c909536af966a553d4235f6b9"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.instance_metadata/1"
+    },
+    "known_project": {
+      "parts": [
+        {
+          "bytes": 365,
+          "path": "records/known_project/known_project-0001.jsonl",
+          "records": 2,
+          "sha256": "2f0328b022054ec60e320e53066e8956b97e56fc7488c6feb30e5aa35e99259e"
+        }
+      ],
+      "records": 2,
+      "schema": "dtvp.dump.known_project/1"
+    },
+    "outbox_entry": {
+      "parts": [
+        {
+          "bytes": 1199,
+          "path": "records/outbox_entry/outbox_entry-0001.jsonl",
+          "records": 2,
+          "sha256": "9e90d81242550085561efd1199da0123a7e9828c733bc071a4702f0c0d9b4879"
+        }
+      ],
+      "records": 2,
+      "schema": "dtvp.dump.outbox_entry/1"
+    },
+    "revision": {
+      "parts": [
+        {
+          "bytes": 2646,
+          "path": "records/revision/revision-0001.jsonl",
+          "records": 6,
+          "sha256": "e6b23f4b0cae896ce77acaf7f41b6dd1e5ded0b4fef29f2b3ba9ccd9de18475e"
+        }
+      ],
+      "records": 6,
+      "schema": "dtvp.dump.revision/1"
+    },
+    "session_version": {
+      "parts": [
+        {
+          "bytes": 74,
+          "path": "records/session_version/session_version-0001.jsonl",
+          "records": 1,
+          "sha256": "85e5d0c39eb5acce3d13150cf7523ee33590ee48d3c25b3743f48b9baa01017d"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.session_version/1"
+    },
+    "source_analysis": {
+      "parts": [
+        {
+          "bytes": 437,
+          "path": "records/source_analysis/source_analysis-0001.jsonl",
+          "records": 1,
+          "sha256": "96df3d0c5d766a5ef67d8922cdbc6abbd1c9ea7e39a7928b0920cbe9b0d17564"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.source_analysis/1"
+    },
+    "source_bom": {
+      "parts": [
+        {
+          "bytes": 267,
+          "path": "records/source_bom/source_bom-0001.jsonl",
+          "records": 1,
+          "sha256": "acb64c812d8094acf0e0c91c794314a6f2120ceaaa022b2989d3c9b5c857d151"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.source_bom/1"
+    },
+    "source_finding": {
+      "parts": [
+        {
+          "bytes": 601,
+          "path": "records/source_finding/source_finding-0001.jsonl",
+          "records": 2,
+          "sha256": "e3a3e558ccfd15c690d455d1fc7aa9a2d868d3933420ec2227ee736938489303"
+        }
+      ],
+      "records": 2,
+      "schema": "dtvp.dump.source_finding/1"
+    },
+    "source_project": {
+      "parts": [
+        {
+          "bytes": 126,
+          "path": "records/source_project/source_project-0001.jsonl",
+          "records": 1,
+          "sha256": "f638e2c4bdb13632694db610c0c7583daab914f40dc2951c825bb835f773e373"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.source_project/1"
+    },
+    "source_project_vulnerability": {
+      "parts": [],
+      "records": 0,
+      "schema": "dtvp.dump.source_project_vulnerability/1"
+    },
+    "source_snapshot": {
+      "parts": [
+        {
+          "bytes": 439,
+          "path": "records/source_snapshot/source_snapshot-0001.jsonl",
+          "records": 3,
+          "sha256": "7d383abe369a589553a8b51957bffe884db8b0e1416c0b5ef7c92f0ff908c2f1"
+        }
+      ],
+      "records": 3,
+      "schema": "dtvp.dump.source_snapshot/1"
+    },
+    "tmrescore_proposal": {
+      "parts": [
+        {
+          "bytes": 121,
+          "path": "records/tmrescore_proposal/tmrescore_proposal-0001.jsonl",
+          "records": 1,
+          "sha256": "a0d6dd7712df65a234b7f4056ff3f72b2d533782fc55a2c39cd07e0b7c4103e7"
+        }
+      ],
+      "records": 1,
+      "schema": "dtvp.dump.tmrescore_proposal/1"
+    },
+    "token_audit": {
+      "parts": [
+        {
+          "bytes": 398,
+          "path": "records/token_audit/token_audit-0001.jsonl",
+          "records": 2,
+          "sha256": "2caf0ca04fc8e1be7ddcf9b9c9d682c7f504212f222685cd6d25adadebc8ce5f"
+        }
+      ],
+      "records": 2,
+      "schema": "dtvp.dump.token_audit/1"
+    }
+  },
+  "excluded": [],
+  "format": "dtvp.dump",
+  "format_minor": 0,
+  "format_version": 1,
+  "reason": "manual",
+  "required_features": [
+    "credentials"
+  ],
+  "scope": {
+    "kind": "instance"
+  },
+  "source": {
+    "dependency_track_url": "https://dtrack.example.test/api"
+  },
+  "stores": [
+    {
+      "migrations": [
+        {
+          "checksum": "d40683f9f80a0d91e18f271bb8b53a26339208f36e625117635c5b988e7625b3",
+          "name": "initial",
+          "namespace": "local_store",
+          "version": 1
+        },
+        {
+          "checksum": "0dbddfaf6489c0429e5c89e0865e780b997ce120214db2d1bd921dd86880d0a7",
+          "name": "known_projects",
+          "namespace": "local_store",
+          "version": 2
+        },
+        {
+          "checksum": "55a488a14dd45636701f9c755409bf77c8e951b134e890c7108174f6e272feeb",
+          "name": "initial",
+          "namespace": "assessment_outbox",
+          "version": 1
+        },
+        {
+          "checksum": "15888fc7e8d44b7e5937f360c567c9f5934179f9404a37c53ecfecd0bcec3a3f",
+          "name": "metadata",
+          "namespace": "assessment_outbox",
+          "version": 2
+        },
+        {
+          "checksum": "51c44e90d11c02cf5e53843e090c11cab30e5b55d98153f3a7520da4cc332467",
+          "name": "sync_base_and_revisions",
+          "namespace": "assessment_outbox",
+          "version": 3
+        },
+        {
+          "checksum": "a92f094aeb79d03272b2d9c1d01a4b813c6dbb812a42a12e7181c2098f51fa8d",
+          "name": "local_state_is_the_record",
+          "namespace": "assessment_outbox",
+          "version": 4
+        },
+        {
+          "checksum": "e1812a24d1d5e4068204f5cfdda16f325ad7a18e69a0b8dda2d52e3c1b01572c",
+          "name": "assessment_fields",
+          "namespace": "assessment_outbox",
+          "version": 5
+        },
+        {
+          "checksum": "ecec6bf69de3a08e470045ccff55194aabf0d8f6efb4b9f7badf86fa26ad4829",
+          "name": "team_review_fields",
+          "namespace": "assessment_outbox",
+          "version": 6
+        },
+        {
+          "checksum": "4fbc60e67ae849af263febfc999a098931204f604511397a4b0ad225afcea3ec",
+          "name": "store_each_text_once",
+          "namespace": "assessment_outbox",
+          "version": 7
+        },
+        {
+          "checksum": "004892171030b567c42f2b42f83141e31c93bb796dceac0e5c23db5ddaf613b9",
+          "name": "analysis_response",
+          "namespace": "assessment_outbox",
+          "version": 8
+        },
+        {
+          "checksum": "1f2e7dab9894946d8e08249aad809e0db51eeda5dab9844d557e07ae929c3f1b",
+          "name": "initial",
+          "namespace": "access_tokens",
+          "version": 1
+        }
+      ],
+      "name": "main",
+      "namespaces": [
+        "local_store",
+        "assessment_outbox",
+        "access_tokens"
+      ],
+      "snapshot_at": "2026-11-20T12:00:00+00:00",
+      "snapshot_method": "vacuum-into"
+    },
+    {
+      "migrations": [
+        {
+          "checksum": "c39a5cf985cd68ed5f521e05c8b883645f6603ec133f91f02d146ea0bf2e36bf",
+          "name": "initial",
+          "namespace": "code_analysis_results",
+          "version": 1
+        },
+        {
+          "checksum": "7b92293a9b73f1d03563ee389b7f873db2c8dfda17d5913153e9499acafb79a9",
+          "name": "applications",
+          "namespace": "code_analysis_results",
+          "version": 2
+        },
+        {
+          "checksum": "1c388580ce86689f831e1ec6831c650246d37049bff204e308ff367c575a28dd",
+          "name": "assessment_metadata",
+          "namespace": "code_analysis_results",
+          "version": 3
+        }
+      ],
+      "name": "code_analysis_results",
+      "namespaces": [
+        "code_analysis_results"
+      ],
+      "snapshot_at": "2026-11-20T12:00:00+00:00",
+      "snapshot_method": "backup-api"
+    }
+  ],
+  "warnings": [
+    "1 outbox_entry record keeps a payload that is not JSON as payload_raw"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:outbox_entry",
+  "title": "dtvp.dump.outbox_entry/1: a queued export to the source",
+  "type": "object",
+  "properties": {
+    "key": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/key"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "update_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "payload": {},
+    "payload_raw": {
+      "type": "string"
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "next_attempt_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "key",
+    "revision",
+    "update_id",
+    "attempts",
+    "next_attempt_at",
+    "last_error",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/payload_choice"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
-from unittest.mock import mock_open, patch
+import json
+from unittest.mock import patch
 
 import pytest
 
@@ -13,43 +14,41 @@ def override_auth():
     main.app.dependency_overrides = {}
 
 
-def test_update_team_mapping(client):
+def test_update_team_mapping(client, tmp_path):
     new_mapping = {"comp1": "team1", "comp2": "team2"}
+    target = tmp_path / "test_mapping_update.json"
 
-    with patch(
-        "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
-    ):
+    with patch("dtvp.main.get_team_mapping_path", return_value=str(target)):
         with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-            with patch("builtins.open", mock_open()) as mocked_file:
-                response = client.put("/api/settings/mapping", json=new_mapping)
+            response = client.put("/api/settings/mapping", json=new_mapping)
 
             assert response.status_code == 200
             assert response.json()["status"] == "success"
 
-            # Verify file write
-            mocked_file.assert_called_with("/tmp/test_mapping_update.json", "w")
-            handle = mocked_file()
-            # We can't easily check full json dump content with mock_open, but we can verify write was called
-            assert handle.write.called
+    assert json.loads(target.read_text()) == new_mapping
+    assert target.read_text() == json.dumps(new_mapping, indent=2)
 
 
-def test_update_team_mapping_failure(client):
+def test_update_team_mapping_failure(client, tmp_path):
     new_mapping = {"comp": "team"}
+    settings_dir = tmp_path / "settings"
+    settings_dir.mkdir()
+    target = settings_dir / "test_mapping_update.json"
 
-    with patch(
-        "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
-    ):
+    with patch("dtvp.main.get_team_mapping_path", return_value=str(target)):
         with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-            with patch("builtins.open", side_effect=Exception("Write error")):
+            with patch("os.replace", side_effect=OSError("Write error")):
                 response = client.put("/api/settings/mapping", json=new_mapping)
 
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "error"
             assert "Write error" in data["message"]
+    assert not target.exists()
+    assert list(settings_dir.iterdir()) == []
 
 
-def test_update_team_groups_reviewer(client):
+def test_update_team_groups_reviewer(client, tmp_path):
     groups = {
         "Core-MUC": {
             "teams": ["Core-MUC", "3rd Party"],
@@ -60,30 +59,28 @@ def test_update_team_groups_reviewer(client):
         "core": "Core-MUC",
         "vendor": "3rd Party",
     }
+    target = tmp_path / "test_team_groups.json"
 
     with (
         patch("dtvp.main.get_user_role", return_value="REVIEWER"),
         patch("dtvp.main.load_team_mapping", return_value=team_mapping),
-        patch(
-            "dtvp.main.get_team_groups_path",
-            return_value="/tmp/test_team_groups.json",
-        ),
-        patch("builtins.open", mock_open()) as mocked_file,
+        patch("dtvp.main.get_team_groups_path", return_value=str(target)),
     ):
         response = client.put("/api/settings/team-groups", json=groups)
 
     assert response.status_code == 200
     assert response.json()["status"] == "success"
-    mocked_file.assert_called_with("/tmp/test_team_groups.json", "w")
+    assert json.loads(target.read_text()) == groups
 
 
-def test_update_team_groups_rejects_unknown_team(client):
+def test_update_team_groups_rejects_unknown_team(client, tmp_path):
     groups = {
         "Core-MUC": {
             "teams": ["Unknown"],
             "groups": [],
         }
     }
+    target = tmp_path / "test_team_groups.json"
 
     with (
         patch("dtvp.main.get_user_role", return_value="REVIEWER"),
@@ -91,14 +88,14 @@ def test_update_team_groups_rejects_unknown_team(client):
             "dtvp.main.load_team_mapping",
             return_value={"core": "Core-MUC"},
         ),
-        patch("builtins.open", mock_open()) as mocked_file,
+        patch("dtvp.main.get_team_groups_path", return_value=str(target)),
     ):
         response = client.put("/api/settings/team-groups", json=groups)
 
     assert response.status_code == 200
     assert response.json()["status"] == "error"
     assert "unknown configured team Unknown" in response.json()["message"]
-    mocked_file.assert_not_called()
+    assert not target.exists()
 
 
 def test_update_team_groups_analyst_forbidden(client):
@@ -112,21 +109,19 @@ def test_update_team_groups_analyst_forbidden(client):
     assert "Only reviewers" in response.json()["detail"]
 
 
-def test_update_roles_reviewer(client):
+def test_update_roles_reviewer(client, tmp_path):
     new_roles = {"alice": "REVIEWER", "bob": "ANALYST"}
+    target = tmp_path / "test_roles_update.json"
 
     # Mock user role to be REVIEWER
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-        with patch(
-            "dtvp.main.get_user_roles_path", return_value="/tmp/test_roles_update.json"
-        ):
-            with patch("builtins.open", mock_open()) as mocked_file:
-                response = client.put("/api/settings/roles", json=new_roles)
+        with patch("dtvp.main.get_user_roles_path", return_value=str(target)):
+            response = client.put("/api/settings/roles", json=new_roles)
 
-                assert response.status_code == 200
-                assert response.json()["status"] == "success"
+            assert response.status_code == 200
+            assert response.json()["status"] == "success"
 
-                mocked_file.assert_called_with("/tmp/test_roles_update.json", "w")
+    assert json.loads(target.read_text()) == new_roles
 
 
 def test_update_roles_analyst_forbidden(client):
@@ -140,23 +135,23 @@ def test_update_roles_analyst_forbidden(client):
         assert "Only reviewers" in response.json()["detail"]
 
 
-def test_update_auto_analysis_guidance_reviewer(client):
+def test_update_auto_analysis_guidance_reviewer(client, tmp_path):
     guidance = {"components": {"keycloak-extension": "Check upstream Keycloak too."}}
+    target = tmp_path / "test_auto_guidance.json"
 
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
         with patch(
             "dtvp.main.get_auto_analysis_guidance_path",
-            return_value="/tmp/test_auto_guidance.json",
+            return_value=str(target),
         ):
-            with patch("builtins.open", mock_open()) as mocked_file:
-                response = client.put(
-                    "/api/settings/auto-analysis-guidance",
-                    json=guidance,
-                )
+            response = client.put(
+                "/api/settings/auto-analysis-guidance",
+                json=guidance,
+            )
 
-                assert response.status_code == 200
-                assert response.json()["status"] == "success"
-                mocked_file.assert_called_with("/tmp/test_auto_guidance.json", "w")
+            assert response.status_code == 200
+            assert response.json()["status"] == "success"
+    assert json.loads(target.read_text()) == guidance
 
 
 def test_update_auto_analysis_guidance_analyst_forbidden(client):

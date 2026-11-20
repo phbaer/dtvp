@@ -380,20 +380,7 @@ class AssessmentOutboxStore:
             "last_error": row["last_error"],
             "updated_at": str(row["updated_at"]),
             "export_rejections": int(row["export_rejections"] or 0),
-            "base": (
-                None
-                if row["base_state"] is None
-                else assessment_value(
-                    row["base_state"],
-                    # Usually the record's own text: then it is not stored
-                    # again (base_same) and not held in memory twice.
-                    row["analysis_details"]
-                    if row["base_details"] is None
-                    or row["base_details"] == row["analysis_details"]
-                    else row["base_details"],
-                    row["base_suppressed"],
-                )
-            ),
+            "base": AssessmentOutboxStore.resolve_base_value(row),
             "remote": (
                 None
                 if row["remote_state"] is None
@@ -404,6 +391,27 @@ class AssessmentOutboxStore:
                 )
             ),
         }
+
+    @staticmethod
+    def resolve_base_value(row: Any) -> dict[str, Any] | None:
+        """The value last agreed with the source, from a state row.
+
+        None without a base state. Its text is ``base_details``, or the
+        record's own text when that is NULL: usually the base is the
+        record's own text, which is then not stored again. ``base_same`` is
+        only a storage hint and is not consulted; a row may carry
+        ``base_same = 1`` with ``base_details`` still set until the fields
+        are synchronised. The instance dump resolves the base the same way.
+        """
+        if row["base_state"] is None:
+            return None
+        return assessment_value(
+            row["base_state"],
+            row["analysis_details"]
+            if row["base_details"] is None
+            else row["base_details"],
+            row["base_suppressed"],
+        )
 
     @staticmethod
     def _local_value(state: dict[str, Any]) -> dict[str, Any]:

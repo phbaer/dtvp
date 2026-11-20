@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:source_analysis",
+  "title": "dtvp.dump.source_analysis/1: the assessment last read from or written to the source",
+  "type": "object",
+  "properties": {
+    "key": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/key"
+    },
+    "payload": {},
+    "payload_raw": {
+      "type": "string"
+    },
+    "updated_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "key",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/payload_choice"
+    }
+  ]
+}

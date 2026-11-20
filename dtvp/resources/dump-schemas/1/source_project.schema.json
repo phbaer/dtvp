@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:source_project",
+  "title": "dtvp.dump.source_project/1: one project of the stored project list",
+  "type": "object",
+  "properties": {
+    "position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "payload": {},
+    "payload_raw": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "position"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/payload_choice"
+    }
+  ]
+}

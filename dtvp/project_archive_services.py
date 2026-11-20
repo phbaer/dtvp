@@ -3,7 +3,6 @@ import hashlib
 import io
 import json
 import os
-import posixpath
 import re
 import shutil
 import tempfile
@@ -14,6 +13,14 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .assessment_model import with_analysis_response
+from .bundle_io import (
+    BundleError,
+    ZipBundleReader,
+    assert_safe_member_name,
+    atomic_output,
+    sha256_hex,
+    stable_json_bytes,
+)
 from .dt_client import DTClient
 
 
@@ -113,43 +120,21 @@ def _safe_project_tree_name(project_name: str) -> str:
     return f"{_safe_filename(project_name)}-{digest}"
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _json_bytes(data: Any) -> bytes:
-    return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False).encode(
-        "utf-8"
-    ) + b"\n"
+# Limits for reading an archive; see dtvp/bundle_io.py.
+ARCHIVE_MAX_MEMBERS = 10_000
+ARCHIVE_MAX_TOTAL_UNCOMPRESSED = 16 * 1024**3
 
 
 def _write_zip_file(path: str, files: dict[str, bytes]) -> None:
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-
-    fd, tmp_path = tempfile.mkstemp(
-        dir=directory or ".",
-        prefix=".tmp-project-archive-",
-        suffix=".zip",
-    )
-    os.close(fd)
-    try:
+    with atomic_output(path, mode=0o600) as handle:
         with zipfile.ZipFile(
-            tmp_path,
+            handle,
             "w",
             compression=zipfile.ZIP_DEFLATED,
             compresslevel=6,
         ) as archive:
             for name, data in files.items():
                 archive.writestr(name, data)
-        os.replace(tmp_path, path)
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
 
 
 def _diffable_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -179,7 +164,7 @@ def _write_expanded_archive_tree(
 
     try:
         stable_files = dict(files)
-        stable_files["manifest.json"] = _json_bytes(_diffable_manifest(manifest))
+        stable_files["manifest.json"] = stable_json_bytes(_diffable_manifest(manifest))
         for name, data in stable_files.items():
             _assert_safe_zip_name(name)
             target_path = (tmp_dir / Path(*name.split("/"))).resolve()
@@ -199,22 +184,16 @@ def _write_expanded_archive_tree(
 
 
 def _assert_safe_zip_name(name: str) -> None:
-    if not name or name.startswith("/") or name.startswith("\\"):
-        raise ProjectArchiveValidationError(f"Unsafe archive path: {name!r}")
-    normalized = posixpath.normpath(name)
-    if normalized != name or normalized == ".":
-        raise ProjectArchiveValidationError(f"Unsafe archive path: {name!r}")
-    if any(part in {"", ".", ".."} for part in name.split("/")):
-        raise ProjectArchiveValidationError(f"Unsafe archive path: {name!r}")
+    assert_safe_member_name(name, ProjectArchiveValidationError)
 
 
 def _read_json_member(
-    zip_file: zipfile.ZipFile,
+    zip_file: ZipBundleReader,
     path: str,
 ) -> Any:
     _assert_safe_zip_name(path)
     try:
-        return json.loads(zip_file.read(path))
+        return json.loads(zip_file.read_bytes(path))
     except KeyError as exc:
         raise ProjectArchiveValidationError(f"Missing archive file: {path}") from exc
     except json.JSONDecodeError as exc:
@@ -499,11 +478,11 @@ async def export_project_archive(
         vulnerabilities_path = f"{version_dir}/vulnerabilities.json"
         assessments_path = f"{version_dir}/assessments.json"
 
-        files[project_path] = _json_bytes(project)
-        files[bom_path] = _json_bytes(bom or {})
-        files[findings_path] = _json_bytes(findings)
-        files[vulnerabilities_path] = _json_bytes(vulnerabilities)
-        files[assessments_path] = _json_bytes(assessments)
+        files[project_path] = stable_json_bytes(project)
+        files[bom_path] = stable_json_bytes(bom or {})
+        files[findings_path] = stable_json_bytes(findings)
+        files[vulnerabilities_path] = stable_json_bytes(vulnerabilities)
+        files[assessments_path] = stable_json_bytes(assessments)
 
         version_entries.append(
             {
@@ -531,7 +510,7 @@ async def export_project_archive(
         )
 
     checksums = {
-        name: {"sha256": _sha256(data), "size": len(data)}
+        name: {"sha256": sha256_hex(data), "size": len(data)}
         for name, data in sorted(files.items())
     }
     manifest = {
@@ -553,7 +532,7 @@ async def export_project_archive(
         },
         "files": checksums,
     }
-    files["manifest.json"] = _json_bytes(manifest)
+    files["manifest.json"] = stable_json_bytes(manifest)
 
     timestamp = created_at.replace("+00:00", "Z").replace(":", "").replace(".", "")
     filename = f"{_safe_filename(normalized_name)}-{timestamp}{ARCHIVE_FILE_SUFFIX}"
@@ -585,10 +564,20 @@ async def export_project_archive(
 
 
 def load_project_archive(path: str) -> dict[str, Any]:
-    with zipfile.ZipFile(path, "r") as zip_file:
-        for member in zip_file.namelist():
-            _assert_safe_zip_name(member)
+    try:
+        return _load_project_archive(path)
+    except BundleError as exc:
+        raise ProjectArchiveValidationError(str(exc)) from exc
 
+
+def _load_project_archive(path: str) -> dict[str, Any]:
+    with ZipBundleReader(
+        path,
+        max_members=ARCHIVE_MAX_MEMBERS,
+        max_total_uncompressed=ARCHIVE_MAX_TOTAL_UNCOMPRESSED,
+        max_ratio=None,
+        max_line_bytes=ARCHIVE_MAX_TOTAL_UNCOMPRESSED,
+    ) as zip_file:
         manifest = _read_json_member(zip_file, "manifest.json")
         schema_version = manifest.get("schema_version")
         if schema_version != ARCHIVE_SCHEMA_VERSION:
@@ -603,13 +592,13 @@ def load_project_archive(path: str) -> dict[str, Any]:
         for file_path, metadata in (manifest.get("files") or {}).items():
             _assert_safe_zip_name(file_path)
             try:
-                data = zip_file.read(file_path)
+                data = zip_file.read_bytes(file_path)
             except KeyError as exc:
                 raise ProjectArchiveChecksumError(
                     f"Missing checksummed archive file: {file_path}"
                 ) from exc
             expected = (metadata or {}).get("sha256")
-            actual = _sha256(data)
+            actual = sha256_hex(data)
             if expected != actual:
                 raise ProjectArchiveChecksumError(
                     f"Checksum mismatch for {file_path}: expected {expected}, got {actual}"

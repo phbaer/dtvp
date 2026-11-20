@@ -509,9 +509,7 @@ def build_settings_route_deps(
     get_auto_analysis_guidance_path: Callable[[], str],
     get_user_roles_path: Callable[[], str],
     get_rescore_rules_path: Callable[[], str],
-    write_bytes: Callable[[str, bytes], None],
-    write_json: Callable[[str, Any], None],
-    write_and_validate_json_bytes: Callable[[str, bytes], None],
+    write_settings_file: Callable[..., str],
 ) -> SettingsRouteDeps:
     return SettingsRouteDeps(
         get_user_role=get_user_role,
@@ -525,9 +523,7 @@ def build_settings_route_deps(
         get_auto_analysis_guidance_path=get_auto_analysis_guidance_path,
         get_user_roles_path=get_user_roles_path,
         get_rescore_rules_path=get_rescore_rules_path,
-        write_bytes=write_bytes,
-        write_json=write_json,
-        write_and_validate_json_bytes=write_and_validate_json_bytes,
+        write_settings_file=write_settings_file,
     )
 
 
