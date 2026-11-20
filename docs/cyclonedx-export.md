@@ -6,7 +6,7 @@
 | :--- | :--- |
 | Status | Implemented |
 | Decision | [ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md), decision 5 |
-| Verified | 2026-11-19: the consumer read a second export of a real project version after the first fixes and found the eight gaps closed; historical team assessments, the date fallback and the prefix property were added after that reading and are checked against `tests/test_cyclonedx_export.py` only. 2026-11-18 against `tests/test_cyclonedx_export.py` and `tests/test_export.py`, a run against the mock Dependency-Track in Chromium, and by reading a generated VDR with the security documentation generator's CycloneDX reader (`from_cyclonedx` and `read_cyclonedx_fields` at its commit `6646bb8`). The inventory and the VDR are validated against the official CycloneDX 1.5 JSON schema (strict) in `tests/test_cyclonedx_export.py`. `analysis.response` was added on 2026-11-19 and is checked against that test file and schema only; no consumer has read it yet. |
+| Verified | 2026-11-19: the consumer read a second export of a real project version after the first fixes and found the eight gaps closed; historical team assessments, the date fallback and the prefix property were added after that reading and are checked against `tests/test_cyclonedx_export.py` only. 2026-11-18 against `tests/test_cyclonedx_export.py` and `tests/test_export.py`, a run against the mock Dependency-Track in Chromium, and by reading a generated VDR with the security documentation generator's CycloneDX reader (`from_cyclonedx` and `read_cyclonedx_fields` at its commit `6646bb8`). The inventory and the VDR are validated against the official CycloneDX 1.5 JSON schema (strict) in `tests/test_cyclonedx_export.py`. `analysis.response` was added on 2026-11-19 and is checked against that test file and schema only; no consumer has read it yet. 2026-11-20: undated annotations, `annotation_dated_by_assessment` and `unassigned_state` (keyed by the assessor) checked against `tests/test_cyclonedx_export.py` and the CycloneDX 1.5 and 1.6 schemas only; no consumer has read them yet. |
 
 DTVP serves two CycloneDX documents for each project version:
 
@@ -109,11 +109,14 @@ separate entries as well.
 | Rationale (the General assessment, else the free text) | `analysis.detail`, without former team assessments and without `[Assessed by: …]` and `[Reviewed by: …]` tags |
 | Date of the assessment | `analysis.lastUpdated`: the date of the General assessment, or, when it has none, the latest date of the live team assessments. A reviewer's approval keeps the date, so it is when the assessment was last written. DTVP does not record when it was first made: no `analysis.firstIssued` |
 | Rescoring | A `ratings` entry whose `source.name` is the assessment source, with `score`, `severity`, `method`, `vector`, and the rationale as `justification`. A rescoring that has a score and no CVSS vector has the `method` `other` and no `vector` |
-| One team's assessment | An entry in the BOM's `annotations`: `subjects` is the vulnerability's `bom-ref`, `annotator.organization.name` the team, `annotator.organization.contact[0].name` the assessor, `timestamp` the assessment date, `text` the team's text. A team whose text only says "See global assessment." has no annotation |
+| One team's assessment | An entry in the BOM's `annotations`: `subjects` is the vulnerability's `bom-ref`, `annotator.organization.name` the team, `annotator.organization.contact[0].name` the assessor, `text` the team's text. `timestamp` is the team's date; without one, the date of the assessment (the source of `analysis.lastUpdated`, also when the state is not set) and `<prefix>:annotation_dated_by_assessment`; without either, the export time and `<prefix>:undated_annotation`. A team whose text only says "See global assessment." has no annotation |
+| An annotation dated by its assessment (the team recorded no date) | One property `<prefix>:annotation_dated_by_assessment` per such annotation, in annotation order. The value is the annotator's name: the team, or the assessor of an assessment without a team. The date is when the assessment was last written, not the team's own, see [Limits](#limits) |
+| An annotation without any recorded date | One property `<prefix>:undated_annotation` per such annotation, in annotation order. The value is the annotator's name: the team, or the assessor of an assessment without a team |
 | Assessor, reviewer | Properties `<prefix>:assessed_by`, `<prefix>:reviewed_by`, from the assessments' fields and from `[Assessed by: …]`, `[Reviewed by: …]` tags inside their texts |
 | Ticket references | Property `<prefix>:spr`, comma-separated: the tickets recorded with the live and the historical team assessments, then the keys the texts mention (live, former and historical ones), if ticket prefixes are configured. A ticket is about the vulnerability in the product, not about who owned the component |
 | Pending review, suppressed | Properties `<prefix>:pending_review`, `<prefix>:suppressed` (`true`; absent otherwise) |
 | State per team | One property `<prefix>:team_state` per team, as `<team>=<STATE>` |
+| State of an assessment without a team | One property `<prefix>:unassigned_state` per such assessment, as `<assessor>=<STATE>` (`-` without an assessor), see [Assessments Without A Team](#assessments-without-a-team) |
 | SSVC decision | Property `<prefix>:ssvc` |
 | Free text beside a General assessment | Property `<prefix>:free_text` |
 | Assessments of teams that no longer own the component, as the repair noted them in the General assessment | One property `<prefix>:former_assessment` per note, as written ("Former team assessment (…)…") |
@@ -140,10 +143,18 @@ the property prefix, and the DTVP version (`<prefix>:export`,
 The team mapping names a fallback team (key `*`, for example `Unknown`) for
 components no team owns. An assessment under that name is not a team's:
 
-- it has no `<prefix>:team_state`;
-- its text is an annotation by the assessor, as `annotator.individual.name`;
+- its state is the property `<prefix>:unassigned_state`, as
+  `<assessor>=<STATE>` (for example `rita=EXPLOITABLE`), or `-=<STATE>` when
+  it names no assessor; it has no `<prefix>:team_state`. Several such
+  assessments are listed in block order;
+- its text is an annotation by the assessor, as `annotator.individual.name`:
+  the state with the same assessor belongs to it;
 - without an assessor the text is the property
-  `<prefix>:unassigned_assessment`.
+  `<prefix>:unassigned_assessment`, and the state is the one keyed `-`.
+
+Several assessments without a team pair by the assessor. Those with the same
+assessor, or several without one, pair in block order only when each has a
+text; see [Limits](#limits).
 
 The name is that of the team mapping at the time of the export. A team of the
 same name that the mapping assigns components to is not distinguished from it.
@@ -170,8 +181,20 @@ both per product (`assessment_source` and `sbom_property_prefix` in its
 - **Annotator.** CycloneDX allows one annotator per annotation, so the team
   is the annotating organization and the assessor its contact. A reader that
   expects the assessor in `annotator.individual` finds none.
-- **Undated team assessments** carry the export time as `timestamp`, because
-  CycloneDX requires one.
+- **Undated annotations.** A CycloneDX 1.5–1.7 annotation requires a
+  `timestamp` and allows no properties. An annotation without any date
+  therefore carries the export time and is named on the vulnerability by
+  `<prefix>:undated_annotation`.
+- **An annotation dated by its assessment** carries when the assessment as a
+  whole was last written: the General assessment's date, else the latest date
+  of another team. It is not the team's own date, which DTVP did not record,
+  and it can be earlier than when the team wrote its text (for example a text
+  edited in Dependency-Track and imported later). The vulnerability names
+  such an annotation by `<prefix>:annotation_dated_by_assessment`.
+- **Several assessments without a team** pair state and text by the assessor
+  (`unassigned_state` is keyed by it). An assessment whose text only refers
+  to the General one has a state and no text, so several of them with the
+  same assessor, or without any, cannot be told apart beyond block order.
 - **Tickets.** DTVP has no list of ticket systems. A key in a text is
   recognised only for the prefixes given with the request or configured, as
   `<prefix>-<number>`; without them only the ticket fields are exported.

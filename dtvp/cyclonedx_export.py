@@ -12,9 +12,13 @@ markup out of an analysis text:
   ``justification``;
 - BOM ``annotations``: one per team assessment, with the vulnerability's
   ``bom-ref`` as subject, the team as annotator and the assessor as its
-  contact;
+  contact. Its timestamp is the team's date, else the date of the
+  assessment, else the export time; the vulnerability names a borrowed
+  date by ``annotation_dated_by_assessment`` and the export time by
+  ``undated_annotation``;
 - ``properties``: assessor, reviewer, tickets, review status, team states,
-  SSVC, former team assessments;
+  states of assessments without a team, SSVC, former team assessments,
+  annotations not dated by their team;
 - ``recommendation``: Dependency-Track's own, else one derived from the
   version ranges it holds (see ``fixed_versions``), with its provenance.
 
@@ -413,20 +417,25 @@ def _read(
         )
     known = {key.strip() for ticket in recorded for key in ticket.split(",")}
     text_only = [key for key in mentioned if key not in known]
+    # When a team last wrote its assessment; the General one may have no date.
+    latest_team_date = max(
+        (
+            team["assessed_at_ms"] for team in live
+            if team["team"] != "General" and team["assessed_at_ms"]
+        ),
+        default=None,
+    )
     return {
         "general": general,
         "rationale": rationale,
         "former": former,
         "historical": historical,
         "teams": teams,
-        # When a team last wrote its assessment; the General one may have no date.
-        "latest_team_date": max(
-            (
-                team["assessed_at_ms"] for team in live
-                if team["team"] != "General" and team["assessed_at_ms"]
-            ),
-            default=None,
-        ),
+        "latest_team_date": latest_team_date,
+        # When the assessment as a whole was last written: the date of the
+        # General assessment, else the latest date of the live teams. A
+        # reviewer's approval keeps it, so it is not when it was first made.
+        "assessment_date": _date_time(general.get("assessed_at_ms") or latest_team_date),
         "assessors": _distinct(
             [general["assessed_by"]] if general.get("assessed_by")
             else text_assessors or [team["assessed_by"] for team in live]
@@ -480,19 +489,20 @@ def _analysis(fields: dict[str, Any], read: dict[str, Any]) -> dict[str, Any] | 
         analysis["response"] = [response]
     if read["rationale"]:
         analysis["detail"] = read["rationale"]
-    # The date of the General assessment. A reviewer's approval keeps it, so
-    # it is when the assessment was last written, not when it was first made.
-    # Without it, the latest date of the live team assessments: the state
-    # then comes from them.
-    if assessed := _date_time(
-        read["general"].get("assessed_at_ms") or read["latest_team_date"]
-    ):
-        analysis["lastUpdated"] = assessed
+    # The date of the General assessment, else the latest date of the live
+    # team assessments: the state then comes from them.
+    if read["assessment_date"]:
+        analysis["lastUpdated"] = read["assessment_date"]
     return analysis
 
 
 def _properties(
-    fields: dict[str, Any], read: dict[str, Any], prefix: str
+    fields: dict[str, Any],
+    read: dict[str, Any],
+    prefix: str,
+    *,
+    borrowed: Iterable[str] = (),
+    undated: Iterable[str] = (),
 ) -> list[dict[str, str]]:
     general = read["general"]
     properties: list[tuple[str, str]] = []
@@ -509,6 +519,13 @@ def _properties(
     for team in read["teams"]:
         if not team["unowned"]:
             properties.append(("team_state", f"{team['team']}={team['state']}"))
+    for team in read["teams"]:
+        if team["unowned"]:
+            # Keyed by the assessor, who annotates its text, or ``-`` when
+            # there is none and the text is ``unassigned_assessment``. Never
+            # the fallback team name: it is no team's.
+            key = team["assessed_by"] or "-"
+            properties.append(("unassigned_state", f"{key}={team['state']}"))
     if general.get("ssvc"):
         properties.append(("ssvc", str(general["ssvc"])))
     if fields["free_text"] and general.get("details"):
@@ -522,6 +539,12 @@ def _properties(
         properties.append(("former_assessment", note))
     for team in read["historical"]:
         properties.append(("historical_assessment", _historical(team)))
+    for name in borrowed:
+        # The annotation carries the assessment's latest date, not the team's.
+        properties.append(("annotation_dated_by_assessment", name))
+    for name in undated:
+        # An annotation must have a timestamp; this one carries the export time.
+        properties.append(("undated_annotation", name))
     return [{"name": f"{prefix}:{name}", "value": value} for name, value in properties]
 
 
@@ -549,8 +572,19 @@ def _historical(team: dict[str, Any]) -> str:
 
 def _annotations(
     read: dict[str, Any], subject: str, generated_at: str
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """The annotations of the team assessments, who annotates those dated by
+    the assessment, and who annotates those without any date.
+
+    An annotation needs a timestamp: the team's date, else the date of the
+    assessment, else the export time. Neither of the last two is the team's
+    own date (the assessment's can be earlier than the team wrote), so the
+    annotator is named: the team, or the assessor of an assessment without
+    a team (never the fallback team name).
+    """
     annotations = []
+    borrowed: list[str] = []
+    undated: list[str] = []
     for team in read["teams"]:
         if not team["text"]:
             continue  # a state without a text of its own is ``team_state`` only
@@ -559,6 +593,7 @@ def _annotations(
             if not team["assessed_by"]:
                 continue
             annotator: dict[str, Any] = {"individual": {"name": team["assessed_by"]}}
+            name = team["assessed_by"]
         else:
             # CycloneDX allows one annotator per annotation: the team, with
             # the assessor as its contact.
@@ -566,15 +601,23 @@ def _annotations(
             if team["assessed_by"]:
                 organization["contact"] = [{"name": team["assessed_by"]}]
             annotator = {"organization": organization}
+            name = team["team"]
+        timestamp = _date_time(team["assessed_at_ms"])
+        if not timestamp and read["assessment_date"]:
+            timestamp = read["assessment_date"]
+            borrowed.append(name)
+        elif not timestamp:
+            timestamp = generated_at
+            undated.append(name)
         annotations.append(
             {
                 "subjects": [subject],
                 "annotator": annotator,
-                "timestamp": _date_time(team["assessed_at_ms"]) or generated_at,
+                "timestamp": timestamp,
                 "text": team["text"],
             }
         )
-    return annotations
+    return annotations, borrowed, undated
 
 
 def _add_missing_components(
@@ -918,10 +961,16 @@ def build_vdr(
         if analysis := _analysis(fields, read):
             entry["analysis"] = analysis
         entry["affects"] = [{"ref": ref} for ref in group["refs"]]
-        if properties := [*_properties(fields, read, property_prefix), *provenance]:
+        own_annotations, borrowed, undated = _annotations(read, bom_ref, moment)
+        if properties := [
+            *_properties(
+                fields, read, property_prefix, borrowed=borrowed, undated=undated
+            ),
+            *provenance,
+        ]:
             entry["properties"] = properties
         vulnerabilities.append(entry)
-        annotations.extend(_annotations(read, bom_ref, moment))
+        annotations.extend(own_annotations)
         if read["text_only_tickets"]:
             text_only_tickets += 1
         historical_assessments += len(read["historical"])
