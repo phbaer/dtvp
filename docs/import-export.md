@@ -53,7 +53,10 @@ Assessments are **not** replaced by an import. Per finding:
 | Export discarded, previous value unknown (`cancelled`) | any | Dependency-Track's value replaces the local one |
 
 "Same value" compares the analysis state, the details text (ignoring
-surrounding whitespace), and the suppression flag. A local change made while
+surrounding whitespace), and the suppression flag. Dependency-Track's findings
+list carries the text of findings with a state only; for a finding that DTVP
+records with a text and no state, the analysis is read on its own, so that
+its text is compared too. A local change made while
 an import was already running is never touched by that import, and an
 assessed finding whose details could not be read from Dependency-Track is
 skipped rather than treated as emptied.

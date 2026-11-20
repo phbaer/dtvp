@@ -927,6 +927,22 @@ class AssessmentOutboxStore:
             state = self._states.get(key)
             return copy.deepcopy(state) if state is not None else None
 
+    def keys_with_text_and_no_state(self, project_uuid: str) -> set[AssessmentKey]:
+        """Findings of a project whose record has a text and no state.
+
+        The source lists the text of an assessment only for findings with a
+        state, so for these it has to be read finding by finding.
+        """
+        self._ensure_initialized()
+        with self._lock:
+            return {
+                key
+                for key, state in self._states.items()
+                if key[0] == project_uuid
+                and (value := self._local_value(state))["state"] == "NOT_SET"
+                and value["details"].strip()
+            }
+
     def get_revision(self, key: AssessmentKey) -> int:
         overlay = self.get_overlay(key)
         return int(overlay.get("revision") or 0) if overlay else 0

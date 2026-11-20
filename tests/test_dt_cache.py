@@ -1108,6 +1108,33 @@ async def test_an_assessment_the_source_dropped_is_exported_again(tmp_path):
     await manager.close()
 
 
+async def test_a_text_without_a_state_is_read_from_the_source_and_not_exported_again(tmp_path):
+    manager, client = await _manager_with_source(tmp_path)
+    notes = "--- [Team: General] [State: NOT_SET] [Assessed By: rita] ---\nNotes so far."
+    await manager.persist_assessment_updates([_local_payload(notes, state="NOT_SET")])
+    client.get_analysis.return_value = {
+        "analysisState": "NOT_SET", "analysisDetails": notes, "isSuppressed": False,
+    }
+    await manager.flush_pending_updates(client)
+    client.update_analysis.reset_mock()
+    client.get_analysis.reset_mock()
+
+    # The findings list has the text of assessed findings only.
+    listed = _source_finding()
+    del listed["analysis"]["analysisDetails"]
+    client.get_vulnerabilities.return_value = [listed]
+    analysis = await _analysis(manager, client, refresh=True)
+
+    client.get_analysis.assert_awaited_once_with(
+        project_uuid="p1", component_uuid="c1", vulnerability_uuid="v1"
+    )
+    assert analysis["analysisDetails"] == notes
+    assert analysis["dtvpSyncStatus"] == "synced"
+    await manager.flush_pending_updates(client)
+    client.update_analysis.assert_not_awaited()
+    await manager.close()
+
+
 async def test_a_finding_that_disappears_and_returns_keeps_its_assessment(tmp_path):
     manager, client = await _manager_with_source(tmp_path)
     await manager.persist_assessment_updates([_local_payload("Kept across removal")])
