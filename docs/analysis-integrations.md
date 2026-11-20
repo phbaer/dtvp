@@ -172,6 +172,9 @@ the existing result deletion API remains available for assessment-only clients.
 ### Project Workspace And Dashboard
 
 The vulnerability card presents Code Evidence as a target-oriented workflow.
+In the [assessment workspace](screens.md#assessment-workspace) Code Evidence is
+shown beside the assessment form, and applying a result fills the form without
+leaving it.
 For analysts, the target-oriented runs section leads; reviewers start with the
 Combined assessment because it is their primary decision input. The expandable
 `Run new analysis` control sits inside the runs section above its compact latest-

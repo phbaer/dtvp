@@ -4,7 +4,7 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff, Maximize2, Minimize2 } from '@lucide/vue'
 
 import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
@@ -41,6 +41,10 @@ const props = defineProps<{
     hasAutomaticAssessment?: boolean
     automaticAssessmentStatus?: AutomaticAssessmentStatus | null
     activeTeamFilter?: string
+    /** Show the context and the assessment form side by side (inspector only). */
+    workspace?: boolean
+    /** The host can open the assessment workspace (wide enough viewport). */
+    workspaceAvailable?: boolean
 }>()
 
 const DESCRIPTION_FALLBACK = 'No description available.'
@@ -68,6 +72,10 @@ const handleCloseOnEscape = (e: KeyboardEvent) => {
             showConflictModal.value = false
         } else if (showCalculatorModal.value) {
             showCalculatorModal.value = false
+        } else if (isWorkspace.value && showMoreMenu.value) {
+            // In the workspace the first Esc closes the menu, a second one
+            // leaves the workspace.
+            showMoreMenu.value = false
         }
     }
 }
@@ -83,6 +91,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+    if (formHighlightTimer) clearTimeout(formHighlightTimer)
     globalThis.removeEventListener('keydown', handleCloseOnEscape)
     globalThis.removeEventListener('resize', handleViewportResize)
     if (expanded.value && openCardCount > 0) {
@@ -103,6 +112,7 @@ const emit = defineEmits([
     'update:assessment',
     'toggle-expand',
     'close',
+    'toggle-workspace',
 ])
 
 const ANALYSIS_STATES = [
@@ -163,7 +173,12 @@ const unlockBodyScroll = () => {
 
 const expanded = ref(props.inModal ? true : false)
 type DetailTab = 'overview' | 'analysis' | 'review'
+// In the assessment workspace this is only ever 'overview' or 'analysis': it
+// says what the left pane shows, and the form is always visible beside it.
 const activeDetailTab = ref<DetailTab>('overview')
+const isWorkspace = computed(() => !!props.inModal && !!props.workspace)
+/** The one test for "the assessment form is visible". */
+const reviewVisible = computed(() => isWorkspace.value || activeDetailTab.value === 'review')
 const state = ref('NOT_SET')
 const details = ref('')
 const justification = ref('NOT_SET')
@@ -270,7 +285,10 @@ const matrixInstances = computed(() => {
     ))
 })
 
-/** Shows, on the Context tab, which findings differ and in which fields. */
+/**
+ * Shows, on the Context tab, which findings differ and in which fields.
+ * In the workspace this changes only the left pane; the form stays in view.
+ */
 const openDifferences = async () => {
     setDetailTab('overview')
     await nextTick()
@@ -283,7 +301,19 @@ const openDifferences = async () => {
 /** Puts one version of the assessment into the Global form; saving applies it to every finding. */
 const applyFindingVariant = async (variantDetails: string, variantState: string) => {
     await handleApplyAllAssessment(variantDetails, variantState, '')
-    setDetailTab('review', true)
+    void revealAssessmentForm()
+}
+
+/** Apply from the evidence cards in Context · 3: fill the Global form and show it. */
+const onEvidenceApplyAll = async (assessmentDetails: string, assessmentState: string, assessmentJustification: string) => {
+    await handleApplyAllAssessment(assessmentDetails, assessmentState, assessmentJustification)
+    void revealAssessmentForm()
+}
+
+/** Adopt a team block from the evidence cards in Context · 3 and show the form. */
+const onEvidenceAdoptTeam = async (block: AssessmentBlock) => {
+    await handleAdoptTeamBlock(block)
+    void revealAssessmentForm()
 }
 
 const showMoreMenu = ref(false)
@@ -428,6 +458,12 @@ const onAssigneeInput = () => {
 
 const headerEl = ref<HTMLElement | null>(null)
 const detailsEl = ref<HTMLElement | null>(null)
+// The two panes of the assessment workspace; plain wrappers in tab mode.
+const contextPaneEl = ref<HTMLElement | null>(null)
+const assessmentPaneEl = ref<HTMLElement | null>(null)
+const workspaceHeadingEl = ref<HTMLElement | null>(null)
+const formHighlight = ref(false)
+let formHighlightTimer: ReturnType<typeof setTimeout> | null = null
 const headerHeight = ref(48) // sensible default
 const detailsMaxHeight = ref('calc(100vh - 8rem)')
 
@@ -570,8 +606,19 @@ const requestClose = async () => {
     }
 }
 
+/** A modal or menu of this card is open; Esc belongs to it, not to the workspace. */
+const hasOpenOverlay = () => Boolean(
+    genericModal.value.show
+    || showConflictModal.value
+    || showCalculatorModal.value
+    || showDeleteModal.value
+    || reviewModal.value.show
+    || showMoreMenu.value
+)
+
 defineExpose({
     confirmApplyDraftBeforeLeave,
+    hasOpenOverlay,
 })
 
 const changeResponse = (value: string) => {
@@ -843,8 +890,7 @@ const applyProposal = async () => {
     // A threat-model proposal is reviewer context for the global assessment,
     // not a synthetic team assessment. Stage it in the normal form and let the
     // reviewer persist it with the card's save action.
-    selectedTeam.value = ''
-    await nextTick()
+    await moveToGlobalForm()
 
     pendingVector.value = proposal.rescored_vector
     const score = calculateScoreFromVector(proposal.rescored_vector)
@@ -957,7 +1003,7 @@ const handleCodeAnalysisResult = async (
     codeAnalysisDraftApplied.value = true
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = [...analysisRunIds]
-    setDetailTab('review', true)
+    void revealAssessmentForm()
 }
 
 /**
@@ -1096,15 +1142,14 @@ const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[
             `to ${scopedDraft.team}.`,
             `Combined state: ${scopedDraft.state.replace(/_/g, ' ')}.`,
         ].join(' ')
-        setDetailTab('review', true)
+        void revealAssessmentForm()
         return
     }
 
     // Switch to the global assessment first: the selectedTeam watcher persists the
     // current form into its own team draft, which would otherwise overwrite the
     // analyzer drafts written below.
-    selectedTeam.value = ''
-    await nextTick()
+    await moveToGlobalForm()
 
     const fallbackTeams: string[] = []
     const preservedTeams: string[] = []
@@ -1192,7 +1237,7 @@ const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[
             ? [`No team is mapped for ${prepared.unmappedComponents.join(', ')}.`]
             : []),
     ].join(' ')
-    setDetailTab('review', true)
+    void revealAssessmentForm()
 }
 
 const handleCodeAnalysisResultChange = (result: CodeAnalysisAssessResponse | null, components: string[]) => {
@@ -1260,8 +1305,7 @@ const applyEffectiveAssessmentSummary = async () => {
         })))
     if (!reference) return
 
-    selectedTeam.value = ''
-    await nextTick()
+    await moveToGlobalForm()
     state.value = reference.state
     justification.value = reference.justification
     details.value = reference.details
@@ -1309,7 +1353,7 @@ const openApproval = async () => {
     await nextTick()
     await whenDetailsLoaded()
     if (!canApprove.value) return
-    if (activeDetailTab.value !== 'review') setDetailTab('review', true)
+    if (!reviewVisible.value) setDetailTab('review', true)
     if (selectedTeam.value) {
         selectedTeam.value = ''
         await nextTick()
@@ -1330,7 +1374,7 @@ const approvalBlockedReason = computed(() => {
     if (assessmentMissingFields.value.length > 0) return `Still needed: ${assessmentMissingFields.value.join(', ')}.`
     return ''
 })
-const approvalAtForm = computed(() => activeDetailTab.value === 'review' && !selectedTeam.value)
+const approvalAtForm = computed(() => reviewVisible.value && !selectedTeam.value)
 const canApproveNow = computed(() => (
     canApprove.value
     && approvalAtForm.value
@@ -1738,12 +1782,28 @@ const syncAllAssessments = () => {
     }
 }
 
+// Set while a handler deliberately moves to the Global form. Switching
+// resets formTouched, and the formTouched watcher below would otherwise
+// return a team-scoped analyst to their team's form before the handler
+// fills the Global one.
+let forcingGlobalForm = false
+
+/** Switches to the Global form and waits until the switch has settled. */
+const moveToGlobalForm = async () => {
+    forcingGlobalForm = true
+    try {
+        selectedTeam.value = ''
+        await nextTick()
+    } finally {
+        forcingGlobalForm = false
+    }
+}
+
 const handleApplyAllAssessment = async (assessmentDetails: string, assessmentState: string, assessmentJustification: string) => {
     // Always apply to global assessment regardless of current team selection.
     // Must await nextTick so the selectedTeam watcher (updateFormFromGroup) runs
     // before we set the form values — otherwise it overwrites them.
-    selectedTeam.value = ''
-    await nextTick()
+    await moveToGlobalForm()
 
     // Parse the full structured text and extract only the General block's details.
     const blocks = parseAssessmentBlocks(assessmentDetails)
@@ -1778,8 +1838,7 @@ const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
     // Always apply to global assessment regardless of current team selection.
     // Must await nextTick so the selectedTeam watcher (updateFormFromGroup) runs
     // before we set the form values — otherwise it overwrites them.
-    selectedTeam.value = ''
-    await nextTick()
+    await moveToGlobalForm()
 
     // Adopt the team block's assessment into the global form fields.
     // Only copy the team's details text (not a full structured document).
@@ -1824,7 +1883,8 @@ watch(formTouched, (touched) => {
     if (touched) assessmentSubmitted.value = false
     if (
         !touched
-        && activeDetailTab.value === 'review'
+        && !forcingGlobalForm
+        && reviewVisible.value
         && activeTeamScope.value
         && !showAllAssessmentTeams.value
         && scopedAssessmentTeam.value
@@ -2009,7 +2069,7 @@ const refreshDetails = async () => {
 
 const handleUpdate = async (force: boolean = false, isApprove: boolean = false) => {
     if (!isReviewer.value && assessmentMissingFields.value.length > 0) {
-        setDetailTab('review', true)
+        void revealAssessmentForm()
         await showAlert(
             'Assessment Incomplete',
             `Complete ${assessmentMissingFields.value.join(', ')} before submitting for review.`,
@@ -2274,6 +2334,11 @@ const detailTabs = computed<Array<{ id: DetailTab, label: string, icon: Componen
     { id: 'review', label: 'Assessment', icon: ShieldCheck },
 ])
 
+// The workspace shows the form beside the tabs, so its tab goes away there.
+const visibleDetailTabs = computed(() => (
+    isWorkspace.value ? detailTabs.value.filter(tab => tab.id !== 'review') : detailTabs.value
+))
+
 const detailTabStatus = (tab: DetailTab) => {
     if (tab === 'overview') return `${visibleInstances.value.length}/${allInstances.value.length}`
     if (tab === 'analysis') {
@@ -2300,22 +2365,65 @@ const detailTabClass = (tab: DetailTab) =>
 const detailTabId = (tab: DetailTab) => `vuln-${props.group.id}-detail-tab-${tab}`
 const detailTabPanelId = (tab: DetailTab) => `vuln-${props.group.id}-detail-panel-${tab}`
 
+/** Preselects the team the user is scoped to, as opening the Assessment tab does. */
+const autoSelectReviewTeam = () => {
+    const matchingTeam = (
+        activeTeamScope.value && !showAllAssessmentTeams.value
+            ? scopedAssessmentTeam.value
+            : (!selectedTeam.value && !isReviewer.value && allAssessmentTeams.value.length === 1
+                ? allAssessmentTeams.value[0]
+                : '')
+    )
+    if (matchingTeam) selectedTeam.value = matchingTeam
+}
+
 const setDetailTab = (tab: DetailTab, preserveReviewTeam = false) => {
-    if (tab === 'review' && !preserveReviewTeam) {
-        const matchingTeam = (
-            activeTeamScope.value && !showAllAssessmentTeams.value
-                ? scopedAssessmentTeam.value
-                : (!selectedTeam.value && !isReviewer.value && allAssessmentTeams.value.length === 1
-                    ? allAssessmentTeams.value[0]
-                    : '')
-        )
-        if (matchingTeam) selectedTeam.value = matchingTeam
+    if (isWorkspace.value) {
+        // The form is always visible in the workspace: the review "tab" only
+        // scrolls its pane, every other tab changes the left pane alone.
+        if (tab === 'review') {
+            if (!preserveReviewTeam) autoSelectReviewTeam()
+            nextTick(() => {
+                assessmentPaneEl.value?.scrollTo?.({ top: 0, behavior: 'smooth' })
+            })
+            return
+        }
+        activeDetailTab.value = tab
+        nextTick(() => {
+            contextPaneEl.value?.scrollTo?.({ top: 0, behavior: 'smooth' })
+        })
+        return
     }
+    if (tab === 'review' && !preserveReviewTeam) autoSelectReviewTeam()
     activeDetailTab.value = tab
     nextTick(() => {
         detailsEl.value?.scrollTo?.({ top: 0, behavior: 'smooth' })
     })
 }
+
+/**
+ * Shows the form after an action filled it. In tab mode that opens the
+ * Assessment tab; in the workspace the left pane stays where it is and the
+ * decision section scrolls into view, briefly highlighted.
+ */
+const revealAssessmentForm = async () => {
+    if (!isWorkspace.value) {
+        setDetailTab('review', true)
+        return
+    }
+    await nextTick()
+    assessmentPaneEl.value
+        ?.querySelector?.('[data-testid="assessment-decision-section"]')
+        ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    formHighlight.value = true
+    if (formHighlightTimer) clearTimeout(formHighlightTimer)
+    formHighlightTimer = setTimeout(() => {
+        formHighlight.value = false
+        formHighlightTimer = null
+    }, 1500)
+}
+
+const toggleWorkspace = () => emit('toggle-workspace')
 
 const uniqueComponents = dependencyInfo.uniqueComponents
 const affectedTaggedComponents = dependencyInfo.affectedTaggedComponents
@@ -2735,6 +2843,23 @@ watch(activeTeamScope, () => {
     }
 }, { immediate: true })
 
+// Entering the workspace keeps every draft and the chosen team: the card is
+// the same instance, only its layout changes.
+watch(isWorkspace, (open, wasOpen) => {
+    if (open) {
+        if (activeDetailTab.value === 'review') {
+            // The user was on the form and already chose the team there.
+            activeDetailTab.value = 'overview'
+        } else {
+            autoSelectReviewTeam()
+        }
+        void nextTick(() => workspaceHeadingEl.value?.focus())
+    } else if (wasOpen) {
+        // Leaving lands on the form the user was just working in.
+        activeDetailTab.value = 'review'
+    }
+}, { immediate: true })
+
 const teamBlockMeta = (team: string): AssessmentBlock | undefined => {
     return mergedAssessmentData.value.blocks.find(b => b.team === team)
 }
@@ -2749,7 +2874,7 @@ const teamBlockStateColor = (state?: string): string => {
 </script>
 
 <template>
-    <div :class="['vuln-card relative border rounded-lg transition-colors', inModal ? 'overflow-hidden' : (expanded ? 'overflow-visible z-40' : 'overflow-hidden'), cardStyle]">
+    <div :class="['vuln-card relative border rounded-lg transition-colors', inModal ? 'overflow-hidden' : (expanded ? 'overflow-visible z-40' : 'overflow-hidden'), isWorkspace ? 'flex h-full flex-col' : '', cardStyle]">
     <!-- Criticality Badges — header-height only -->
     <div
         class="absolute top-0 left-0 z-20 pointer-events-none flex"
@@ -2800,7 +2925,7 @@ const teamBlockStateColor = (state?: string): string => {
         ref="headerEl"
         @click="!inModal && (expanded = !expanded)"
         class="pl-[76px] pr-4 py-3 flex items-start transition-all relative overflow-hidden"
-        :class="inModal ? '' : 'cursor-pointer hover:bg-white/2'"
+        :class="[inModal ? '' : 'cursor-pointer hover:bg-white/2', isWorkspace ? 'shrink-0' : '']"
     >
 
         <VulnGroupCardHeader
@@ -2834,6 +2959,22 @@ const teamBlockStateColor = (state?: string): string => {
         >
             <template v-if="inModal" #actions>
                 <button
+                    v-if="workspaceAvailable"
+                    type="button"
+                    data-testid="workspace-toggle"
+                    class="relative z-30 mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border transition-colors"
+                    :class="isWorkspace
+                        ? 'border-cyan-600/70 bg-cyan-950/60 text-cyan-100 hover:bg-cyan-900/60'
+                        : 'border-gray-700/80 bg-gray-950/70 text-gray-300 hover:bg-gray-800 hover:text-white'"
+                    :title="isWorkspace ? 'Leave assessment workspace' : 'Open assessment workspace'"
+                    :aria-label="isWorkspace ? 'Leave assessment workspace' : 'Open assessment workspace'"
+                    :aria-pressed="isWorkspace ? 'true' : 'false'"
+                    @click.stop="toggleWorkspace"
+                >
+                    <Minimize2 v-if="isWorkspace" :size="15" aria-hidden="true" />
+                    <Maximize2 v-else :size="15" aria-hidden="true" />
+                </button>
+                <button
                     type="button"
                     class="relative z-30 mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-700/80 bg-gray-950/70 text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
                     title="Close details"
@@ -2846,12 +2987,19 @@ const teamBlockStateColor = (state?: string): string => {
         </VulnGroupCardHeader>
     </div>
             <!-- Expanded Details -->
-    <div v-if="expanded" ref="detailsEl" class="px-4 pb-4 border-t border-gray-700 overflow-y-auto" :style="inModal ? {} : { maxHeight: detailsMaxHeight }">
-        <div data-vuln-card-sticky-nav class="sticky top-0 z-30 -mx-4 mb-5 border-b border-gray-700/80 bg-gray-900/95 px-4 shadow-lg backdrop-blur">
+    <div
+        v-if="expanded"
+        ref="detailsEl"
+        :class="isWorkspace
+            ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 border-t border-gray-700'
+            : 'px-4 pb-4 border-t border-gray-700 overflow-y-auto'"
+        :style="inModal ? {} : { maxHeight: detailsMaxHeight }"
+    >
+        <div data-vuln-card-sticky-nav class="sticky top-0 z-30 -mx-4 mb-5 border-b border-gray-700/80 bg-gray-900/95 px-4 shadow-lg backdrop-blur" :class="isWorkspace ? 'shrink-0' : ''">
             <div class="-mx-4 flex flex-wrap items-end gap-2 px-4">
                 <div class="flex min-w-0 flex-1 flex-wrap items-end" role="tablist" aria-label="Vulnerability detail sections">
                     <button
-                        v-for="tab in detailTabs"
+                        v-for="tab in visibleDetailTabs"
                         :key="tab.id"
                         :id="detailTabId(tab.id)"
                         type="button"
@@ -2940,7 +3088,7 @@ const teamBlockStateColor = (state?: string): string => {
                             role="menu"
                             data-testid="assessment-more-menu"
                             class="absolute right-0 z-50 mt-1 w-64 rounded border border-gray-700 bg-gray-900 py-1 text-left text-xs shadow-xl"
-                            @keydown.esc="showMoreMenu = false"
+                            @keydown.esc.prevent="showMoreMenu = false"
                         >
                             <label
                                 v-if="canChangeSuppression"
@@ -2977,6 +3125,20 @@ const teamBlockStateColor = (state?: string): string => {
             </div>
         </div>
 
+        <!-- In tab mode these wrappers are display: contents and change nothing. -->
+        <div
+            data-testid="workspace-columns"
+            :class="isWorkspace
+                ? 'grid min-h-0 flex-1 gap-4 grid-cols-[minmax(0,1fr)_minmax(34rem,42rem)] 2xl:grid-cols-[minmax(0,1fr)_minmax(36rem,48rem)]'
+                : 'contents'"
+        >
+        <div
+            ref="contextPaneEl"
+            data-testid="workspace-context-pane"
+            :class="isWorkspace ? 'min-h-0 overflow-y-auto overscroll-contain pb-4 pr-1' : 'contents'"
+            :role="isWorkspace ? 'region' : undefined"
+            :aria-label="isWorkspace ? 'Context' : undefined"
+        >
         <div
             v-if="inconsistencyIssues.length > 0 || assessmentVariantCount > 1"
             data-testid="card-differences-banner"
@@ -3090,7 +3252,8 @@ const teamBlockStateColor = (state?: string): string => {
 
             <div
                 v-if="triggeringTaggedComponents.length > 0 || affectedTaggedComponents.length > 0"
-                class="grid gap-4 rounded border border-gray-800/80 bg-gray-950/30 p-3 lg:grid-cols-2"
+                class="grid gap-4 rounded border border-gray-800/80 bg-gray-950/30 p-3"
+                :class="isWorkspace ? '2xl:grid-cols-2' : 'lg:grid-cols-2'"
             >
                 <div v-if="triggeringTaggedComponents.length > 0" data-testid="triggering-team-components" class="space-y-2">
                     <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Triggering team-mapped components</h4>
@@ -3128,7 +3291,9 @@ const teamBlockStateColor = (state?: string): string => {
             <DetailSection
                 step="Context · 3"
                 title="Existing assessment evidence"
-                description="Read-only evidence already stored for findings in the current component scope. Create or change the assessment in the Assessment tab."
+                :description="isWorkspace
+                    ? 'Read-only evidence already stored for findings in the current component scope. Create or change the assessment in the form on the right.'
+                    : 'Read-only evidence already stored for findings in the current component scope. Create or change the assessment in the Assessment tab.'"
                 bodyClass="space-y-3"
                 data-testid="vulnerability-assessments"
             >
@@ -3138,8 +3303,8 @@ const teamBlockStateColor = (state?: string): string => {
                     :assessment="assessment"
                     :isReviewer="isReviewer"
                     :showDependencies="false"
-                    @apply-all="handleApplyAllAssessment"
-                    @adopt-team="handleAdoptTeamBlock"
+                    @apply-all="onEvidenceApplyAll"
+                    @adopt-team="onEvidenceAdoptTeam"
                     @mapping-updated="handleMappingUpdated"
                 />
             </DetailSection>
@@ -3180,13 +3345,37 @@ const teamBlockStateColor = (state?: string): string => {
                 @proposals-change="handleCodeAnalysisProposalsChange"
             />
         </section>
+        </div>
 
+        <div
+            ref="assessmentPaneEl"
+            data-testid="workspace-assessment-pane"
+            :class="isWorkspace ? 'min-h-0 overflow-y-auto overscroll-contain pb-4 pr-1 border-l border-gray-800 pl-4' : 'contents'"
+        >
+        <h3
+            v-if="isWorkspace"
+            :id="`vuln-${group.id}-workspace-assessment-heading`"
+            ref="workspaceHeadingEl"
+            data-testid="workspace-assessment-heading"
+            tabindex="-1"
+            class="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-100 outline-none"
+        >
+            <ShieldCheck :size="13" aria-hidden="true" />
+            Assessment
+            <span
+                v-if="detailTabStatus('review')"
+                class="rounded-full border border-current/20 bg-black/20 px-1.5 py-0.5 text-[9px] normal-case tracking-normal opacity-80"
+                data-testid="detail-tab-status-review"
+            >
+                {{ detailTabStatus('review') }}
+            </span>
+        </h3>
         <section
-            v-show="activeDetailTab === 'review'"
+            v-show="reviewVisible"
             :id="detailTabPanelId('review')"
-            :aria-labelledby="detailTabId('review')"
+            :aria-labelledby="isWorkspace ? `vuln-${group.id}-workspace-assessment-heading` : detailTabId('review')"
             class="space-y-3"
-            role="tabpanel"
+            :role="isWorkspace ? 'region' : 'tabpanel'"
         >
             <div class="rounded-lg border border-blue-800/40 bg-blue-950/10 px-4 py-3">
                 <h3 class="flex items-center gap-2 text-sm font-bold text-blue-100">
@@ -3194,7 +3383,9 @@ const teamBlockStateColor = (state?: string): string => {
                     Assessment
                 </h3>
                 <p class="mt-1 max-w-4xl text-xs leading-relaxed text-gray-500">
-                    Confirm the scope, record the decision and rationale, then complete the review checks before saving or submitting.
+                    {{ isWorkspace
+                        ? 'The context is on the left; save with the action bar above.'
+                        : 'Confirm the scope, record the decision and rationale, then complete the review checks before saving or submitting.' }}
                 </p>
             </div>
             <div
@@ -3388,6 +3579,7 @@ const teamBlockStateColor = (state?: string): string => {
                         title="Decision & rationale"
                         description="Set the assessment state, justification, technical rationale, ownership, and any reviewer-only rescoring context."
                         data-testid="assessment-decision-section"
+                        :class="formHighlight ? 'ring-2 ring-indigo-400' : ''"
                     >
                     <div
                         v-if="selectedTeam && selectedAutomaticProposal"
@@ -3441,7 +3633,7 @@ const teamBlockStateColor = (state?: string): string => {
                     </div>
                     <p v-if="ssvcTouched && selectedTeam" class="mb-3 text-xs text-amber-300">Unsaved SSVC changes: return to the global assessment to save them.</p>
                     <p v-if="responseTouched && selectedTeam" class="mb-3 text-xs text-amber-300" data-testid="unsaved-response-hint">Unsaved response: return to the global assessment to save it.</p>
-                    <div :class="isReviewer && !selectedTeam ? 'grid items-start gap-4 xl:grid-cols-2' : ''">
+                    <div :class="isReviewer && !selectedTeam ? (isWorkspace ? 'grid items-start gap-4' : 'grid items-start gap-4 xl:grid-cols-2') : ''">
                         <section
                             v-if="isReviewer && !selectedTeam"
                             data-testid="global-cvss-rescoring"
@@ -3593,7 +3785,7 @@ const teamBlockStateColor = (state?: string): string => {
                             </section>
 
                             <SsvcCalculator :model-value="pendingSsvc" :summary="savedSsvc" :disabled="updating || loadingDetails"
-                                :cves="[group.id, ...(group.aliases || [])]" :active="activeDetailTab === 'review'"
+                                :cves="[group.id, ...(group.aliases || [])]" :active="reviewVisible"
                                 :allow-autofill="!ssvcTouched && savedSsvc.status === 'UNASSESSED'" @update:model-value="changeSsvc" />
                         </section>
 
@@ -3832,6 +4024,8 @@ const teamBlockStateColor = (state?: string): string => {
                     </DetailSection>
             </div>
         </section>
+        </div>
+        </div>
 
     </div>
 

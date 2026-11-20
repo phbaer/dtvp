@@ -222,6 +222,22 @@ describe('the response of the Global assessment in the form', () => {
         expect(vm.responseTouched).toBe(false)
         wrapper.unmount()
     })
+
+    it('is on the form in the assessment workspace without opening a tab', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: group(`[Response: UPDATE]\n\n${GENERAL}\n\n${SECURITY}`) as any, inModal: true, workspace: true, workspaceAvailable: true },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }) }, stubs: { teleport: true } },
+        })
+        await flushPromises()
+
+        expect((wrapper.vm as any).activeDetailTab).toBe('overview')
+        expect((wrapper.vm as any).selectedTeam).toBe('')
+        const pane = wrapper.get('[data-testid="workspace-assessment-pane"]')
+        expect(pane.find('[data-testid="analysis-response-field"]').exists()).toBe(true)
+        expect(wrapper.get('#vuln-CVE-2023-1234-detail-panel-review').attributes('style') || '').not.toContain('display: none')
+        expect(responseSelect(wrapper).props('modelValue')).toBe('UPDATE')
+        wrapper.unmount()
+    })
 })
 
 describe('the response where the Global assessment is displayed', () => {

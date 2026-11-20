@@ -26,7 +26,7 @@ The dashboard lists Dependency-Track projects, versions, classifiers, and review
 
 ![Project review](screenshots/project-view.png)
 
-The project review page is the main vulnerability workflow. It combines grouped vulnerability cards, lifecycle state, team ownership, assessment controls, dependency-path context, and code-analysis shortcuts. Compact row badges and the opened card's single Next action guide identify the next useful analyst step. Once its destination tab is open, navigation disappears and the guide points to the concrete control in that tab. A Team filter also scopes the opened card's code evidence and assessment workflow, so another team's saved run or draft does not drive the selected team's next action.
+The project review page is the main vulnerability workflow. It combines grouped vulnerability cards, lifecycle state, team ownership, assessment controls, dependency-path context, and code-analysis shortcuts. Compact row badges identify the next useful analyst step; inside the opened card the tab status badges say what is still missing, and every action sits in the sticky bar next to the tabs. A Team filter also scopes the opened card's code evidence and assessment workflow, so another team's saved run or draft does not drive the selected team's next action.
 
 ### Lifecycle Badges
 
@@ -41,6 +41,18 @@ The lifecycle view shows Open, Incomplete, Conflicting, Ready for approval, and 
 ![Vulnerability card overview](screenshots/vuln-card-overview.png)
 
 The Context tab uses three clearly separated sections in a fixed reading order: advisory description and references; where the vulnerability was found, as a matrix of components by project versions with the assessment state of each finding (a component row opens its dependency chains); and the existing assessment evidence.
+
+### Assessment Workspace
+
+![Assessment workspace](screenshots/assessment-workspace.png)
+
+From a viewport of 1280px, the header of the vulnerability detail has a workspace button next to Close. It opens the same card full screen, with the context on the left and the assessment form always visible on the right; the action bar with Save or Submit, Approve, Reload and More spans both columns. The left pane shows the differences banner and either Context or Code Evidence, chosen by the two remaining tabs. The two panes scroll on their own, so the evidence can be read while the decision, rationale and review checks are filled in.
+
+Show differences opens the comparison in the left pane. Apply, Adopt, Use for all findings and the analyzer's apply actions fill the form without changing the left pane: the decision section scrolls into view and is briefly highlighted.
+
+![Assessment workspace for approval](screenshots/assessment-workspace-approval.png)
+
+For a reviewer on the Global form the bar button reads Approve and approves in place; with a team selected it reads Review & approve and switches the form to Global. The workspace button or Esc leaves the workspace and lands on the Assessment tab with every unsaved edit kept. Esc first closes an open menu or dialog, and Esc in a text field stays with the field; on a checkbox, a button or plain text it leaves the workspace. While the workspace is open, Tab and Shift+Tab wrap inside it, and a click on plain text keeps focus in it. Close (X) still asks about unsaved edits. Below 1280px the button is not offered, and the workspace closes when the window becomes narrower than that, with focus on the Assessment tab.
 
 ### Assignee Chips And Approval
 
@@ -76,7 +88,7 @@ The Assessment tab uses the same section hierarchy as Context and Code Evidence:
 
 ![Conflicting assessment](screenshots/inconsistent-assessment.png)
 
-A banner above the tabs states why the vulnerability is inconsistent and what each team decided. Existing assessment evidence in Context shows the conflicting team blocks.
+A banner above the tabs (at the top of the context pane in the [assessment workspace](#assessment-workspace)) states why the vulnerability is inconsistent and what each team decided. Existing assessment evidence in Context shows the conflicting team blocks.
 
 ### Differences Between Findings
 

@@ -3,6 +3,9 @@ import { computed, onMounted, onUnmounted, ref, type ComputedRef, type Ref } fro
 export const DETAIL_INSPECTOR_MIN_VIEWPORT = 1360
 export const FILTER_RAIL_MIN_VIEWPORT = 1280
 export const FILTER_RAIL_WITH_DETAIL_MIN_VIEWPORT = 1680
+// The assessment workspace puts the context beside the form; below this
+// width the two columns would not fit and the tabbed detail stays.
+export const WORKSPACE_MIN_VIEWPORT = 1280
 
 interface UseProjectViewLayoutOptions {
     viewMode: Ref<string>
@@ -17,6 +20,7 @@ export function useProjectViewLayout({
 }: UseProjectViewLayoutOptions) {
     const viewportWidth = ref(typeof window === 'undefined' ? FILTER_RAIL_MIN_VIEWPORT : window.innerWidth)
     const isDesktopInspector = computed(() => viewportWidth.value >= DETAIL_INSPECTOR_MIN_VIEWPORT)
+    const isWorkspaceViewport = computed(() => viewportWidth.value >= WORKSPACE_MIN_VIEWPORT)
     const isDesktopDetailOpen = computed(() =>
         (!!selectedGroup.value || selectedGroupLoading.value)
         && viewMode.value === 'analysis'
@@ -47,6 +51,7 @@ export function useProjectViewLayout({
     return {
         viewportWidth,
         isDesktopInspector,
+        isWorkspaceViewport,
         isDesktopDetailOpen,
         isFilterRailVisible,
         updateViewportWidth,

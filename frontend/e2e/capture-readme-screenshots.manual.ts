@@ -453,6 +453,27 @@ async function openProjectCard(page: Page, groupId: string) {
     return detailCard
 }
 
+/** Opens the full-screen assessment workspace of an inspector card. */
+async function openWorkspace(card: Locator) {
+    await card.getByTestId('workspace-toggle').click()
+    const workspace = card.page().getByRole('dialog', { name: /^Assessment workspace for / })
+    await expect(workspace).toBeVisible({ timeout: 10000 })
+    await expect(workspace.getByTestId('workspace-assessment-heading')).toBeVisible({ timeout: 10000 })
+    await expect(workspace.getByTestId('assessment-decision-section')).toBeVisible({ timeout: 10000 })
+    return workspace
+}
+
+/** The workspace fills the viewport, so the capture is the viewport itself. */
+async function captureWorkspace(workspace: Locator, path: string) {
+    const ssvc = workspace.getByTestId('ssvc-calculator')
+    if (await ssvc.isVisible()) {
+        await expect(ssvc.getByText(/^CERT\/CC /)).toBeVisible()
+    }
+    // Let the smooth scroll and the highlight of a filled form settle.
+    await workspace.page().waitForTimeout(1800)
+    await workspace.page().screenshot({ path })
+}
+
 async function selectDetailTab(card: Locator, name: string) {
     const tab = card.getByRole('tab', { name })
     await expect(tab).toBeVisible({ timeout: 10000 })
@@ -1364,6 +1385,41 @@ test.describe('Capture README screenshots', () => {
         await expect(card.locator('#cvss-vector-input')).toBeVisible({ timeout: 10000 })
 
         await captureWithPadding(card, '../docs/screenshots/vuln-card-cvss-rescoring.png')
+    })
+
+    test('capture assessment workspace screenshot', async ({ page }) => {
+        await page.route('**/auth/me', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ username: 'analyst', role: 'ANALYST' }),
+        }))
+        await page.setViewportSize({ width: 1800, height: 1100 })
+        await page.goto('/project/TestProject?teams=PlatformTeam&lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        const workspace = await openWorkspace(card)
+        // The analyst's team is preselected on the form beside the context.
+        await expect(workspace.getByTestId('assessment-team-scope')).toContainText('PlatformTeam')
+        await expect(workspace.getByTestId('workspace-context-pane').getByTestId('where-found')).toBeVisible()
+
+        await captureWorkspace(workspace, '../docs/screenshots/assessment-workspace.png')
+    })
+
+    test('capture assessment workspace approval screenshot', async ({ page }) => {
+        await page.setViewportSize({ width: 1800, height: 1100 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-3001')
+        const workspace = await openWorkspace(card)
+        // The reviewer approves the Global form; the team evidence is on the left.
+        await expect(workspace.getByTestId('assessment-approve-button')).toHaveText('Approve')
+        const evidence = workspace.getByTestId('workspace-context-pane').getByTestId('vulnerability-assessments')
+        await expect(evidence).toContainText('EdgeTeam')
+        await evidence.evaluate(element => element.scrollIntoView({ block: 'start' }))
+
+        await captureWorkspace(workspace, '../docs/screenshots/assessment-workspace-approval.png')
     })
 
     test('capture statistics screenshot', async ({ page }) => {
