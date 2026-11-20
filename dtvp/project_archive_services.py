@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from .finding_keys import finding_key
 from .assessment_model import with_analysis_response
 from .bundle_io import (
     BundleError,
@@ -397,7 +398,7 @@ async def _collect_assessments(
                 "project_uuid": project.get("uuid"),
                 "project_name": project.get("name"),
                 "project_version": project.get("version"),
-                "finding_uuid": finding.get("uuid") or finding.get("matrix"),
+                "finding_uuid": finding_key(project.get("uuid"), finding),
                 "component": component,
                 "vulnerability": vulnerability,
                 "analysis": archived_analysis,

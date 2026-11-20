@@ -164,3 +164,23 @@ def test_mock_oidc_rejects_wrong_pkce_verifier():
 
     assert token_response.status_code == 400
     assert token_response.json()["detail"] == "Invalid PKCE code verifier"
+
+
+def test_mock_findings_have_dependency_tracks_real_shape():
+    """Dependency-Track findings carry no top-level uuid, only "matrix";
+    the mock must not hide code that relies on a uuid (finding_keys.py)."""
+    from fastapi.testclient import TestClient
+
+    from test_setup import mock_dt
+
+    client = TestClient(mock_dt.app, headers={"X-Api-Key": "test"})
+    project_uuid = mock_dt.PROJECT_UUID
+    response = client.get(f"/api/v1/finding/project/{project_uuid}")
+    assert response.status_code == 200
+    findings = response.json()
+    assert findings
+    for finding in findings:
+        assert "uuid" not in finding
+        assert finding["matrix"] == (
+            f"{project_uuid}:{finding['component']['uuid']}:{finding['vulnerability']['uuid']}"
+        )

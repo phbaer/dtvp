@@ -5,6 +5,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .finding_keys import finding_key
 from .assessment_model import (
     RESPONSE_TAG_PATTERN,
     analysis_response,
@@ -1086,7 +1087,7 @@ def group_vulnerabilities(
                 "component_version": comp_ver,
                 "component_uuid": comp_uuid,
                 "vulnerability_uuid": vuln.get("uuid"),
-                "finding_uuid": finding.get("uuid"),
+                "finding_uuid": finding_key(proj_uuid, finding),
                 "attributed_on": attributed_on,
                 "analysis_state": analysis.get("state")
                 or analysis.get("analysisState"),

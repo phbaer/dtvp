@@ -17,7 +17,7 @@
         </div>
 
         <div class="flex-1 overflow-y-auto p-4 bg-gray-800 space-y-4">
-          <div v-for="conflict in conflictData || []" :key="conflict.finding_uuid" class="bg-gray-900 border border-gray-700 rounded p-4">
+          <div v-for="(conflict, index) in conflictData || []" :key="conflict.finding_uuid || index" class="bg-gray-900 border border-gray-700 rounded p-4">
             <div class="font-bold text-gray-300 mb-2 border-b border-gray-700 pb-1">
               {{ conflict.project_name }} {{ conflict.project_version }} - {{ conflict.component_name }}
             </div>

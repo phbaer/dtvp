@@ -373,3 +373,50 @@ def test_the_response_is_saved_validated_and_returned_as_a_field(override_deps, 
         assert "Response" not in cleared.json()[0]["new_details"]
         assert client.get("/api/assessments/fields", params=query).json()["response"] is None
     mock_client.update_analysis.assert_not_called()
+
+
+def test_a_stale_save_of_a_dependency_track_shaped_finding_is_rejected(
+    override_deps,
+    mock_client,
+):
+    """Dependency-Track's findings have no UUID, only a matrix. The grouped
+    finding the browser saves must still carry a key, or the original
+    analysis the browser sends matches no finding and the stale-write check
+    is silently skipped."""
+    from dtvp.logic import group_vulnerabilities
+
+    [group] = group_vulnerabilities([{
+        "version": {"name": "App", "version": "1.0", "uuid": "p1"},
+        "vulnerabilities": [{
+            "matrix": "p1:c1:v1",
+            "component": {"name": "lib-a", "version": "1.0", "uuid": "c1"},
+            "vulnerability": {"vulnId": "CVE-2026-1", "uuid": "v1", "severity": "HIGH"},
+            "analysis": {"state": "NOT_SET"},
+        }],
+    }])
+    [instance] = group["affected_versions"][0]["components"]
+    assert instance["finding_uuid"] == "p1:c1:v1"
+
+    client = TestClient(main.app)
+    first = {
+        "instances": [instance],
+        "state": "IN_TRIAGE",
+        "details": "First update",
+        "original_analysis": {
+            instance["finding_uuid"]: {
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "dtvpRevision": 0,
+            }
+        },
+    }
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        first_response = client.post("/api/assessment", json=first)
+        stale_response = client.post(
+            "/api/assessment",
+            json={**first, "state": "NOT_AFFECTED", "details": "Stale update"},
+        )
+
+    assert first_response.status_code == 200
+    assert stale_response.status_code == 409
+    assert stale_response.json()["conflicts"][0]["current"]["dtvpRevision"] == 1

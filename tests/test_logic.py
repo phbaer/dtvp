@@ -1774,3 +1774,34 @@ def test_a_text_save_keeps_another_teams_open_block():
     assert by_team["TeamX"]["historical"] is False
     assert (by_team["TeamX"]["ticket"], by_team["TeamX"]["assigned"]) == ("ABC-1", ["bob"])
     assert by_team["TeamY"]["assigned"] == ["carol"]
+
+
+
+def test_a_dependency_track_finding_without_a_uuid_gets_a_stable_unique_key():
+    """Dependency-Track's findings carry no UUID of their own, only a matrix
+    (<project>:<component>:<vulnerability>); every grouped finding still needs
+    a key, the same at every import."""
+    def finding(component, matrix=True):
+        item = {
+            "component": {"name": "libA", "version": "1.0", "uuid": component},
+            "vulnerability": {"vulnId": "CVE-2026-1", "uuid": "v1", "severity": "HIGH"},
+            "analysis": {"state": "NOT_SET"},
+        }
+        if matrix:
+            item["matrix"] = f"p1:{component}:v1"
+        return item
+
+    def keys():
+        [group] = group_vulnerabilities([{
+            "version": {"name": "App", "version": "1.0", "uuid": "p1"},
+            "vulnerabilities": [finding("c1"), finding("c2", matrix=False)],
+        }])
+        return sorted(
+            component["finding_uuid"]
+            for version in group["affected_versions"]
+            for component in version["components"]
+        )
+
+    first = keys()
+    assert first == ["p1:c1:v1", "p1:c2:v1"]  # matrix, or the same composite
+    assert keys() == first

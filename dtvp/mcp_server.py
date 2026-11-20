@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable
 
+from .finding_keys import instance_finding_key
 from .access_token_services import (
     SCOPE_READ,
     SCOPE_WRITE,
@@ -540,14 +541,20 @@ class McpToolService:
                 f"Responsible teams: {', '.join(responsible) or 'none'}"
             )
 
-        components = [
-            component
-            for component in _components(group)
-            if component.get("finding_uuid")
-        ]
-        targets = list(zip(components, await self._current_analyses(components)))
-        if not targets:
+        found = _components(group)
+        if not found:
             raise McpToolError("This vulnerability has no findings to assess")
+        components = []
+        for component in found:
+            key = instance_finding_key(component)
+            if key:
+                components.append({**component, "finding_uuid": key})
+        if not components:
+            raise McpToolError(
+                "The findings of this vulnerability have no project, component "
+                "and vulnerability identity to assess them by"
+            )
+        targets = list(zip(components, await self._current_analyses(components)))
         return group, team_name, normalized_state, text, targets
 
     @staticmethod

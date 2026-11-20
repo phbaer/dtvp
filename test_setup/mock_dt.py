@@ -762,12 +762,11 @@ def get_findings(project_uuid: str):
         for vuln_uuid in [VULN_UUID_1, VULN_JACKSON_UUID, VULN_UUID_2]:
             add_vuln(vuln_uuid)
 
-    # Ensure every finding has a stable identifier for frontend conflict matching.
+    # Findings keep Dependency-Track's real shape: no top-level uuid, only
+    # "matrix" (DTVP derives its finding key from it; dtvp/finding_keys.py).
     now_ms = int(time.time() * 1000)
     day_ms = 24 * 60 * 60 * 1000
     for index, finding in enumerate(current_findings):
-        if "uuid" not in finding:
-            finding["uuid"] = finding.get("matrix")
         days_old = 7 if index % 4 == 0 else 35
         finding.setdefault(
             "attribution",
