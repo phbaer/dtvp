@@ -1,0 +1,3 @@
+{"form":"list","item_count":2,"kind":"findings","project_uuid":"0f1b2c3d-1111-4a11-8a11-111111111111","updated_at":"2026-11-10T09:00:00+00:00"}
+{"form":"raw","item_count":0,"kind":"project_vulnerabilities","project_uuid":"0f1b2c3d-1111-4a11-8a11-111111111111","raw":{"error":"not a list"},"updated_at":"2026-11-10T09:00:00+00:00"}
+{"form":"list","item_count":1,"kind":"projects","project_uuid":"","updated_at":"2026-11-10T09:00:00+00:00"}

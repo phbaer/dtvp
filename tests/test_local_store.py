@@ -231,7 +231,13 @@ async def test_data_survives_a_restart_without_any_json_files(tmp_path):
     await first.get_bom(client, "p1")
     await first.close()
 
-    assert sorted(path.name for path in tmp_path.iterdir() if path.suffix == ".json") == []
+    # No JSON cache file; the instance registry (a dot file) is not one.
+    assert sorted(
+        path.name
+        for path in tmp_path.iterdir()
+        if path.suffix == ".json" and not path.name.startswith(".")
+    ) == []
+    assert (tmp_path / ".dtvp-instance.json").exists()
     assert not (tmp_path / "findings").exists()
 
     offline = AsyncMock()

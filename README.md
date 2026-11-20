@@ -76,7 +76,8 @@ Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and
 `openssl rand -base64 48`. DTVP refuses to start without such a key; see
 [Deployment](docs/deployment.md) for the file-based alternative. Compose
 serves DTVP under `/dtvp` by default; `DTVP_HTTP_PORT` controls the host port.
-Persistent data lives in `./data`. Sign-ins expire after at most 12 hours without use
+Persistent data lives in `./data`; run one DTVP process per data directory,
+which an instance lock enforces. Sign-ins expire after at most 12 hours without use
 and one week in total, logout ends all of a user's sessions, and reviewers can
 revoke a user's sessions; see [Deployment](docs/deployment.md).
 
@@ -103,6 +104,8 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Capture documentation screenshots | `cd frontend && npm run test:ui:docs -- --project=chromium` |
 | Benchmark grouped queries | `uv run python scripts/benchmark_group_queries.py` |
 | Benchmark the assessment record | `uv run python scripts/benchmark_assessment_store.py --assessments 50000` |
+| Back up the instance (online) | `uv run python -m dtvp.backup export` |
+| Check a dump | `uv run python -m dtvp.backup verify FILE` (`inspect FILE` reads only the manifest) |
 
 Browser tests cover Chromium, Firefox, and WebKit. CI's Playwright image must
 match the version in `frontend/package-lock.json`. See
@@ -238,6 +241,7 @@ cache-refresh, and Dependency-Track state changes
 | [CycloneDX inventory and VDR](docs/cyclonedx-export.md) | Downloading the BOM and a VDR with assessments in standard fields per project version, the recommendation derived from the fixed versions Dependency-Track holds, the field mapping, and its limits |
 | [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, agent code evidence, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
+| [Backup and restore](docs/backup-and-restore.md) | The instance dump `dtvp.dump/1`: export and verify, encryption at rest, format, JSON Schemas, versioning, and validation rules |
 | [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |
 
 OpenAPI specifications: [tmrescore](openapi/tmrescore-openapi.json) and

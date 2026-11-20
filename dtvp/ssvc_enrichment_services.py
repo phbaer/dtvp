@@ -246,9 +246,12 @@ def _service(path: str) -> SsvcEnrichmentService:
     return SsvcEnrichmentService(path)
 
 
+def get_ssvc_cache_path() -> str:
+    return os.getenv("DTVP_SSVC_CACHE_PATH") or str(Path(os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")) / "ssvc_enrichment.sqlite3")
+
+
 def get_service() -> SsvcEnrichmentService:
-    path = os.getenv("DTVP_SSVC_CACHE_PATH") or str(Path(os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")) / "ssvc_enrichment.sqlite3")
-    return _service(path)
+    return _service(get_ssvc_cache_path())
 
 
 async def run_kev_refresh_loop() -> None:

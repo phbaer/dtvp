@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:assessment",
+  "title": "dtvp.dump.assessment/1: the local assessment record of a finding",
+  "type": "object",
+  "properties": {
+    "key": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/key"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "value": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/value"
+    },
+    "updated_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "sync": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "synced",
+            "pending",
+            "error",
+            "cancelled",
+            "inactive",
+            "superseded"
+          ]
+        },
+        "update_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "export_rejections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "base": {
+          "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_value"
+        },
+        "remote": {
+          "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_value"
+        }
+      },
+      "required": [
+        "status",
+        "update_id",
+        "last_error",
+        "export_rejections",
+        "base",
+        "remote"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "key",
+    "revision",
+    "value",
+    "updated_at",
+    "sync"
+  ],
+  "additionalProperties": false
+}

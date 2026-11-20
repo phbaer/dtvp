@@ -102,12 +102,8 @@ from .dt_client import (
     get_shared_client,
 )
 from .file_io_services import read_text as read_text_impl
-from .file_io_services import (
-    write_and_validate_json_bytes as write_and_validate_json_bytes_impl,
-)
-from .file_io_services import write_bytes as write_bytes_impl
-from .file_io_services import write_json as write_json_impl
 from .frontend_routes import register_frontend_routes
+from .settings_files import write_settings_file
 from .general_api_routes import (
     create_general_api_router,
     refresh_task_snapshots_for_assessments,
@@ -837,9 +833,7 @@ api_router.include_router(
             get_auto_analysis_guidance_path=lambda: get_auto_analysis_guidance_path(),
             get_user_roles_path=lambda: get_user_roles_path(),
             get_rescore_rules_path=lambda: get_rescore_rules_path(),
-            write_bytes=write_bytes_impl,
-            write_json=write_json_impl,
-            write_and_validate_json_bytes=write_and_validate_json_bytes_impl,
+            write_settings_file=write_settings_file,
         ),
         forbidden_response=FORBIDDEN_RESPONSE,
         current_user_dependency=get_current_user,

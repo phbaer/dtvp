@@ -47,6 +47,7 @@ from .finding_lifecycle_services import (
     read_summary,
     record_carry_over,
 )
+from .instance_stores import claim_instance, get_dt_cache_path, release_instance
 from .ports import AffectedVersionSource, AssessmentSink, VulnerabilitySource
 from .local_store import (
     KIND_ANALYSIS,
@@ -77,10 +78,6 @@ def _is_missing_finding_error(exc: Exception) -> bool:
         and exc.response is not None
         and exc.response.status_code == 404
     )
-
-
-def get_dt_cache_path() -> str:
-    return os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
 
 
 def _positive_int_env(name: str, default: int, *, minimum: int = 1) -> int:
@@ -511,10 +508,14 @@ class CacheManager:
             Callable[[bool, BaseException | None], None]
         ] = []
         self._cache_status_listeners: List[Callable[[], None]] = []
+        self._instance_claim: str | None = None
         self._open_stores()
 
     def _open_stores(self) -> None:
         self._ensure_directories()
+        # Before any database is opened or migrated: one process per data
+        # directory, and none while a restore is unfinished.
+        self._instance_claim = claim_instance(self.base_path)
         self._document_refs: Dict[str, DocumentRef] = {}
         self.store = LocalStore(get_database_path(self.base_path), logger=logger)
         imported = self.store.import_legacy_json_cache(self.base_path)
@@ -1008,9 +1009,14 @@ class CacheManager:
             self._invalidate_cache_status()
         return changed
 
+    def _release_instance(self) -> None:
+        claim, self._instance_claim = self._instance_claim, None
+        release_instance(claim)
+
     def reset(self, base_path: str = None) -> None:
         self._write_executor.shutdown(wait=True, cancel_futures=False)
         self.store.close()
+        self._release_instance()
         if base_path:
             self.base_path = base_path
         self.lock = asyncio.Lock()
@@ -1209,6 +1215,7 @@ class CacheManager:
         await self.flush_cache_writes()
         self._write_executor.shutdown(wait=True, cancel_futures=False)
         self.store.close()
+        self._release_instance()
 
     def _save_project_cache(
         self,

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:source_finding",
+  "title": "dtvp.dump.source_finding/1: one finding of a project as read from the source",
+  "type": "object",
+  "properties": {
+    "project_uuid": {
+      "type": "string"
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "payload": {},
+    "payload_raw": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_uuid",
+    "position"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/payload_choice"
+    }
+  ]
+}

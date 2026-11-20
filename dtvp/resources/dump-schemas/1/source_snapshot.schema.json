@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:source_snapshot",
+  "title": "dtvp.dump.source_snapshot/1: one stored collection read from the source",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "enum": [
+        "projects",
+        "findings",
+        "project_vulnerabilities"
+      ]
+    },
+    "project_uuid": {
+      "type": "string"
+    },
+    "item_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "form": {
+      "enum": [
+        "list",
+        "raw"
+      ]
+    },
+    "raw": {}
+  },
+  "required": [
+    "kind",
+    "project_uuid",
+    "item_count",
+    "updated_at",
+    "form"
+  ],
+  "additionalProperties": false,
+  "if": {
+    "properties": {
+      "form": {
+        "const": "raw"
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "raw"
+    ]
+  },
+  "else": {
+    "not": {
+      "required": [
+        "raw"
+      ]
+    }
+  }
+}

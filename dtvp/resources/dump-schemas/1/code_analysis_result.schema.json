@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:code_analysis_result",
+  "title": "dtvp.dump.code_analysis_result/1: one stored code-analysis run",
+  "type": "object",
+  "properties": {
+    "analysis_run_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "payload_raw": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "analysis_run_id"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/payload_choice"
+    }
+  ]
+}

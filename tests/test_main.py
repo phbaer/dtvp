@@ -437,49 +437,56 @@ def test_serve_index_not_found():
             assert resp.status_code == 404
 
 
-def test_upload_mapping(client):
-    from unittest.mock import mock_open, patch
+def test_upload_mapping(client, tmp_path):
+    from unittest.mock import patch
 
     mapping_content = b'{"comp": "team"}'
     files = {"file": ("mapping.json", mapping_content, "application/json")}
+    target = tmp_path / "test_mapping.json"
 
     # We mock get_team_mapping_path to avoid overwriting real data/temp files
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-        with patch(
-            "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"
-        ):
-            with patch(
-                "builtins.open", mock_open(read_data='{"test": "data"}')
-            ) as mocked_file:
-                response = client.post("/api/settings/mapping", files=files)
+        with patch("dtvp.main.get_team_mapping_path", return_value=str(target)):
+            response = client.post("/api/settings/mapping", files=files)
 
-                assert response.status_code == 200
-                assert response.json()["status"] == "success"
+            assert response.status_code == 200
+            assert response.json()["status"] == "success"
 
-            # Verify file write
-            mocked_file.assert_called_with(
-                "/tmp/test_mapping.json", "r"
-            )  # It opens for read at end too
+    # Stored byte for byte.
+    assert target.read_bytes() == mapping_content
 
 
-def test_upload_mapping_failure(client):
+def test_upload_mapping_failure(client, tmp_path):
     from unittest.mock import patch
 
-    mapping_content = b"invalid"
-    files = {"file": ("mapping.json", mapping_content, "application/json")}
+    files = {"file": ("mapping.json", b'{"comp": "team"}', "application/json")}
+    settings_dir = tmp_path / "settings"
+    settings_dir.mkdir()
+    target = settings_dir / "test_mapping.json"
 
-    # Mock open to raise exception on write or processing
+    # The write fails after validation; nothing is left behind.
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-        with patch(
-            "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"
-        ):
-            with patch("builtins.open", side_effect=Exception("Disk full")):
+        with patch("dtvp.main.get_team_mapping_path", return_value=str(target)):
+            with patch("os.replace", side_effect=OSError("Disk full")):
                 response = client.post("/api/settings/mapping", files=files)
 
                 assert response.status_code == 200
             data = response.json()
             assert data["status"] == "error"
             assert "Disk full" in data["message"]
+    assert list(settings_dir.iterdir()) == []
+
+
+def test_upload_mapping_rejects_invalid_json(client, tmp_path):
+    from unittest.mock import patch
+
+    files = {"file": ("mapping.json", b"invalid", "application/json")}
+    target = tmp_path / "test_mapping.json"
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        with patch("dtvp.main.get_team_mapping_path", return_value=str(target)):
+            response = client.post("/api/settings/mapping", files=files)
+    assert response.json() == {"status": "error", "message": "Invalid JSON"}
+    assert not target.exists()
 
 
 def test_get_team_mapping(client):

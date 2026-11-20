@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:revision",
+  "title": "dtvp.dump.revision/1: one entry of the assessment history",
+  "type": "object",
+  "properties": {
+    "revision_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "key": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/key"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "value": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/value"
+    },
+    "origin": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "revision_id",
+    "key",
+    "revision",
+    "value",
+    "origin",
+    "author",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

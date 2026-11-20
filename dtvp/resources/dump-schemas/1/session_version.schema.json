@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:session_version",
+  "title": "dtvp.dump.session_version/1: a user's browser session version; a restore raises it",
+  "type": "object",
+  "properties": {
+    "username": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "revoked_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "username",
+    "version",
+    "revoked_at"
+  ],
+  "additionalProperties": false
+}

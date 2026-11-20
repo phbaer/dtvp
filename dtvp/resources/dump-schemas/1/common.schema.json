@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:common",
+  "title": "dtvp.dump/1 shared definitions",
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullable_string": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "A timestamp exactly as stored; not converted."
+    },
+    "key": {
+      "type": "object",
+      "description": "A finding: Dependency-Track project, component and vulnerability UUIDs, exactly as stored.",
+      "properties": {
+        "project_uuid": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "component_uuid": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "vulnerability_uuid": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      },
+      "required": [
+        "project_uuid",
+        "component_uuid",
+        "vulnerability_uuid"
+      ],
+      "additionalProperties": false
+    },
+    "analysis_state": {
+      "enum": [
+        "NOT_SET",
+        "EXPLOITABLE",
+        "IN_TRIAGE",
+        "FALSE_POSITIVE",
+        "NOT_AFFECTED",
+        "RESOLVED"
+      ]
+    },
+    "value": {
+      "type": "object",
+      "description": "An assessment value: state, full details text, suppression.",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/analysis_state"
+        },
+        "details": {
+          "type": "string"
+        },
+        "suppressed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state",
+        "details",
+        "suppressed"
+      ],
+      "additionalProperties": false
+    },
+    "nullable_value": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/value"
+        }
+      ]
+    },
+    "payload_choice": {
+      "description": "Exactly one of payload (the stored JSON document) and payload_raw (a stored text that is not JSON, kept verbatim).",
+      "oneOf": [
+        {
+          "required": [
+            "payload"
+          ]
+        },
+        {
+          "required": [
+            "payload_raw"
+          ]
+        }
+      ]
+    },
+    "target_choice": {
+      "description": "Exactly one of target and target_raw.",
+      "oneOf": [
+        {
+          "required": [
+            "target"
+          ]
+        },
+        {
+          "required": [
+            "target_raw"
+          ]
+        }
+      ]
+    }
+  }
+}

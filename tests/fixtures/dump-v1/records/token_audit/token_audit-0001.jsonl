@@ -1,0 +1,2 @@
+{"action":"list_findings","agent":"claude","audit_id":1,"detail":"","occurred_at":"2026-11-16T08:00:00+00:00","outcome":"ok","target":{"project":"Imaging Suite"},"token_id":"tok-1","username":"alice"}
+{"action":"save_assessment","agent":"claude","audit_id":2,"detail":"read-only token","occurred_at":"2026-11-16T08:01:00+00:00","outcome":"denied","target":{},"token_id":"tok-1","username":"alice"}

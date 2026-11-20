@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:code_analysis_application",
+  "title": "dtvp.dump.code_analysis_application/1: a code-analysis result applied to a finding",
+  "type": "object",
+  "properties": {
+    "analysis_run_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "finding_uuid": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "group_id_lower": {
+      "type": "string"
+    },
+    "workflow_id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "applied",
+        "queued",
+        "failed"
+      ]
+    },
+    "applied_by": {
+      "type": "string"
+    },
+    "applied_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "payload_fingerprint": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "analysis_run_id",
+    "finding_uuid",
+    "group_id_lower",
+    "workflow_id",
+    "status",
+    "applied_by",
+    "applied_at",
+    "payload_fingerprint"
+  ],
+  "additionalProperties": false
+}

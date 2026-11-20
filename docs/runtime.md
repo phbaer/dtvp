@@ -38,8 +38,12 @@ Important backend components:
 | `dtvp/dt_client.py` and `dt_cache.py` | Dependency-Track access, in-memory document cache, overlays, and pending writes |
 | `dtvp/local_store.py` | SQLite database for imported source data and the one-time JSON cache import |
 | `dtvp/finding_lifecycle_services.py` | What happened to findings: the analysis gate of a read, gone findings with reasons, carry-over from the record (`finding_lifecycle` migrations, same database file as the assessments) |
+| `dtvp/backup/` | The instance dump `dtvp.dump/1`: online export from database snapshots, inspect and verify (`python -m dtvp.backup`); the published JSON Schemas are in `dtvp/resources/dump-schemas/1/` |
+| `dtvp/instance_stores.py` | The registry of every file an instance persists (records, settings, caches, legacy inputs) and the instance lock |
 | `dtvp/ports.py` | The source and sink interfaces the cache manager is written against; Dependency-Track implements both |
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
+| `dtvp/bundle_io.py` | ZIP container helpers shared by the project archive and the instance dump: stable JSON and JSONL encodings, a deterministic streaming writer, a reader that checks names, member count and declared sizes before reading, and atomic output files |
+| `dtvp/settings_files.py` and `file_io_services.py` | The settings files with their validation rules; every write validates first and then replaces the file atomically (temporary file, fsync, rename) |
 | `dtvp/tmrescore_*` | Threat-model integration, inventory, cache, execution, and task state |
 | `dtvp/code_analysis_*` and `analysis_queue_*` | Analyzer integration, result store, queue, and automatic scans |
 | `dtvp/event_hub.py`, `event_routes.py`, `event_producers.py` | The app-wide live-update stream: sequence, replay buffer, `/api/events`, and the producers fed by cache-manager listeners |
@@ -116,6 +120,12 @@ Important frontend components:
   Follow-up pages and full-result drains omit facet counts they do not consume;
   a Team-filter request renders its card window without facet counts, then
   refreshes complete task-wide and filtered counts in the background.
+- The cache manager takes the instance lock (`flock` on
+  `<DTVP_DT_CACHE_PATH>/.dtvp-instance.lock`) before it opens or migrates a
+  database, at import time, and holds it until it is closed. Opening stores
+  on the same directory again in one process shares the lock; another
+  process fails with `InstanceBusyError`, and an unfinished restore journal
+  raises `RestoreInProgressError`. Both show on the startup failure page.
 - The local database (`DTVP_DATABASE_PATH`, by default
   `<DTVP_DT_CACHE_PATH>/dtvp.sqlite3`) stores projects, findings,
   vulnerability details, BOMs, and the last known source assessment of each

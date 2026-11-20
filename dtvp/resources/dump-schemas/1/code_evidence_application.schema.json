@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:code_evidence_application",
+  "title": "dtvp.dump.code_evidence_application/1: code evidence used in a saved assessment",
+  "type": "object",
+  "properties": {
+    "evidence_id": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "finding_uuid": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "workflow_id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "applied",
+        "queued",
+        "failed"
+      ]
+    },
+    "applied_by": {
+      "type": "string"
+    },
+    "applied_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    }
+  },
+  "required": [
+    "evidence_id",
+    "finding_uuid",
+    "workflow_id",
+    "status",
+    "applied_by",
+    "applied_at"
+  ],
+  "additionalProperties": false
+}
