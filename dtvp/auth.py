@@ -1,16 +1,16 @@
 import asyncio
 import logging
+import sqlite3
 from functools import lru_cache
 from typing import Optional
 from urllib.parse import urlparse
 
 from authlib.integrations.base_client.errors import MismatchingStateError, OAuthError
 from authlib.integrations.starlette_client import OAuth
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
-from jose import jwt
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from joserfc.errors import JoseError
-from pydantic import Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .access_token_services import (
@@ -21,6 +21,13 @@ from .access_token_services import (
     looks_like_access_token,
 )
 from .logic import get_user_role
+from .session_services import (
+    SESSION_COOKIE,
+    decode_session_token,
+    issue_session_token,
+    load_session_config,
+    needs_refresh,
+)
 
 # POST routes that only read. Everything else a token may call is GET/HEAD.
 # POST /api/assessments/details is deliberately absent: it rewrites the
@@ -38,9 +45,6 @@ class AuthSettings(BaseSettings):
     OIDC_AUTHORITY: Optional[str] = Field(alias="DTVP_OIDC_AUTHORITY", default=None)
     OIDC_REDIRECT_URI: Optional[str] = Field(
         alias="DTVP_OIDC_REDIRECT_URI", default=None
-    )
-    SESSION_SECRET_KEY: str = Field(
-        alias="DTVP_SESSION_SECRET_KEY", default="change_me"
     )
     FRONTEND_URL: str = Field(
         alias="DTVP_FRONTEND_URL", default="http://localhost:8000"
@@ -101,6 +105,9 @@ class AuthSettings(BaseSettings):
 
 
 auth_settings = AuthSettings()
+# Refuses a missing, placeholder, or short signing key. dtvp.boot checks it
+# before loading the app too; this covers serving dtvp.main:app directly.
+session_config = load_session_config()
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -177,9 +184,14 @@ async def callback(request: Request):
             status_code=400, detail="OIDC identity token has no user identifier"
         )
 
-    session_token = jwt.encode(
-        {"sub": username}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
-    )
+    try:
+        version = await asyncio.to_thread(access_token_store.session_version, username)
+    except sqlite3.Error as exc:
+        logger.exception("Session version lookup failed at sign-in")
+        raise HTTPException(
+            status_code=503, detail="Sign-in unavailable: the session store cannot be read"
+        ) from exc
+    session_token = issue_session_token(session_config, username, version)
 
     base = auth_settings.FRONTEND_URL.rstrip("/")
     path = auth_settings.CONTEXT_PATH
@@ -188,19 +200,67 @@ async def callback(request: Request):
     target = f"{base}{path}"
 
     response = RedirectResponse(url=target)
+    _set_session_cookie(response, session_token)
+    return response
+
+
+def _set_session_cookie(response, token: str) -> None:
     response.set_cookie(
-        key="session_token",
-        value=session_token,
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=session_config.ttl_seconds,
         path=auth_settings.application_cookie_path,
         secure=auth_settings.secure_cookies,
         httponly=True,
         samesite="lax",
     )
-    return response
+
+
+def _clear_session_cookie(response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE,
+        path=auth_settings.application_cookie_path,
+        secure=auth_settings.secure_cookies,
+        httponly=True,
+        samesite="lax",
+    )
 
 
 @router.get("/logout")
-async def logout(response: Response):
+async def logout(request: Request):
+    """End every session of the signed-in user and return to the login page.
+
+    Stays a GET because the SPA navigates here. A cross-site link can at most
+    sign a user out.
+    """
+    if not auth_settings.DEV_DISABLE_AUTH:
+        claims = decode_session_token(
+            session_config, request.cookies.get(SESSION_COOKIE, "")
+        )
+        if claims is not None:
+            try:
+                current = await asyncio.to_thread(
+                    access_token_store.session_version, claims.username
+                )
+                # A session that is already revoked must not end the
+                # user's newer sessions.
+                if claims.version == current:
+                    await asyncio.to_thread(
+                        access_token_store.revoke_sessions, claims.username
+                    )
+            except sqlite3.Error as exc:
+                # Clearing only this cookie would look like a sign-out while
+                # every copy of the session stays valid. Say so instead; the
+                # user can try again.
+                logger.exception("Could not revoke sessions on logout")
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Sign-out failed: your sessions could not be ended. "
+                        "Try again in a moment."
+                    ),
+                ) from exc
+
     base = auth_settings.FRONTEND_URL.rstrip("/")
     path = auth_settings.CONTEXT_PATH.rstrip("/")
     if path and not path.startswith("/"):
@@ -211,32 +271,52 @@ async def logout(response: Response):
     target = f"{base}{path}{redirect_path}"
 
     response = RedirectResponse(url=target)
-    response.delete_cookie(
-        key="session_token",
-        path=auth_settings.application_cookie_path,
-        secure=auth_settings.secure_cookies,
-        httponly=True,
-        samesite="lax",
-    )
+    _clear_session_cookie(response)
     return response
 
 
-def _session_user(request: Request) -> str:
+async def _session_user(request: Request) -> str:
     if auth_settings.DEV_DISABLE_AUTH:
         return "devuser"
 
-    token = request.cookies.get("session_token")
-    if token:
-        try:
-            payload = jwt.decode(
-                token, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"]
-            )
-            return payload.get("sub")
-        except Exception as e:
-            logger.debug(f"Failed to decode JWT token: {e}")
-            pass
+    claims = decode_session_token(
+        session_config, request.cookies.get(SESSION_COOKIE) or ""
+    )
+    if claims is None:
+        if request.cookies.get(SESSION_COOKIE):
+            logger.debug("Rejected an invalid, expired, or legacy session cookie")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
-    raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        current = await asyncio.to_thread(
+            access_token_store.session_version, claims.username
+        )
+    except sqlite3.Error as exc:
+        logger.exception("Session version lookup failed")
+        # Fail closed, but not with 401: that would send the SPA to sign-in
+        # in a loop while the database is unavailable.
+        raise HTTPException(
+            status_code=503, detail="Session check unavailable"
+        ) from exc
+    if claims.version != current:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if needs_refresh(claims, config=session_config):
+        request.state.refreshed_session_token = issue_session_token(
+            session_config,
+            claims.username,
+            claims.version,
+            authenticated_at=claims.authenticated_at,
+        )
+    return claims.username
+
+
+def apply_session_refresh(request: Request, response) -> None:
+    """Send the renewed session cookie that authentication prepared, if any."""
+    state = getattr(request, "state", None)
+    token = getattr(state, "refreshed_session_token", None) if state else None
+    if token:
+        _set_session_cookie(response, token)
 
 
 def _bearer_access_token(request: Request) -> str | None:
@@ -298,13 +378,13 @@ async def get_session_user(request: Request):
             status_code=403,
             detail="This operation requires an interactive session",
         )
-    return _session_user(request)
+    return await _session_user(request)
 
 
 async def get_current_user(request: Request):
     plain = _bearer_access_token(request)
     if plain is None:
-        return _session_user(request)
+        return await _session_user(request)
 
     record = await authenticate_access_token(plain)
     if not record.has_scope(SCOPE_READ) or not _access_token_may_call(request):
@@ -322,3 +402,52 @@ async def get_current_user(request: Request):
 @router.get("/me")
 async def get_user_info(user: str = Depends(get_current_user)):
     return {"username": user, "role": get_user_role(user)}
+
+
+class SessionRevokeRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=256)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def _strip(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+@router.post("/sessions/revoke")
+async def revoke_sessions(
+    body: SessionRevokeRequest,
+    request: Request,
+    user: str = Depends(get_session_user),
+):
+    """End every browser session of a user.
+
+    Anyone may end their own sessions; reviewers may end anyone's. The
+    username is the identity DTVP stores (the OIDC ``sub``, else
+    ``preferred_username`` or ``email``), as in user_roles.json. Unknown
+    names are accepted so a session can be revoked before it is used.
+    """
+    target = body.username
+    if target != user and get_user_role(user) != "REVIEWER":
+        raise HTTPException(
+            status_code=403,
+            detail="Only reviewers can revoke another user's sessions",
+        )
+    try:
+        await asyncio.to_thread(access_token_store.revoke_sessions, target)
+    except sqlite3.Error as exc:
+        logger.exception("Could not revoke the sessions of %s", target)
+        raise HTTPException(
+            status_code=503,
+            detail="The sessions could not be ended: the session store cannot be written",
+        ) from exc
+    logger.info("Sessions of %s revoked by %s", target, user)
+
+    payload = {"status": "revoked", "username": target}
+    if target != user:
+        return payload
+    # The caller's own session just ended: do not renew it, clear it.
+    if hasattr(request.state, "refreshed_session_token"):
+        del request.state.refreshed_session_token
+    response = JSONResponse(payload)
+    _clear_session_cookie(response)
+    return response

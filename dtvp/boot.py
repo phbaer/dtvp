@@ -2,10 +2,12 @@ import asyncio
 import importlib
 import json
 import os
+import sys
 import traceback
 from contextlib import AsyncExitStack
 from typing import Any, Awaitable, Callable
 
+from .session_services import SessionConfigError, load_session_config
 from .startup_progress import clear_startup_progress
 from .startup_page_services import (
     build_startup_page_html,
@@ -154,6 +156,22 @@ class BootApp:
         while True:
             message = await receive()
             if message["type"] == "lifespan.startup":
+                # The real app loads in the background, where an error only
+                # shows on the startup page. A missing or weak session key
+                # must stop the process instead, so check it here first.
+                try:
+                    load_session_config()
+                except SessionConfigError as exc:
+                    print(f"DTVP startup refused: {exc}", file=sys.stderr)
+                    self._set_state(
+                        "failed",
+                        "DTVP startup failed. Check the backend logs.",
+                        str(exc),
+                    )
+                    await send(
+                        {"type": "lifespan.startup.failed", "message": str(exc)}
+                    )
+                    continue
                 await send({"type": "lifespan.startup.complete"})
                 self._ensure_load_started()
             elif message["type"] == "lifespan.shutdown":

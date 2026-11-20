@@ -31,7 +31,8 @@ Important backend components:
 | `dtvp/logic.py` | Grouping, ownership, assessment parsing, CVSS, statistics, and dependency analysis |
 | `dtvp/assessment_*` and `rescore_rule_services.py` | Assessment writes, conflict handling, metadata recovery, and CVSS rules |
 | `dtvp/assessment_use_cases.py` | Transport-independent assessment save rules shared by the REST route and the MCP tools |
-| `dtvp/access_token_*` and `mcp_server.py` | Personal access tokens, their audit log, and the MCP endpoint for AI agents |
+| `dtvp/auth.py` and `session_services.py` | OIDC login, session tokens (expiry, sliding renewal, per-user revocation) and the signing-key check |
+| `dtvp/access_token_*` and `mcp_server.py` | Personal access tokens, their audit log, per-user browser session versions, and the MCP endpoint for AI agents |
 | `dtvp/assessment_outbox_services.py` | Local assessments with their base value and history, the export queue, the merge with source values, and conflict resolution |
 | `dtvp/bulk_workflows/` | Registry-backed bulk-change plug-ins |
 | `dtvp/dt_client.py` and `dt_cache.py` | Dependency-Track access, in-memory document cache, overlays, and pending writes |

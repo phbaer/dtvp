@@ -4,6 +4,11 @@ A token belongs to one user, carries scopes, expires, and can be revoked.
 Only a SHA-256 digest is stored: the secret part is 256 bits of randomness,
 so a fast digest is sufficient and keeps per-request verification cheap.
 The plain token is returned exactly once, when it is created.
+
+The store also holds each user's browser session version. A session cookie
+carries the version it was issued with; ``revoke_sessions`` raises it, which
+ends every session of that user (see dtvp/session_services.py and
+docs/adr/0004).
 """
 
 import hashlib
@@ -306,6 +311,30 @@ class AccessTokenStore:
                     (_iso(current), row["token_id"]),
                 )
             return self._record(row)
+
+    def session_version(self, username: str) -> int:
+        """The user's current browser session version; 0 until first revoked."""
+        with self._lock, closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT version FROM session_versions WHERE username = ?",
+                (username,),
+            ).fetchone()
+        return int(row["version"]) if row is not None else 0
+
+    def revoke_sessions(self, username: str, *, now: datetime | None = None) -> int:
+        """End every browser session of the user and return the new version."""
+        with self._lock, closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                """
+                INSERT INTO session_versions (username, version, revoked_at)
+                VALUES (?, 1, ?)
+                ON CONFLICT(username) DO UPDATE
+                SET version = version + 1, revoked_at = excluded.revoked_at
+                RETURNING version
+                """,
+                (username, _iso(now or datetime.now(UTC))),
+            ).fetchall()
+        return int(rows[0]["version"])
 
     def record_audit(
         self,

@@ -34,8 +34,9 @@ Lines to add to `.env` (and to `.env.dist` as the documented template):
 # Personal access tokens and the MCP endpoint for AI agents and scripts.
 # Off by default. See docs/ai-access.md.
 DTVP_ACCESS_TOKENS_ENABLED=false
-# Token digests and the token audit log are kept in the local database
-# (DTVP_DATABASE_PATH). Set this only to keep them in a separate file.
+# Token digests, the token audit log and browser session versions are kept
+# in the local database (DTVP_DATABASE_PATH). Set this only to keep them in a
+# separate file, and back that file up with the database.
 # DTVP_ACCESS_TOKENS_PATH=
 ```
 

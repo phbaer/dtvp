@@ -40,9 +40,54 @@ Deployment rules:
 - DTVP delegates OIDC discovery, state and nonce handling, the authorization-
   code flow with S256 PKCE, token exchange, and JWKS-backed ID-token validation
   to Authlib. Its transient login state lives in a signed, HttpOnly cookie that
-  expires after ten minutes. Set a strong `DTVP_SESSION_SECRET_KEY` in every
-  deployment. This login is independent of Dependency-Track browser sessions:
-  backend calls use `DTVP_DT_API_KEY` and never forward browser credentials.
+  expires after ten minutes. This login is independent of Dependency-Track
+  browser sessions: backend calls use `DTVP_DT_API_KEY` and never forward
+  browser credentials.
+- Every deployment needs its own session signing key of at least 32 random
+  bytes. It signs the session cookie, the login-state cookie, and SSVC evidence
+  tokens. Generate one with
+  `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` or
+  `openssl rand -base64 48` and set it as `DTVP_SESSION_SECRET_KEY` in `.env`,
+  or write it to a file, mount that file read-only, and name it with
+  `DTVP_SESSION_SECRET_KEY_FILE`. DTVP refuses to start when the key is unset,
+  the old `change_me` placeholder, or shorter than 32 bytes: the backend logs
+  the reason and uvicorn exits with "Application startup failed", so the
+  container stops instead of serving. Keys committed to the repository for
+  development and tests start with `dtvp-dev-only-` and are refused unless
+  `DTVP_SESSION_ALLOW_DEV_KEY=true`; never set that flag in a deployment.
+  Rotating the key signs everyone out and invalidates SSVC suggestions that
+  are still open in a browser.
+- A session cookie is valid for `DTVP_SESSION_TTL_HOURS` (default 12 hours)
+  after it was issued. It is renewed on use once more than half of that has
+  passed, so active users stay signed in and an unused session ends within
+  that time. However active, a session ends `DTVP_SESSION_MAX_AGE_HOURS`
+  (default 168, one week) after sign-in. Each user has a
+  session version in the database (the access-token tables, see
+  `DTVP_ACCESS_TOKENS_PATH`), and every request checks it: logout ends all
+  sessions of that user on every device. Back up that database like the main
+  one: losing it restores every revoked session. When the version cannot be
+  written, logout answers `503` and keeps the cookie instead of pretending to
+  sign out. A reviewer ends another user's sessions with
+  `POST <context path>/auth/sessions/revoke` and the body
+  `{"username": "<user>"}` from a signed-in browser session; any user may
+  revoke their own. There is no button for it yet; signed in as a reviewer,
+  run this in the browser's developer console on a DTVP page:
+
+  ```js
+  await fetch('/dtvp/auth/sessions/revoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'the-user-id' }),
+  }).then(r => r.json())
+  ```
+
+  Replace `/dtvp` with the context path. The answer is
+  `{"status": "revoked", "username": ...}`. The username is the identity DTVP records (the OIDC
+  `sub`, as in `user_roles.json`). Access tokens are revoked separately (see
+  [AI and API access](ai-access.md)). When the database cannot be read,
+  requests fail with `503` instead of signing users out. After upgrading to a
+  version with expiring sessions, every user signs in once more; older
+  cookies are rejected.
 - API `401` responses move the SPA to sign-in and preserve the current route for
   the OIDC return. Reviewer authorization failures remain `403` errors and do
   not incorrectly log the user out.

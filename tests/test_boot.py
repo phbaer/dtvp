@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from dtvp import boot
@@ -66,3 +68,65 @@ def test_boot_hands_http_to_real_app_after_import(monkeypatch):
 
     assert response.status_code == 200
     assert response.text == "real app"
+
+
+async def _run_lifespan_startup(app):
+    import asyncio
+
+    received = asyncio.Queue()
+    sent = []
+    await received.put({"type": "lifespan.startup"})
+
+    async def receive():
+        return await received.get()
+
+    async def send(message):
+        sent.append(message)
+        if message["type"].startswith("lifespan.startup."):
+            await received.put({"type": "lifespan.shutdown"})
+
+    await app({"type": "lifespan"}, receive, send)
+    return sent
+
+
+async def test_boot_refuses_startup_with_the_placeholder_session_key(monkeypatch, capsys):
+    imported = []
+    monkeypatch.setenv("DTVP_SESSION_SECRET_KEY", "change_me")
+    monkeypatch.setattr(
+        boot, "_import_real_app", lambda path=boot.REAL_APP_PATH: imported.append(path)
+    )
+
+    sent = await _run_lifespan_startup(boot.BootApp())
+
+    assert sent[0]["type"] == "lifespan.startup.failed"
+    assert "DTVP_SESSION_SECRET_KEY" in sent[0]["message"]
+    assert "secrets.token_urlsafe" in sent[0]["message"]
+    assert sent[-1] == {"type": "lifespan.shutdown.complete"}
+    assert imported == []
+    assert "DTVP_SESSION_SECRET_KEY" in capsys.readouterr().err
+
+
+async def test_boot_refuses_startup_with_a_short_session_key(monkeypatch):
+    monkeypatch.setenv("DTVP_SESSION_SECRET_KEY", "too-short")
+    monkeypatch.setattr(
+        boot, "_import_real_app", lambda path=boot.REAL_APP_PATH: pytest.fail("loaded")
+    )
+
+    sent = await _run_lifespan_startup(boot.BootApp())
+
+    assert sent[0]["type"] == "lifespan.startup.failed"
+    assert "too-short" not in sent[0]["message"]
+
+
+async def test_boot_completes_startup_with_a_valid_session_key(monkeypatch):
+    def fake_import(path=boot.REAL_APP_PATH):
+        raise RuntimeError("not needed")
+
+    monkeypatch.setenv("DTVP_SESSION_SECRET_KEY", "v" * 48)
+    monkeypatch.setattr(boot, "_import_real_app", fake_import)
+    app = boot.BootApp()
+
+    sent = await _run_lifespan_startup(app)
+
+    assert sent[0] == {"type": "lifespan.startup.complete"}
+    assert sent[-1] == {"type": "lifespan.shutdown.complete"}

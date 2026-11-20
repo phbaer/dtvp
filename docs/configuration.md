@@ -68,7 +68,7 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
 | `DTVP_ACCESS_TOKENS_ENABLED` | Accept personal access tokens on `/api` (read-only) and serve the MCP endpoint at `<context path>/mcp` | `false` |
-| `DTVP_ACCESS_TOKENS_PATH` | Separate file for token digests and the token audit log. Leave unset to keep them in the database | `DTVP_DATABASE_PATH` |
+| `DTVP_ACCESS_TOKENS_PATH` | Separate file for token digests, the token audit log, and the browser session versions that logout and revocation depend on. Back it up with the main database: losing it restores revoked sessions. Leave unset to keep them in the database | `DTVP_DATABASE_PATH` |
 
 ## Authentication, Runtime, And Frontend
 
@@ -78,7 +78,11 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID; the older name `CLIENT_ID` is read when this is unset | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | Optional OIDC client secret for confidential clients | unset |
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback | derived from frontend URL/context path |
-| `DTVP_SESSION_SECRET_KEY` | Session signing key | `change_me` |
+| `DTVP_SESSION_SECRET_KEY` | Required. Signs the session cookie, the OIDC login-state cookie, and SSVC evidence tokens. At least 32 bytes; startup is refused when it is unset, `change_me`, or shorter. Generate one with `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` or `openssl rand -base64 48` | none (required) |
+| `DTVP_SESSION_SECRET_KEY_FILE` | Alternative to `DTVP_SESSION_SECRET_KEY`: path of a file holding the key, for example a mounted secret. Trailing whitespace and newlines are stripped; an unreadable file is refused, and setting both variables is refused | unset |
+| `DTVP_SESSION_TTL_HOURS` | Lifetime of a sign-in in whole hours, 1–720. A session is renewed on use once more than half of it has passed; an unused one ends this long after it was issued or last renewed. Logout and [revocation](deployment.md) end it earlier | `12` |
+| `DTVP_SESSION_MAX_AGE_HOURS` | Absolute lifetime of a sign-in in whole hours, from the lifetime above to 2160. Renewal never extends a session past it; the user signs in again | `168` |
+| `DTVP_SESSION_ALLOW_DEV_KEY` | Accept a key starting with `dtvp-dev-only-`, the keys committed for the local development stack and the tests. Never set it in a deployment | `false` |
 | `DTVP_DEV_DISABLE_AUTH` | Resolve local requests as `devuser` | `false` |
 | `DTVP_FRONTEND_URL` | Public frontend base URL | `http://localhost:8000`; Compose: `http://localhost/dtvp` |
 | `DTVP_CONTEXT_PATH` | Application mount path | app `/`; Compose `/dtvp` |

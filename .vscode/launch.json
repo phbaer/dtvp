@@ -10,7 +10,11 @@
                 "dtvp.main:app",
                 "--reload"
             ],
-            "jinja": true
+            "jinja": true,
+            "env": {
+                "DTVP_SESSION_SECRET_KEY": "dtvp-dev-only-local-mock-stack-session-key",
+                "DTVP_SESSION_ALLOW_DEV_KEY": "true"
+            }
         }
     ]
 }

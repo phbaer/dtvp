@@ -39,14 +39,14 @@ def parse_date(value: str) -> datetime:
 
 
 def sign_evidence(evidence: dict) -> str:
-    from .auth import auth_settings
-    return jwt.encode({"purpose": "ssvc-exploitation", "evidence": evidence}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256")
+    from .auth import session_config
+    return jwt.encode({"purpose": "ssvc-exploitation", "evidence": evidence}, session_config.secret_key, algorithm="HS256")
 
 
 def verify_evidence(token: str, answers: dict[str, str]) -> dict:
-    from .auth import auth_settings
+    from .auth import session_config
     try:
-        claims = jwt.decode(token, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"])
+        claims = jwt.decode(token, session_config.secret_key, algorithms=["HS256"])
         evidence = claims["evidence"]
         if claims.get("purpose") != "ssvc-exploitation" or evidence["value"] != answers.get(SOURCES["exploitation_point"]):
             raise ValueError("Evidence does not match Exploitation")
