@@ -5,7 +5,7 @@
 
 | | |
 | :--- | :--- |
-| Status | Format, export, inspect and verify: implemented. Restore: not yet; see [Implementation status](#implementation-status) |
+| Status | Format, export, inspect, verify, restore and recover: implemented; see [Implementation status](#implementation-status) |
 | Owner | Repository owner |
 | Verified | 2026-11-20 against `dtvp/backup/`, `dtvp/resources/dump-schemas/1/` and `tests/test_dump_schemas.py`, `tests/test_backup_*.py` |
 
@@ -18,6 +18,8 @@ version or storage engine. The per-project archive is not a backup.
 
 - [Implementation status](#implementation-status)
 - [How to export and verify a dump](#how-to-export-and-verify-a-dump)
+- [How to restore a dump](#how-to-restore-a-dump)
+- [How to recover an interrupted restore](#how-to-recover-an-interrupted-restore)
 - [Reference: format `dtvp.dump/1`](#reference-format-dtvpdump1)
   - [File and container](#file-and-container)
   - [Manifest](#manifest)
@@ -34,11 +36,12 @@ version or storage engine. The per-project archive is not a backup.
 | :--- | :--- |
 | Format, manifest and entity JSON Schemas, frozen fixture `tests/fixtures/dump-v1` | Implemented |
 | `export`, `inspect`, `verify` | Implemented |
-| `restore`, `recover`, `verify --deep` | Not yet implemented |
-| Scheduled dumps and `prune` | Not yet implemented |
+| `restore`, `recover`, `verify --deep` | Implemented |
+| Scheduled dumps and `prune` | Implemented |
 
-Until restore exists, the cold copy of the data directory with the backend
-stopped stays the restore path; see [Deployment](deployment.md).
+A cold copy of the whole data directory, taken while the backend was
+stopped, remains a fallback for the same DTVP version; see
+[Deployment](deployment.md).
 
 ## How To Export And Verify A Dump
 
@@ -65,10 +68,12 @@ What export does:
    holds `data/dt_cache/.dtvp-export.lock` (E5). It does not take the
    instance lock: the backend keeps working.
 2. Snapshots each database into a private temporary directory
-   (`.dtvp-dump-tmp-*`, mode 0700, files 0600) in `--tmp-dir`, or beside the
-   output file, or in `data/dt_cache` for standard output. It needs about
-   1.1 times the space the databases use (E7). Directories left by an
-   interrupted export are removed by the next one.
+   (`.dtvp-dump-tmp-<instance>-*`, mode 0700, files 0600) in `--tmp-dir`,
+   or beside the output file, or in `data/dt_cache` for standard output. It
+   needs about 1.1 times the space the databases use (E7). `<instance>` is
+   a digest of the instance's export lock path: directories left by an
+   interrupted export are removed by the next export of the same instance,
+   and those of other instances sharing the directory are left alone.
    - Databases in WAL mode are copied with `VACUUM INTO`, one read
      transaction that does not block writers.
    - The code-analysis results database is not in WAL mode; it is copied
@@ -107,16 +112,142 @@ docker compose exec -T dtvp python -m dtvp.backup export --out - \
 
 Decrypt to a file before `verify` or `inspect`; both need a seekable file.
 
-### Scheduled Dumps With Cron
+### Scheduled Dumps
 
-A host cron job is one way to take regular dumps:
+Two equal ways; use one of them.
+
+**In the backend.** Set `DTVP_BACKUP_INTERVAL_SECONDS` (off at `0`, the
+default; at least 3600). After each interval the backend exports to
+`DTVP_BACKUP_PATH` with the label `DTVP_BACKUP_LABEL`, verifies the new
+file, and keeps the newest `DTVP_BACKUP_RETENTION_COUNT` dumps of that
+label. `DTVP_BACKUP_INCLUDE_ACCESS_TOKENS` and `DTVP_BACKUP_INCLUDE_SOURCE`
+choose what goes in; see [Configuration](configuration.md#backup). A run is
+skipped while another export or a restore runs. The outcome (time, file
+name, size, duration, last error; no paths) is the `backup` block of
+`/api/performance-status`.
+
+**Host cron.**
 
 ```cron
 # m h dom mon dow  command
-15 2 * * *  cd /srv/dtvp && docker compose exec -T dtvp python -m dtvp.backup export --dir /app/data/backups
+15 2 * * *  cd /srv/dtvp && docker compose exec -T dtvp python -m dtvp.backup export --dir /app/data/backups && docker compose exec -T dtvp python -m dtvp.backup prune /app/data/backups --keep 7
 ```
 
-Keep the backup directory on a different disk, or copy it off the host.
+`python -m dtvp.backup prune DIR --keep N [--label L]` deletes the oldest
+dumps beyond N, each with its sidecar. It considers only files named
+exactly as an export names a dump of that label,
+`<label>-<yyyymmddTHHMMSSZ>[-with-credentials][-N].dtvp-dump.zip`, whose
+container and manifest check out, orders them by the manifest's
+`created_at` (never by file time) and never deletes another file. A dump
+labelled `dtvp-before-upgrade` therefore never counts toward the label
+`dtvp`. Manual exports with the default label `dtvp` do share the
+scheduler's retention (when `DTVP_BACKUP_LABEL` is `dtvp`); give a dump
+you want to keep its own label. Instances sharing one backup directory
+should still use different labels, because each one prunes every dump of its
+label. Two exports of one label in the same second never overwrite each
+other: an export reserves its file name before it writes, and the second one
+gets a `-N` suffix.
+
+Keep the backup directory on a different disk, or copy it off the host. The
+backup directory is never part of a dump and does not make a restore target
+count as holding records.
+
+## How To Restore A Dump
+
+A restore replaces the instance's records with those of a dump. It runs
+offline: stop the backend first. Run it with the backend's environment and
+working directory so it resolves the same files; with Compose:
+
+```bash
+docker compose stop dtvp
+docker compose run --rm dtvp python -m dtvp.backup verify --deep /app/data/backups/<file>.dtvp-dump.zip
+docker compose run --rm dtvp python -m dtvp.backup restore /app/data/backups/<file>.dtvp-dump.zip --dry-run
+docker compose run --rm dtvp python -m dtvp.backup restore /app/data/backups/<file>.dtvp-dump.zip
+docker compose start dtvp
+```
+
+`python -m dtvp.backup restore FILE [--dry-run] [--replace] [--new-instance]
+[--accept-dt-url-change] [--accept-pruning] [--accept-path-change]
+[--allow-unknown]`:
+
+1. Takes the instance locks and the export lock and holds them to the end
+   (T1: the backend or an export is running). The instance locks are
+   `.dtvp-instance.lock` in `data/dt_cache` and in every other directory
+   holding a record database, the proposals file or a cache (by default
+   `data/`), the same files a running backend holds. A backend of another
+   `DTVP_DT_CACHE_PATH` whose results or proposals resolve to the same
+   directory therefore blocks the restore too. Refuses while a restore
+   journal exists (T2). Checks that the backend recorded the same paths
+   (T6, `--accept-path-change`) and that a backend has run here at all (T7,
+   `--new-instance` for a fresh host), and that there is room for the staged
+   copies (T8).
+   Refuses when a file this run would move an original to exists already
+   (T9).
+2. Reads the whole dump once and checks every rule (C, F, S, R, W); then
+   refuses a target that already holds records (T3, `--replace`), a
+   different Dependency-Track (T4, `--accept-dt-url-change`) and restored
+   code-analysis results that this instance's
+   `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS` or `RETENTION_DAYS` would delete
+   (T5, `--accept-pruning`). Settings files on the target do not count as
+   records (the image ships `data/rescore_rules.json`); they are moved aside
+   and reported. Nothing is written before this point.
+3. Stages new files beside their targets (`<file>.restore-<dump id>`):
+   fresh databases built with this version's migrations, the records
+   inserted with their ids, revisions and full texts, the storage of
+   migration 0007 applied again, the derived fields rebuilt and the legacy
+   imports marked as done. It checks the databases (P1), reads them back as
+   an export would and compares every record, setting and sequence with the
+   dump (P2), and makes sure no side file is left (P3). A failure here
+   removes the staged files and leaves the instance untouched.
+4. Writes the journal `data/dt_cache/.dtvp-restore-<dump id>.json` and moves
+   each file into place: the original goes to
+   `<file>.pre-restore-<dump id>-<UTC yyyymmddTHHMMSSZ of this restore>`,
+   the staged file takes its name. Restoring the same dump again therefore
+   keeps the data replaced by that run under a new name. A database's
+   `-wal`, `-shm` and `-journal` files go to the database's new name plus
+   their suffix (`dtvp.sqlite3.pre-restore-<run>-wal`), so SQLite opens the
+   moved-aside database with its last committed transactions and rolls back
+   an unfinished one. Caches (the grouped summary index,
+   the SSVC cache, the code-analysis diagnostics) are moved aside and rebuilt
+   by the backend. Then the registry is written and the journal deleted.
+
+`--dry-run` takes no lock and changes nothing: it reports every rule, the
+planned moves with absolute paths, and whether the instance lock is held.
+
+After a restore:
+
+- Assessments, their history and revision numbers, sync state, base and
+  remote values, rejected exports and the export queue are as they were, so
+  exports continue; a client saving against an older revision is refused
+  cleanly.
+- Access tokens exist only if the dump included them. With `--replace`, the
+  target's own tokens are in the moved-aside database.
+- Browser sessions stay valid only if `DTVP_SESSION_SECRET_KEY` is the same
+  as on the source.
+- The first background sync reloads the project list from
+  Dependency-Track.
+- DTVP never deletes `*.pre-restore-*` files. Remove them once the
+  restored instance has been checked. To open a moved-aside database, keep
+  its `-wal` and `-journal` files beside it under their names.
+
+`python -m dtvp.backup verify FILE --deep` stages a dump in a temporary
+directory, without a target or a lock, and proves the round trip (P1-P3).
+
+## How To Recover An Interrupted Restore
+
+If a restore stops during the swap (a crash, a full disk, a killed
+process), the journal stays and the backend refuses to start. Run, with
+the backend stopped:
+
+```bash
+docker compose run --rm dtvp python -m dtvp.backup recover --resume   # finish the restore
+docker compose run --rm dtvp python -m dtvp.backup recover --abort    # put the original back
+```
+
+Both repeat safely. `--abort` returns every file to its original state;
+staged files remain and are removed by the next restore. If a file was
+changed by something other than DTVP in between, recovery stops and prints
+the action to fix by hand.
 
 ## Reference: Format `dtvp.dump/1`
 
@@ -125,7 +256,7 @@ Keep the backup directory on a different disk, or copy it off the host.
 A dump is a ZIP file named
 `<label>-<UTC yyyymmddTHHMMSSZ>[-with-credentials].dtvp-dump.zip`, with mode
 0600, and a sidecar `<file>.sha256` in `sha256sum` format. The label
-defaults to `dtvp`; a taken name gets a `-N` suffix. Written to standard
+defaults to `dtvp`; a taken or reserved name gets a `-N` suffix. Written to standard
 output, there is no sidecar.
 
 Members:
@@ -228,7 +359,7 @@ Entities are written in this order, each sorted as listed:
 | `code_evidence_application` | `code_evidence_applications` | evidence, finding | `evidence_id, finding_uuid, workflow_id, status` (`applied`, `queued`, `failed`), `applied_by, applied_at` |
 | `finding_presence` | `finding_presence` (namespace `finding_lifecycle`, in the assessment records' file) | finding key | `key, vuln_id, component_name, component_version, component_purl, component_identity, first_seen_at, status` (`reported`, `gone`), `gone_at, last_seen_at, gone_reason` (`replaced`, `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export` or null), `successor_component_uuid, carry_over` (`carried`, `conflict`, `own_assessment`, `undetermined` or null), `returned_at`. DTVP's record of findings the source stopped reporting; it cannot be read from the source again |
 | `finding_read` | `finding_reads` | `project_uuid` | `project_uuid, read_at, went` (counts by reason; `went_raw` when not a JSON object), `returned, carried_over, not_carried` |
-| `session_version` | `session_versions` (in the access-token file) | `username` | `username, version, revoked_at`. Not a credential, so it is in every dump; it keeps logouts and revocations effective after a restore |
+| `session_version` | `session_versions` (in the access-token file) | `username` | `username, version, revoked_at`. Not a credential, so it is in every dump; it keeps logouts and revocations effective after a restore. A restore writes each version one higher: every restored user signs in again, and no session revoked before or after the dump comes back. Users without a version keep any session signed with the same key; to end every session after a restore, rotate `DTVP_SESSION_SECRET_KEY` |
 | `tmrescore_proposal` | `tmrescore_proposals.json` | `project_name` | `project_name, snapshot` (an object), as stored |
 | `instance_metadata` | `store_metadata` key `active_projects` | key | `key, value`; zero or one record |
 
@@ -336,6 +467,18 @@ reported.
 | E6 | Export: a restore journal exists | Refused |
 | E7 | Export: not enough free space | Refused |
 | E8 | Export: a database kept changing and its copy did not finish within 300 s | Refused |
+| T1 | Restore: an instance lock (`data/dt_cache` or a record or cache directory) or the export lock is held (backend or export running) | Refused |
+| T2 | Restore: a restore journal exists; use `recover` | Refused |
+| T3 | Restore: the target holds records (any row in a dumped table, or a proposals file) | Refused without `--replace` |
+| T4 | Restore: the Dependency-Track URL differs from the dump's | Refused without `--accept-dt-url-change` |
+| T5 | Restore: this instance's code-analysis retention would delete restored results | Refused without `--accept-pruning` |
+| T6 | Restore: the backend recorded other paths than the command resolves | Refused without `--accept-path-change` |
+| T7 | Restore: no backend has run here (no `.dtvp-instance.json`) | Refused without `--new-instance` |
+| T8 | Restore: not enough free space beside the targets | Refused |
+| T9 | Restore: a file this run would move an original to exists already | Refused |
+| P1 | Staging: `integrity_check` or `foreign_key_check` fails | Refused; target untouched |
+| P2 | Staging: the staged files read back differ from the dump | Refused; target untouched |
+| P3 | Staging: a `-wal`, `-shm` or `-journal` file is left beside a staged database | Refused; target untouched |
 
 The W rules are kept by the current code but legacy and imported data may
 break them; a restore reproduces the source as it was.

@@ -124,6 +124,25 @@ def _project_vulnerability_row(
     )
 
 
+def source_analysis_row(
+    key: tuple[str, str, str], payload: Any, updated_at: str
+) -> tuple[Any, ...]:
+    """A ``source_analyses`` row: the lookup columns derived from the
+    stored source assessment, then the document and its time."""
+    analysis = payload if isinstance(payload, dict) else {}
+    suppressed = analysis.get("isSuppressed", analysis.get("is_suppressed"))
+    return (
+        key[0],
+        key[1],
+        key[2],
+        _text(analysis.get("analysisState") or analysis.get("state")),
+        _text(analysis.get("analysisDetails") or analysis.get("analysis_details")),
+        None if suppressed is None else int(bool(suppressed)),
+        _dump(payload),
+        updated_at,
+    )
+
+
 _LIST_TABLES = {
     KIND_PROJECTS: "source_projects",
     KIND_FINDINGS: "source_findings",
@@ -295,8 +314,6 @@ class LocalStore:
             )
             return
         if ref.kind == KIND_ANALYSIS:
-            analysis = data if isinstance(data, dict) else {}
-            suppressed = analysis.get("isSuppressed", analysis.get("is_suppressed"))
             connection.execute(
                 """
                 INSERT INTO source_analyses (
@@ -313,17 +330,9 @@ class LocalStore:
                     payload_json = excluded.payload_json,
                     updated_at = excluded.updated_at
                 """,
-                (
-                    ref.project_uuid,
-                    ref.component_uuid,
-                    ref.vulnerability_uuid,
-                    _text(analysis.get("analysisState") or analysis.get("state")),
-                    _text(
-                        analysis.get("analysisDetails")
-                        or analysis.get("analysis_details")
-                    ),
-                    None if suppressed is None else int(bool(suppressed)),
-                    _dump(data),
+                source_analysis_row(
+                    (ref.project_uuid, ref.component_uuid, ref.vulnerability_uuid),
+                    data,
                     now,
                 ),
             )

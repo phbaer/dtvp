@@ -5,9 +5,11 @@ consists of: the record databases, the record files, the settings files,
 caches that can be rebuilt, and legacy inputs that were imported once. The
 instance dump (``dtvp.backup``) and the restore work from it.
 
-``claim_instance`` takes an exclusive lock on the data directory before the
-databases are opened, so only one DTVP process (or one restore) uses an
-instance at a time, and refuses to open an instance a restore left
+``claim_instance`` takes an exclusive lock on every directory that holds a
+record database, a record file or a cache before the databases are opened,
+so only one DTVP process (or one restore) uses those files at a time, even
+when two instances with different ``DTVP_DT_CACHE_PATH`` resolve some paths
+to the same directory. It refuses to open an instance a restore left
 half-finished.
 
 This module must not import ``dtvp.main`` or ``dtvp.dt_cache``: importing
@@ -112,6 +114,26 @@ class InstanceStores:
             if item.name == name:
                 return item.path
         raise KeyError(name)
+
+    def instance_lock_paths(self) -> tuple[str, ...]:
+        """The instance lock of ``dt_cache`` first, then one lock file in
+        every other directory holding a record database (with its side
+        files), a record file or a cache. Settings directories are not
+        locked: they may be read-only mounts, and a running backend only
+        reads them between explicit settings writes."""
+        directories = {
+            os.path.dirname(path)
+            for path in (
+                *(store.path for store in self.sqlite_records),
+                *(item.path for item in self.json_records),
+                *(item.path for item in self.caches),
+            )
+        }
+        directories.discard(self.dt_cache_dir)
+        return (
+            self.lock_path,
+            *(os.path.join(directory, LOCK_FILENAME) for directory in sorted(directories)),
+        )
 
     def journals(self) -> list[str]:
         return sorted(glob.glob(self.journal_glob))
@@ -275,16 +297,43 @@ def read_instance_registry(stores: InstanceStores) -> dict[str, Any] | None:
     return document if isinstance(document, dict) else None
 
 
-_claims: dict[str, list[int]] = {}
+# Per claim key (the dt_cache lock path): the lock files taken and the count.
+_claims: dict[str, list[Any]] = {}
+# Per lock file: the descriptor and how many claims share it, so that two
+# stores in one process that share a directory share its lock.
+_held: dict[str, list[int]] = {}
 _claims_lock = threading.Lock()
 
 
+def _hold(path: str) -> bool:
+    held = _held.get(path)
+    if held is not None:
+        held[1] += 1
+        return True
+    descriptor = try_lock_exclusive(path)
+    if descriptor is None:
+        return False
+    _held[path] = [descriptor, 1]
+    return True
+
+
+def _drop(path: str) -> None:
+    held = _held.get(path)
+    if held is None:
+        return
+    held[1] -= 1
+    if held[1] <= 0:
+        del _held[path]
+        unlock(held[0])
+
+
 def claim_instance(dt_cache_dir: str) -> str:
-    """Hold the instance lock of a data directory for this process.
+    """Hold the instance locks of a data directory for this process.
 
     Idempotent and counted per resolved directory, because one process may
-    open several stores on the same directory. Raises ``InstanceBusyError``
-    when another process or a restore holds it, and
+    open several stores on the same directory. Locks every file of
+    ``InstanceStores.instance_lock_paths``. Raises ``InstanceBusyError``
+    when another process or a restore holds one of them, and
     ``RestoreInProgressError`` while a restore journal exists. On success the
     resolved paths are recorded in ``.dtvp-instance.json``. Returns the key
     to pass to ``release_instance``.
@@ -296,14 +345,17 @@ def claim_instance(dt_cache_dir: str) -> str:
         if claim is not None:
             claim[1] += 1
             return key
-        descriptor = try_lock_exclusive(stores.lock_path)
-        if descriptor is None:
-            raise InstanceBusyError(
-                f"The DTVP instance lock {stores.lock_path} is held: another "
-                "DTVP process or a restore is using this data directory. Run "
-                "one DTVP process per data directory."
-            )
+        taken: list[str] = []
         try:
+            for path in stores.instance_lock_paths():
+                if not _hold(path):
+                    raise InstanceBusyError(
+                        f"The DTVP instance lock {path} is held: another "
+                        "DTVP process or a restore is using this data directory "
+                        "or one of its record or cache directories. Run one "
+                        "DTVP process per data directory."
+                    )
+                taken.append(path)
             journals = stores.journals()
             if journals:
                 raise RestoreInProgressError(
@@ -314,14 +366,15 @@ def claim_instance(dt_cache_dir: str) -> str:
                 )
             write_instance_registry(stores)
         except BaseException:
-            unlock(descriptor)
+            for path in taken:
+                _drop(path)
             raise
-        _claims[key] = [descriptor, 1]
+        _claims[key] = [tuple(taken), 1]
         return key
 
 
 def release_instance(key: str | None) -> None:
-    """Drop one claim; the lock is released with the last one."""
+    """Drop one claim; the locks are released with the last one."""
     if not key:
         return
     with _claims_lock:
@@ -332,4 +385,5 @@ def release_instance(key: str | None) -> None:
         if claim[1] > 0:
             return
         del _claims[key]
-        unlock(claim[0])
+        for path in claim[0]:
+            _drop(path)

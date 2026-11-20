@@ -19,6 +19,14 @@ os.environ["DTVP_SESSION_ALLOW_DEV_KEY"] = "true"
 os.environ["DTVP_SESSION_SECRET_KEY_FILE"] = ""
 os.environ.pop("DTVP_SESSION_TTL_HOURS", None)
 os.environ.pop("DTVP_SESSION_MAX_AGE_HOURS", None)
+# The records and caches that otherwise resolve from the working directory:
+# the backend locks their directories, which must not be the checkout's data/.
+os.environ["DTVP_CODE_ANALYSIS_RESULTS_PATH"] = os.path.join(
+    _IMPORT_TIME_DATA.name, "code_analysis_results.sqlite"
+)
+os.environ["DTVP_TMRESCORE_CACHE_PATH"] = os.path.join(
+    _IMPORT_TIME_DATA.name, "tmrescore_proposals.json"
+)
 
 from dtvp import dt_cache, main  # noqa: E402
 from dtvp.access_token_services import access_token_store  # noqa: E402

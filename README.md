@@ -80,6 +80,10 @@ Persistent data lives in `./data`; run one DTVP process per data directory,
 which an instance lock enforces. Sign-ins expire after at most 12 hours without use
 and one week in total, logout ends all of a user's sessions, and reviewers can
 revoke a user's sessions; see [Deployment](docs/deployment.md).
+Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and a
+strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
+`DTVP_HTTP_PORT` controls the host port. Persistent data lives in `./data`;
+run one DTVP process per data directory, which instance locks enforce.
 
 The published DTVP image uses Python 3.14 free threading. Code analysis uses
 a separately deployed Agentyzer service; set `DTVP_CODE_ANALYSIS_URL` to its
@@ -105,7 +109,9 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Benchmark grouped queries | `uv run python scripts/benchmark_group_queries.py` |
 | Benchmark the assessment record | `uv run python scripts/benchmark_assessment_store.py --assessments 50000` |
 | Back up the instance (online) | `uv run python -m dtvp.backup export` |
-| Check a dump | `uv run python -m dtvp.backup verify FILE` (`inspect FILE` reads only the manifest) |
+| Check a dump | `uv run python -m dtvp.backup verify FILE` (`--deep` also stages it; `inspect FILE` reads only the manifest) |
+| Delete old dumps | `uv run python -m dtvp.backup prune data/backups --keep 7` |
+| Restore a dump (backend stopped) | `uv run python -m dtvp.backup restore FILE --dry-run`, then without `--dry-run`; `recover --resume\|--abort` after an interruption |
 
 Browser tests cover Chromium, Firefox, and WebKit. CI's Playwright image must
 match the version in `frontend/package-lock.json`. See
@@ -242,7 +248,7 @@ cache-refresh, and Dependency-Track state changes
 | [Native vulnerability matcher: investigation](docs/vulnerability-matcher-investigation.md) | How Dependency-Track matches today, vulnerability sources including European ones, matching beyond CPE, the chosen design and its plan ([ADR 0009](docs/adr/0009-native-vulnerability-matcher.md)); not built yet |
 | [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, agent code evidence, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
-| [Backup and restore](docs/backup-and-restore.md) | The instance dump `dtvp.dump/1`: export and verify, encryption at rest, format, JSON Schemas, versioning, and validation rules |
+| [Backup and restore](docs/backup-and-restore.md) | The instance dump `dtvp.dump/1`: export, verify, restore and recovery, encryption at rest, format, JSON Schemas, versioning, and validation rules |
 | [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |
 
 OpenAPI specifications: [tmrescore](openapi/tmrescore-openapi.json) and

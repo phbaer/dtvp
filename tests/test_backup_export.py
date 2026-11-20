@@ -18,7 +18,8 @@ from dtvp.backup import container, export, schemas, sqlite_source
 from dtvp.backup.errors import DumpError
 from dtvp.backup.export import export_dump
 from dtvp.backup.manifest import sanitize_dependency_track_url
-from dtvp.instance_stores import try_lock_exclusive, unlock
+from dtvp.backup.verify import verify_dump
+from dtvp.instance_stores import resolve_instance_stores, try_lock_exclusive, unlock
 from tests.backup_instance import P1, P2, configure_instance, populate
 
 
@@ -289,12 +290,57 @@ def test_taken_names_get_a_suffix(instance, monkeypatch):
     assert os.path.basename(second.path) == "nightly-20261120T120000Z-2.dtvp-dump.zip"
 
 
+def test_a_name_another_export_reserved_is_not_taken(instance, monkeypatch):
+    """Two instances (or a scheduled and a manual export) writing into one
+    directory with the same label in the same second get different names:
+    a name is reserved exclusively before the dump is written."""
+
+    class Frozen(export.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return export.datetime(2026, 11, 20, 12, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(export, "datetime", Frozen)
+    backups = instance.root / "backups"
+    backups.mkdir(exist_ok=True)
+    # Another export has reserved the first name and is still writing.
+    reserved = backups / "nightly-20261120T120000Z.dtvp-dump.zip"
+    reserved.write_bytes(b"")
+    result = export_dump(label="nightly", directory=str(backups))
+    assert os.path.basename(result.path) == "nightly-20261120T120000Z-2.dtvp-dump.zip"
+    assert reserved.read_bytes() == b""  # left to its owner
+
+
+def test_choosing_a_name_reserves_it(tmp_path):
+    # Two exports choosing a name before either has written its dump.
+    first = export._free_name(str(tmp_path), "nightly-20261120T120000Z")
+    second = export._free_name(str(tmp_path), "nightly-20261120T120000Z")
+    assert first != second
+    assert os.path.exists(first) and os.path.exists(second)
+
+
+def test_a_failed_export_releases_its_reserved_name(instance, monkeypatch):
+    backups = instance.root / "backups"
+    backups.mkdir(exist_ok=True)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(export, "write_dump", fail)
+    with pytest.raises(RuntimeError):
+        export_dump(label="nightly", directory=str(backups))
+    assert [name for name in os.listdir(backups) if name.endswith(".zip")] == []
+
+
 def test_snapshot_directories_are_private_and_removed(instance, monkeypatch, tmp_path):
     backups = instance.root / "backups"
     backups.mkdir()
-    stale = backups / ".dtvp-dump-tmp-stale"
+    stale = backups / (export.snapshot_dir_prefix(resolve_instance_stores()) + "stale")
     stale.mkdir()
     (stale / "main.sqlite").write_bytes(b"old")
+    # Another instance's directory (or one of an older version) is not ours.
+    foreign = backups / ".dtvp-dump-tmp-0123456789abcdef-live"
+    foreign.mkdir()
     seen = []
     original = sqlite_source.snapshot_store
 
@@ -316,7 +362,32 @@ def test_snapshot_directories_are_private_and_removed(instance, monkeypatch, tmp
     with pytest.raises(RuntimeError):
         export_dump()
     assert not os.path.exists(seen[-1][0])
-    assert [path.name for path in backups.iterdir() if path.name.startswith(".")] == []
+    assert [path.name for path in backups.iterdir() if path.name.startswith(".")] == [foreign.name]
+
+
+def test_an_export_leaves_the_snapshots_of_another_instance_alone(instance, tmp_path, monkeypatch):
+    first = resolve_instance_stores()
+    other = configure_instance(monkeypatch, tmp_path / "other")
+    populate(other)
+    second = resolve_instance_stores()
+    shared = tmp_path / "shared"
+    real = export.open_snapshot_source
+    seen = {}
+
+    def overlapping(stores, tmp_dir, **kwargs):
+        if stores is first and "other" not in seen:
+            # The other instance's export runs while this one has made its
+            # snapshot directory and not yet filled it.
+            seen["other"] = export_dump(directory=str(shared), label="staging", stores=second)
+            seen["mine"] = os.path.exists(tmp_dir)
+        return real(stores, tmp_dir, **kwargs)
+
+    monkeypatch.setattr(export, "open_snapshot_source", overlapping)
+    result = export_dump(directory=str(shared), stores=first)
+    assert seen["mine"] is True
+    assert seen["other"].path != result.path
+    assert verify_dump(result.path).errors == []
+    assert export.snapshot_dir_prefix(first) != export.snapshot_dir_prefix(second)
 
 
 def _writer(path, statements, stop, errors, latencies, wal):

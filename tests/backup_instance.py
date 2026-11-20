@@ -15,6 +15,7 @@ from dtvp.assessment_outbox_services import (
     get_legacy_assessment_outbox_path,
 )
 from dtvp.code_analysis_result_services import CodeAnalysisResultStore
+from dtvp.code_evidence_services import CodeEvidenceStore
 from dtvp.instance_stores import InstanceStores, resolve_instance_stores
 from dtvp.local_store import (
     KIND_ANALYSIS,
@@ -227,6 +228,9 @@ def populate(instance: Instance) -> dict:
             keys["error"],
         )
 
+    # Read the rows written directly into fields, as a backend start does.
+    instance.outbox()._ensure_initialized()
+
     tokens = instance.tokens()
     token, _plain = tokens.create(username="alice", name="agent", scopes=["read", "write"])
     tokens.record_audit(token=token, agent="claude", action="list", outcome="ok", target={"project": "Imaging"})
@@ -293,6 +297,50 @@ def populate(instance: Instance) -> dict:
         status="applied",
         applied_by="alice",
         workflow_id="wf-1a2b3c4d",
+    )
+
+    # Agent code evidence: record data beside the analyzer runs.
+    evidence = CodeEvidenceStore(path_provider=lambda: instance.code_analysis_results)
+    kept, _created = evidence.add(
+        project_name="Imaging Suite",
+        vuln_id="CVE-2026-0001",
+        vuln_ids=["CVE-2026-0001", "GHSA-xxxx-yyyy-zzzz"],
+        scope="components",
+        targets=[{"component_name": "lib-1", "finding_uuid": "v1"}],
+        title="Parser not reachable",
+        body_markdown="The **parser** never sees user input.",
+        references=["https://example.test/src/parser.py#L10"],
+        suggested_state="NOT_AFFECTED",
+        suggested_justification="CODE_NOT_REACHABLE",
+        confidence="high",
+        author_username="alice",
+        token_id=token.token_id,
+        agent_label="alice (via agent)",
+        idempotency_key="run-42",
+    )
+    withdrawn, _created = evidence.add(
+        project_name="Imaging Suite",
+        vuln_id="CVE-2026-0001",
+        vuln_ids=["CVE-2026-0001"],
+        scope="vulnerability",
+        targets=[],
+        title="Superseded note",
+        body_markdown="Wrong component.",
+        references=[],
+        suggested_state=None,
+        suggested_justification=None,
+        confidence=None,
+        author_username="alice",
+        token_id=token.token_id,
+        agent_label="alice (via agent)",
+    )
+    evidence.withdraw(withdrawn["evidence_id"], "rita", "Wrong component")
+    evidence.record_application(
+        evidence_id=kept["evidence_id"],
+        finding_uuid="v1",
+        status="applied",
+        applied_by="alice",
+        workflow_id="individual-assessment",
     )
 
     save_tmrescore_project_cache({"Imaging Suite": {"status": "completed", "proposals": [{"score": 5.3}]}})

@@ -31,14 +31,29 @@ Deployment rules:
 - Back up with the instance dump while the backend runs:
   `docker compose exec dtvp python -m dtvp.backup export` writes a checked
   file to `data/backups` that holds every record and the settings files;
-  see [Backup and restore](backup-and-restore.md). Restore from a dump
-  arrives with the next change; until then, restore from a cold copy of
-  the whole `./data` directory taken while the backend was stopped, into
-  the same DTVP version.
+  see [Backup and restore](backup-and-restore.md). Restore it with the
+  backend stopped:
+  `docker compose run --rm dtvp python -m dtvp.backup restore <file>`.
+  A cold copy of the whole `./data` directory taken while the backend was
+  stopped remains a fallback, into the same DTVP version only.
+- Practise the restore once a quarter: copy a recent dump to a scratch
+  host or directory, run `python -m dtvp.backup verify --deep <file>`, then
+  restore it into a scratch instance (`restore <file> --new-instance`), start
+  a backend on it and check a few projects, their history and the export
+  queue. Record the date and the duration. Run the scratch instance in its
+  own working directory, or set every path to scratch values:
+  `DTVP_DT_CACHE_PATH`, `DTVP_CODE_ANALYSIS_RESULTS_PATH`,
+  `DTVP_TMRESCORE_CACHE_PATH`, `DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH`,
+  `DTVP_SSVC_CACHE_PATH` and the settings paths. The results and proposals
+  otherwise resolve to `data/` in the working directory, the production
+  files; the restore then stops with T1 because the running backend holds
+  that directory's lock.
 - Run one DTVP process per data directory. Before it opens a database the
-  backend takes an exclusive lock on `data/dt_cache/.dtvp-instance.lock`
-  (`flock`); a second backend, or a restore, on the same directory fails at
-  startup with a message naming the lock. The lock needs a local filesystem
+  backend takes an exclusive lock (`flock`) on
+  `data/dt_cache/.dtvp-instance.lock` and on `.dtvp-instance.lock` in every
+  other directory holding its record databases, proposals file or caches
+  (by default `data/`); a second backend, or a restore, using any of those
+  directories fails at startup with a message naming the lock. The lock needs a local filesystem
   or a Docker volume; do not put the data directory on NFS. The backend
   records the paths it resolved in `data/dt_cache/.dtvp-instance.json`.
   While a restore journal (`data/dt_cache/.dtvp-restore-*.json`) exists, the

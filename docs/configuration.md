@@ -72,7 +72,12 @@ See [Backup and restore](backup-and-restore.md).
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
-| `DTVP_BACKUP_PATH` | Directory for new instance dumps (`python -m dtvp.backup export` without `--out`); preferably on another disk | `data/backups` |
+| `DTVP_BACKUP_PATH` | Directory for new instance dumps (`python -m dtvp.backup export` without `--out`, and scheduled dumps); preferably on another disk | `data/backups` |
+| `DTVP_BACKUP_INTERVAL_SECONDS` | Scheduled dumps in the backend: seconds between dumps; `0` turns them off, positive values below `3600` are raised to `3600` | `0` |
+| `DTVP_BACKUP_RETENTION_COUNT` | Scheduled dumps of the label to keep (at least 1) | `7` |
+| `DTVP_BACKUP_INCLUDE_ACCESS_TOKENS` | Include access-token digests in scheduled dumps (they then contain credentials) | `false` |
+| `DTVP_BACKUP_INCLUDE_SOURCE` | Include data read from Dependency-Track in scheduled dumps | `true` |
+| `DTVP_BACKUP_LABEL` | File name prefix of scheduled dumps | `dtvp` |
 | `DTVP_DUMP_MAX_UNCOMPRESSED_BYTES` | Largest declared uncompressed size of a dump that `inspect` and `verify` read | `17179869184` (16 GiB) |
 
 ## Access Tokens And MCP

@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -75,13 +76,48 @@ def dump_filename(label: str, created: datetime, *, with_credentials: bool) -> s
     return f"{label}-{stamp}{suffix}"
 
 
+def dump_name_pattern(label: str) -> re.Pattern[str]:
+    """The full file names ``dump_filename`` and ``_free_name`` give a dump
+    of ``label``, and no others: a dump labelled ``dtvp-before-upgrade``
+    does not belong to the label ``dtvp``."""
+    return re.compile(
+        re.escape(label)
+        + r"-\d{8}T\d{6}Z(?:-with-credentials)?(?:-\d+)?"
+        + re.escape(DUMP_SUFFIX)
+    )
+
+
 def _free_name(directory: str, stem: str) -> str:
-    candidate = os.path.join(directory, stem + DUMP_SUFFIX)
-    number = 2
-    while os.path.exists(candidate):
-        candidate = os.path.join(directory, f"{stem}-{number}{DUMP_SUFFIX}")
-        number += 1
-    return candidate
+    """A dump name in ``directory`` that no other export can take.
+
+    The name is reserved by creating an empty file exclusively, so two
+    exports into one directory with the same label in the same second (two
+    instances sharing a backup directory, or a scheduled and a manual dump)
+    get different names. The export replaces the reservation with the dump,
+    or removes it when it fails.
+    """
+    number = 1
+    while True:
+        name = stem + DUMP_SUFFIX if number == 1 else f"{stem}-{number}{DUMP_SUFFIX}"
+        candidate = os.path.join(directory, name)
+        try:
+            descriptor = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            number += 1
+            continue
+        os.close(descriptor)
+        return candidate
+
+
+def _release_reservation(path: str | None) -> None:
+    """Remove a name reserved by ``_free_name`` that never got its dump."""
+    if not path:
+        return
+    try:
+        if os.path.getsize(path) == 0:
+            os.remove(path)
+    except OSError:
+        pass
 
 
 def _read_file(path: str) -> bytes:
@@ -137,11 +173,21 @@ def _dependency_track_url() -> str | None:
         return None
 
 
-def sweep_stale_temp_dirs(tmp_root: str) -> list[str]:
-    """Remove snapshot directories of exports that did not clean up. Only
-    called while holding the export lock, so none of them is in use."""
+def snapshot_dir_prefix(stores: InstanceStores) -> str:
+    """The name prefix of this instance's snapshot directories. It carries a
+    digest of the instance's export lock, so that instances sharing a backup
+    or temporary directory never take each other's directories for stale."""
+    owner = hashlib.sha256(os.path.realpath(stores.export_lock_path).encode()).hexdigest()
+    return f"{TMP_PREFIX}{owner[:16]}-"
+
+
+def sweep_stale_temp_dirs(tmp_root: str, prefix: str) -> list[str]:
+    """Remove snapshot directories of this instance's exports that did not
+    clean up. Only called while holding this instance's export lock, so none
+    of the directories with this instance's ``prefix`` is in use; those of
+    other instances are left alone."""
     removed = []
-    for path in glob.glob(os.path.join(glob.escape(tmp_root), TMP_PREFIX + "*")):
+    for path in glob.glob(os.path.join(glob.escape(tmp_root), glob.escape(prefix) + "*")):
         if os.path.isdir(path) and not os.path.islink(path):
             shutil.rmtree(path, ignore_errors=True)
             removed.append(path)
@@ -325,9 +371,12 @@ def export_dump(
         tmp_root = tmp_dir or os.path.dirname(path)
     snapshot_dir = None
     source = None
+    reserved = path if (path and not out and not to_stdout) else None
+    written = False
     try:
         os.makedirs(tmp_root, exist_ok=True)
-        sweep_stale_temp_dirs(tmp_root)
+        prefix = snapshot_dir_prefix(stores)
+        sweep_stale_temp_dirs(tmp_root, prefix)
         needed = copy_tree_free_space_needed([store.path for store in stores.sqlite_records])
         available = free_bytes(tmp_root)
         if available < needed:
@@ -335,7 +384,7 @@ def export_dump(
                 "E7",
                 f"{tmp_root} has {available} bytes free; the snapshots need about {needed}",
             )
-        snapshot_dir = tempfile.mkdtemp(prefix=TMP_PREFIX, dir=tmp_root)
+        snapshot_dir = tempfile.mkdtemp(prefix=prefix, dir=tmp_root)
         source = open_snapshot_source(
             stores,
             snapshot_dir,
@@ -358,6 +407,7 @@ def export_dump(
         else:
             with atomic_output(path, mode=0o600) as handle:
                 manifest, checker = write_dump(source, handle, **details)
+            written = True
             size = os.path.getsize(path)
             sidecar = path + ".sha256"
             atomic_write_bytes(
@@ -370,6 +420,8 @@ def export_dump(
             source.close()
         if snapshot_dir is not None:
             shutil.rmtree(snapshot_dir, ignore_errors=True)
+        if reserved and not written:
+            _release_reservation(reserved)
         unlock(lock)
     result = ExportResult(
         path=path,

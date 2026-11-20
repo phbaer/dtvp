@@ -102,6 +102,7 @@ from .dt_client import (
     get_shared_client,
 )
 from .file_io_services import read_text as read_text_impl
+from .backup.schedule import get_backup_status, run_backup_loop
 from .frontend_routes import register_frontend_routes
 from .settings_files import write_settings_file
 from .general_api_routes import (
@@ -346,6 +347,9 @@ async def _initialize_application_runtime() -> None:
         snapshot_task = asyncio.create_task(run_project_archive_snapshot_loop())
         background_tasks.add(snapshot_task)
         snapshot_task.add_done_callback(background_tasks.discard)
+        backup_task = asyncio.create_task(run_backup_loop())
+        background_tasks.add(backup_task)
+        backup_task.add_done_callback(background_tasks.discard)
         grouped_task_cleanup = asyncio.create_task(
             run_grouped_vuln_task_cleanup_loop()
         )
@@ -708,6 +712,7 @@ def get_performance_status() -> dict[str, Any]:
             "by_status": grouped_status_counts,
         },
         "cache": cache_manager.get_runtime_stats(),
+        "backup": get_backup_status(),
     }
 
 
