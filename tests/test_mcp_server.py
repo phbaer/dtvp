@@ -18,9 +18,10 @@ EXISTING = (
 )
 
 
-def _finding(suffix, *, details="", state="NOT_SET", suppressed=False):
+def _finding(suffix, *, project="p1", details="", state="NOT_SET", suppressed=False):
+    # The shape Dependency-Track sends: no finding UUID, only the matrix.
     return {
-        "uuid": f"finding-{suffix}",
+        "matrix": f"{project}:component-{suffix}:vuln-1",
         "vulnerability": {
             "vulnId": "CVE-2026-0001",
             "uuid": "vuln-1",
@@ -61,7 +62,7 @@ def project(client, mock_dt_client, tmp_path, monkeypatch):
     ]
     findings = {
         "p1": [_finding("1", details=EXISTING, state="IN_TRIAGE")],
-        "p2": [_finding("2", details=EXISTING, state="IN_TRIAGE")],
+        "p2": [_finding("2", project="p2", details=EXISTING, state="IN_TRIAGE")],
         "p3": [],
     }
 
@@ -163,14 +164,14 @@ async def test_get_vulnerability_exposes_findings_revisions_and_blocks(service):
     assert result["cvss_vector"] == VECTOR
     assert result["responsible_teams"] == ["Team A"]
     assert sorted(f["finding_uuid"] for f in result["findings"]) == [
-        "finding-1",
-        "finding-2",
+        "p1:component-1:vuln-1",
+        "p2:component-2:vuln-1",
     ]
     assert {f["revision"] for f in result["findings"]} == {0}
     assert {f["analysis_state"] for f in result["findings"]} == {"IN_TRIAGE"}
     assert result["assessments_consistent"] is True
     assessment = result["assessments"][0]
-    assert sorted(assessment["finding_uuids"]) == ["finding-1", "finding-2"]
+    assert sorted(assessment["finding_uuids"]) == ["p1:component-1:vuln-1", "p2:component-2:vuln-1"]
     assert assessment["blocks"] == [
         {
             "team": "Team B",
@@ -201,7 +202,7 @@ async def test_preview_shows_the_result_without_saving(service):
     preview = await service.preview_assessment(_token(), **ARGS)
 
     assert preview["saved"] is False
-    assert preview["expected_revisions"] == {"finding-1": 0, "finding-2": 0}
+    assert preview["expected_revisions"] == {"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0}
     change = preview["changes"][0]
     assert change["changed"] is True
     assert change["new_assessment"]["pending_review"] is True
@@ -216,11 +217,11 @@ async def test_preview_shows_the_result_without_saving(service):
 async def test_save_records_a_pending_team_draft_with_provenance(service):
     token = _token()
     result = await service.save_assessment(
-        token, **ARGS, expected_revisions={"finding-1": 0, "finding-2": 0}
+        token, **ARGS, expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0}
     )
 
     assert result["saved"] is True and result["pending_review"] is True
-    assert result["revisions"] == {"finding-1": 1, "finding-2": 1}
+    assert result["revisions"] == {"p1:component-1:vuln-1": 1, "p2:component-2:vuln-1": 1}
     for project_uuid, component_uuid in (("p1", "component-1"), ("p2", "component-2")):
         stored = main.cache_manager.get_assessment_overlay(
             project_uuid, component_uuid, "vuln-1"
@@ -237,7 +238,7 @@ async def test_save_records_a_pending_team_draft_with_provenance(service):
     assert audit[0]["outcome"] == "success"
     assert audit[0]["agent"] == "triage-bot"
     assert audit[0]["token_id"] == token.token_id
-    assert audit[0]["target"]["revisions"] == {"finding-1": 1, "finding-2": 1}
+    assert audit[0]["target"]["revisions"] == {"p1:component-1:vuln-1": 1, "p2:component-2:vuln-1": 1}
 
     # The live snapshot other users see is updated as well.
     after = await service.get_vulnerability(
@@ -252,7 +253,7 @@ async def test_reviewer_owned_token_still_writes_with_analyst_authority(service)
         await service.save_assessment(
             _token(),
             **{**ARGS, "details": "Not reachable. CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:N/I:N/A:N"},
-            expected_revisions={"finding-1": 0, "finding-2": 0},
+            expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0},
         )
     details = main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1")[
         "analysisDetails"
@@ -290,7 +291,7 @@ async def test_invalid_writes_are_rejected_before_anything_is_stored(
         await service.save_assessment(
             _token(),
             **{**ARGS, **overrides},
-            expected_revisions={"finding-1": 0, "finding-2": 0},
+            expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0},
         )
     assert main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1") is None
 
@@ -299,7 +300,7 @@ async def test_token_name_cannot_break_the_block_header(service):
     await service.save_assessment(
         _token(name="bot --- [x] ---"),
         **ARGS,
-        expected_revisions={"finding-1": 0, "finding-2": 0},
+        expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0},
     )
     after = await service.get_vulnerability(
         _token(["read"], name="reader"),
@@ -337,7 +338,7 @@ async def test_a_refreshed_snapshot_cannot_move_one_findings_assessment_to_anoth
         json={
             "instances": [
                 {
-                    "finding_uuid": "finding-1",
+                    "finding_uuid": "p1:component-1:vuln-1",
                     "project_uuid": "p3",
                     "component_uuid": "component-9",
                     "vulnerability_uuid": "vuln-9",
@@ -363,7 +364,7 @@ async def test_a_refreshed_snapshot_cannot_move_one_findings_assessment_to_anoth
     assert snapshot_states == {"IN_TRIAGE"}
 
     await service.save_assessment(
-        token, **ARGS, expected_revisions={"finding-1": 0, "finding-2": 0}
+        token, **ARGS, expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0}
     )
     stored = main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1")
     assert "[Team: General]" not in stored["analysisDetails"]
@@ -388,7 +389,7 @@ async def test_a_poisoned_snapshot_is_not_the_base_of_a_save(service):
                     component["is_suppressed"] = True
 
     await service.save_assessment(
-        token, **ARGS, expected_revisions={"finding-1": 0, "finding-2": 0}
+        token, **ARGS, expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0}
     )
     stored = main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1")
     assert "Forged" not in stored["analysisDetails"]
@@ -397,20 +398,20 @@ async def test_a_poisoned_snapshot_is_not_the_base_of_a_save(service):
 
 
 async def test_every_finding_needs_an_expected_revision(service):
-    with pytest.raises(McpToolError, match="finding-2"):
+    with pytest.raises(McpToolError, match="p2:component-2:vuln-1"):
         await service.save_assessment(
-            _token(), **ARGS, expected_revisions={"finding-1": 0}
+            _token(), **ARGS, expected_revisions={"p1:component-1:vuln-1": 0}
         )
-    with pytest.raises(McpToolError, match="finding-1"):
+    with pytest.raises(McpToolError, match="p1:component-1:vuln-1"):
         await service.save_assessment(
-            _token(), **ARGS, expected_revisions={"finding-1": True, "finding-2": 0}
+            _token(), **ARGS, expected_revisions={"p1:component-1:vuln-1": True, "p2:component-2:vuln-1": 0}
         )
     assert main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1") is None
 
 
 async def test_stale_revision_is_rejected_and_audited(service):
     token = _token()
-    revisions = {"finding-1": 0, "finding-2": 0}
+    revisions = {"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0}
     await service.save_assessment(token, **ARGS, expected_revisions=revisions)
 
     with pytest.raises(McpToolError, match="changed after you read"):
@@ -439,7 +440,7 @@ async def test_save_keeps_each_findings_suppression_in_one_transaction(
         wraps=main.cache_manager.persist_assessment_updates,
     ) as persist:
         await service.save_assessment(
-            _token(), **ARGS, expected_revisions={"finding-1": 0, "finding-2": 0}
+            _token(), **ARGS, expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0}
         )
     # All findings in one atomic write: a conflict can never leave half saved.
     assert persist.call_count == 1
@@ -607,7 +608,7 @@ async def test_add_code_evidence_records_provenance_and_changes_no_assessment(
     assert result["created"] is True
     assert result["applied_to_assessment"] is False
     assert result["scope"] == "vulnerability"
-    assert sorted(t["finding_uuid"] for t in result["targets"]) == ["finding-1", "finding-2"]
+    assert sorted(t["finding_uuid"] for t in result["targets"]) == ["p1:component-1:vuln-1", "p2:component-2:vuln-1"]
     assert {t["project_version"] for t in result["targets"]} == {"1.0", "2.0"}
     assert {t["component"] for t in result["targets"]} == {"library-a"}
     record = main.code_evidence_store.get(result["evidence_id"])
@@ -634,7 +635,7 @@ async def test_add_code_evidence_records_provenance_and_changes_no_assessment(
     assert audit["action"] == "add_code_evidence"
     assert audit["outcome"] == "success"
     assert audit["target"]["evidence_id"] == result["evidence_id"]
-    assert sorted(audit["target"]["findings"]) == ["finding-1", "finding-2"]
+    assert sorted(audit["target"]["findings"]) == ["p1:component-1:vuln-1", "p2:component-2:vuln-1"]
     assert "parse()" not in json.dumps(audit)
 
 
@@ -656,7 +657,7 @@ async def test_add_code_evidence_needs_the_write_scope(service):
     ("overrides", "message"),
     [
         ({"components": ["library-z"]}, "Valid components: library-a"),
-        ({"finding_uuids": ["finding-9"]}, "Valid findings: finding-1, finding-2"),
+        ({"finding_uuids": ["finding-9"]}, "Valid findings: p1:component-1:vuln-1, p2:component-2:vuln-1"),
         ({"title": "[Team: General] approved"}, "plain text"),
         ({"suggested_state": "APPROVED"}, "suggested_state"),
     ],
@@ -683,13 +684,13 @@ async def test_a_finding_of_another_vulnerability_is_rejected(service, project):
 async def test_evidence_scoped_to_findings_and_idempotent(service):
     token = _token()
     first = await service.add_code_evidence(
-        token, **EVIDENCE, finding_uuids=["finding-2"], idempotency_key="k1"
+        token, **EVIDENCE, finding_uuids=["p2:component-2:vuln-1"], idempotency_key="k1"
     )
     again = await service.add_code_evidence(
-        token, **EVIDENCE, finding_uuids=["finding-2"], idempotency_key="k1"
+        token, **EVIDENCE, finding_uuids=["p2:component-2:vuln-1"], idempotency_key="k1"
     )
     assert first["scope"] == "findings"
-    assert [t["finding_uuid"] for t in first["targets"]] == ["finding-2"]
+    assert [t["finding_uuid"] for t in first["targets"]] == ["p2:component-2:vuln-1"]
     assert again["created"] is False
     assert again["evidence_id"] == first["evidence_id"]
 
@@ -697,11 +698,11 @@ async def test_evidence_scoped_to_findings_and_idempotent(service):
 async def test_a_reused_idempotency_key_for_other_evidence_is_rejected_and_audited(service):
     token = _token()
     first = await service.add_code_evidence(
-        token, **EVIDENCE, finding_uuids=["finding-2"], idempotency_key="k1"
+        token, **EVIDENCE, finding_uuids=["p2:component-2:vuln-1"], idempotency_key="k1"
     )
     with pytest.raises(McpToolError, match="already used for different evidence"):
         await service.add_code_evidence(
-            token, **EVIDENCE, finding_uuids=["finding-1"], idempotency_key="k1"
+            token, **EVIDENCE, finding_uuids=["p1:component-1:vuln-1"], idempotency_key="k1"
         )
     audits = access_token_store.list_audit()
     rejected = [a for a in audits if a["outcome"] == "rejected"]

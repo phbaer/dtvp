@@ -36,7 +36,9 @@ export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): Group
             ...version,
             components: version.components.map(instance => {
                 const persistenceResult = data.dtvp_results?.find(
-                    (result: any) => result.uuid === instance.finding_uuid,
+                    // A finding without a key matches no result: two findings
+                    // must never take the same result because both keys are empty.
+                    (result: any) => Boolean(instance.finding_uuid) && result.uuid === instance.finding_uuid,
                 )
                 if (data.dtvp_results && !persistenceResult) return instance
                 return {

@@ -304,3 +304,21 @@ describe('changes that are not saves', () => {
         expect(updated.affected_versions[0]!.components[0]!.justification).toBeUndefined()
     })
 })
+
+describe('applyAssessmentDataToGroup without finding keys', () => {
+    it('never gives two keyless findings the same result', () => {
+        const instance = (component: string, details: string) => ({
+            project_uuid: 'p1', component_uuid: component, vulnerability_uuid: 'v1',
+            finding_uuid: null, analysis_state: 'IN_TRIAGE', analysis_details: details,
+        })
+        const group: any = {
+            id: 'CVE-2026-1',
+            affected_versions: [{ components: [instance('c1', 'First text'), instance('c2', 'Second text')] }],
+        }
+        const updated = applyAssessmentDataToGroup(group, {
+            dtvp_results: [{ uuid: null, new_state: 'NOT_AFFECTED', new_details: 'Only for c1' }],
+        })
+        const details = updated.affected_versions[0]!.components.map((c: any) => c.analysis_details)
+        expect(details).toEqual(['First text', 'Second text'])
+    })
+})

@@ -4,6 +4,7 @@ import hashlib
 import re
 from typing import Any
 
+from ..finding_keys import instance_finding_key
 from ..assessment_model import agreed_response, preserve_response
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..code_analysis_assessment_services import (
@@ -447,16 +448,7 @@ def _application_keys(
 
 
 def _application_finding_key(instance: dict[str, Any]) -> str:
-    finding_uuid = _text(instance.get("finding_uuid"))
-    if finding_uuid:
-        return finding_uuid
-    identity = [
-        _text(instance.get(key))
-        for key in ("project_uuid", "component_uuid", "vulnerability_uuid")
-    ]
-    if not all(identity):
-        return ""
-    return "finding:" + ":".join(identity)
+    return instance_finding_key(instance) or ""
 
 
 def _boolean_text(value: Any) -> str:

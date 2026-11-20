@@ -1338,7 +1338,7 @@ def test_automatic_assessment_workflow_uses_composite_identity_without_finding_u
     assert preview["summary"]["findings"] == 2
     assert preview["summary"]["missing_identity_findings"] == 0
     assert len(payloads) == 2
-    assert all(instance["finding_uuid"].startswith("finding:project-1:") for instance, _payload in payloads)
+    assert all(instance["finding_uuid"].startswith("project-1:") for instance, _payload in payloads)
     assert skipped["missing_identity"] == 0
 
 

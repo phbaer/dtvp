@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable, Iterable, Optional
 
+from .finding_keys import instance_finding_key
 from .assessment_model import RESERVED_DETAIL_PATTERN
 from .code_analysis_result_services import (
     CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE,
@@ -211,7 +212,7 @@ def _group_components(group: dict[str, Any]) -> list[dict[str, Any]]:
         component
         for version in group.get("affected_versions") or []
         for component in version.get("components") or []
-        if isinstance(component, dict) and component.get("finding_uuid")
+        if isinstance(component, dict) and instance_finding_key(component)
     ]
 
 
@@ -221,7 +222,7 @@ def _target(component: dict[str, Any]) -> dict[str, Any]:
         "component_version": component.get("component_version"),
         "component_purl": component.get("component_purl"),
         "project_version": component.get("project_version"),
-        "finding_uuid": component.get("finding_uuid"),
+        "finding_uuid": instance_finding_key(component),
         "project_uuid": component.get("project_uuid"),
         "component_uuid": component.get("component_uuid"),
         "vulnerability_uuid": component.get("vulnerability_uuid"),
@@ -251,7 +252,7 @@ def resolve_targets(
     wanted_findings = _string_list(finding_uuids, "finding_uuids")
     wanted_components = _string_list(components, "components")
     if wanted_findings:
-        by_uuid = {str(component["finding_uuid"]): component for component in findings}
+        by_uuid = {str(instance_finding_key(component)): component for component in findings}
         unknown = [uuid_ for uuid_ in wanted_findings if uuid_ not in by_uuid]
         if unknown:
             raise CodeEvidenceError(
@@ -350,8 +351,10 @@ def _row_record(row: tuple[Any, ...], vuln_ids: list[str]) -> dict[str, Any]:
         "vuln_id": data["vuln_id"],
         "vuln_ids": vuln_ids,
         "scope": data["scope"],
+        # Targets written before findings had a key carry none: derive it.
         "targets": [
-            target for target in _decode_list(data["targets_json"]) if isinstance(target, dict)
+            {**target, "finding_uuid": instance_finding_key(target)}
+            for target in _decode_list(data["targets_json"]) if isinstance(target, dict)
         ],
         "title": data["title"],
         "body_markdown": data["body_markdown"],

@@ -177,9 +177,13 @@ A token acts as its owner. Code evidence follows the rules in
 - It cannot change SSVC, approve, force a save, delete an assessment, or
   change whether a finding is suppressed.
 - `save_assessment` requires the revision of **every** finding, as returned by
-  `get_vulnerability` or `preview_assessment`. All findings are written in one
-  transaction: if any changed since, nothing is saved and the client must
-  read again.
+  `get_vulnerability` or `preview_assessment`, in `expected_revisions` keyed
+  by `finding_uuid`. All findings are written in one transaction: if any
+  changed since, nothing is saved and the client must read again.
+- `finding_uuid` is DTVP's key for a finding, not a Dependency-Track UUID:
+  Dependency-Track's findings have none. It is Dependency-Track's composite
+  `matrix`, `<project uuid>:<component uuid>:<vulnerability uuid>`, and is
+  never sent to Dependency-Track.
 - The existing blocks a save builds on come from DTVP's stored state for each
   finding, never from the caller or from the live task snapshot.
 - The assessment text must be plain prose. Text containing `---` or the start

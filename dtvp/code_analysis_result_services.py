@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .finding_keys import stored_finding_key
 from .code_analysis_assessment_services import (
     ASSESSMENT_METADATA_VERSION,
     record_application_eligible,
@@ -1073,7 +1074,7 @@ class CodeAnalysisResultStore:
         return [
             {
                 "analysis_run_id": row[0],
-                "finding_uuid": row[1],
+                "finding_uuid": stored_finding_key(row[1]),
                 "group_id": row[2],
                 "workflow_id": row[3],
                 "status": row[4],
