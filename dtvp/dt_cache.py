@@ -1411,6 +1411,9 @@ class CacheManager:
                     project_uuid,
                     cve=None,
                 )
+                await self._read_texts_without_state(
+                    client, project_uuid, fresh_findings
+                )
                 source_analyses = {
                     key: finding.get("analysis")
                     for finding in fresh_findings or []
@@ -1710,6 +1713,54 @@ class CacheManager:
             return document
 
         return await asyncio.to_thread(assemble)
+
+    async def _read_texts_without_state(
+        self,
+        client: VulnerabilitySource,
+        project_uuid: str,
+        findings: Any,
+    ) -> None:
+        """Read the text of findings that are recorded with a text and no state.
+
+        The findings list carries the text of assessed findings only. Without
+        this, the source would seem to have dropped the text of such a record
+        at every import, and the record would be exported again and again.
+        """
+        if not isinstance(findings, list):
+            return
+        wanted = await asyncio.to_thread(
+            self.assessment_outbox.keys_with_text_and_no_state, project_uuid
+        )
+        if not wanted:
+            return
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            key = self._finding_analysis_key(project_uuid, finding)
+            if key not in wanted:
+                continue
+            listed = finding.get("analysis")
+            if isinstance(listed, dict) and (
+                _get_analysis_state(listed) != "NOT_SET" or _get_analysis_details(listed)
+            ):
+                continue  # the list already says what the source holds
+            try:
+                analysis = await client.get_analysis(
+                    project_uuid=key[0],
+                    component_uuid=key[1],
+                    vulnerability_uuid=key[2],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not read the analysis of %s/%s in %s: %s",
+                    key[1], key[2], project_uuid, exc,
+                )
+                continue
+            if isinstance(analysis, dict):
+                finding["analysis"] = {
+                    **(listed if isinstance(listed, dict) else {}),
+                    **analysis,
+                }
 
     async def _merge_source_assessments(
         self,
