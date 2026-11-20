@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     previewBulkWorkflow: vi.fn(),
     applyBulkWorkflow: vi.fn(),
     buildBulkWorkflowDocument: vi.fn(),
+    uploadBulkWorkflowSource: vi.fn(),
 }))
 
 vi.mock('../../lib/api', async importOriginal => {
@@ -17,6 +18,7 @@ vi.mock('../../lib/api', async importOriginal => {
         previewBulkWorkflow: mocks.previewBulkWorkflow,
         applyBulkWorkflow: mocks.applyBulkWorkflow,
         buildBulkWorkflowDocument: mocks.buildBulkWorkflowDocument,
+        uploadBulkWorkflowSource: mocks.uploadBulkWorkflowSource,
     }
 })
 
@@ -466,5 +468,239 @@ describe('BulkWorkflowModal', () => {
         await flushPromises()
 
         expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(2)
+    })
+
+    describe('restore from an export', () => {
+        const restoreWorkflow = {
+            ...workflow,
+            id: 'team-assessment-restore',
+            label: 'Restore Team Assessments From Export',
+            requires_source: true,
+            source_kind: 'dependency-track-vdr',
+        }
+        const upload = (sourceId: string, sha: string) => ({
+            source_id: sourceId,
+            entries: 3,
+            team_blocks: 5,
+            summary: {
+                tool: 'Dependency-Track', tool_version: '4.99.0', spec_version: '1.5',
+                project_uuid: 'proj-1', project_name: 'App', project_version: '1.0',
+                timestamp: '2030-01-03T00:00:00Z', sha256: sha, warnings: ['Not from Dependency-Track.'],
+            },
+        })
+        const restorePreview = (token: string) => ({
+            task_id: 'task-1',
+            workflow: restoreWorkflow,
+            preview_token: token,
+            selectable_group_ids: ['CVE-2099-0001', 'CVE-2099-0002'],
+            items: [{
+                group_id: 'CVE-2099-0001',
+                finding_count: 1,
+                restore_count: 2,
+                status: 'Ready',
+                requires_review: false,
+                review: [],
+                notes: [{ kind: 'present_ticket_missing', team: 'TeamA', tickets: ['ABC-1'] }],
+                blocks: [
+                    { team: 'TeamB', state: 'NOT_AFFECTED', date: '2030-01-01', assessed_by: 'bob',
+                      ticket: 'ABC-2', match: 'uuid', component_name: 'lib-a', component_version: '1.0',
+                      project_version: '1.0', text_excerpt: 'Not shipped.' },
+                    { team: 'TeamC', state: 'NOT_AFFECTED', date: null, assessed_by: null,
+                      ticket: null, match: 'uuid', component_name: 'lib-a', component_version: '1.0',
+                      project_version: '1.0', text_excerpt: '' },
+                ],
+            }, {
+                group_id: 'CVE-2099-0002',
+                finding_count: 1,
+                restore_count: 1,
+                status: 'Review first',
+                requires_review: true,
+                review: ['A restored assessment has a worse state than the finding today'],
+                notes: [],
+                blocks: [],
+            }, {
+                // Notes only: listed, never selectable.
+                group_id: 'CVE-2099-0003',
+                finding_count: 0,
+                restore_count: 0,
+                status: 'Notes only',
+                requires_review: false,
+                review: [],
+                notes: [{ kind: 'present_ticket_missing', team: 'TeamD', tickets: ['ABC-3'] }],
+                blocks: [],
+            }],
+            summary: {
+                groups: 2,
+                notes_only_groups: 1,
+                unmatched: { no_finding_in_view: 2, ambiguous: 1, other_project: 0 },
+                unmatched_samples: [{ id: 'CVE-2099-0009', component_name: 'lib-z', component_version: '9', reason: 'ambiguous' }],
+                unmatched_note: 'Entries can be unmatched because the finding is no longer reported or the current filters exclude it.',
+            },
+        })
+
+        const choose = async (wrapper: any, name: string) => {
+            const input = wrapper.get('[data-testid="bulk-workflow-source-input"]')
+            Object.defineProperty(input.element, 'files', {
+                value: [new File(['{}'], name, { type: 'application/json' })],
+                configurable: true,
+            })
+            await input.trigger('change')
+            await flushPromises()
+        }
+
+        beforeEach(() => {
+            mocks.getBulkWorkflowSummary.mockResolvedValue({
+                task_id: 'task-1',
+                workflows: [
+                    { ...workflow, candidate_count: null, summary: {} },
+                    { ...restoreWorkflow, candidate_count: null, summary: {} },
+                ],
+            })
+            mocks.uploadBulkWorkflowSource
+                .mockReset()
+                .mockResolvedValueOnce(upload('source-1', 'a'.repeat(64)))
+                .mockResolvedValueOnce(upload('source-2', 'b'.repeat(64)))
+            mocks.previewBulkWorkflow.mockImplementation(async (workflowId: string, _task, _filters, _progress, sourceId?: string) =>
+                workflowId === restoreWorkflow.id
+                    ? restorePreview(`token-${sourceId}`)
+                    : {
+                        task_id: 'task-1', workflow, preview_token: 'preview-1',
+                        selectable_group_ids: [], items: [], summary: { groups: 0 },
+                    })
+        })
+
+        it('asks for a file only for a workflow that reads one', async () => {
+            const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+
+            await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+            await flushPromises()
+            expect(wrapper.find('[data-testid="bulk-workflow-source-input"]').exists()).toBe(false)
+
+            await wrapper.get('[data-testid="bulk-workflow-team-assessment-restore"]').trigger('click')
+            await flushPromises()
+            expect(wrapper.find('[data-testid="bulk-workflow-source-input"]').exists()).toBe(true)
+            expect(wrapper.find('[data-testid="bulk-workflow-source-empty-state"]').exists()).toBe(true)
+            // No preview before a file is there.
+            expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(1)
+            expect(wrapper.find('[data-testid="bulk-workflow-apply"]').exists()).toBe(false)
+        })
+
+        it('uploads, previews and applies with the source id', async () => {
+            const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+            await wrapper.get('[data-testid="bulk-workflow-team-assessment-restore"]').trigger('click')
+            await flushPromises()
+            await choose(wrapper, 'export.json')
+
+            expect(mocks.uploadBulkWorkflowSource).toHaveBeenCalledTimes(1)
+            const summary = wrapper.get('[data-testid="bulk-workflow-source-summary"]').text()
+            expect(summary).toContain('Dependency-Track 4.99.0')
+            expect(summary).toContain('project App 1.0')
+            expect(summary).toContain('aaaaaaaaaaaa')
+            expect(summary).not.toContain('a'.repeat(13))
+            expect(wrapper.get('[data-testid="bulk-workflow-source-warning"]').text()).toContain('Not from Dependency-Track.')
+            expect(mocks.previewBulkWorkflow).toHaveBeenLastCalledWith(
+                'team-assessment-restore', 'task-1', {}, expect.any(Function), 'source-1',
+            )
+
+            const row = wrapper.get('[data-testid="bulk-workflow-item-CVE-2099-0001"]').text()
+            expect(row).toContain('2 team assessments on 1 findings')
+            const blocks = wrapper.get('[data-testid="restore-blocks-CVE-2099-0001"]').text()
+            expect(blocks).toContain('TeamB · NOT_AFFECTED · 2030-01-01 · bob · ABC-2')
+            expect(blocks).toContain('TeamC · NOT_AFFECTED · undated')
+            expect(blocks).toContain('matched by uuid')
+            expect(blocks).toContain('Not shipped.')
+            expect(wrapper.get('[data-testid="restore-review-CVE-2099-0002"]').text())
+                .toContain('worse state')
+            expect(wrapper.get('[data-testid="restore-review-CVE-2099-0001"]').text())
+                .toContain('ABC-1 is named nowhere')
+            // A vulnerability with notes only is shown but cannot be selected.
+            const notesOnly = wrapper.get('[data-testid="bulk-workflow-item-CVE-2099-0003"]')
+            expect(notesOnly.text()).toContain('Notes only; nothing to restore')
+            expect(wrapper.get('[data-testid="restore-review-CVE-2099-0003"]').text())
+                .toContain('ABC-3 is named nowhere')
+            expect(notesOnly.classes()).toContain('opacity-60')
+            await notesOnly.trigger('click')
+
+            const unmatched = wrapper.get('[data-testid="bulk-workflow-unmatched"]').text()
+            expect(unmatched).toContain('Unmatched entries · 3')
+            expect(unmatched).toContain('2 no finding in view')
+            expect(unmatched).toContain('1 ambiguous')
+            expect(unmatched).toContain('CVE-2099-0009')
+            expect(unmatched).toContain('no longer reported')
+
+            // Review-first items start unselected.
+            expect(wrapper.get('[data-testid="bulk-workflow-apply"]').text()).toContain('Apply selected (1)')
+            mocks.applyBulkWorkflow.mockResolvedValueOnce({
+                task_id: 'task-1', workflow: restoreWorkflow, results: [],
+                summary: { attempted: 1, succeeded: 0, queued: 0, failed: 0, changed_since_preview: 1 },
+            })
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+            expect(mocks.applyBulkWorkflow).toHaveBeenCalledWith(
+                'team-assessment-restore', 'task-1', {}, ['CVE-2099-0001'], 'token-source-1',
+                expect.any(Function), 'source-1',
+            )
+            // A finding saved after the preview is left as it is, and said so.
+            expect(wrapper.get('[data-testid="bulk-workflow-changed-since-preview"]').text())
+                .toContain('1 changed since the preview')
+        })
+
+        it('keys the preview cache by file and resets the preview for a new file', async () => {
+            const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+            await wrapper.get('[data-testid="bulk-workflow-team-assessment-restore"]').trigger('click')
+            await flushPromises()
+            await choose(wrapper, 'first.json')
+            expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(1)
+
+            // Back to the same workflow and file: the preview is reused.
+            await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+            await flushPromises()
+            await wrapper.get('[data-testid="bulk-workflow-team-assessment-restore"]').trigger('click')
+            await flushPromises()
+            expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(2)
+            expect(wrapper.find('[data-testid="bulk-workflow-item-CVE-2099-0001"]').exists()).toBe(true)
+
+            let release: (value: unknown) => void = () => {}
+            mocks.uploadBulkWorkflowSource.mockReset().mockImplementationOnce(
+                () => new Promise(resolve => { release = resolve }),
+            )
+            const input = wrapper.get('[data-testid="bulk-workflow-source-input"]')
+            Object.defineProperty(input.element, 'files', {
+                value: [new File(['{}'], 'second.json', { type: 'application/json' })],
+                configurable: true,
+            })
+            await input.trigger('change')
+            await flushPromises()
+            // The preview of the first file is gone while the second is read.
+            expect(wrapper.find('[data-testid="bulk-workflow-item-CVE-2099-0001"]').exists()).toBe(false)
+            expect(wrapper.find('[data-testid="bulk-workflow-apply"]').exists()).toBe(false)
+
+            release(upload('source-2', 'b'.repeat(64)))
+            await flushPromises()
+            expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(3)
+            expect(mocks.previewBulkWorkflow).toHaveBeenLastCalledWith(
+                'team-assessment-restore', 'task-1', {}, expect.any(Function), 'source-2',
+            )
+        })
+
+        it('shows an upload error', async () => {
+            mocks.uploadBulkWorkflowSource.mockReset().mockRejectedValueOnce({
+                response: { data: { detail: 'This is a DTVP export; restoring needs a Dependency-Track export.' } },
+            })
+            const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+            await wrapper.get('[data-testid="bulk-workflow-team-assessment-restore"]').trigger('click')
+            await flushPromises()
+            await choose(wrapper, 'dtvp.json')
+            expect(wrapper.get('[data-testid="bulk-workflow-error"]').text()).toContain('This is a DTVP export')
+            expect(mocks.previewBulkWorkflow).not.toHaveBeenCalled()
+        })
     })
 })

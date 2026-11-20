@@ -62,7 +62,10 @@ aggregate state follows these rules:
   assessment remains pending review. Takeover copies decision, justification,
   and rationale, but resets assignees and review checks. The bulk
   [Repair Assessments](review-workflows.md#bulk-changes) operation marks a
-  former team's block historical in the same way. A historical block is a record, not the finding's decision: its rescoring
+  former team's block historical in the same way. Historical blocks can also
+  come from the bulk
+  [restore from a Dependency-Track export](review-workflows.md#restore-team-assessments-from-an-export).
+  A historical block is a record, not the finding's decision: its rescoring
   tags and the CVSS vectors its text quotes do not rescore the finding
   (`without_historical_blocks` in `dtvp/logic.py`, `withoutHistoricalBlocks`
   in the frontend).

@@ -119,10 +119,11 @@ constraints, and CI conventions.
    and adjust CVSS scores. A save never drops another team's assessment; a
    block it leaves out is kept as historical, and a team's historical block
    stays beside its new assessment.
-4. Use **Bulk Changes** to apply automatic assessments or run the combined
+4. Use **Bulk Changes** to apply automatic assessments, run the combined
    repair (synchronization, former-team assessments kept as historical, CVSS
-   restore, rescoring);
-   use archives to export and restore project data.
+   restore, rescoring), or restore lost team assessments from a
+   Dependency-Track export as historical blocks; use archives to export and
+   restore project data.
 
 | Lifecycle | Meaning |
 | :--- | :--- |

@@ -318,6 +318,9 @@ export interface BulkWorkflowMetadata {
     description: string;
     supports_apply: boolean;
     supports_document: boolean;
+    /** The workflow reads an uploaded file (see uploadBulkWorkflowSource). */
+    requires_source?: boolean;
+    source_kind?: string | null;
     version: number;
 }
 
@@ -325,6 +328,26 @@ export interface BulkWorkflowSummaryItem extends BulkWorkflowMetadata {
     candidate_count: number | null;
     summary: Record<string, number>;
     unavailable_reason?: string;
+}
+
+export interface BulkWorkflowSourceSummary {
+    tool: string;
+    tool_version: string;
+    spec_version: string;
+    project_uuid: string;
+    project_name: string;
+    project_version: string;
+    timestamp: string;
+    sha256: string;
+    warnings: string[];
+    [key: string]: unknown;
+}
+
+export interface BulkWorkflowSourceUpload {
+    source_id: string;
+    summary: BulkWorkflowSourceSummary;
+    entries: number;
+    team_blocks: number;
 }
 
 export interface BulkWorkflowSummaryResponse {
@@ -346,7 +369,7 @@ export interface BulkWorkflowPreviewResponse {
     preview_token: string;
     selectable_group_ids: string[];
     items: BulkWorkflowPreviewItem[];
-    summary: Record<string, number>;
+    summary: Record<string, any>;
     /** Stages the workflow had to leave out, with the reason. */
     notes?: string[];
     /** Repair topics present in the preview, for per-topic selection. */
@@ -611,16 +634,31 @@ const startBulkWorkflowTask = async (
     return res.data.task_id;
 };
 
+/** Upload the file a workflow reads; it is held in server memory only. */
+export const uploadBulkWorkflowSource = async (
+    file: File,
+): Promise<BulkWorkflowSourceUpload> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await api.post('/bulk-workflows/sources', form);
+    return res.data;
+};
+
+// Only workflows that read an upload send one; other payloads stay as they were.
+const withSource = (payload: Record<string, unknown>, sourceId?: string) =>
+    sourceId ? { ...payload, source_id: sourceId } : payload;
+
 export const previewBulkWorkflow = async (
     workflowId: string,
     taskId: string,
     filters: BulkWorkflowFilters = {},
     onProgress?: BulkWorkflowProgressHandler,
+    sourceId?: string,
 ): Promise<BulkWorkflowPreviewResponse> => {
-    const operationId = await startBulkWorkflowTask(workflowId, 'preview', {
+    const operationId = await startBulkWorkflowTask(workflowId, 'preview', withSource({
         task_id: taskId,
         filters,
-    });
+    }, sourceId));
     return waitForBulkWorkflowTask<BulkWorkflowPreviewResponse>(operationId, onProgress);
 };
 
@@ -631,13 +669,14 @@ export const applyBulkWorkflow = async (
     groupIds: string[],
     previewToken: string,
     onProgress?: BulkWorkflowProgressHandler,
+    sourceId?: string,
 ): Promise<BulkWorkflowApplyResponse> => {
-    const operationId = await startBulkWorkflowTask(workflowId, 'apply', {
+    const operationId = await startBulkWorkflowTask(workflowId, 'apply', withSource({
         task_id: taskId,
         filters,
         group_ids: groupIds,
         preview_token: previewToken,
-    });
+    }, sourceId));
     return waitForBulkWorkflowTask<BulkWorkflowApplyResponse>(operationId, onProgress);
 };
 
@@ -648,13 +687,14 @@ export const buildBulkWorkflowDocument = async (
     groupIds: string[],
     previewToken: string,
     onProgress?: BulkWorkflowProgressHandler,
+    sourceId?: string,
 ): Promise<string> => {
-    const operationId = await startBulkWorkflowTask(workflowId, 'document', {
+    const operationId = await startBulkWorkflowTask(workflowId, 'document', withSource({
         task_id: taskId,
         filters,
         group_ids: groupIds,
         preview_token: previewToken,
-    });
+    }, sourceId));
     return waitForBulkWorkflowTask<string>(operationId, onProgress);
 };
 

@@ -39,6 +39,7 @@ import {
     resumeTMRescoreAnalysis,
     runTMRescoreAnalysis,
     startProjectArchiveExport,
+    uploadBulkWorkflowSource,
     uploadProjectArchiveImport,
     waitForProjectArchiveTask,
 } from '../api'
@@ -176,6 +177,36 @@ describe('api.ts', () => {
             preview_token: 'token-2',
         })
         expect(mocks.get).toHaveBeenNthCalledWith(3, '/bulk-workflows/tasks/operation-document')
+    })
+
+    it('uploads a workflow source and sends its id only when it is set', async () => {
+        mocks.post
+            .mockResolvedValueOnce({ data: { source_id: 'source-1', summary: {}, entries: 1, team_blocks: 2 } })
+            .mockResolvedValueOnce({ data: { task_id: 'operation-preview' } })
+            .mockResolvedValueOnce({ data: { task_id: 'operation-apply' } })
+            .mockResolvedValueOnce({ data: { task_id: 'operation-document' } })
+        mocks.get.mockImplementation(async (url: string) => ({
+            data: { id: url.split('/').at(-1), status: 'completed', message: '', progress: 100, result: { ok: true } },
+        }))
+        const file = new File(['{}'], 'export.json', { type: 'application/json' })
+
+        const upload = await uploadBulkWorkflowSource(file)
+        expect(upload.source_id).toBe('source-1')
+        const [url, form] = mocks.post.mock.calls[0]
+        expect(url).toBe('/bulk-workflows/sources')
+        expect(form).toBeInstanceOf(FormData)
+        expect((form as FormData).get('file')).toBeInstanceOf(File)
+
+        await previewBulkWorkflow('team-assessment-restore', 'task-1', {}, undefined, 'source-1')
+        await applyBulkWorkflow('team-assessment-restore', 'task-1', {}, ['CVE-1'], 'token-1', undefined, 'source-1')
+        await buildBulkWorkflowDocument('team-assessment-restore', 'task-1', {}, ['CVE-1'], 'token-2', undefined, 'source-1')
+        expect(mocks.post).toHaveBeenNthCalledWith(2, '/bulk-workflows/team-assessment-restore/preview-task', {
+            task_id: 'task-1', filters: {}, source_id: 'source-1',
+        })
+        expect(mocks.post).toHaveBeenNthCalledWith(3, '/bulk-workflows/team-assessment-restore/apply-task', {
+            task_id: 'task-1', filters: {}, group_ids: ['CVE-1'], preview_token: 'token-1', source_id: 'source-1',
+        })
+        expect(mocks.post.mock.calls[3][1]).toMatchObject({ source_id: 'source-1' })
     })
 
     it('getProjects calls /projects', async () => {
