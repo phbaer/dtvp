@@ -696,6 +696,8 @@ describe('VulnGroupCard', () => {
         await analysisTab?.trigger('click')
         await flushPromises()
 
+        expect(wrapper.get('[data-testid="run-analysis-toggle"]').attributes('disabled')).toBeUndefined()
+        await wrapper.get('[data-testid="run-analysis-toggle"]').trigger('click')
         expect(wrapper.get('[data-testid="code-analysis-start"]').attributes('disabled')).toBeUndefined()
     })
 

@@ -161,7 +161,7 @@ The detail workspace provides:
 | Tab | Purpose |
 | :--- | :--- |
 | Context | Three ordered sections: advisory and references; where it was found, a matrix of components by project versions with the assessment state of each finding and the dependency chains of a component behind its row; existing assessment evidence |
-| Code Evidence | A semantic run list with an expandable new-analysis control; selected rows own indented outcome and evidence disclosures; a worst-case combined decision with the shared advisory shown once and rationale grouped into per-target cards |
+| Code Evidence | One list of analyzer runs and agent evidence grouped by component, with source filters; a row opens a reader with provenance, sanitised Markdown, collapsed technical details, and a separate "Apply to the assessment" box; Run analysis and More in the header; the worst case of the latest analyzer results at the bottom. See [Code evidence reader](screens.md#code-evidence-reader) |
 | Assessment | Consistent scope and decision/rationale sections, saved with the actions in the sticky bar; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage; inconsistent team decisions remain explicit for manual resolution; global CVSS/rescoring controls |
 
 From a 1280px wide viewport the detail can also open as a full-screen

@@ -240,6 +240,7 @@ def build_general_api_route_deps(
     service_unavailable_response: dict[int | str, dict[str, Any]],
     not_found_response: dict[int | str, dict[str, Any]],
     code_analysis_result_store: Any = None,
+    code_evidence_store: Any = None,
     load_team_groups: Callable[[], dict[str, Any]] | None = None,
     get_grouped_vuln_cache_revision: Callable[..., Any] | None = None,
     group_query_executor: Any = None,
@@ -313,6 +314,7 @@ def build_general_api_route_deps(
         service_unavailable_response=service_unavailable_response,
         not_found_response=not_found_response,
         code_analysis_result_store=code_analysis_result_store,
+        code_evidence_store=code_evidence_store,
         get_grouped_vuln_cache_revision=(
             get_grouped_vuln_cache_revision or (lambda **_kwargs: None)
         ),
@@ -413,6 +415,8 @@ def build_code_analysis_route_deps(
     not_found_response: dict[int | str, dict[str, Any]],
     service_unavailable_response: dict[int | str, dict[str, Any]],
     get_dashboard_status_cache_seconds: Callable[[], int] | None = None,
+    code_evidence_store: Any = None,
+    get_user_role: Callable[[str], str] | None = None,
 ) -> CodeAnalysisRouteDeps:
     return CodeAnalysisRouteDeps(
         code_analysis_settings_cls=code_analysis_settings_cls,
@@ -429,6 +433,8 @@ def build_code_analysis_route_deps(
         get_dashboard_status_cache_seconds=(
             get_dashboard_status_cache_seconds or (lambda: 3)
         ),
+        code_evidence_store=code_evidence_store,
+        get_user_role=get_user_role or (lambda _user: "ANALYST"),
     )
 
 

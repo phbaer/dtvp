@@ -86,6 +86,7 @@ from .auto_analysis_services import (
 from .code_analysis_integration import CodeAnalysisClient, CodeAnalysisSettings
 from .code_analysis_result_services import CodeAnalysisResultStore
 from .code_analysis_routes import create_code_analysis_router
+from .code_evidence_services import CodeEvidenceStore
 from .dt_cache import CacheManager, cache_manager
 from .dt_client import (
     DTClient,
@@ -633,6 +634,7 @@ project_archive_service_deps = build_project_archive_service_deps(
 )
 
 code_analysis_result_store = CodeAnalysisResultStore(logger=logger)
+code_evidence_store = CodeEvidenceStore(logger=logger)
 
 
 def get_performance_status() -> dict[str, Any]:
@@ -686,6 +688,7 @@ general_api_route_deps = build_general_api_route_deps(
     grouped_vuln_service_deps=grouped_vuln_service_deps,
     assessment_service_deps=assessment_service_deps,
     code_analysis_result_store=code_analysis_result_store,
+    code_evidence_store=code_evidence_store,
     dt_settings_cls=DTSettings,
     get_dt_client_cls=lambda: DTClient,
     get_user_role=lambda user: get_user_role(user),
@@ -1115,6 +1118,8 @@ api_router.include_router(
                 minimum=1,
                 logger=logger,
             ),
+            code_evidence_store=code_evidence_store,
+            get_user_role=lambda user: get_user_role(user),
         ),
         current_user_dependency=get_current_user,
     )

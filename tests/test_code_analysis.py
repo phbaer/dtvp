@@ -988,6 +988,22 @@ def test_completed_analysis_queue_item_persists_result_history(client):
         "Reachability: no production path reaches the vulnerable parser.",
     ]
     assert "result" not in payload[0]
+    assert payload[0]["used_in_assessment"] is False
+
+    main.code_analysis_result_store.record_application(
+        analysis_run_id=item.queue_id,
+        finding_uuid="finding-1",
+        group_id="CVE-2026-PERSIST",
+        status="applied",
+        applied_by="analyst",
+        workflow_id="assessment",
+    )
+    for include_result in ("false", "true"):
+        used = client.get(
+            "/api/projects/ExampleApp/vulnerabilities/CVE-2026-PERSIST/analysis-results",
+            params={"include_result": include_result},
+        ).json()
+        assert [record["used_in_assessment"] for record in used] == [True]
 
     detail_response = client.get(f"/api/code-analysis/results/{item.queue_id}")
     assert detail_response.status_code == 200
@@ -2157,3 +2173,127 @@ def test_analysis_queue_cleanup_prunes_expired_finished_items(client):
     assert [entry["queue_id"] for entry in list_response.json()] == [item.queue_id]
     assert removed == 1
     assert main.analysis_queue.get(item.queue_id) is None
+
+
+# -- agent code evidence (REST, for the browser) ------------------------------
+
+
+def _evidence(author="testuser", components=None, title="Parser not linked"):
+    from dtvp.code_evidence_services import normalize_evidence_input
+
+    targets = [
+        {
+            "component": name,
+            "component_version": "1.0",
+            "finding_uuid": f"finding-{name}",
+            "project_version": "1.0",
+            "vulnerability_uuid": "vuln-1",
+        }
+        for name in components or ["owned-api"]
+    ]
+    record, _created = main.code_evidence_store.add(
+        project_name="ExampleApp",
+        vuln_id="CVE-2026-EVIDENCE",
+        vuln_ids=["CVE-2026-EVIDENCE", "GHSA-evid-ence0-0000"],
+        scope="components" if components else "vulnerability",
+        targets=targets,
+        author_username=author,
+        token_id="tok_1",
+        agent_label="triage-bot",
+        **normalize_evidence_input(title=title, body_markdown="**Evidence**"),
+    )
+    return record
+
+
+def test_code_evidence_list_route(client):
+    whole = _evidence()
+    worker = _evidence(components=["owned-worker"], title="Worker only")
+    withdrawn = _evidence(title="Withdrawn")
+    main.code_evidence_store.withdraw(withdrawn["evidence_id"], "rita", "wrong")
+    main.code_evidence_store.record_application(
+        evidence_id=whole["evidence_id"],
+        finding_uuid="finding-owned-api",
+        status="queued",
+        applied_by="bob",
+    )
+
+    response = client.get(
+        "/api/projects/ExampleApp/vulnerabilities/GHSA-EVID-ENCE0-0000/code-evidence"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["withdrawn_count"] == 1
+    assert [item["evidence_id"] for item in body["items"]] == [
+        worker["evidence_id"],
+        whole["evidence_id"],
+    ]
+    assert body["items"][1]["applications"][0]["applied_by"] == "bob"
+
+    scoped = client.get(
+        "/api/projects/ExampleApp/vulnerabilities/CVE-2026-EVIDENCE/code-evidence",
+        params={"component_name": ["owned-api"], "include_withdrawn": "true"},
+    ).json()
+    assert {item["evidence_id"] for item in scoped["items"]} == {
+        whole["evidence_id"],
+        withdrawn["evidence_id"],
+    }
+
+
+def test_code_evidence_withdraw_by_reviewer_and_author(client):
+    by_author = _evidence(author="testuser")
+    response = client.post(
+        f"/api/code-evidence/{by_author['evidence_id']}/withdraw",
+        json={"reason": "Wrong component"},
+    )
+    assert response.status_code == 200
+    assert response.json()["withdrawn"]["by"] == "testuser"
+    again = client.post(
+        f"/api/code-evidence/{by_author['evidence_id']}/withdraw",
+        json={"reason": "again"},
+    )
+    assert again.status_code == 409
+
+    foreign = _evidence(author="alice")
+    refused = client.post(
+        f"/api/code-evidence/{foreign['evidence_id']}/withdraw",
+        json={"reason": "Not mine"},
+    )
+    assert refused.status_code == 403
+    assert main.code_evidence_store.get(foreign["evidence_id"])["withdrawn"] is None
+
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        accepted = client.post(
+            f"/api/code-evidence/{foreign['evidence_id']}/withdraw",
+            json={"reason": "Duplicate"},
+        )
+    assert accepted.status_code == 200
+    assert accepted.json()["withdrawn"]["reason"] == "Duplicate"
+
+    missing = client.post(
+        "/api/code-evidence/ev_missing/withdraw", json={"reason": "x"}
+    )
+    assert missing.status_code == 404
+
+
+def test_code_evidence_withdraw_refuses_access_tokens(client, monkeypatch):
+    from dtvp.access_token_services import access_token_store
+
+    monkeypatch.setenv("DTVP_ACCESS_TOKENS_ENABLED", "true")
+    record = _evidence(author="alice")
+    _token, plain = access_token_store.create(
+        username="alice", name="bot", scopes=["read", "write"]
+    )
+    main.app.dependency_overrides.pop(main.get_current_user, None)
+    headers = {"Authorization": f"Bearer {plain}"}
+    listed = client.get(
+        "/api/projects/ExampleApp/vulnerabilities/CVE-2026-EVIDENCE/code-evidence",
+        headers=headers,
+    )
+    assert listed.status_code == 200
+    refused = client.post(
+        f"/api/code-evidence/{record['evidence_id']}/withdraw",
+        json={"reason": "by token"},
+        headers=headers,
+    )
+    assert refused.status_code == 403
+    assert main.code_evidence_store.get(record["evidence_id"])["withdrawn"] is None

@@ -128,9 +128,9 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | `DTVP_ANALYSIS_QUEUE_CAPACITY` | Concurrent DTVP queue items | `1` |
 | `DTVP_ANALYSIS_QUEUE_MAX_PENDING` | Maximum pending DTVP queue items before new submissions receive HTTP 429 | `1000` |
 | `DTVP_ANALYSIS_QUEUE_TTL_SECONDS` | Completed/failed queue retention | `3600` |
-| `DTVP_CODE_ANALYSIS_RESULTS_PATH` | Result/application SQLite store | `data/code_analysis_results.sqlite` |
-| `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS` | Maximum stored results | `2000` |
-| `DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS` | Maximum result age; `0` disables | `0` |
+| `DTVP_CODE_ANALYSIS_RESULTS_PATH` | Result/application SQLite store; also holds the code evidence agents add through MCP ([agent code evidence](analysis-integrations.md#agent-code-evidence)) | `data/code_analysis_results.sqlite` |
+| `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS` | Maximum stored analyzer results; agent code evidence is not counted or pruned | `2000` |
+| `DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS` | Maximum analyzer result age; `0` disables. Agent code evidence is kept | `0` |
 | `DTVP_CODE_ANALYSIS_RESULTS_STORE_GUIDANCE` | Persist reviewer/follow-up guidance | `true` |
 | `DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS` | Maximum dedupe age; `0` uses fingerprints only | `0` |
 | `DTVP_AUTO_CODE_ANALYSIS_ENABLED` | Enable automatic scans | `false` |

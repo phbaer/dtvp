@@ -22,6 +22,11 @@ from .code_analysis_assessment_services import (
 )
 from .code_analysis_benchmark_services import build_code_analysis_benchmark
 from .code_analysis_result_services import build_follow_up_guidance
+from .code_evidence_services import (
+    CodeEvidenceError,
+    CodeEvidenceNotFoundError,
+    CodeEvidenceWithdrawnError,
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,8 @@ class CodeAnalysisRouteDeps:
     not_found_response: dict[int | str, dict[str, Any]]
     service_unavailable_response: dict[int | str, dict[str, Any]]
     get_dashboard_status_cache_seconds: Callable[[], int] = lambda: 3
+    code_evidence_store: Any = None
+    get_user_role: Callable[[str], str] = lambda _user: "ANALYST"
 
 
 class _DashboardStatusCache:
@@ -180,6 +187,10 @@ class QueueClearRequest(BaseModel):
     statuses: list[str] = Field(
         default_factory=lambda: ["completed", "failed", "cancelled"]
     )
+
+
+class CodeEvidenceWithdrawRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class CodeAnalysisCleanupRequest(BaseModel):
@@ -1148,20 +1159,92 @@ def _register_code_analysis_routes(
             "limit": _coerce_limit(limit),
             "offset": offset,
         }
-        if include_result:
-            metadata = await asyncio.to_thread(
-                deps.result_store.list_result_metadata,
-                **list_options,
-            )
-            records = await asyncio.gather(*(
-                asyncio.to_thread(deps.result_store.get, record["analysis_run_id"])
-                for record in metadata
-            ))
-            return [record for record in records if record]
-        return await asyncio.to_thread(
+        metadata = await asyncio.to_thread(
             deps.result_store.list_result_metadata,
             **list_options,
         )
+        if include_result:
+            loaded = await asyncio.gather(*(
+                asyncio.to_thread(deps.result_store.get, record["analysis_run_id"])
+                for record in metadata
+            ))
+            records = [record for record in loaded if record]
+        else:
+            records = list(metadata)
+        # Mark the runs a saved assessment used, like agent evidence.
+        applications = await asyncio.to_thread(
+            deps.result_store.list_applications,
+            analysis_run_ids=[record["analysis_run_id"] for record in records],
+        )
+        used = {application["analysis_run_id"] for application in applications}
+        return [
+            {**record, "used_in_assessment": record["analysis_run_id"] in used}
+            for record in records
+        ]
+
+    @router.get(
+        "/projects/{project_name}/vulnerabilities/{vuln_id}/code-evidence",
+    )
+    async def code_evidence_list_for_vulnerability(
+        project_name: str,
+        vuln_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+        component_name: Annotated[Optional[list[str]], Query()] = None,
+        vuln_alias: Annotated[Optional[list[str]], Query()] = None,
+        include_withdrawn: Annotated[bool, Query()] = False,
+    ):
+        store = deps.code_evidence_store
+        if store is None:
+            return {"items": [], "withdrawn_count": 0}
+        records = await asyncio.to_thread(
+            store.list_for_vulnerability,
+            project_name,
+            [vuln_id, *(vuln_alias or [])],
+            component_name,
+            True,
+        )
+        withdrawn_count = sum(1 for record in records if record["withdrawn"])
+        if not include_withdrawn:
+            records = [record for record in records if not record["withdrawn"]]
+        return {
+            "items": await asyncio.to_thread(store.with_applications, records),
+            "withdrawn_count": withdrawn_count,
+        }
+
+    @router.post(
+        "/code-evidence/{evidence_id}/withdraw",
+        responses=deps.not_found_response,
+    )
+    async def code_evidence_withdraw(
+        evidence_id: str,
+        req: CodeEvidenceWithdrawRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        store = deps.code_evidence_store
+        record = (
+            await asyncio.to_thread(store.get, evidence_id) if store is not None else None
+        )
+        if record is None:
+            raise HTTPException(status_code=404, detail="Code evidence not found.")
+        is_reviewer = str(deps.get_user_role(user) or "").upper() == "REVIEWER"
+        if not is_reviewer and record["author"]["username"] != user:
+            raise HTTPException(
+                status_code=403,
+                detail="Only a reviewer or the author can withdraw code evidence.",
+            )
+        try:
+            withdrawn = await asyncio.to_thread(
+                store.withdraw, evidence_id, user, req.reason
+            )
+        except CodeEvidenceNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Code evidence not found.") from exc
+        except CodeEvidenceWithdrawnError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CodeEvidenceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return withdrawn
 
     @router.post(
         "/projects/{project_name}/vulnerabilities/{vuln_id}/analysis-cleanup",

@@ -187,4 +187,5 @@ Agentyzer implements this API as an independently deployed service. Set `DTVP_CO
 
 - A static OpenAPI specification for Code Analysis is available at `openapi/code-analysis-openapi.json`.
 - The expected Code Analysis API surface is also implemented by the mock service in `test_setup/mock_code_analysis.py`.
+- Code evidence from other AI agents does not use this API: agents add it through DTVP's own MCP tool `add_code_evidence` ([AI and API access](ai-access.md#code-evidence)). DTVP stores it beside the analyzer results and shows both kinds in one list.
 - In the mock environment, Code Analysis exposes a dynamic OpenAPI definition at `/openapi.json`.

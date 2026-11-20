@@ -38,6 +38,17 @@ ANALYSIS_RESPONSES = (
     "WORKAROUND_AVAILABLE",
 )
 RESPONSE_NOT_SET = "NOT_SET"
+
+# Structure of the stored assessment text. Text written by an agent, and any
+# text copied into an assessment from outside, must not contain it.
+RESERVED_DETAIL_PATTERN = re.compile(
+    # An opening is enough: the block parser recognises "--- [Team:" without
+    # a closing bracket, so unclosed tags are as dangerous as closed ones.
+    r"---|\[\s*/?\s*(?:Team|State|Assessed By|Reviewed By|Rescored|"
+    r"Rescored Vector|Status|SSVC|Assigned|Historical|Copied From|"
+    r"Justification|Date)\b",
+    re.IGNORECASE,
+)
 # Only a tag with a value of the list is the field. Anything else in
 # brackets stays the text it is.
 RESPONSE_TAG_PATTERN = (
