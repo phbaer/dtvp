@@ -480,3 +480,90 @@ async def test_a_text_cannot_forge_or_remove_the_response(deps):
     await _save(deps, "REVIEWER", team=None, details=forged,
                 comparison_mode="REPLACE", response="NOT_SET")
     assert _response() is None
+
+
+# -- code evidence a person referenced ---------------------------------------
+
+
+def _evidence_store(tmp_path):
+    from dtvp.code_evidence_services import CodeEvidenceStore
+
+    return CodeEvidenceStore(path_provider=lambda: str(tmp_path / "evidence.sqlite"))
+
+
+def _add_evidence(store, *, project="TestApp", vulnerability_uuid="v1", finding_uuid="f1"):
+    from dtvp.code_evidence_services import normalize_evidence_input
+
+    record, _created = store.add(
+        project_name=project,
+        vuln_id="CVE-2026-0001",
+        vuln_ids=["CVE-2026-0001"],
+        scope="vulnerability",
+        targets=[
+            {
+                "component": "library-a",
+                "finding_uuid": finding_uuid,
+                "vulnerability_uuid": vulnerability_uuid,
+            }
+        ],
+        author_username="alice",
+        token_id="tok_1",
+        agent_label="bot",
+        **normalize_evidence_input(title="Not linked", body_markdown="Body"),
+    )
+    return record
+
+
+EVIDENCE_INSTANCE = {**INSTANCE, "project_name": "TestApp"}
+
+
+@pytest.mark.parametrize(
+    "case", ["unknown", "withdrawn", "other_project", "other_vulnerability"]
+)
+async def test_unusable_code_evidence_is_rejected_before_the_write(
+    deps, tmp_path, case
+):
+    store = _evidence_store(tmp_path)
+    deps.code_evidence_store = store
+    evidence_id = "ev_missing"
+    if case == "withdrawn":
+        evidence_id = _add_evidence(store)["evidence_id"]
+        store.withdraw(evidence_id, "rita", "wrong")
+    elif case == "other_project":
+        evidence_id = _add_evidence(store, project="Other")["evidence_id"]
+    elif case == "other_vulnerability":
+        evidence_id = _add_evidence(
+            store, vulnerability_uuid="v9", finding_uuid="f9"
+        )["evidence_id"]
+
+    with pytest.raises(AssessmentValidationError, match="evidence"):
+        await save_assessment(
+            deps,
+            _request(instances=[dict(EVIDENCE_INSTANCE)], code_evidence_ids=[evidence_id]),
+            user="bob",
+            client=None,
+        )
+    assert dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1") is None
+    assert store.list_applications([evidence_id]) == []
+
+
+async def test_code_evidence_applications_are_recorded_after_the_save(deps, tmp_path):
+    store = _evidence_store(tmp_path)
+    deps.code_evidence_store = store
+    # The same DT vulnerability in another project version is the same
+    # vulnerability, even with a different finding.
+    evidence_id = _add_evidence(store, finding_uuid="f-older-version")["evidence_id"]
+
+    await save_assessment(
+        deps,
+        _request(instances=[dict(EVIDENCE_INSTANCE)], code_evidence_ids=[evidence_id]),
+        user="bob",
+        client=None,
+    )
+
+    assert dt_cache.cache_manager.get_assessment_overlay("p1", "c1", "v1") is not None
+    [application] = store.list_applications([evidence_id])
+    assert application["finding_uuid"] == "f1"
+    assert application["applied_by"] == "bob"
+    assert application["status"] == "queued"
+    assert application["workflow_id"] == "individual-assessment"

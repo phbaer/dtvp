@@ -208,6 +208,8 @@ export interface AssessmentPayload {
     force?: boolean;
     comparison_mode?: 'MERGE' | 'REPLACE';
     analysis_run_ids?: string[];
+    /** Agent code evidence referenced in this draft; recorded on save. */
+    code_evidence_ids?: string[];
 }
 
 export interface Statistics {

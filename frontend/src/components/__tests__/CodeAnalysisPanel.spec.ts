@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
     fetchResult: vi.fn(),
     getCachedResult: vi.fn(),
     refreshStatus: vi.fn(),
+    listEvidence: vi.fn(),
+    withdrawEvidence: vi.fn(),
 }))
 
 const clipboardWriteText = vi.fn()
@@ -26,6 +28,8 @@ vi.mock('../../lib/api', () => ({
     codeAnalysisGetPrompts: mocks.getPrompts,
     codeAnalysisGetResult: mocks.getResult,
     codeAnalysisListVulnerabilityResults: mocks.listResults,
+    listCodeEvidence: mocks.listEvidence,
+    withdrawCodeEvidence: mocks.withdrawEvidence,
 }))
 
 vi.mock('../../lib/analysisQueueStore', () => ({
@@ -65,10 +69,19 @@ const loadHistory = async (_wrapper: ReturnType<typeof mount>) => {
 
 const viewHistoryRun = async (wrapper: ReturnType<typeof mount>, runId: string) => {
     await loadHistory(wrapper)
-    const row = wrapper.get(`[data-testid="analysis-history-row"][data-run-id="${runId}"]`)
-    await row.findAll('button').find(button => button.text().trim() === 'View')?.trigger('click')
+    const earlier = wrapper.findAll('[data-testid="evidence-earlier-toggle"]')
+    if (!wrapper.find(`[data-testid="evidence-row"][data-id="${runId}"]`).exists()) {
+        for (const toggle of earlier) await toggle.trigger('click')
+    }
+    await wrapper.get(`[data-testid="evidence-row"][data-id="${runId}"]`).trigger('click')
     await flushPromises()
 }
+
+const openRunForm = async (wrapper: ReturnType<typeof mount>) => {
+    await wrapper.get('[data-testid="run-analysis-toggle"]').trigger('click')
+    await flushPromises()
+}
+
 
 const expandDisclosure = async (wrapper: ReturnType<typeof mount>, label: string) => {
     const button = wrapper.findAll('button').find(candidate => candidate.text().includes(label))
@@ -93,6 +106,7 @@ describe('CodeAnalysisPanel', () => {
         ;(window as any).__env__ = { DTVP_JIRA_CREATE_URL: '' }
         mocks.queueItems.value = []
         mocks.listResults.mockResolvedValue([])
+        mocks.listEvidence.mockResolvedValue({ items: [], withdrawn_count: 0 })
         mocks.cleanupVulnerability.mockResolvedValue({
             status: 'cleaned',
             matched: { assessments: 1, dtvp_runs: 1, agentyzer_jobs: 1 },
@@ -140,8 +154,7 @@ describe('CodeAnalysisPanel', () => {
         })
 
         expect(wrapper.text()).toContain('No team-assigned component target is available')
-        const analyzeButton = wrapper.findAll('button').find(button => button.text().includes('Analyze'))
-        expect(analyzeButton?.attributes('disabled')).toBeDefined()
+        expect(wrapper.get('[data-testid="run-analysis-toggle"]').attributes('disabled')).toBeDefined()
     })
 
     it('automatically loads only the current vulnerability history without full results', async () => {
@@ -213,31 +226,33 @@ describe('CodeAnalysisPanel', () => {
                 offset: 0,
             },
         )
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(2)
-        expect(wrapper.findAll('[data-testid="analysis-history-component-group"]')).toHaveLength(2)
-        const earlierButtons = wrapper.findAll('button').filter(button => button.text().includes('Earlier runs'))
-        expect(earlierButtons).toHaveLength(2)
+        // One list: the latest run per component, older runs behind one disclosure.
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(2)
+        expect(wrapper.findAll('[data-testid="evidence-group"]').map(group => group.attributes('data-component'))).toEqual([
+            'owned-service',
+            'owned-worker',
+        ])
+        const earlierButtons = wrapper.findAll('[data-testid="evidence-earlier-toggle"]')
+        expect(earlierButtons.map(button => button.text())).toEqual(['Earlier runs (3)', 'Earlier runs (1)'])
         for (const button of earlierButtons) await button.trigger('click')
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(6)
-        expect(wrapper.text()).toContain('Follow-up chain (1)')
-        expect(wrapper.text()).toContain('Independent runs (3)')
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(6)
 
-        const earlierRow = wrapper.get('[data-testid="analysis-history-row"][data-run-id="run-0"]')
-        await earlierRow.findAll('button').find(button => button.text().trim() === 'View')?.trigger('click')
+        const earlierRow = wrapper.get('[data-testid="evidence-row"][data-id="run-0"]')
+        await earlierRow.trigger('click')
         await flushPromises()
-        expect(earlierRow.element.nextElementSibling?.getAttribute('data-testid')).toBe('selected-analysis-run-details')
-        expect(earlierRow.element.nextElementSibling?.querySelector('[data-testid="inline-analysis-outcome"]')).not.toBeNull()
-        expect(earlierRow.element.nextElementSibling?.querySelector('[data-testid="selected-analysis-supporting-evidence"]')).not.toBeNull()
-        expect(earlierRow.text()).toContain('Hide')
-        await earlierRow.findAll('button').find(button => button.text().trim() === 'Hide')?.trigger('click')
+        expect(earlierRow.attributes('aria-expanded')).toBe('true')
+        const reader = wrapper.get(`#${earlierRow.attributes('aria-controls')}`)
+        expect(reader.find('[data-testid="evidence-reader"]').text()).toContain('Outcome for run-0')
+        expect(reader.find('[data-testid="evidence-technical-details"] [data-testid="selected-analysis-supporting-evidence"]').exists()).toBe(true)
+        expect(reader.find('[data-testid="evidence-apply-box"]').exists()).toBe(true)
+        await earlierRow.trigger('click')
         await flushPromises()
-        expect(earlierRow.element.nextElementSibling?.getAttribute('data-testid')).not.toBe('selected-analysis-run-details')
+        expect(wrapper.find('[data-testid="evidence-reader"]').exists()).toBe(false)
 
-        expect(wrapper.text()).toContain('6 runs')
-        expect(wrapper.find('[data-testid="reusable-analysis-banner"]').exists()).toBe(false)
-        expect(wrapper.get('[data-testid="analysis-runs-section"]').text()).toContain('Analysis runs by target')
-        expect(wrapper.get('[data-testid="combined-analysis-assessment"]').text()).toContain('Combined assessment')
-        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeUndefined()
+        // The first view: two header controls, the filter chips, and the list.
+        expect(wrapper.find('[data-testid="new-analysis-section"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="analysis-cleanup-panel"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="combined-analysis-assessment"]').text()).toContain('Apply all latest analyzer results')
     })
 
     it('offers the latest reusable result when a newer benchmark record exists', async () => {
@@ -273,10 +288,9 @@ describe('CodeAnalysisPanel', () => {
         })
         await flushPromises()
 
-        expect(wrapper.find('[data-testid="reusable-analysis-banner"]').exists()).toBe(false)
-        expect(wrapper.get('[data-component="owned-worker"]').text()).toContain('Not Affected')
+        expect(wrapper.find('[data-testid="evidence-row"][data-id="benchmark-newest"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="evidence-group"][data-component="owned-worker"]').text()).toContain('Not Affected')
         expect(wrapper.get('[data-testid="combined-analysis-assessment"]').text()).toContain('owned-worker')
-        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeUndefined()
     })
 
     it('offers an opened completed queue result as the combined draft while history persistence catches up', async () => {
@@ -323,13 +337,9 @@ describe('CodeAnalysisPanel', () => {
         expect(targetAssessment.text()).toContain('Version:')
         expect(targetAssessment.text()).not.toContain('owned-service: Version:')
         expect(wrapper.find('[data-testid="apply-single-analysis-result"]').exists()).toBe(true)
-        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeUndefined()
-        expect(wrapper.get('[data-testid="combined-analysis-assessment"]').classes()).toContain('order-2')
-        expect(wrapper.get('[data-testid="analysis-runs-section"]').classes()).toContain('order-3')
-        expect(wrapper.get('[data-testid="analysis-runs-section"]').element.contains(
-            wrapper.get('[data-testid="new-analysis-section"]').element,
-        )).toBe(true)
-        expect(wrapper.get('[data-testid="combined-assessment-preview"]').text()).toContain('Decision rationale')
+        expect(wrapper.find('[data-testid="new-analysis-section"]').exists()).toBe(false)
+        // Only the worst case is shown; the per-target cards are collapsed.
+        expect((wrapper.get('[data-testid="combined-target-assessments"]').element as HTMLDetailsElement).open).toBe(false)
     })
 
     it('uses the mapped worst assessment in the combined preview even when a safer result has a higher score', async () => {
@@ -404,9 +414,8 @@ describe('CodeAnalysisPanel', () => {
 
         const preview = wrapper.get('[data-testid="combined-assessment-preview"]')
         expect(preview.text()).toContain('Probably Affected')
-        expect(preview.text()).toContain('Latest coverage')
-        expect(preview.text()).toContain('Worst-case decision')
-        expect(preview.get('[data-testid="combined-decision-summary"]').text()).toContain('owned-service')
+        expect(preview.text()).toContain('Worst case')
+        expect(preview.text()).toContain('Controlling: owned-service')
         const targetAssessments = preview.findAll('[data-testid="combined-target-assessment"]')
         expect(targetAssessments).toHaveLength(2)
         const serviceAssessment = targetAssessments.find(card => card.attributes('data-component') === 'owned-service')
@@ -415,7 +424,8 @@ describe('CodeAnalysisPanel', () => {
         expect(serviceAssessment?.text()).not.toContain('owned-service: Reachability:')
         expect(workerAssessment?.text()).toContain('Version evidence: the resolved version is outside the affected range.')
         expect(workerAssessment?.text()).not.toContain('owned-worker: Version evidence:')
-        expect(preview.text().match(/CVE-2026-0001 affects the shared parser\./g)).toHaveLength(1)
+        // The compact block repeats neither the advisory nor it per target.
+        expect(preview.text()).not.toContain('CVE-2026-0001 affects the shared parser.')
         expect(preview.classes()).toContain('border-amber-500/70')
         expect((wrapper.vm as any).combinedAssessmentPreview.assessment.adjusted_cvss.adjusted_score).toBe(6.4)
     })
@@ -477,30 +487,30 @@ describe('CodeAnalysisPanel', () => {
         })
         await flushPromises()
 
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(1)
-        await wrapper.findAll('button').find(button => button.text().includes('Earlier runs'))?.trigger('click')
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(3)
-        expect(wrapper.find('[data-run-id="security-run"]').exists()).toBe(true)
-        expect(wrapper.find('[data-run-id="security-alias-run"]').exists()).toBe(true)
-        expect(wrapper.find('[data-run-id="legacy-run"]').exists()).toBe(true)
-        expect(wrapper.find('[data-run-id="runtime-run"]').exists()).toBe(false)
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(1)
+        await wrapper.get('[data-testid="evidence-earlier-toggle"]').trigger('click')
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(3)
+        expect(wrapper.find('[data-id="security-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-id="security-alias-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-id="legacy-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-id="runtime-run"]').exists()).toBe(false)
         expect(wrapper.text()).toContain('Automatic and manual assessments available')
         expect(wrapper.emitted('scope-results-change')?.at(-1)).toEqual([true])
 
         await viewHistoryRun(wrapper, 'security-run')
-        expect(wrapper.find('[data-testid="inline-analysis-outcome"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="evidence-reader"]').exists()).toBe(true)
 
         await wrapper.setProps({ teamScope: 'Runtime', teamScopeAliases: [] })
         await flushPromises()
 
-        expect(wrapper.find('[data-testid="inline-analysis-outcome"]').exists()).toBe(false)
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(1)
-        await wrapper.findAll('button').find(button => button.text().includes('Earlier runs'))?.trigger('click')
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(2)
-        expect(wrapper.find('[data-run-id="security-run"]').exists()).toBe(false)
-        expect(wrapper.find('[data-run-id="security-alias-run"]').exists()).toBe(false)
-        expect(wrapper.find('[data-run-id="runtime-run"]').exists()).toBe(true)
-        expect(wrapper.find('[data-run-id="legacy-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="evidence-reader"]').exists()).toBe(false)
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(1)
+        await wrapper.get('[data-testid="evidence-earlier-toggle"]').trigger('click')
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(2)
+        expect(wrapper.find('[data-id="security-run"]').exists()).toBe(false)
+        expect(wrapper.find('[data-id="security-alias-run"]').exists()).toBe(false)
+        expect(wrapper.find('[data-id="runtime-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-id="legacy-run"]').exists()).toBe(true)
     })
 
     it('does not expose another team\'s code-assessment availability in a scoped view', async () => {
@@ -527,10 +537,10 @@ describe('CodeAnalysisPanel', () => {
         })
         await flushPromises()
 
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(0)
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(0)
         expect(wrapper.text()).not.toContain('Automatic assessment available')
         expect(wrapper.emitted('scope-results-change')?.at(-1)).toEqual([false])
-        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeDefined()
+        expect(wrapper.find('[data-testid="evidence-empty"]').exists()).toBe(true)
     })
 
     it.each([undefined, false])('keeps ineligible history readable without offering drafts (%s)', async eligible => {
@@ -556,13 +566,15 @@ describe('CodeAnalysisPanel', () => {
             },
         })
         await flushPromises()
-        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(1)
+        expect(wrapper.findAll('[data-testid="evidence-row"]')).toHaveLength(1)
         expect(wrapper.text()).not.toContain('Automatic assessment available')
         expect(wrapper.emitted('scope-results-change')?.at(-1)).toEqual([false])
         await viewHistoryRun(wrapper, 'legacy-run')
-        expect(wrapper.text()).toContain('This result cannot be applied')
-        const applyButton = wrapper.findAll('button').find(button => button.text().includes('Use as draft'))
-        expect(applyButton?.attributes('disabled')).toBeDefined()
+        expect(wrapper.get('[data-testid="evidence-body"]').text()).toContain('Unverified historical analysis')
+        expect(wrapper.get('[data-testid="evidence-apply-disabled-reason"]').text()).toContain('not eligible')
+        const applyButton = wrapper.get('[data-testid="evidence-apply"]')
+        expect(applyButton.attributes('disabled')).toBeDefined()
+        await applyButton.trigger('click')
         expect(wrapper.emitted('apply-result')).toBeUndefined()
         wrapper.unmount()
     })
@@ -618,14 +630,15 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
+        await openRunForm(wrapper)
         expect(wrapper.text()).toContain('All Components (2)')
-        expect(wrapper.text()).toContain('2 selected')
+        expect(wrapper.get('[data-testid="code-analysis-start"]').text()).toBe('Analyze 2')
 
         await wrapper.setProps({ componentNames: ['owned-api'] })
         await flushPromises()
 
         expect(wrapper.text()).toContain('All Components (1)')
-        expect(wrapper.text()).toContain('1 selected')
+        expect(wrapper.get('[data-testid="code-analysis-start"]').text()).toBe('Analyze 1')
         expect(wrapper.text()).not.toContain('2 of 1 components')
     })
 
@@ -648,8 +661,8 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
-        const analyzeButton = wrapper.findAll('button').find(button => button.text().includes('Analyze'))
-        await analyzeButton?.trigger('click')
+        await openRunForm(wrapper)
+        await wrapper.get('[data-testid="code-analysis-start"]').trigger('click')
 
         expect(mocks.submit).toHaveBeenCalledWith(
             'CVE-2026-0001',
@@ -744,6 +757,7 @@ describe('CodeAnalysisPanel', () => {
 
         await flushPromises()
         expect(wrapper.findAll('button').some(button => button.text().trim() === 'Benchmark')).toBe(false)
+        await openRunForm(wrapper)
         await wrapper.get('[data-testid="code-analysis-start"]').trigger('click')
         await flushPromises()
         await flushPromises()
@@ -796,13 +810,16 @@ describe('CodeAnalysisPanel', () => {
         expect(benchmarkFinding.text()).toContain('Aligned')
         expect(benchmarkFinding.find('svg').exists()).toBe(true)
 
-        const decision = wrapper.get('[data-testid="inline-analysis-outcome"]')
-        expect(decision.text()).toContain('Run outcome')
-        expect(decision.text()).toContain('Rationale')
-        expect(decision.text()).toContain('No reachable vulnerable call path was found.')
-        expect(decision.text()).toContain('Version uncertain')
-        expect(decision.text()).toContain('Ask a follow-up')
-        expect(wrapper.get('[data-testid="selected-analysis-supporting-evidence"]').element.closest('[data-testid="analysis-runs-section"]')).not.toBeNull()
+        // The finished run opens in the evidence list; its technical details
+        // sit collapsed inside the reader.
+        const reader = wrapper.get('[data-testid="evidence-reader"]')
+        expect(reader.get('[data-testid="evidence-body"]').text()).toContain('Analysis result')
+        expect(reader.get('[data-testid="evidence-added-by"]').text()).toContain('Agentyzer run queue-benchmark')
+        const technical = reader.get('[data-testid="evidence-technical-details"]')
+        expect((technical.element as HTMLDetailsElement).open).toBe(false)
+        expect(technical.text()).toContain('Version uncertain')
+        expect(technical.text()).toContain('Ask a follow-up')
+        expect(technical.find('[data-testid="selected-analysis-supporting-evidence"]').exists()).toBe(true)
 
         expect(wrapper.find('[data-testid="assessment-draft-body"]').exists()).toBe(false)
         expect(wrapper.get('[data-testid="assessment-benchmark-body"]').element.parentElement).toBe(
@@ -835,8 +852,8 @@ describe('CodeAnalysisPanel', () => {
         expect(disclosureButtons[benchmarkIndex].attributes('aria-expanded')).toBe('true')
         expect(wrapper.text()).toContain('Agreement 4/5')
 
-        await wrapper.get('[data-testid="hide-analysis-outcome"]').trigger('click')
-        expect(wrapper.find('[data-testid="inline-analysis-outcome"]').exists()).toBe(false)
+        await wrapper.get('[data-testid="evidence-reader-close"]').trigger('click')
+        expect(wrapper.find('[data-testid="evidence-reader"]').exists()).toBe(false)
         expect(wrapper.find('[data-testid="selected-analysis-supporting-evidence"]').exists()).toBe(false)
     })
 
@@ -888,6 +905,7 @@ describe('CodeAnalysisPanel', () => {
         })
 
         await wrapper.findAll('button').find(button => button.text().includes('Abort'))?.trigger('click')
+        await openRunForm(wrapper)
         await wrapper.findAll('button').find(button => button.text().includes('Analyze More'))?.trigger('click')
 
         expect(mocks.cancel).toHaveBeenCalledWith('queue-running')
@@ -906,6 +924,7 @@ describe('CodeAnalysisPanel', () => {
 
         expect(mocks.getPrompts).not.toHaveBeenCalled()
 
+        await openRunForm(wrapper)
         await wrapper.find('#code-analysis-guidance').setValue('Also check upstream Keycloak exposure.')
         await wrapper.findAll('button').find(button => button.text().includes('Analyzer request context'))?.trigger('click')
         await flushPromises()
@@ -1396,7 +1415,12 @@ describe('CodeAnalysisPanel', () => {
         })
         await viewHistoryRun(wrapper, 'run-provenance')
 
-        await wrapper.get('[data-testid="inline-analysis-outcome"]').find('button').trigger('click')
+        const applyBox = wrapper.get('[data-testid="evidence-apply-box"]')
+        expect(applyBox.text()).toContain('Fills the General assessment draft with this run')
+        expect(applyBox.text()).toContain('Nothing is saved until you save the assessment.')
+        expect(applyBox.find('[data-testid="evidence-use-suggestion"]').exists()).toBe(false)
+        await applyBox.get('[data-testid="evidence-apply"]').trigger('click')
+        await flushPromises()
 
         expect(wrapper.emitted('apply-result')?.[0]?.[2]).toEqual(['run-provenance'])
         expect(wrapper.emitted('apply-result')?.[0]?.[3]).toBe('Platform')
@@ -1437,11 +1461,12 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
-        await loadHistory(wrapper)
+        await viewHistoryRun(wrapper, 'run-delete')
         expect(wrapper.text()).toContain('owned-service')
 
-        const removeButtons = wrapper.findAll('button[aria-label="Remove analysis run"]')
-        await removeButtons[0].trigger('click')
+        // Remove sits behind the reader's More menu.
+        await wrapper.get('[data-testid="evidence-reader-more"]').trigger('click')
+        await wrapper.get('[data-testid="evidence-remove-run"]').trigger('click')
         await flushPromises()
 
         expect(confirmSpy).toHaveBeenCalledWith(
@@ -1488,6 +1513,8 @@ describe('CodeAnalysisPanel', () => {
         })
         await flushPromises()
 
+        expect(wrapper.find('[data-testid="analysis-cleanup-toggle"]').exists()).toBe(false)
+        await wrapper.get('[data-testid="code-evidence-more"]').trigger('click')
         await wrapper.get('[data-testid="analysis-cleanup-toggle"]').trigger('click')
         const checkboxes = wrapper.findAll('[data-testid="analysis-cleanup-panel"] input[type="checkbox"]')
         await checkboxes[0].setValue(false)
@@ -1585,13 +1612,10 @@ describe('CodeAnalysisPanel', () => {
             expect.any(Function),
         )
 
-        const selectedFollowUpRow = wrapper.findAll('div').find(node =>
-            node.text().includes('Follow-up')
-            && node.text().includes('Hide')
-            && node.text().includes('owned-service')
-        )
-        expect(selectedFollowUpRow).toBeDefined()
-        expect(wrapper.text()).toContain('Follow-up platform assessment')
+        const selectedFollowUpRow = wrapper.get('[data-testid="evidence-row"][data-id="follow-run"]')
+        expect(selectedFollowUpRow.attributes('aria-expanded')).toBe('true')
+        expect(wrapper.get('[data-testid="evidence-reader"]').text()).toContain('Follow-up platform assessment')
+        expect(wrapper.get('[data-testid="evidence-reader"]').text()).toContain('follow-up')
     })
 
     it('uses and copies analyzer-generated ticket text for affected analysis results', async () => {
@@ -1683,6 +1707,7 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
+        await openRunForm(wrapper)
         await wrapper.findAll('button').find(button => button.text().includes('Analyze'))?.trigger('click')
         await flushPromises()
 
@@ -1710,6 +1735,181 @@ describe('CodeAnalysisPanel', () => {
 
         await wrapper.findAll('button').find(button => button.text().includes('Copy'))?.trigger('click')
         expect(clipboardWriteText).toHaveBeenCalledWith(ticketText)
+    })
+
+    describe('agent code evidence', () => {
+        const agentEvidence = (overrides: Record<string, any> = {}) => ({
+            kind: 'agent',
+            evidence_id: 'ev_1',
+            project_name: 'ExampleApp',
+            vuln_id: 'CVE-2026-0001',
+            scope: 'components',
+            targets: [{ component: 'owned-service', component_version: '1.2.3', project_version: '2.0', finding_uuid: 'f-1' }],
+            title: 'Parser entry point is not linked',
+            body_markdown: '## Call graph\n\n`parse()` is **never** called.<script>alert(1)</script>',
+            references: ['https://example.org/commit/1', 'javascript:alert(1)'],
+            suggested_state: 'NOT_AFFECTED',
+            suggested_justification: 'CODE_NOT_REACHABLE',
+            confidence: 'high',
+            author: { username: 'alice', agent_label: 'triage-bot', token_id: 'tok_1', authority: 'ANALYST' },
+            created_at: '2026-07-06T13:00:00Z',
+            withdrawn: null,
+            applications: [],
+            ...overrides,
+        })
+
+        const mountWithEvidence = async (items: any[], props: Record<string, any> = {}) => {
+            mocks.listResults.mockResolvedValue([{
+                analysis_run_id: 'run-1',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'owned-service',
+                project_name: 'ExampleApp',
+                source: 'manual',
+                status: 'completed',
+                summary: { application_eligible: true, verdict: 'Not Affected', executive_summary: { assessment: 'Analyzer says not reachable.' } },
+                finished_at: '2026-07-06T12:00:00Z',
+            }])
+            mocks.listEvidence.mockResolvedValue({ items, withdrawn_count: items.filter(item => item.withdrawn).length })
+            const wrapper = mount(CodeAnalysisPanel, {
+                props: {
+                    vulnId: 'CVE-2026-0001',
+                    vulnAliases: ['GHSA-ALIAS'],
+                    projectName: 'ExampleApp',
+                    componentNames: ['owned-service'],
+                    currentTeam: 'Platform',
+                    ...props,
+                },
+                global: { provide: { user: { value: { username: 'bob' } } } },
+            })
+            await flushPromises()
+            return wrapper
+        }
+
+        it('reloads evidence and runs after a save while it stays visible', async () => {
+            // In the assessment workspace the panel is never hidden, so the
+            // card signals each save through refreshKey.
+            const wrapper = await mountWithEvidence([agentEvidence()], { refreshKey: 0 })
+            const evidenceCalls = mocks.listEvidence.mock.calls.length
+            const runCalls = mocks.listResults.mock.calls.length
+
+            await wrapper.setProps({ refreshKey: 1 })
+            await flushPromises()
+
+            expect(mocks.listEvidence.mock.calls.length).toBe(evidenceCalls + 1)
+            expect(mocks.listResults.mock.calls.length).toBeGreaterThan(runCalls)
+        })
+
+        it('lists agent evidence and analyzer runs in one list', async () => {
+            const wrapper = await mountWithEvidence([
+                agentEvidence(),
+                agentEvidence({ evidence_id: 'ev_all', scope: 'vulnerability', title: 'Whole vulnerability', created_at: '2026-07-06T11:00:00Z' }),
+            ])
+
+            expect(mocks.listEvidence).toHaveBeenCalledWith('ExampleApp', 'CVE-2026-0001', {
+                vuln_alias: ['GHSA-ALIAS'],
+                component_name: ['owned-service'],
+                include_withdrawn: true,
+            })
+            const groups = wrapper.findAll('[data-testid="evidence-group"]')
+            expect(groups.map(group => group.attributes('data-component'))).toEqual(['All components', 'owned-service'])
+            const rows = groups[1].findAll('[data-testid="evidence-row"]')
+            expect(rows.map(row => row.attributes('data-kind'))).toEqual(['agent', 'analyzer'])
+            expect(rows[0].text()).toContain('Agent: triage-bot')
+            expect(rows[0].text()).toContain('NOT_AFFECTED · CODE_NOT_REACHABLE')
+            expect(rows[0].text()).toContain('alice')
+            expect(rows[1].text()).toContain('Analyzer')
+            expect(rows[1].text()).toContain('Analyzer says not reachable.')
+
+            await wrapper.get('[data-testid="evidence-filter-agent"]').trigger('click')
+            expect(wrapper.findAll('[data-testid="evidence-row"]').every(row => row.attributes('data-kind') === 'agent')).toBe(true)
+            await wrapper.get('[data-testid="evidence-filter-analyzer"]').trigger('click')
+            expect(wrapper.findAll('[data-testid="evidence-row"]').map(row => row.attributes('data-kind'))).toEqual(['analyzer'])
+        })
+
+        it('marks agent evidence whose findings are no longer reported', async () => {
+            const current = await mountWithEvidence([agentEvidence()], { reportedFindingUuids: ['f-1', 'f-2'] })
+            await current.get('[data-testid="evidence-row"][data-id="ev_1"]').trigger('click')
+            await flushPromises()
+            expect(current.get('[data-testid="evidence-for"]').text()).not.toContain('no longer reported')
+
+            const stale = await mountWithEvidence([agentEvidence()], { reportedFindingUuids: ['f-9'] })
+            await stale.get('[data-testid="evidence-row"][data-id="ev_1"]').trigger('click')
+            await flushPromises()
+            expect(stale.get('[data-testid="evidence-for"]').text()).toContain('no longer reported')
+        })
+
+        it('reads agent evidence and applies only a reference unless the suggestion is chosen', async () => {
+            const wrapper = await mountWithEvidence([agentEvidence()])
+            await wrapper.get('[data-testid="evidence-row"][data-id="ev_1"]').trigger('click')
+            await flushPromises()
+
+            const reader = wrapper.get('[data-testid="evidence-reader"]')
+            expect(reader.get('[data-testid="evidence-added-by"]').text()).toBe('alice via token triage-bot (id tok_1), analyst authority')
+            expect(reader.get('[data-testid="evidence-for"]').text()).toContain('owned-service 1.2.3')
+            expect(reader.find('[data-testid="evidence-body"] h2').text()).toBe('Call graph')
+            expect(reader.find('script').exists()).toBe(false)
+            expect(reader.find('a[href="https://example.org/commit/1"]').exists()).toBe(true)
+            expect(reader.find('a[href^="javascript:"]').exists()).toBe(false)
+            expect(reader.find('[data-testid="evidence-technical-details"]').exists()).toBe(false)
+            expect(reader.get('[data-testid="evidence-apply-box"]').text()).toContain('Adds a reference to this evidence to the Platform assessment draft.')
+
+            await reader.get('[data-testid="evidence-apply"]').trigger('click')
+            expect(wrapper.emitted('apply-evidence')?.[0]?.[0]).toEqual({
+                evidenceId: 'ev_1',
+                reference: 'Code evidence ev_1 from triage-bot (alice, 2026-07-06): Parser entry point is not linked',
+            })
+
+            await reader.get('[data-testid="evidence-use-suggestion"]').setValue(true)
+            await reader.get('[data-testid="evidence-apply"]').trigger('click')
+            expect(wrapper.emitted('apply-evidence')?.[1]?.[0]).toMatchObject({
+                evidenceId: 'ev_1',
+                state: 'NOT_AFFECTED',
+                justification: 'CODE_NOT_REACHABLE',
+            })
+            expect(wrapper.emitted('apply-result')).toBeUndefined()
+        })
+
+        it('hides withdrawn evidence by default and lets a reviewer withdraw with a reason', async () => {
+            const withdrawn = agentEvidence({
+                evidence_id: 'ev_old',
+                title: 'Withdrawn entry',
+                withdrawn: { at: '2026-07-06T14:00:00Z', by: 'rita', reason: 'duplicate' },
+            })
+            mocks.withdrawEvidence.mockResolvedValue({
+                ...agentEvidence(),
+                withdrawn: { at: '2026-07-06T15:00:00Z', by: 'bob', reason: 'Wrong component' },
+            })
+            const wrapper = await mountWithEvidence([agentEvidence(), withdrawn], { isReviewer: true })
+
+            expect(wrapper.find('[data-testid="evidence-row"][data-id="ev_old"]').exists()).toBe(false)
+            await wrapper.get('[data-testid="evidence-show-withdrawn"]').setValue(true)
+            expect(wrapper.find('[data-testid="evidence-row"][data-id="ev_old"]').text()).toContain('Withdrawn')
+
+            await wrapper.get('[data-testid="evidence-row"][data-id="ev_1"]').trigger('click')
+            await wrapper.get('[data-testid="evidence-reader-more"]').trigger('click')
+            await wrapper.get('[data-testid="evidence-withdraw"]').trigger('click')
+            await wrapper.get('[data-testid="evidence-withdraw-reason"]').setValue('Wrong component')
+            await wrapper.get('[data-testid="evidence-withdraw-confirm"]').trigger('click')
+            await flushPromises()
+
+            expect(mocks.withdrawEvidence).toHaveBeenCalledWith('ev_1', 'Wrong component')
+            expect(wrapper.get('[data-testid="evidence-withdrawn"]').text()).toContain('Wrong component')
+            expect(wrapper.get('[data-testid="evidence-apply"]').attributes('disabled')).toBeDefined()
+        })
+
+        it('shows at most two header controls and keeps the run form and cleanup behind them', async () => {
+            const wrapper = await mountWithEvidence([])
+            const header = wrapper.get('header')
+            expect(header.findAll('button').map(button => button.text())).toEqual(['Run analysis', 'More'])
+            expect(wrapper.find('[data-testid="new-analysis-section"]').exists()).toBe(false)
+            await wrapper.get('[data-testid="run-analysis-toggle"]').trigger('click')
+            expect(wrapper.find('[data-testid="new-analysis-section"]').exists()).toBe(true)
+            await wrapper.get('[data-testid="code-evidence-more"]').trigger('click')
+            await wrapper.get('[data-testid="code-evidence-refresh"]').trigger('click')
+            await flushPromises()
+            expect(mocks.listEvidence).toHaveBeenCalledTimes(2)
+            expect(wrapper.find('[data-testid="analysis-cleanup-panel"]').exists()).toBe(false)
+        })
     })
 
     describe('apply all saved results', () => {

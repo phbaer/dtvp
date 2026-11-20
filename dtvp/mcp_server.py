@@ -1,13 +1,15 @@
-"""MCP endpoint for AI agents (see docs/adr/0001).
+"""MCP endpoint for AI agents (see docs/adr/0001 and docs/ai-access.md).
 
 ``McpToolService`` holds the behaviour and has no dependency on the MCP SDK;
 ``build_mcp_server`` exposes it as tools and ``create_mcp_app`` wraps the
 Streamable HTTP transport in access-token authentication.
 
-Every write made here is a team assessment recorded with analyst authority,
-whatever the token owner's role: it is marked pending review, cannot approve
-or change SSVC, names the token it came through, and is written to the audit
-log. Text supplied by the agent is data, never structure.
+Every write made here is recorded with analyst authority, whatever the
+token owner's role, names the token it came through, and is written to the
+audit log. A team assessment is marked pending review and cannot approve or
+change SSVC. Code evidence is stored beside the analyzer results and changes
+no assessment at all: a person decides whether to use it. Text supplied by
+the agent is data, never structure.
 """
 
 import asyncio
@@ -26,7 +28,11 @@ from .access_token_services import (
     access_tokens_enabled,
     looks_like_access_token,
 )
-from .assessment_model import analysis_response, set_shared_response
+from .assessment_model import (
+    RESERVED_DETAIL_PATTERN,
+    analysis_response,
+    set_shared_response,
+)
 from .assessment_use_cases import (
     AssessmentConflictError,
     AssessmentRequest,
@@ -40,6 +46,11 @@ from .general_api_routes import (
     start_grouped_vuln_task,
     task_for_user,
 )
+from .code_evidence_services import (
+    CodeEvidenceError,
+    normalize_evidence_input,
+    resolve_targets,
+)
 from .logic import STATE_PRIORITY, parse_assessment_blocks
 
 AGENT_ROLE = "ANALYST"
@@ -47,18 +58,10 @@ ANALYSIS_STATES = tuple(STATE_PRIORITY)
 MAX_DETAILS_LENGTH = 8000
 MAX_SEARCH_LIMIT = 100
 MAX_DEPENDENCY_CHAINS = 5
+MAX_EVIDENCE_LIST_LIMIT = 50
+MAX_ANALYZER_REPORT_LENGTH = 8000
 DEFAULT_TASK_WAIT_SECONDS = 120.0
 TASK_POLL_SECONDS = 0.1
-# Structure of the stored assessment text. Agent prose must not contain it.
-RESERVED_DETAIL_PATTERN = re.compile(
-    # An opening is enough: the block parser recognises "--- [Team:" without
-    # a closing bracket, so unclosed tags are as dangerous as closed ones.
-    r"---|\[\s*/?\s*(?:Team|State|Assessed By|Reviewed By|Rescored|"
-    r"Rescored Vector|Status|SSVC|Assigned|Historical|Copied From|"
-    r"Justification|Date)\b",
-    re.IGNORECASE,
-)
-
 SERVER_INSTRUCTIONS = """\
 DTVP reviews Dependency-Track vulnerabilities across the versions of a project.
 
@@ -75,7 +78,22 @@ finding that changed after you read it: on a conflict, read it again.
 
 Write details as plain prose with your evidence and reasoning. Do not include
 bracketed tags or '---' separators.
+
+Use add_code_evidence to record what you found in the code (Markdown allowed).
+Evidence never changes an assessment; a person decides whether to use it.
+Check list_code_evidence first to avoid duplicates; pass an idempotency_key
+when retrying.
 """
+
+
+def _shown_analyzer_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The analyzer runs the evidence list in the UI shows: benchmark-derived
+    records are comparisons of a run, not evidence of their own."""
+    return [
+        record
+        for record in records
+        if str(record.get("source") or "").strip().lower() != "benchmark"
+    ]
 
 
 class McpToolError(Exception):
@@ -230,6 +248,51 @@ class McpToolService:
                 for block in blocks
             ],
         }
+
+    @staticmethod
+    def _group_vuln_ids(group: dict[str, Any]) -> list[str]:
+        return [
+            str(value)
+            for value in [group.get("id"), *(group.get("aliases") or [])]
+            if str(value or "").strip()
+        ]
+
+    def _evidence_store(self) -> Any:
+        store = getattr(self.deps.route_deps, "code_evidence_store", None)
+        if store is None:
+            raise McpToolError("Code evidence is not available on this server")
+        return store
+
+    async def _evidence_counts(
+        self, project_name: Any, group: dict[str, Any]
+    ) -> dict[str, int]:
+        """How much evidence exists; a cheap hint that the tools exist."""
+        vuln_ids = self._group_vuln_ids(group)
+        store = getattr(self.deps.route_deps, "code_evidence_store", None)
+        result_store = getattr(self.deps.route_deps, "code_analysis_result_store", None)
+        agent = 0
+        analyzer = 0
+        try:
+            if store is not None:
+                agent = len(
+                    await asyncio.to_thread(
+                        store.list_for_vulnerability, str(project_name or ""), vuln_ids
+                    )
+                )
+            if result_store is not None:
+                analyzer = len(
+                    _shown_analyzer_records(
+                        await asyncio.to_thread(
+                            result_store.list_result_metadata,
+                            project_name=str(project_name or ""),
+                            vuln_ids=vuln_ids,
+                            limit=1000,
+                        )
+                    )
+                )
+        except Exception:
+            self.deps.logger.exception("Counting code evidence failed")
+        return {"agent": agent, "analyzer": analyzer}
 
     async def _audit(
         self,
@@ -409,6 +472,9 @@ class McpToolService:
             "ssvc": hydrated.get("ssvc_summary"),
             "exploitation_evidence": hydrated.get("evidence_sources") or [],
             "code_analysis": hydrated.get("code_assessment_status"),
+            "code_evidence": await self._evidence_counts(
+                task.get("_project_name"), hydrated
+            ),
             "findings": findings,
             # One entry when every finding carries the same assessment text.
             "assessments": list(variants.values()),
@@ -732,6 +798,243 @@ class McpToolService:
         }
 
 
+    # -- code evidence ----------------------------------------------------
+
+    async def add_code_evidence(
+        self,
+        token: AccessToken,
+        *,
+        project: str,
+        vulnerability_id: str,
+        title: str,
+        body_markdown: str,
+        components: list[str] | None = None,
+        finding_uuids: list[str] | None = None,
+        references: list[str] | None = None,
+        suggested_state: str | None = None,
+        suggested_justification: str | None = None,
+        confidence: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        self._require_scope(token, SCOPE_WRITE)
+        store = self._evidence_store()
+        task = await self._project_task(token, project)
+        group = self._find_group(task, vulnerability_id)
+        audit_target: dict[str, Any] = {
+            "project": task.get("_project_name"),
+            "vulnerability": group.get("id"),
+        }
+        try:
+            scope, targets = resolve_targets(group, components, finding_uuids)
+            audit_target["findings"] = [t["finding_uuid"] for t in targets]
+            fields = normalize_evidence_input(
+                title=title,
+                body_markdown=body_markdown,
+                references=references,
+                suggested_state=suggested_state,
+                suggested_justification=suggested_justification,
+                confidence=confidence,
+                idempotency_key=idempotency_key,
+            )
+            record, created = await asyncio.to_thread(
+                lambda: store.add(
+                    project_name=str(task.get("_project_name") or ""),
+                    vuln_id=str(group.get("id") or ""),
+                    vuln_ids=self._group_vuln_ids(group),
+                    scope=scope,
+                    targets=targets,
+                    author_username=token.username,
+                    token_id=token.token_id,
+                    agent_label=agent_label(token),
+                    authority=AGENT_ROLE,
+                    **fields,
+                )
+            )
+        except CodeEvidenceError as exc:
+            await self._audit(
+                token,
+                action="add_code_evidence",
+                outcome="rejected",
+                target=audit_target,
+                detail=str(exc),
+            )
+            raise McpToolError(str(exc)) from exc
+        except Exception as exc:
+            await self._audit(
+                token,
+                action="add_code_evidence",
+                outcome="error",
+                target=audit_target,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+        await self._audit(
+            token,
+            action="add_code_evidence",
+            outcome="success",
+            target={
+                **audit_target,
+                "evidence_id": record["evidence_id"],
+                "findings": [t.get("finding_uuid") for t in record["targets"]],
+                "created": created,
+            },
+        )
+        return {
+            "project": record["project_name"],
+            "id": record["vuln_id"],
+            "evidence_id": record["evidence_id"],
+            "created": created,
+            "created_at": record["created_at"],
+            "scope": record["scope"],
+            "targets": record["targets"],
+            "applied_to_assessment": False,
+            "note": (
+                "Recorded as code evidence. It changes no assessment; a "
+                "person decides whether to use it in an assessment draft."
+            ),
+        }
+
+    @staticmethod
+    def _agent_item(record: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": "agent",
+            "evidence_id": record["evidence_id"],
+            "title": record["title"],
+            "body_markdown": record["body_markdown"],
+            "references": record["references"],
+            "scope": record["scope"],
+            "targets": record["targets"],
+            "suggested_state": record["suggested_state"],
+            "suggested_justification": record["suggested_justification"],
+            "confidence": record["confidence"],
+            "author": record["author"],
+            "created_at": record["created_at"],
+            "withdrawn": record["withdrawn"],
+            "applications": [
+                {
+                    "finding_uuid": application["finding_uuid"],
+                    "applied_by": application["applied_by"],
+                    "applied_at": application["applied_at"],
+                }
+                for application in record.get("applications") or []
+            ],
+        }
+
+    @staticmethod
+    def _analyzer_item(
+        metadata: dict[str, Any], full: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        assessment = metadata.get("assessment") or {}
+        result_assessment = ((full or {}).get("result") or {}).get("assessment") or {}
+        report = str(result_assessment.get("report_markdown") or "")
+        return {
+            "kind": "analyzer",
+            "analysis_run_id": metadata.get("analysis_run_id"),
+            "component": metadata.get("component_name"),
+            "source": metadata.get("source"),
+            "submitted_by": metadata.get("submitted_by"),
+            "finished_at": metadata.get("finished_at"),
+            "created_at": metadata.get("finished_at")
+            or metadata.get("recorded_at")
+            or metadata.get("submitted_at"),
+            "model": metadata.get("model"),
+            "verdict": assessment.get("verdict"),
+            "confidence": assessment.get("confidence"),
+            "exposure": assessment.get("exposure"),
+            "application_eligible": bool(assessment.get("application_eligible")),
+            "executive_summary": assessment.get("executive_summary") or {},
+            "report_markdown": report[:MAX_ANALYZER_REPORT_LENGTH],
+            "report_truncated": len(report) > MAX_ANALYZER_REPORT_LENGTH,
+        }
+
+    async def list_code_evidence(
+        self,
+        token: AccessToken,
+        *,
+        project: str,
+        vulnerability_id: str,
+        components: list[str] | None = None,
+        include_withdrawn: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        self._require_scope(token, SCOPE_READ)
+        limit = max(1, min(int(limit), MAX_EVIDENCE_LIST_LIMIT))
+        offset = max(0, int(offset))
+        store = self._evidence_store()
+        task = await self._project_task(token, project)
+        group = self._find_group(task, vulnerability_id)
+        project_name = str(task.get("_project_name") or "")
+        vuln_ids = self._group_vuln_ids(group)
+        component_names = [str(name) for name in components or [] if str(name).strip()]
+
+        agent_records = await asyncio.to_thread(
+            store.list_for_vulnerability,
+            project_name,
+            vuln_ids,
+            component_names or None,
+            bool(include_withdrawn),
+        )
+        result_store = getattr(self.deps.route_deps, "code_analysis_result_store", None)
+        analyzer_records = (
+            _shown_analyzer_records(
+                await asyncio.to_thread(
+                    result_store.list_result_metadata,
+                    project_name=project_name,
+                    vuln_ids=vuln_ids,
+                    component_names=component_names or None,
+                    limit=1000,
+                )
+            )
+            if result_store is not None
+            else []
+        )
+        merged: list[tuple[str, str, dict[str, Any]]] = [
+            ("agent", str(record["created_at"] or ""), record)
+            for record in agent_records
+        ] + [
+            (
+                "analyzer",
+                str(
+                    record.get("finished_at")
+                    or record.get("recorded_at")
+                    or record.get("submitted_at")
+                    or ""
+                ),
+                record,
+            )
+            for record in analyzer_records
+        ]
+        merged.sort(key=lambda entry: entry[1], reverse=True)
+        page = merged[offset : offset + limit]
+
+        agent_page = await asyncio.to_thread(
+            store.with_applications,
+            [record for kind, _when, record in page if kind == "agent"],
+        )
+        agent_by_id = {record["evidence_id"]: record for record in agent_page}
+        analyzer_full = {}
+        for kind, _when, record in page:
+            if kind == "analyzer" and result_store is not None:
+                run_id = record.get("analysis_run_id")
+                analyzer_full[run_id] = await asyncio.to_thread(result_store.get, run_id)
+        items = [
+            self._agent_item(agent_by_id[record["evidence_id"]])
+            if kind == "agent"
+            else self._analyzer_item(record, analyzer_full.get(record.get("analysis_run_id")))
+            for kind, _when, record in page
+        ]
+        return {
+            "project": project_name,
+            "id": group.get("id"),
+            "total": len(merged),
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page) < len(merged),
+            "items": items,
+        }
+
+
 # -- MCP wiring -----------------------------------------------------------
 
 
@@ -887,6 +1190,74 @@ def build_mcp_server(service: McpToolService) -> Any:
             state=state,
             details=details,
             expected_revisions=expected_revisions,
+        )
+
+    @server.tool(name="add_code_evidence", annotations=writes)
+    async def add_code_evidence_tool(
+        ctx: Context,
+        project: str,
+        vulnerability_id: str,
+        title: str,
+        body_markdown: str,
+        components: list[str] | None = None,
+        finding_uuids: list[str] | None = None,
+        references: list[str] | None = None,
+        suggested_state: str | None = None,
+        suggested_justification: str | None = None,
+        confidence: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Record what you found in the code for one vulnerability.
+
+        `body_markdown` is your evidence as Markdown (up to 20,000 characters);
+        `title` is one plain line (up to 160). The evidence is about the
+        whole vulnerability, or only the `components` (names) or
+        `finding_uuids` you give. It never changes an assessment: a person
+        reads it and decides whether to use it. `suggested_state`,
+        `suggested_justification` (with NOT_AFFECTED) and `confidence`
+        (low, medium, high) are optional hints for that person. Pass the
+        same `idempotency_key` when retrying the same call; reusing a key for
+        different evidence is rejected. Needs a token with the write scope.
+        """
+        return await call(
+            ctx,
+            service.add_code_evidence,
+            project=project,
+            vulnerability_id=vulnerability_id,
+            title=title,
+            body_markdown=body_markdown,
+            components=components,
+            finding_uuids=finding_uuids,
+            references=references,
+            suggested_state=suggested_state,
+            suggested_justification=suggested_justification,
+            confidence=confidence,
+            idempotency_key=idempotency_key,
+        )
+
+    @server.tool(annotations=read_only)
+    async def list_code_evidence(
+        ctx: Context,
+        project: str,
+        vulnerability_id: str,
+        components: list[str] | None = None,
+        include_withdrawn: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Code evidence for a vulnerability, newest first: entries agents
+        added (kind "agent") and code-analyzer runs (kind "analyzer").
+        Withdrawn agent entries are left out unless `include_withdrawn`.
+        Returns at most 50 items per call; page with offset."""
+        return await call(
+            ctx,
+            service.list_code_evidence,
+            project=project,
+            vulnerability_id=vulnerability_id,
+            components=components,
+            include_withdrawn=include_withdrawn,
+            limit=limit,
+            offset=offset,
         )
 
     @server.resource(

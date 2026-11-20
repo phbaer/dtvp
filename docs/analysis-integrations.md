@@ -6,6 +6,7 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 - [Threat-Model Rescoring](#threat-model-rescoring)
 - [Code Analysis](#code-analysis)
+  - [Agent Code Evidence](#agent-code-evidence)
 
 ## Threat-Model Rescoring
 
@@ -159,7 +160,9 @@ Result APIs:
 - `DELETE /api/code-analysis/results/{run_id}`
 - `POST /api/code-analysis/results/{run_id}/compact`
 - `POST /api/code-analysis/results/{run_id}/benchmark`
-- `GET /api/projects/{project}/vulnerabilities/{vuln_id}/analysis-results`
+- `GET /api/projects/{project}/vulnerabilities/{vuln_id}/analysis-results`;
+  each run carries `used_in_assessment`, true once a saved assessment recorded
+  an application of it
 - `POST /api/projects/{project}/vulnerabilities/{vuln_id}/analysis-cleanup`
 
 Vulnerability cleanup can independently remove saved analyzer assessments or
@@ -169,24 +172,71 @@ running work unless active cancellation is explicitly selected. The project
 workspace exposes complete vulnerability cleanup plus per-run cleanup, while
 the existing result deletion API remains available for assessment-only clients.
 
+### Agent Code Evidence
+
+AI agents connected through MCP add code evidence with `add_code_evidence`
+and read it with `list_code_evidence`; see
+[AI and API access](ai-access.md#code-evidence) for the tool rules and limits,
+and [ADR 0006](adr/0006-agent-code-evidence-is-applied-by-a-person.md) for
+the decision. Evidence is never an assessment: a person uses it in an
+assessment draft and saves that draft as usual.
+
+Storage: the same SQLite file as the analyzer results
+(`DTVP_CODE_ANALYSIS_RESULTS_PATH`), migration
+`code_analysis_results/0004_code_evidence.sql`, in three tables:
+
+| Table | Content |
+| :--- | :--- |
+| `code_evidence` | One row per entry: project, vulnerability ID, scope, targets (component, version, purl, project version, finding UUID), title, Markdown body, references, suggestion, author, token ID, agent label, authority, idempotency key, creation time, and the withdrawal (time, user, reason) |
+| `code_evidence_vuln_ids` | The vulnerability ID and every alias of an entry, lowercased, for lookups by either |
+| `code_evidence_applications` | Which saved finding used which entry, with status (`applied`, `queued`, `failed`), user, and time |
+
+`dtvp/code_evidence_services.py` owns the store and the validation that MCP
+and REST share. Analyzer retention (`DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS`,
+`DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS`), result deletion, and the
+vulnerability cleanup never delete agent evidence. Withdrawing is the only
+way to retire an entry, and it keeps the row.
+
+Browser APIs (session only for the write):
+
+- `GET /api/projects/{project}/vulnerabilities/{vuln_id}/code-evidence`
+  with `vuln_alias`, `component_name` (repeatable), and `include_withdrawn`;
+  returns `{items, withdrawn_count}`, each item with its `applications`.
+  Access tokens may call it, like every `GET`.
+- `POST /api/code-evidence/{evidence_id}/withdraw` with `{reason}`: a
+  reviewer, or the user whose token wrote the entry. Others get 403, an
+  unknown ID 404, an entry already withdrawn 409. Access tokens are refused.
+- `POST /api/assessment` accepts `code_evidence_ids`. Each must exist, not be
+  withdrawn, and belong to the project and Dependency-Track vulnerability of
+  at least one saved finding; otherwise the save is rejected before anything
+  is written. After the save one application per finding and entry is
+  recorded; a failure there is logged and does not undo the save. The UI
+  sends only the entries whose reference line ("Code evidence <id> from ...")
+  is still in the text being saved, so evidence whose line was replaced (for
+  example by an analyzer result) or deleted is not recorded as used. When a
+  save is rejected because an entry was withdrawn, is unknown, or belongs
+  elsewhere, the UI drops that entry from the draft, says so, and keeps the
+  rest of the draft for the next save.
+
 ### Project Workspace And Dashboard
 
-The vulnerability card presents Code Evidence as a target-oriented workflow.
+The vulnerability card's Code Evidence tab shows one evidence list: analyzer
+runs and [agent code evidence](#agent-code-evidence), grouped by component and
+filterable by source. The header holds **Run analysis** (hidden when no
+analyzer is configured) and **More** (Refresh, Clean up analyzer data).
+Selecting a row opens a reader beneath it with the provenance, the Markdown
+body (analyzer runs show `report_markdown`, otherwise their executive summary),
+and a separate **Apply to the assessment** box. For an analyzer run the
+assessment draft, benchmark, component results, ticket, version coverage, LLM
+conversation, pipeline evidence, and follow-up question sit collapsed under
+**Technical details** (`CodeAnalysisRunDetails.vue`); Remove run is in the
+reader's More menu. Queue results that are not saved yet open in place above
+the list. Agent evidence and analyzer runs reload whenever the tab becomes
+visible, so a save made on the Assessment tab shows "Used in assessment" on
+both kinds of row.
 In the [assessment workspace](screens.md#assessment-workspace) Code Evidence is
-shown beside the assessment form, and applying a result fills the form without
+shown beside the assessment form, and applying evidence fills the form without
 leaving it.
-For analysts, the target-oriented runs section leads; reviewers start with the
-Combined assessment because it is their primary decision input. The expandable
-`Run new analysis` control sits inside the runs section above its compact latest-
-run list. Each target row keeps View, Use as draft, Earlier runs, and Delete
-actions on the right. View reveals a dismissible inline outcome with the
-vulnerability and assessment executive summaries plus follow-up question
-context directly beneath that row. Legacy results without an executive summary
-fall back to their rationale. The list
-indents the complete selected-run detail region—including every disclosure—so
-the owning row remains visually unambiguous. Assessment draft, benchmark,
-component results, ticket, version coverage, LLM conversation, and pipeline
-evidence are peer disclosures in the same run context and start collapsed.
 Derivative benchmark records do not replace a target's latest analysis row.
 Live analyzer logs treat the analyzer-provided progress log as authoritative;
 the current-activity and active-agent snapshots are fallback state rather than

@@ -1817,6 +1817,8 @@ export interface CodeAnalysisResultRecord {
     compact_context?: Record<string, any>;
     result?: CodeAnalysisAssessResponse;
     recorded_at?: string | null;
+    /** Set by the vulnerability results list: a saved assessment used this run. */
+    used_in_assessment?: boolean;
 }
 
 export type CodeAnalysisAssessmentSourceKind = 'auto' | 'manual' | 'unknown';
@@ -2076,6 +2078,72 @@ export const codeAnalysisListVulnerabilityResults = async (
         `/projects/${encodeURIComponent(projectName)}/vulnerabilities/${encodeURIComponent(vulnId)}/analysis-results`,
         { params },
     );
+    return res.data;
+};
+
+export interface CodeEvidenceTarget {
+    component?: string | null;
+    component_version?: string | null;
+    component_purl?: string | null;
+    project_version?: string | null;
+    finding_uuid?: string | null;
+    project_uuid?: string | null;
+    component_uuid?: string | null;
+    vulnerability_uuid?: string | null;
+}
+
+export interface CodeEvidenceApplication {
+    finding_uuid: string;
+    status?: string;
+    applied_by: string;
+    applied_at: string;
+}
+
+/** Code evidence an AI agent added through MCP; see docs/ai-access.md. */
+export interface CodeEvidence {
+    kind: 'agent';
+    evidence_id: string;
+    project_name: string;
+    vuln_id: string;
+    vuln_ids?: string[];
+    scope: 'vulnerability' | 'components' | 'findings';
+    targets: CodeEvidenceTarget[];
+    title: string;
+    body_markdown: string;
+    references: string[];
+    suggested_state?: string | null;
+    suggested_justification?: string | null;
+    confidence?: 'low' | 'medium' | 'high' | null;
+    author: {
+        username: string;
+        agent_label: string;
+        token_id: string;
+        authority: string;
+    };
+    created_at: string;
+    withdrawn?: { at: string; by: string; reason: string } | null;
+    applications?: CodeEvidenceApplication[];
+}
+
+export interface CodeEvidenceList {
+    items: CodeEvidence[];
+    withdrawn_count: number;
+}
+
+export const listCodeEvidence = async (
+    projectName: string,
+    vulnId: string,
+    params: { vuln_alias?: string[]; component_name?: string[]; include_withdrawn?: boolean } = {},
+): Promise<CodeEvidenceList> => {
+    const res = await api.get(
+        `/projects/${encodeURIComponent(projectName)}/vulnerabilities/${encodeURIComponent(vulnId)}/code-evidence`,
+        { params },
+    );
+    return res.data;
+};
+
+export const withdrawCodeEvidence = async (evidenceId: string, reason: string): Promise<CodeEvidence> => {
+    const res = await api.post(`/code-evidence/${encodeURIComponent(evidenceId)}/withdraw`, { reason });
     return res.data;
 };
 

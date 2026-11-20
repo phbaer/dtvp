@@ -128,6 +128,9 @@ class AssessmentRequest(BaseModel):
     force: bool = False
     comparison_mode: Optional[str] = "MERGE"
     analysis_run_ids: list[str] = Field(default_factory=list)
+    # Agent code evidence a person referenced in this assessment; recorded
+    # as applications after the save. Never accepted from MCP tools.
+    code_evidence_ids: list[str] = Field(default_factory=list)
     ssvc: SsvcInput | None = None
 
     @field_validator("response", mode="before")
@@ -160,6 +163,8 @@ class AssessmentUseCaseDeps(Protocol):
     cache_manager: Any
     logger: Any
     code_analysis_result_store: Any
+    # Optional: deps without it cannot accept code_evidence_ids.
+    code_evidence_store: Any
     get_user_role: Callable[[str], str]
     fetch_current_assessment_analyses: Callable[[Any, Any], Awaitable[list[Any]]]
     collect_assessment_conflicts: Callable[
@@ -366,6 +371,112 @@ def record_code_analysis_applications(
         deps.logger.exception("Failed to persist code-analysis application provenance")
 
 
+def _code_evidence_store(deps: AssessmentUseCaseDeps) -> Any:
+    return getattr(deps, "code_evidence_store", None)
+
+
+def record_code_evidence_applications(
+    deps: AssessmentUseCaseDeps,
+    *,
+    evidence_ids: list[str],
+    payloads: AssessmentPayloads,
+    finalized: list[dict[str, Any]],
+    user: str,
+    workflow_id: str,
+) -> None:
+    """Record which saved findings referenced which evidence. Like the
+    analyzer provenance, a failure here is logged and never undoes the save."""
+    store = _code_evidence_store(deps)
+    if store is None or not evidence_ids:
+        return
+    results_by_uuid = {
+        str(result.get("uuid") or ""): result
+        for result in finalized
+        if result.get("uuid")
+    }
+    try:
+        for instance, _payload in payloads:
+            finding_uuid = str(instance.get("finding_uuid") or "").strip()
+            if not finding_uuid:
+                continue
+            result = results_by_uuid.get(finding_uuid) or {}
+            status = (
+                "queued"
+                if result.get("queued")
+                else "applied"
+                if result.get("status") == "success"
+                else "failed"
+            )
+            for evidence_id in evidence_ids:
+                store.record_application(
+                    evidence_id=evidence_id,
+                    finding_uuid=finding_uuid,
+                    status=status,
+                    applied_by=user,
+                    workflow_id=workflow_id,
+                )
+    except Exception:
+        deps.logger.exception("Failed to persist code-evidence application provenance")
+
+
+def _validate_code_evidence(
+    deps: AssessmentUseCaseDeps,
+    req: AssessmentRequest,
+) -> list[str]:
+    """The referenced evidence ids, each existing, not withdrawn, and about
+    the project and vulnerability of at least one saved finding."""
+    evidence_ids = list(
+        dict.fromkeys(
+            str(evidence_id).strip()
+            for evidence_id in req.code_evidence_ids
+            if str(evidence_id).strip()
+        )
+    )
+    if not evidence_ids:
+        return []
+    store = _code_evidence_store(deps)
+    if store is None:
+        raise AssessmentValidationError("Code evidence is not available")
+    instance_projects = {
+        str(instance.get("project_name") or "").strip().casefold()
+        for instance in req.instances
+    }
+    instance_findings = {
+        str(instance.get("finding_uuid") or "").strip()
+        for instance in req.instances
+    }
+    instance_vulnerabilities = {
+        str(instance.get("vulnerability_uuid") or "").strip()
+        for instance in req.instances
+    }
+    instance_findings.discard("")
+    instance_vulnerabilities.discard("")
+    for evidence_id in evidence_ids:
+        record = store.get(evidence_id)
+        if not record:
+            raise AssessmentValidationError(f"Unknown code evidence {evidence_id}")
+        if record.get("withdrawn"):
+            raise AssessmentValidationError(
+                f"Code evidence {evidence_id} was withdrawn and cannot be used"
+            )
+        if str(record.get("project_name") or "").casefold() not in instance_projects:
+            raise AssessmentValidationError(
+                f"Code evidence {evidence_id} belongs to another project"
+            )
+        targets = record.get("targets") or []
+        target_findings = {str(t.get("finding_uuid") or "") for t in targets}
+        target_vulnerabilities = {
+            str(t.get("vulnerability_uuid") or "") for t in targets
+        }
+        if instance_findings.isdisjoint(target_findings) and (
+            instance_vulnerabilities.isdisjoint(target_vulnerabilities - {""})
+        ):
+            raise AssessmentValidationError(
+                f"Code evidence {evidence_id} belongs to another vulnerability"
+            )
+    return evidence_ids
+
+
 def _validate_ssvc_change(req: AssessmentRequest, role: str) -> None:
     if "ssvc" not in req.model_fields_set:
         return
@@ -489,6 +600,7 @@ async def save_assessment(
     _validate_ssvc_change(req, role)
     _validate_response_change(req, role)
     _validate_analysis_runs(deps, req)
+    evidence_ids = _validate_code_evidence(deps, req)
 
     payloads = deps.build_assessment_payloads(req, user, role)
     keep_ssvc = "ssvc" not in req.model_fields_set
@@ -541,6 +653,14 @@ async def save_assessment(
         user=user,
         workflow_id=workflow_id,
         fallback_run_ids=req.analysis_run_ids,
+    )
+    record_code_evidence_applications(
+        deps,
+        evidence_ids=evidence_ids,
+        payloads=payloads,
+        finalized=finalized,
+        user=user,
+        workflow_id=workflow_id,
     )
     return finalized
 

@@ -16,7 +16,8 @@ and applies consistent decisions across releases.
 - Analyzer results are applied only when Agentyzer marks them eligible; see
   [Analysis integrations](docs/analysis-integrations.md#analyzer-result-validity).
 - Optional access for AI agents: personal access tokens and an MCP endpoint to
-  read vulnerabilities and draft team assessments that stay pending review.
+  read vulnerabilities, draft team assessments that stay pending review, and
+  add code evidence that a person reviews beside the Agentyzer runs.
 - Local-first: DTVP imports from Dependency-Track, works on its own database,
   and exports assessments back automatically or on request. Changes made on
   both sides become a visible conflict instead of one overwriting the other.
@@ -177,7 +178,8 @@ filtering, editing, bulk operations, and archives; or the
 ```text
 Browser → Vue SPA → FastAPI → Dependency-Track + local database/outbox
                            → optional tmrescore and code-analysis services
-AI agent → MCP endpoint (access token) ┘ same assessment rules as the browser
+AI agent → MCP endpoint (access token) ┘ same assessment rules as the browser;
+                                          code evidence is stored, never applied
 ```
 
 | Path | Purpose |
@@ -214,7 +216,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
 | [Import and export](docs/import-export.md) | The local database as the record for assessments, adoption on import, automatic and manual export, failing exports, vanished findings, and history |
 | [CycloneDX inventory and VDR](docs/cyclonedx-export.md) | Downloading the BOM and a VDR with assessments in standard fields per project version, the field mapping, and its limits |
-| [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, and the audit log |
+| [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, agent code evidence, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
 | [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |
 

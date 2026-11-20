@@ -13,6 +13,7 @@ import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVers
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
 import { isCodeAnalysisApplicable, buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
+import { evidenceIdsReferencedIn, unusableEvidenceId } from '../lib/codeEvidence'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { buildTeamAliasGroups } from '../lib/team-mapping'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
@@ -396,6 +397,7 @@ const formTouched = ref(false)
 const codeAnalysisDraftApplied = ref(false)
 const codeAnalysisDraftSummary = ref('')
 const codeAnalysisRunIds = ref<string[]>([])
+const codeEvidenceIds = ref<string[]>([])
 const codeAnalysisProposalRuns = ref<CodeAnalysisComponentRun[]>([])
 const automaticFallbackTeams = ref<Set<string>>(new Set())
 const assessmentSubmitted = ref(false)
@@ -638,6 +640,7 @@ const discardUnsavedDraft = () => {
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
+    codeEvidenceIds.value = []
     automaticFallbackTeams.value = new Set()
     isManualBaseMode.value = false
     assigneeInput.value = ''
@@ -674,6 +677,10 @@ const unscopedDependencyInfo = useVulnDependencyInfo({
 })
 
 const allInstances = dependencyInfo.allInstances
+/** Findings Dependency-Track reports now; evidence about none of them is stale. */
+const reportedFindingUuids = computed(() => allInstances.value
+    .map(instance => instance.finding_uuid)
+    .filter((uuid): uuid is string => Boolean(uuid)))
 const savedSsvc = computed(() => summarizeSsvc(allInstances.value.map(instance => instance.analysis_details || instance.analysisDetails || '')))
 const pendingSsvc = ref<SsvcSelection | null>(null)
 const ssvcTouched = ref(false)
@@ -1018,6 +1025,25 @@ const handleCodeAnalysisResult = async (
 const applyRescoreRulesForState = (targetState: string) => {
     if (!isReviewer.value) return
     applyStateRescore(targetState)
+}
+
+/** Agent code evidence a person chose to use: a reference line, and the
+ * suggested decision only when it was ticked. Nothing is saved here. */
+const handleApplyCodeEvidence = (payload: { evidenceId: string; reference: string; state?: string; justification?: string }) => {
+    const current = details.value.trimEnd()
+    details.value = current ? `${current}\n\n${payload.reference}` : payload.reference
+    if (payload.state) {
+        state.value = payload.state
+        justification.value = payload.justification || 'NOT_SET'
+        applyRescoreRulesForState(payload.state)
+    }
+    formTouched.value = true
+    codeAnalysisDraftApplied.value = true
+    codeAnalysisDraftSummary.value = `Agent evidence ${payload.evidenceId} referenced in the draft. Review before saving.`
+    if (!codeEvidenceIds.value.includes(payload.evidenceId)) {
+        codeEvidenceIds.value = [...codeEvidenceIds.value, payload.evidenceId]
+    }
+    setDetailTab('review', true)
 }
 
 const stageCodeAnalysisGlobalReference = (): AssessmentDraftState | null => {
@@ -2160,6 +2186,8 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             } } : {}),
             state: finalState,
             analysis_run_ids: [...codeAnalysisRunIds.value],
+            // Only evidence the saved text still references counts as used.
+            code_evidence_ids: evidenceIdsReferencedIn(codeEvidenceIds.value, finalText),
         }
 
         const results = await updateAssessment(payload)
@@ -2783,6 +2811,7 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
+    codeEvidenceIds.value = []
     automaticFallbackTeams.value = new Set()
 }
 
@@ -2821,6 +2850,18 @@ const handleAssessmentUpdateError = async (err: any) => {
     if (err.response?.status === 409) {
         conflictData.value = err.response.data.conflicts
         showConflictModal.value = true
+        return
+    }
+
+    const unusable = unusableEvidenceId(err.response?.data?.detail)
+    if (unusable && codeEvidenceIds.value.includes(unusable)) {
+        // Keep the draft; only stop recording this evidence as used.
+        codeEvidenceIds.value = codeEvidenceIds.value.filter(id => id !== unusable)
+        await showAlert(
+            'Code evidence removed',
+            `${err.response.data.detail}. It is no longer recorded as used by this draft; ` +
+            'remove its reference line from the text if it no longer applies, then save again.',
+        )
         return
     }
 
@@ -3338,11 +3379,14 @@ const teamBlockStateColor = (state?: string): string => {
                 :currentAssigned="currentAssigned"
                 :assessmentStatus="props.automaticAssessmentStatus"
                 :isReviewer="isReviewer"
+                :reportedFindingUuids="reportedFindingUuids"
+                :refreshKey="historyRefreshKey"
                 @apply-result="handleCodeAnalysisResult"
                 @apply-all-results="handleApplyAllCodeAnalysisResults"
                 @result-change="handleCodeAnalysisResultChange"
                 @scope-results-change="scopedCodeAnalysisAvailable = $event"
                 @proposals-change="handleCodeAnalysisProposalsChange"
+                @apply-evidence="handleApplyCodeEvidence"
             />
         </section>
         </div>

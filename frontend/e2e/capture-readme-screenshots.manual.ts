@@ -97,6 +97,39 @@ const mockCodeAnalysisResults = [
 
 const README_CAPTURE_BACKGROUND = '#0f172a'
 
+const docsAgentEvidence = {
+    kind: 'agent',
+    evidence_id: 'ev_3f9c2a71d4e84b0f9a6c1e2d7b5a8c40',
+    project_name: 'TestProject',
+    vuln_id: 'CVE-2024-9999',
+    scope: 'components',
+    targets: [
+        { component: 'platform-gateway', component_version: '2.5.0', project_version: '2.0.0', finding_uuid: 'docs-f2' },
+    ],
+    title: 'Parser initialization is reachable only behind authentication',
+    body_markdown: [
+        '## What I checked',
+        '',
+        '- `GatewayBootstrap.configure()` registers the vulnerable parser for every `/api/v2/*` route.',
+        '- `AuthFilter` runs before the parser; anonymous requests are rejected with 401.',
+        '',
+        '| File | Line | Finding |',
+        '|---|---|---|',
+        '| `src/boot/GatewayBootstrap.java` | 88 | parser registered |',
+        '| `src/security/AuthFilter.java` | 41 | authentication required |',
+        '',
+        'The vulnerable path stays reachable to any signed-in user, so the finding is **exploitable** with low privileges.',
+    ].join('\n'),
+    references: ['https://github.com/example/platform-gateway/blob/main/src/boot/GatewayBootstrap.java#L88'],
+    suggested_state: 'EXPLOITABLE',
+    suggested_justification: null,
+    confidence: 'medium',
+    author: { username: 'analyst', agent_label: 'triage-bot', token_id: 'tok_7d2e', authority: 'ANALYST' },
+    created_at: '2026-05-02T12:20:00Z',
+    withdrawn: null,
+    applications: [],
+}
+
 async function captureWithPadding(
     locator: Locator,
     path: string,
@@ -761,6 +794,19 @@ async function mockCommonShell(page: Page) {
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify(listCodeAnalysisResults(url)),
+        })
+    })
+
+    // Code evidence an AI agent added through MCP (see docs/ai-access.md).
+    await page.route('**/api/projects/*/vulnerabilities/*/code-evidence**', async (route) => {
+        const url = new URL(route.request().url())
+        const pathParts = url.pathname.split('/').map(part => decodeURIComponent(part))
+        const vulnId = pathParts[pathParts.indexOf('vulnerabilities') + 1] || ''
+        const items = vulnId === 'CVE-2024-9999' ? [docsAgentEvidence] : []
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ items, withdrawn_count: 0 }),
         })
     })
 
@@ -1989,13 +2035,29 @@ test.describe('Capture README screenshots', () => {
         await card.getByRole('button', { name: 'View', exact: true }).click()
         await expect(card.getByTestId('inline-analysis-outcome').getByText('platform-gateway exposes a reachable parser initialization path used by external requests.')).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('Use as draft').first()).toBeVisible({ timeout: 10000 })
-        await expect(card.getByTestId('combined-analysis-assessment').getByRole('heading', { name: 'platform-gateway', exact: true })).toBeVisible({ timeout: 10000 })
-        await expect(card.getByTestId('combined-assessment-preview').getByText('Decision rationale', { exact: true })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('evidence-row').first()).toBeVisible({ timeout: 10000 })
 
         await card.getByRole('button', { name: /Pipeline Evidence/ }).click()
         await expect(card.getByText('Reachability scan')).toBeVisible({ timeout: 10000 })
 
         await captureWithPadding(card, '../docs/screenshots/code-analysis-result.png')
+    })
+
+    test('capture code evidence reader screenshot', async ({ page }) => {
+        await page.setViewportSize({ width: 2200, height: 2600 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await selectDetailTab(card, 'Code Evidence')
+        const row = card.locator('[data-testid="evidence-row"][data-kind="agent"]').first()
+        await expect(row).toContainText('Agent: triage-bot', { timeout: 10000 })
+        await row.click()
+        const reader = card.getByTestId('evidence-reader')
+        await expect(reader.getByRole('heading', { name: 'What I checked' })).toBeVisible({ timeout: 10000 })
+        await expect(reader.getByTestId('evidence-apply-box')).toBeVisible()
+
+        await captureWithPadding(card.getByTestId('code-evidence-panel'), '../docs/screenshots/code-evidence-reader.png')
     })
 
     test('capture analysis queue dropdown screenshot', async ({ page }) => {

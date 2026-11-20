@@ -209,6 +209,8 @@ class GeneralApiRouteDeps:
     service_unavailable_response: dict[int | str, dict[str, Any]]
     not_found_response: dict[int | str, dict[str, Any]]
     code_analysis_result_store: Any = None
+    # Agent code evidence (see code_evidence_services); None disables it.
+    code_evidence_store: Any = None
     get_grouped_vuln_cache_revision: Callable[..., Any] = lambda **_kwargs: None
     group_query_executor: Any = None
     detail_executor: Any = None

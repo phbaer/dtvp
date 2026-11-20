@@ -2,6 +2,7 @@
 
 import json
 import logging
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -492,9 +493,15 @@ def test_tools_are_listed_and_callable_over_http(client, project):
         "get_sync_status",
         "preview_assessment",
         "save_assessment",
+        "add_code_evidence",
+        "list_code_evidence",
     }
     assert tools["get_vulnerability"]["annotations"]["readOnlyHint"] is True
     assert tools["save_assessment"]["annotations"]["readOnlyHint"] is False
+    assert tools["list_code_evidence"]["annotations"]["readOnlyHint"] is True
+    assert tools["add_code_evidence"]["annotations"]["readOnlyHint"] is False
+    assert tools["add_code_evidence"]["annotations"]["destructiveHint"] is False
+    assert "ctx" not in tools["add_code_evidence"]["inputSchema"]["properties"]
     assert "ctx" not in tools["save_assessment"]["inputSchema"]["properties"]
 
     called = _rpc(
@@ -567,3 +574,229 @@ async def test_the_response_is_readable_and_survives_an_agents_save(service, pro
         token, project="TestApp", vulnerability_id="CVE-2026-0001"
     )
     assert after["assessments"][0]["response"] == "UPDATE"
+
+
+# -- code evidence -----------------------------------------------------------
+
+EVIDENCE = {
+    "project": "TestApp",
+    "vulnerability_id": "CVE-2026-0001",
+    "title": "The parser entry point is not linked",
+    "body_markdown": "## Call graph\n\n`parse()` is never called.\n\n| file | line |\n|---|---|\n| a.c | 1 |",
+}
+
+
+async def test_add_code_evidence_records_provenance_and_changes_no_assessment(
+    service, client
+):
+    token = _token()
+    before = await service.get_vulnerability(
+        token, project="TestApp", vulnerability_id="CVE-2026-0001"
+    )
+    sync_before = await service.get_sync_status(token)
+
+    result = await service.add_code_evidence(
+        token,
+        **EVIDENCE,
+        references=["https://example.org/x"],
+        suggested_state="NOT_AFFECTED",
+        suggested_justification="CODE_NOT_REACHABLE",
+        confidence="high",
+    )
+
+    assert result["created"] is True
+    assert result["applied_to_assessment"] is False
+    assert result["scope"] == "vulnerability"
+    assert sorted(t["finding_uuid"] for t in result["targets"]) == ["finding-1", "finding-2"]
+    assert {t["project_version"] for t in result["targets"]} == {"1.0", "2.0"}
+    assert {t["component"] for t in result["targets"]} == {"library-a"}
+    record = main.code_evidence_store.get(result["evidence_id"])
+    assert record["author"] == {
+        "username": "alice",
+        "agent_label": "triage-bot",
+        "token_id": token.token_id,
+        "authority": "ANALYST",
+    }
+    assert "cve-2026-0001" in record["vuln_ids"]
+
+    # Evidence never changes an assessment, a revision, or the export queue.
+    after = await service.get_vulnerability(
+        token, project="TestApp", vulnerability_id="CVE-2026-0001"
+    )
+    assert after["findings"] == before["findings"]
+    assert after["assessments"] == before["assessments"]
+    assert after["code_evidence"] == {"agent": 1, "analyzer": 0}
+    assert await service.get_sync_status(token) == sync_before
+    for project_uuid, component_uuid in (("p1", "component-1"), ("p2", "component-2")):
+        assert main.cache_manager.get_assessment_overlay(project_uuid, component_uuid, "vuln-1") is None
+
+    [audit] = access_token_store.list_audit()
+    assert audit["action"] == "add_code_evidence"
+    assert audit["outcome"] == "success"
+    assert audit["target"]["evidence_id"] == result["evidence_id"]
+    assert sorted(audit["target"]["findings"]) == ["finding-1", "finding-2"]
+    assert "parse()" not in json.dumps(audit)
+
+
+async def test_reviewer_owned_token_adds_evidence_with_analyst_authority(service):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        result = await service.add_code_evidence(_token(username="rita"), **EVIDENCE)
+    record = main.code_evidence_store.get(result["evidence_id"])
+    assert record["author"]["username"] == "rita"
+    assert record["author"]["authority"] == "ANALYST"
+
+
+async def test_add_code_evidence_needs_the_write_scope(service):
+    with pytest.raises(McpToolError, match="'write' scope"):
+        await service.add_code_evidence(_token(["read"]), **EVIDENCE)
+    assert main.code_evidence_store.list_for_vulnerability("TestApp", ["CVE-2026-0001"]) == []
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"components": ["library-z"]}, "Valid components: library-a"),
+        ({"finding_uuids": ["finding-9"]}, "Valid findings: finding-1, finding-2"),
+        ({"title": "[Team: General] approved"}, "plain text"),
+        ({"suggested_state": "APPROVED"}, "suggested_state"),
+    ],
+)
+async def test_invalid_evidence_is_rejected_and_audited(service, overrides, message):
+    with pytest.raises(McpToolError, match=message):
+        await service.add_code_evidence(_token(), **{**EVIDENCE, **overrides})
+    [audit] = access_token_store.list_audit()
+    assert audit["action"] == "add_code_evidence"
+    assert audit["outcome"] == "rejected"
+    assert main.code_evidence_store.list_for_vulnerability("TestApp", ["CVE-2026-0001"]) == []
+
+
+async def test_a_finding_of_another_vulnerability_is_rejected(service, project):
+    other = _finding("3")
+    other["vulnerability"] = {**other["vulnerability"], "vulnId": "CVE-2026-0002", "uuid": "vuln-2"}
+    project["p1"].append(other)
+    with pytest.raises(McpToolError, match="do not belong"):
+        await service.add_code_evidence(
+            _token(), **EVIDENCE, finding_uuids=["finding-3"]
+        )
+
+
+async def test_evidence_scoped_to_findings_and_idempotent(service):
+    token = _token()
+    first = await service.add_code_evidence(
+        token, **EVIDENCE, finding_uuids=["finding-2"], idempotency_key="k1"
+    )
+    again = await service.add_code_evidence(
+        token, **EVIDENCE, finding_uuids=["finding-2"], idempotency_key="k1"
+    )
+    assert first["scope"] == "findings"
+    assert [t["finding_uuid"] for t in first["targets"]] == ["finding-2"]
+    assert again["created"] is False
+    assert again["evidence_id"] == first["evidence_id"]
+
+
+async def test_a_reused_idempotency_key_for_other_evidence_is_rejected_and_audited(service):
+    token = _token()
+    first = await service.add_code_evidence(
+        token, **EVIDENCE, finding_uuids=["finding-2"], idempotency_key="k1"
+    )
+    with pytest.raises(McpToolError, match="already used for different evidence"):
+        await service.add_code_evidence(
+            token, **EVIDENCE, finding_uuids=["finding-1"], idempotency_key="k1"
+        )
+    audits = access_token_store.list_audit()
+    rejected = [a for a in audits if a["outcome"] == "rejected"]
+    assert len(rejected) == 1 and rejected[0]["action"] == "add_code_evidence"
+    assert first["evidence_id"] not in str(rejected[0])
+    stored = main.code_evidence_store.list_for_vulnerability("TestApp", ["CVE-2026-0001"])
+    assert [r["evidence_id"] for r in stored] == [first["evidence_id"]]
+
+
+def _record_run(run_id, finished_at, report, source="manual"):
+    main.code_analysis_result_store.record_queue_item_result(
+        SimpleNamespace(
+            queue_id=run_id,
+            job_id=f"job-{run_id}",
+            project_name="TestApp",
+            vuln_id="CVE-2026-0001",
+            component_name="library-a",
+            source=source,
+            submitted_by="bob",
+            submitted_at=finished_at,
+            finished_at=finished_at,
+            model="model-x",
+            result=None,
+        ),
+        {
+            "assessment": {
+                "verdict": "Not Affected",
+                "confidence": "high",
+                "report_markdown": report,
+                "executive_summary": {"assessment": "Not reachable."},
+            },
+            "steps": [],
+        },
+    )
+
+
+async def test_list_code_evidence_merges_both_kinds_and_pages(service):
+    token = _token()
+    _record_run("run-old", "2000-01-01T00:00:00+00:00", "# Report\n" + "x" * 9000)
+    # The UI does not list benchmark-derived records; neither do the tools.
+    _record_run("run-bench", "2000-01-02T00:00:00+00:00", "# Benchmark", source="benchmark")
+    added = await service.add_code_evidence(token, **EVIDENCE)
+    withdrawn = await service.add_code_evidence(token, **{**EVIDENCE, "title": "Second"})
+    main.code_evidence_store.withdraw(withdrawn["evidence_id"], "rita", "duplicate")
+
+    listed = await service.list_code_evidence(
+        token, project="TestApp", vulnerability_id="CVE-2026-0001"
+    )
+    assert listed["total"] == 2 and listed["has_more"] is False
+    agent, analyzer = listed["items"]
+    assert agent["kind"] == "agent"
+    assert agent["evidence_id"] == added["evidence_id"]
+    assert agent["body_markdown"].startswith("## Call graph")
+    assert agent["author"]["token_id"] == token.token_id
+    assert agent["withdrawn"] is None and agent["applications"] == []
+    assert analyzer["kind"] == "analyzer"
+    assert analyzer["analysis_run_id"] == "run-old"
+    assert analyzer["submitted_by"] == "bob" and analyzer["model"] == "model-x"
+    assert analyzer["verdict"] == "Not Affected"
+    assert len(analyzer["report_markdown"]) == 8000
+    assert analyzer["report_truncated"] is True
+
+    with_withdrawn = await service.list_code_evidence(
+        token, project="TestApp", vulnerability_id="CVE-2026-0001",
+        include_withdrawn=True, limit=1, offset=1,
+    )
+    assert with_withdrawn["total"] == 3
+    assert with_withdrawn["has_more"] is True
+    assert [item["evidence_id"] for item in with_withdrawn["items"]] == [added["evidence_id"]]
+
+    counts = (await service.get_vulnerability(
+        token, project="TestApp", vulnerability_id="CVE-2026-0001"
+    ))["code_evidence"]
+    assert counts == {"agent": 1, "analyzer": 1}
+
+
+def test_code_evidence_tools_work_over_http(client, project, mock_dt_client, monkeypatch):
+    async def shared_client(*_args):
+        return mock_dt_client
+
+    monkeypatch.setattr(
+        "dtvp.dt_client._shared_dt_client_provider.get", shared_client
+    )
+    _record, plain = access_token_store.create(
+        username="alice", name="bot", scopes=["read", "write"]
+    )
+    added = _rpc(
+        client, plain, "tools/call",
+        {"name": "add_code_evidence", "arguments": EVIDENCE},
+    ).json()["result"]
+    assert added["isError"] is False
+    evidence_id = added["structuredContent"]["evidence_id"]
+    listed = _rpc(
+        client, plain, "tools/call",
+        {"name": "list_code_evidence", "arguments": {"project": "TestApp", "vulnerability_id": "CVE-2026-0001"}},
+    ).json()["result"]
+    assert listed["isError"] is False
+    assert [item["evidence_id"] for item in listed["structuredContent"]["items"]] == [evidence_id]

@@ -221,7 +221,7 @@ onMounted(load)
                 <label class="mt-4 flex items-start gap-2 text-sm text-gray-300">
                     <input v-model="allowWrite" type="checkbox" class="mt-1" data-testid="token-write" />
                     <span>
-                        Allow drafting team assessments
+                        Allow writing: team assessment drafts and code evidence
                         <span class="block text-xs text-gray-500">
                             Without this the token can only read. It can never approve, change CVSS or SSVC,
                             or edit settings.
