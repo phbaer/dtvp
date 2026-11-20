@@ -563,19 +563,52 @@ def test_former_team_assessments_are_not_part_of_the_rationale():
     assert _property(only, "dtvp:former_assessment") == [second]
 
 
-def test_the_repair_writes_the_former_team_note_the_export_recognises():
-    from dtvp.bulk_workflows.assessment_repair import _former_team_note
+def test_the_former_team_note_earlier_repairs_wrote_is_recognised():
+    from dtvp.assessment_model import FORMER_TEAM_NOTE
 
-    note = _former_team_note([
-        {"team": "TeamA", "details": "Not reachable.",
-         "tags": {"State": "NOT_AFFECTED", "Assessed By": "alice"}},
-    ])
+    # As earlier repairs wrote it; the repair now keeps historical blocks.
+    note = f"{FORMER_TEAM_NOTE} (TeamA; NOT_AFFECTED; assessed by alice):\nNot reachable."
     entry, _ = _entry(
         "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] ---\n"
         f"Approved.\n\n{note}"
     )
     assert entry["analysis"]["detail"] == "Approved."
     assert _property(entry, "dtvp:former_assessment") == [note]
+
+
+def test_a_repaired_former_team_is_exported_as_historical_with_the_decision():
+    from dtvp.bulk_workflows.assessment_repair import _render, _repair_former_teams
+    from dtvp.bulk_workflows.incomplete_sync import _parse_blocks
+
+    former = (
+        "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] "
+        "[Ticket: EXP-31] ---\nThe parser is never called."
+    )
+    blocks, info = _repair_former_teams(
+        _parse_blocks(former), {"teamb": "TeamB"}, {},
+        user="reviewer", pending=False, now_ms=1794500000000,
+    )
+    assert info["promoted_to_global_decision"] is True
+    entry, document = _entry(_render(blocks, pending=False))
+
+    # The decision General took comes with the former team's rationale.
+    assert entry["analysis"]["state"] == "not_affected"
+    assert entry["analysis"]["detail"] == "The parser is never called."
+    (historical,) = _property(entry, "dtvp:historical_assessment")
+    assert json.loads(historical) == {
+        "team": "TeamA",
+        "state": "NOT_AFFECTED",
+        "justification": "CODE_NOT_REACHABLE",
+        "assessed_by": "alice",
+        "date": "2026-11-06T21:20:00+00:00",
+        "ticket": "EXP-31",
+        "text": "The parser is never called.",
+    }
+    assert _property(entry, "dtvp:spr") == ["EXP-31"]
+    assert _property(entry, "dtvp:former_assessment") == []
+    # The findings and annotations against the published schema.
+    assert _valid(document)
 
 
 def test_a_rescoring_without_a_vector_says_so():
@@ -649,6 +682,26 @@ def test_a_historical_team_assessment_is_exported_with_its_ticket():
     assert not any(
         "historical" in item["name"] for item in plain["metadata"]["properties"]
     )
+
+
+def test_a_teams_historical_record_beside_its_current_assessment_is_exported():
+    text = (
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: olga] "
+        "[Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] "
+        "[Ticket: VP-1] [Historical: yes] ---\nOld reason.\n\n"
+        "--- [Team: Core] [State: EXPLOITABLE] [Assessed By: bob] "
+        "[Date: 1794561289026] ---\nReachable now.\n\n"
+        "--- [Team: Core] [State: FALSE_POSITIVE] [Assessed By: oskar] "
+        "[Date: 1793000000000] [Ticket: VP-2] [Historical: yes] ---\nOlder reason."
+    )
+    entry, document = _entry(text)
+
+    assert _property(entry, "dtvp:team_state") == ["Core=EXPLOITABLE"]
+    assert sorted(
+        (record["assessed_by"], record["ticket"], record["text"])
+        for record in map(json.loads, _property(entry, "dtvp:historical_assessment"))
+    ) == [("olga", "VP-1", "Old reason."), ("oskar", "VP-2", "Older reason.")]
+    assert _valid(document)
 
 
 def test_an_analysis_without_a_general_date_has_the_latest_team_date():

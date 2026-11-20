@@ -1759,7 +1759,7 @@ test.describe('Capture README screenshots', () => {
         const workflow = {
             id: 'assessment-repair',
             label: 'Repair Assessments',
-            description: 'Synchronize partial assessments, move assessments of former teams into the global assessment, restore lost CVSS vectors, and repair rule-based rescoring.',
+            description: 'Synchronize partial assessments, keep assessments of former teams as historical, restore lost CVSS vectors, and repair rule-based rescoring.',
             supports_apply: true,
             supports_document: false,
             version: 1,
@@ -1796,7 +1796,7 @@ test.describe('Capture README screenshots', () => {
                         repairable: true,
                         repairs: [
                             { id: 'sync_findings', label: 'Synchronize assessment to 1 finding' },
-                            { id: 'former_teams', label: 'Move former team assessment to global notes: Platform' },
+                            { id: 'former_teams', label: 'Keep former team assessment as historical: Platform' },
                         ],
                         review: [],
                         rescore_findings: [],

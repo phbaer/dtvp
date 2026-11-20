@@ -61,7 +61,7 @@ from .local_store import (
     get_database_path,
     safe_filename,
 )
-from .logic import RE_SCORE
+from .logic import RE_SCORE, without_historical_blocks
 
 logger = logging.getLogger(__name__)
 CACHE_STATUS_TTL_SECONDS = 5.0
@@ -347,7 +347,7 @@ def _extract_threadmodel_score(analysis: Optional[Dict[str, Any]]) -> Optional[f
     if not details:
         return None
 
-    match = RE_SCORE.search(details)
+    match = RE_SCORE.search(without_historical_blocks(details))
     if not match:
         return None
 

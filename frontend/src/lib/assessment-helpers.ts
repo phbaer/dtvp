@@ -17,6 +17,9 @@ export interface AssessmentBlock {
     evidenceReviewed?: boolean;
     versionCoverageChecked?: boolean;
     ticket?: string;
+    /** The stored [Evidence Reviewed] / [Version Coverage] values. */
+    evidenceReviewedValue?: string;
+    versionCoverageValue?: string;
     // Read from a header that carries them; the form does not edit them.
     reviewer?: string;
     rescored?: number;
@@ -175,22 +178,69 @@ export const markAssessmentBlocksHistorical = (fullText: string, teams: Iterable
     const sourceKeys = new Set([...teams].map(assessmentTeamKey));
     if (!sourceKeys.size) return fullText;
     return fullText.replace(/---\s*\[Team:\s*([^\]]+)\][^\r\n]*?---/g, (header, team: string) => {
-        if (!sourceKeys.has(assessmentTeamKey(team)) || /\[Historical:\s*yes\]/i.test(header)) return header;
+        if (!sourceKeys.has(assessmentTeamKey(team)) || /\[Historical:\s*yes\s*\]/i.test(header)) return header;
         return header.replace(/\s*---$/, ' [Historical: yes] ---');
     });
 };
 
+
+/**
+ * The text without its historical team blocks. A historical block is a
+ * record: its rescoring tags do not rescore the finding, so the finding's
+ * rescoring is read from this text.
+ */
+export const withoutHistoricalBlocks = (fullText: string): string => {
+    const text = String(fullText || '');
+    const masked = maskSsvcDetails(text);
+    const starts = [...masked.matchAll(/---(?=\s*\[Team:)/g)].map(match => match.index ?? 0);
+    if (!starts.length) return text;
+    const kept = [text.slice(0, starts[0])];
+    starts.forEach((start, index) => {
+        const block = text.slice(start, index + 1 < starts.length ? starts[index + 1] : text.length);
+        const headerEnd = block.indexOf('---', 3);
+        const header = headerEnd === -1 ? block.slice(3) : block.slice(3, headerEnd);
+        if (!/\[Historical:\s*yes\s*\]/i.test(header)) kept.push(block);
+    });
+    return kept.join('');
+};
+
+/**
+ * One active block per team; a historical block is a record of its own and
+ * only one with exactly the same team, decision, text, assessor, reviewer,
+ * date, ticket and rescoring is the same record. As the server's
+ * ``_record_key``.
+ */
+export const assessmentBlockKey = (block: AssessmentBlock): string => {
+    const team = assessmentTeamKey(block.team);
+    if (!block.historical) return `active\u0000${team}`;
+    const collapse = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const user = collapse(block.user);
+    const tickets = [...new Set(String(block.ticket || '').split(',').map(key => key.trim()).filter(Boolean))];
+    return [
+        'historical',
+        team,
+        block.state || 'NOT_SET',
+        block.justification && block.justification !== 'NOT_SET' ? block.justification : '',
+        collapse(block.details),
+        user.toLocaleLowerCase() === 'unknown' ? '' : user,
+        block.timestamp || '',
+        collapse(block.reviewer),
+        tickets.join(','),
+        block.rescored ?? '',
+        collapse(block.vector),
+    ].join('\u0000');
+};
 
 export const deduplicateAssessmentBlocks = (
     blocks: readonly AssessmentBlock[],
 ): AssessmentBlock[] => {
     const unique = new Map<string, { index: number, block: AssessmentBlock }>();
     blocks.forEach((rawBlock, index) => {
-        const key = assessmentTeamKey(rawBlock.team);
-        if (!key) return;
+        if (!assessmentTeamKey(rawBlock.team)) return;
+        const key = assessmentBlockKey(rawBlock);
         const block = cloneAssessmentBlock({
             ...rawBlock,
-            team: key === 'general' ? 'General' : rawBlock.team.trim(),
+            team: assessmentTeamKey(rawBlock.team) === 'general' ? 'General' : rawBlock.team.trim(),
         });
         const existing = unique.get(key);
         if (!existing) {
@@ -383,105 +433,91 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         }
     }
 
-    // Now parse explicit blocks
-    const headerRegex = /---\s*\[Team:\s*([^\]]+)\]\s*\[State:\s*([^\]]+)\](?:\s*\[Assessed By:\s*([^\]]+)\])?(?:\s*\[Date:\s*([^\]]+)\])?(?:\s*\[Justification:\s*([^\]]+)\])?.*?\s*---/g;
+    // Now parse explicit blocks, the way the server's _parse_assessment_blocks
+    // does: a header runs from "---" before "[Team:" to the next "---"; its
+    // tags are read in any order; the text is the rest up to the next header.
+    const headers: Array<{ start: number; end: number; tags: string }> = [];
+    // Same pattern as the server's HEADER_PATTERN: a header is read whole,
+    // so its closing "---" never starts the next one.
+    const headerRegex = /---(?=\s*\[Team:)\s*((?:\[[^\]\n]*\]\s*)+)---/g;
+    let found;
+    while ((found = headerRegex.exec(fullText)) !== null) {
+        headers.push({ start: found.index, end: found.index + found[0].length, tags: found[1]! });
+    }
 
-    let match;
-    while ((match = headerRegex.exec(fullText)) !== null) {
-        const team = match[1];
-        if (!team) continue;
+    headers.forEach((header, index) => {
+        const segmentEnd = index + 1 < headers.length ? headers[index + 1]!.start : originalText.length;
+        const headerText = header.tags;
 
-        const state = match[2] || 'NOT_SET';
-        const user = match[3] || 'Unknown';
-
-        let timestamp: number | undefined = undefined;
-        let justification = 'NOT_SET';
-
-        if (match[4] && !isNaN(Number(match[4]))) {
-            timestamp = Number(match[4]);
-            justification = match[5] || 'NOT_SET';
-        } else if (match[4]) {
-            timestamp = undefined;
-            justification = match[5] || 'NOT_SET';
+        const tags: Record<string, string> = {};
+        for (const tag of headerText.matchAll(/\[([\w\s]+):\s*([^\]]+)\]/g)) {
+            tags[tag[1]!.trim()] = tag[2]!.trim();
         }
+        const team = tags['Team'];
+        if (!team) return;
 
-        if (match[5]) {
-            justification = match[5];
-        }
-
-        // Extract [Assigned: ...] from the header (captured in the .*? wildcard)
-        const headerText = match[0];
-        const ssvc = headerText.match(/\[SSVC:\s*([^\]]+)\]/)?.[1];
-        const historical = /\[Historical:\s*yes\]/i.test(headerText);
-        const copiedFrom = headerText.match(/\[Copied From:\s*([^\]]+)\]/)?.[1]?.trim();
-        const assignedMatch = headerText.match(/\[Assigned:\s*([^\]]+)\]/);
-        const assigned: string[] = assignedMatch
-            ? assignedMatch[1].split(',').map(u => u.trim()).filter(u => u.length > 0)
-            : [];
-        const evidenceReviewed = /\[Evidence Reviewed:\s*(?:yes|true|checked)\]/i.test(headerText);
-        const versionCoverageChecked = /\[Version Coverage:\s*(?:yes|true|checked)\]/i.test(headerText);
-        const ticketMatch = headerText.match(/\[Ticket:\s*([^\]]+)\]/);
-        const ticket = ticketMatch?.[1]?.trim() || '';
-        const reviewer = headerText.match(/\[Reviewed By:\s*([^\]]+)\]/)?.[1]?.trim();
-        const rescoredText = headerText.match(/\[Rescored:\s*([\d.]+)\]/)?.[1];
-        const vector = headerText.match(/\[Rescored Vector:\s*([^\]]+)\]/)?.[1]?.trim();
-
-        const startOfContent = match.index + match[0].length;
-
-        // Find end of content (start of next header or end of string)
-        const nextHeaderRegex = /---\s*\[Team:/g;
-        nextHeaderRegex.lastIndex = startOfContent;
-        const nextMatch = nextHeaderRegex.exec(fullText);
-
-        const endOfContent = nextMatch ? nextMatch.index : fullText.length;
-        const originalContent = originalText.slice(startOfContent, endOfContent).trim();
+        const originalContent = originalText.slice(header.end, segmentEnd).trim();
         const ssvcDetails = [...originalContent.matchAll(ssvcDetailsPattern())].map(match => match[0].trimStart()).join('\n\n');
-        const rawContent = stripSsvcDetails(originalContent).trim();
-
-        // Clean up redundant metadata from the display text
-        let content = rawContent
-        // Cleanup all metadata from content to prevent leakage
-        content = stripAssessmentResponseTags(content)
-            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date|Assigned):\s*[^\]]*\]/g, '')
-            .replace(/\[(Evidence Reviewed|Version Coverage|Ticket|Historical|Copied From):\s*[^\]]*\]/g, '')
-            .replace(/\[Status: Pending Review\]/g, '')
-            .replace(/\[Comment\]/g, '')
+        // Only what the server removes: the text of a block stays as
+        // written, so both sides read the same record.
+        const content = stripAssessmentResponseTags(stripSsvcDetails(originalContent))
+            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
+            .replace(/\[Status: Pending Review\]/gi, '')
             .replace(/\bAssessed\s*--\s*\S+/g, '')
             .replace(/--\s*\S+\s*$/gm, '')
             .trim();
 
-        // Also remove the specific header and any subsequent headers if they somehow leaked into content
-        content = content.replace(/---\s*\[Team:.*?---\s*/g, '').trim();
-
-        const userEscaped = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        content = content.replace(new RegExp(`--\\s*${userEscaped}\\s*$`, 'm'), '').trim();
+        const dateText = tags['Date'];
+        const timestamp = dateText && !isNaN(Number(dateText)) ? Number(dateText) : undefined;
+        const assigned = (tags['Assigned'] || '').split(',').map(u => u.trim()).filter(u => u.length > 0);
+        const evidenceValue = tags['Evidence Reviewed'];
+        const coverageValue = tags['Version Coverage'];
+        const rescoredText = tags['Rescored'];
+        const vector = tags['Rescored Vector'];
+        const reviewer = tags['Reviewed By'];
 
         blocks.push({
             team,
-            historical,
-            copiedFrom,
-            ssvc,
+            historical: (tags['Historical'] || '').toLocaleLowerCase() === 'yes',
+            copiedFrom: tags['Copied From'],
+            ssvc: tags['SSVC'],
             ssvcDetails,
-            state,
-            user,
+            state: tags['State'] || 'NOT_SET',
+            user: tags['Assessed By'] || 'Unknown',
             details: content,
-            justification,
+            justification: tags['Justification'] || 'NOT_SET',
             timestamp,
             assigned,
-            evidenceReviewed,
-            versionCoverageChecked,
-            ticket,
+            evidenceReviewed: /^(?:yes|true|checked)$/i.test(evidenceValue || ''),
+            versionCoverageChecked: /^(?:yes|true|checked)$/i.test(coverageValue || ''),
+            // The stored values, which may say more than yes or no; a block
+            // the form did not edit is written back with them unchanged.
+            ...(evidenceValue ? { evidenceReviewedValue: evidenceValue } : {}),
+            ...(coverageValue ? { versionCoverageValue: coverageValue } : {}),
+            ticket: tags['Ticket'] || '',
             ...(reviewer ? { reviewer } : {}),
-            ...(rescoredText !== undefined && !Number.isNaN(Number(rescoredText))
+            ...(rescoredText !== undefined && /^[\d.]+$/.test(rescoredText) && !Number.isNaN(Number(rescoredText))
                 ? { rescored: Number(rescoredText) }
                 : {}),
             ...(vector ? { vector } : {}),
         });
-    }
+    });
 
     setBoundedCacheEntry(parsedAssessmentBlocksCache, originalText, cloneAssessmentBlocks(blocks), MAX_PARSE_CACHE_ENTRIES);
     return blocks;
 }
+
+const YES_FLAG = /^(?:yes|true|checked)$/i;
+
+/**
+ * The value an [Evidence Reviewed] or [Version Coverage] tag is written
+ * with: the stored value while it agrees with the form's checkbox (it may
+ * say more than yes or no, e.g. "partial"), otherwise "yes" or nothing.
+ */
+export const flagTagValue = (checked: boolean | undefined, stored: string | undefined): string | null => {
+    if (stored && YES_FLAG.test(stored) === Boolean(checked)) return stored;
+    return checked ? 'yes' : null;
+};
 
 const SHARED_RESCORED = /\[Rescored:\s*([\d.]+)\]/;
 const SHARED_RESCORED_VECTOR = /\[Rescored Vector:\s*([^\]]+)\]/;
@@ -508,8 +544,8 @@ const blockToTeamFields = (block: AssessmentBlock): AssessmentTeamFields => {
         ssvc_details: textOrNull(block.ssvcDetails),
         assigned: [...(block.assigned || [])],
         ticket: textOrNull(block.ticket),
-        evidence_reviewed: block.evidenceReviewed ? 'yes' : null,
-        version_coverage: block.versionCoverageChecked ? 'yes' : null,
+        evidence_reviewed: flagTagValue(block.evidenceReviewed, block.evidenceReviewedValue),
+        version_coverage: flagTagValue(block.versionCoverageChecked, block.versionCoverageValue),
         historical: Boolean(block.historical),
         copied_from: textOrNull(block.copiedFrom),
         details: block.details || '',
@@ -583,20 +619,28 @@ export function constructAssessmentDetails(
     for (const b of uniqueBlocks) {
         const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
         const assignedStr = b.assigned && b.assigned.length > 0 ? ` [Assigned: ${b.assigned.join(', ')}]` : '';
-        const evidenceStr = b.evidenceReviewed ? ' [Evidence Reviewed: yes]' : '';
-        const versionCoverageStr = b.versionCoverageChecked ? ' [Version Coverage: yes]' : '';
+        const evidenceValue = flagTagValue(b.evidenceReviewed, b.evidenceReviewedValue);
+        const coverageValue = flagTagValue(b.versionCoverageChecked, b.versionCoverageValue);
+        const evidenceStr = evidenceValue ? ` [Evidence Reviewed: ${formatAssessmentHeaderValue(evidenceValue)}]` : '';
+        const versionCoverageStr = coverageValue ? ` [Version Coverage: ${formatAssessmentHeaderValue(coverageValue)}]` : '';
         const ticketStr = b.ticket?.trim() ? ` [Ticket: ${formatAssessmentHeaderValue(b.ticket)}]` : '';
         const ssvcStr = b.ssvc ? ` [SSVC: ${b.ssvc}]` : '';
+        // A historical block keeps the rescoring it was recorded with; it
+        // does not rescore the finding (see withoutHistoricalBlocks).
+        const historicalRescoreStr = b.historical
+            ? `${b.rescored !== undefined ? ` [Rescored: ${b.rescored}]` : ''}${b.vector ? ` [Rescored Vector: ${b.vector}]` : ''}`
+            : '';
         const historicalStr = b.historical ? ' [Historical: yes]' : '';
         const copiedFromStr = b.copiedFrom ? ` [Copied From: ${formatAssessmentHeaderValue(b.copiedFrom)}]` : '';
-        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr}${ssvcStr}${historicalStr}${copiedFromStr} ---`;
+        const reviewerStr = b.reviewer?.trim() ? ` [Reviewed By: ${formatAssessmentHeaderValue(b.reviewer)}]` : '';
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${reviewerStr}${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr}${historicalRescoreStr}${ssvcStr}${historicalStr}${copiedFromStr} ---`;
         parts.push(header);
         if (b.details) parts.push(b.details);
         if (b.ssvcDetails) parts.push(b.ssvcDetails);
     }
 
     // Calculate Aggregated State
-    const generalBlock = uniqueBlocks.find(b => assessmentTeamKey(b.team) === 'general');
+    const generalBlock = uniqueBlocks.find(b => assessmentTeamKey(b.team) === 'general' && !b.historical);
     let aggState = 'NOT_SET';
 
     if (generalBlock && generalBlock.state !== 'NOT_SET') {
@@ -625,7 +669,8 @@ export function constructAssessmentDetails(
 /**
  * Sanitizes assessment details text by:
  * 1. Parsing all blocks
- * 2. Deduplicating by team (keeping the latest timestamp, or longest details on tie)
+ * 2. Deduplicating by team (keeping the latest timestamp, or longest details on
+ *    tie); every distinct historical block stays
  * 3. Sorting alphabetically by team name, with "General" always first
  * 4. Reconstructing clean text
  *
@@ -650,8 +695,8 @@ export function sanitizeAssessmentDetails(
         return a.team.localeCompare(b.team);
     });
 
-    // Extract shared tags
-    const prose = stripSsvcDetails(fullText);
+    // Extract shared tags; a historical block's rescoring is not the finding's.
+    const prose = stripSsvcDetails(withoutHistoricalBlocks(fullText));
     const tags: string[] = [];
     const rescoredMatch = prose.match(/\[Rescored:\s*[\d\.]+\]/);
     if (rescoredMatch) tags.push(rescoredMatch[0]);
@@ -769,7 +814,9 @@ export function mergeTeamAssessment(
 
     // 2. Update, Create, or Remove block for this team
     const targetKey = assessmentTeamKey(team);
-    const targetIndex = blocks.findIndex(b => assessmentTeamKey(b.team) === targetKey);
+    // A historical block of the team is a record: it stays beside the
+    // team's new assessment and is never replaced by it.
+    const targetIndex = blocks.findIndex(b => assessmentTeamKey(b.team) === targetKey && !b.historical);
     const existingBlock = targetIndex >= 0 ? blocks[targetIndex] : undefined;
     const hasAssignees = newAssigned !== undefined ? newAssigned.length > 0 : ((existingBlock?.assigned?.length ?? 0) > 0);
     const finalEvidenceReviewed = reviewMetadata?.evidenceReviewed ?? existingBlock?.evidenceReviewed ?? false;
@@ -789,6 +836,25 @@ export function mergeTeamAssessment(
         const existingAssigned = existingBlock?.assigned;
         const finalAssigned = newAssigned !== undefined ? newAssigned : (existingAssigned || []);
 
+        // A save that changes only ticket, evidence, coverage or assignment
+        // is not a new assessment: it keeps who made it, when, and who
+        // reviewed it. An approval (not pending) is always re-stamped.
+        const collapse = (value: string | undefined) => (value || '').replace(/\s+/g, ' ').trim();
+        const sameAssessment = Boolean(existingBlock)
+            && existingBlock!.state === newState
+            && (existingBlock!.justification || 'NOT_SET') === (newJustification || 'NOT_SET')
+            && collapse(existingBlock!.details) === collapse(newDetails)
+            && rescoredTags === undefined
+            && finalCopiedFrom === existingBlock!.copiedFrom;
+        const sortedNames = (names: string[] | undefined) => [...(names || [])].sort().join('\u0000');
+        const metadataChanged = Boolean(existingBlock) && (
+            (existingBlock!.ticket || '') !== finalTicket
+            || Boolean(existingBlock!.evidenceReviewed) !== Boolean(finalEvidenceReviewed)
+            || Boolean(existingBlock!.versionCoverageChecked) !== Boolean(finalVersionCoverageChecked)
+            || sortedNames(existingBlock!.assigned) !== sortedNames(finalAssigned)
+        );
+        const keepAttribution = isPending && sameAssessment && metadataChanged;
+
         const newBlock: AssessmentBlock = {
             ssvc: existingBlock?.ssvc,
             ssvcDetails: existingBlock?.ssvcDetails,
@@ -796,14 +862,17 @@ export function mergeTeamAssessment(
             historical: false,
             copiedFrom: finalCopiedFrom,
             state: newState,
-            user: user,
+            user: keepAttribution ? existingBlock!.user : user,
             details: newDetails.trim(),
             justification: newJustification,
-            timestamp: Date.now(),
+            timestamp: keepAttribution ? existingBlock!.timestamp : Date.now(),
             assigned: finalAssigned,
             evidenceReviewed: finalEvidenceReviewed,
             versionCoverageChecked: finalVersionCoverageChecked,
+            ...(existingBlock?.evidenceReviewedValue ? { evidenceReviewedValue: existingBlock.evidenceReviewedValue } : {}),
+            ...(existingBlock?.versionCoverageValue ? { versionCoverageValue: existingBlock.versionCoverageValue } : {}),
             ticket: finalTicket,
+            ...(keepAttribution && existingBlock!.reviewer ? { reviewer: existingBlock!.reviewer } : {}),
         };
 
         if (targetIndex >= 0) {
@@ -818,8 +887,9 @@ export function mergeTeamAssessment(
     if (rescoredTags) {
         tags = rescoredTags;
     } else {
-        // Simple regex for now - assumes they are at the very start
-        const prose = stripSsvcDetails(currentFullText);
+        // Simple regex for now - assumes they are at the very start. A
+        // historical block's rescoring is not the finding's.
+        const prose = stripSsvcDetails(withoutHistoricalBlocks(currentFullText));
         const rescoredMatch = prose.match(/\[Rescored:\s*[\d\.]+\]/);
         if (rescoredMatch) tags.push(rescoredMatch[0]);
 
@@ -841,7 +911,8 @@ export function mergeTeamAssessment(
  * Builds the full assessment text for a bulk sync operation.
  *
  * Strategy:
- * - Preserves one block per team, case-insensitively.
+ * - Preserves one active block per team, case-insensitively, and every
+ *   distinct historical block.
  * - Preserves an existing General block but never synthesizes one from team
  *   assessments or copies team state/details into it.
  * - Removes team summaries generated by older releases because the team blocks
@@ -862,11 +933,13 @@ export function buildBulkSyncDetails(
 ): { text: string, aggregatedState: string } {
     const uniqueBlocks = deduplicateAssessmentBlocks(allBlocks);
     // 1. Separate out the General block from team-specific blocks.
-    const teamBlocks = uniqueBlocks.filter(b => assessmentTeamKey(b.team) !== 'general');
-    let existingGeneral = uniqueBlocks.find(b => assessmentTeamKey(b.team) === 'general');
+    // A historical General block is a record and stays with the others.
+    const isActiveGeneral = (block: AssessmentBlock) => assessmentTeamKey(block.team) === 'general' && !block.historical;
+    const teamBlocks = uniqueBlocks.filter(b => !isActiveGeneral(b));
+    let existingGeneral = uniqueBlocks.find(isActiveGeneral);
     if (!existingGeneral && existingGeneralText) {
         existingGeneral = deduplicateAssessmentBlocks(parseAssessmentBlocks(existingGeneralText))
-            .find(block => assessmentTeamKey(block.team) === 'general');
+            .find(isActiveGeneral);
     }
 
     // 2. Recover any user-added comment from the existing General block.
@@ -874,7 +947,7 @@ export function buildBulkSyncDetails(
     let userComment = (existingGeneral?.details || '').trim();
     if (!userComment && existingGeneralText) {
         const parsed = parseAssessmentBlocks(existingGeneralText);
-        const generalBlock = parsed.find(b => b.team === 'General');
+        const generalBlock = parsed.find(b => b.team === 'General' && !b.historical);
         userComment = (generalBlock?.details || '').trim();
     }
 

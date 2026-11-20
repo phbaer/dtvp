@@ -86,6 +86,7 @@ from .logic import (
     populate_group_dependency_chains,
     sanitize_rescored_vector,
     score_to_severity,
+    without_historical_blocks,
 )
 from .rescore_rule_services import (
     RescoreRuleError,
@@ -471,7 +472,8 @@ def _refresh_group_rescoring_metadata(group: dict[str, Any]) -> None:
 
     for affected_version in group.get("affected_versions") or []:
         for component in affected_version.get("components") or []:
-            details = component.get("analysis_details") or ""
+            # Historical blocks are records; they do not rescore the finding.
+            details = without_historical_blocks(component.get("analysis_details") or "")
             score_match = RE_SCORE.search(details)
             vector_match = RE_VECTOR.search(details)
             score: float | None = None

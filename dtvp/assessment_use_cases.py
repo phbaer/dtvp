@@ -115,6 +115,9 @@ class AssessmentRequest(BaseModel):
     # Free text to keep per finding ("project|component|vulnerability"),
     # read from the stored record by the use case; never client input.
     _stored_free_text: dict[str, str] = PrivateAttr(default_factory=dict)
+    # Each finding's stored text, keyed like ``_stored_free_text``: the save
+    # keeps what it would drop of it (``logic.keep_team_records``).
+    _stored_details: dict[str, str] = PrivateAttr(default_factory=dict)
     comment: Optional[str] = None
     justification: Optional[str] = None
     # For a save as text (without ``fields``): the finding's response.
@@ -577,16 +580,22 @@ async def save_assessment(
             raise AssessmentValidationError(str(exc)) from exc
         req = req.model_copy(update={"details": rendered})
         req.model_fields_set.add("details")
-        if req.fields.free_text is None:
-            # The client did not touch the free text: keep each finding's.
-            stored = await asyncio.to_thread(
-                deps.cache_manager.get_cached_assessment_details, req.instances
-            )
-            req._stored_free_text = {
-                finding_key(instance): kept
-                for instance, text in zip(req.instances, stored)
-                if (kept := parse_assessment("", text, False)["free_text"])
-            }
+    # The stored text, never a client's view of it, is what a save may not
+    # lose and where the SSVC record and the response are kept from.
+    stored_details = await asyncio.to_thread(
+        deps.cache_manager.get_cached_assessment_details, req.instances
+    )
+    if req.fields is not None and req.fields.free_text is None:
+        # The client did not touch the free text: keep each finding's.
+        req._stored_free_text = {
+            finding_key(instance): kept
+            for instance, text in zip(req.instances, stored_details)
+            if (kept := parse_assessment("", text, False)["free_text"])
+        }
+    req._stored_details = {
+        finding_key(instance): text
+        for instance, text in zip(req.instances, stored_details)
+    }
     if (
         strict_dt_assessment_conflicts_enabled()
         and not req.force
@@ -609,9 +618,6 @@ async def save_assessment(
         # Never trust client-supplied original_analysis/headers as authority
         # for what reviewers decide with the Global assessment: the SSVC
         # record and the response. Preserve each finding's stored value.
-        stored_details = await asyncio.to_thread(
-            deps.cache_manager.get_cached_assessment_details, req.instances
-        )
         for (_instance, payload), existing in zip(payloads, stored_details):
             if keep_ssvc:
                 payload["details"] = preserve_ssvc_record(payload["details"], existing)

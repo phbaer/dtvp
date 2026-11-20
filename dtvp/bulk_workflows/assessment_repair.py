@@ -5,9 +5,9 @@ the result of the previous one, so a finding receives a single write:
 
 1. restore a rescored CVSS vector that was lost and is recoverable from audit
    history;
-2. synchronize a consistent assessment to findings that lack it, move
-   assessments of teams that no longer own the vulnerability into the global
-   assessment, and combine conflicts that involve no current team;
+2. synchronize a consistent assessment to findings that lack it, keep
+   assessments of teams that no longer own the vulnerability as historical
+   blocks, and combine conflicts that involve no current team;
 3. repair missing, incomplete, or incorrect rule-based CVSS rescores.
 """
 
@@ -15,11 +15,9 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import UTC, datetime
 from typing import Any, Callable
 
 from ..assessment_model import (
-    FORMER_TEAM_NOTE,
     SEE_GLOBAL_ASSESSMENT,
     agreed_response,
     preserve_response,
@@ -119,6 +117,19 @@ def _is_assessed(block: dict[str, Any]) -> bool:
     return not _is_historical(block) and block["tags"].get("State", "NOT_SET") != "NOT_SET"
 
 
+def _holds_something(block: dict[str, Any]) -> bool:
+    """Whether a block says or tracks anything: a text, a ticket, assignees,
+    evidence, version coverage or an SSVC decision. Such a block is never
+    replaced or dropped, whatever its state."""
+    return bool(
+        strip_ssvc_details(block["details"]).strip()
+        or any(
+            str(block["tags"].get(tag) or "").strip()
+            for tag in ("Ticket", "Assigned", "Evidence Reviewed", "Version Coverage", "SSVC")
+        )
+    )
+
+
 def _header_value(value: Any) -> str:
     return re.sub(r"[\r\n\[\]]+", " ", str(value or "")).strip()
 
@@ -154,17 +165,6 @@ def _ticket_keys(value: Any) -> list[str]:
     ))
 
 
-def _assessment_day(value: Any) -> str:
-    """The day (UTC) of a ``Date`` tag, which holds milliseconds since 1970."""
-    text = str(value or "").strip()
-    if not text.isdigit():
-        return ""
-    try:
-        return datetime.fromtimestamp(int(text) / 1000, UTC).date().isoformat()
-    except (OverflowError, OSError, ValueError):
-        return ""
-
-
 def _carry_tickets(target: dict[str, Any], sources: list[dict[str, Any]]) -> None:
     """Keep the tickets of blocks that are removed on the block that stays.
 
@@ -178,63 +178,49 @@ def _carry_tickets(target: dict[str, Any], sources: list[dict[str, Any]]) -> Non
         target["tags"]["Ticket"] = ", ".join(keys)
 
 
-def _former_team_note(blocks: list[dict[str, Any]], existing: str = "") -> str:
-    """Deduplicated record of the removed blocks, kept as plain text.
+def _as_historical(block: dict[str, Any]) -> dict[str, Any]:
+    """A copy of ``block`` that no longer counts, with every tag it has."""
+    return {**block, "tags": {**block["tags"], "Historical": "yes"}}
 
-    A rationale is written once however many teams or decisions share it, and
-    not at all when the global assessment (`existing`) already contains it;
-    who decided what, when, and under which ticket, is always kept.
-    """
-    by_text: dict[str, dict[str, Any]] = {}
-    for block in blocks:
-        tags = block["tags"]
-        text = strip_ssvc_details(block["details"]).strip()
-        entry = by_text.setdefault(_normalized(text), {"text": text, "decisions": {}})
-        # Teams that decided the same on different days stay apart, so that
-        # every decision has one date.
-        dated = _assessment_day(tags.get("Date"))
-        decision = entry["decisions"].setdefault(
-            (tags.get("State", ""), tags.get("Justification", ""), dated),
-            {"teams": [], "assessors": [], "tickets": []},
-        )
-        for target, value in (
-            ("teams", block["team"]),
-            ("assessors", tags.get("Assessed By")),
-            *(("tickets", key) for key in _ticket_keys(tags.get("Ticket"))),
+
+def _same_justification(left: Any, right: Any) -> bool:
+    def norm(value: Any) -> str:
+        return "" if value in (None, "", "NOT_SET") else str(value)
+
+    return norm(left) == norm(right)
+
+
+def _decisive_rationale(
+    decisive: dict[str, Any], former: list[dict[str, Any]]
+) -> list[str]:
+    """The texts of the former blocks that made the decision General takes:
+    same state and justification as ``decisive``, references left out,
+    each text once, in block order."""
+    state = decisive["tags"].get("State")
+    justification = decisive["tags"].get("Justification")
+    texts: dict[str, str] = {}
+    for block in former:
+        if (
+            block["tags"].get("State") != state
+            or not _same_justification(block["tags"].get("Justification"), justification)
+            or _is_reference(block)
         ):
-            value = _header_value(value)
-            if value and value not in decision[target]:
-                decision[target].append(value)
-
-    known = _normalized(strip_ssvc_details(existing))
-    notes = []
-    for key, entry in by_text.items():
-        decisions = []
-        for (state, justification, dated), decision in entry["decisions"].items():
-            facts = [", ".join(decision["teams"]), state]
-            if justification and justification != "NOT_SET":
-                facts.append(f"justification {justification}")
-            if decision["assessors"]:
-                facts.append(f"assessed by {', '.join(decision['assessors'])}")
-            if dated:
-                facts.append(f"dated {dated}")
-            if decision["tickets"]:
-                facts.append(f"ticket {', '.join(decision['tickets'])}")
-            decisions.append("; ".join(facts))
-        if key in known and all(_normalized(decision) in known for decision in decisions):
-            # Both the rationale and who decided it are recorded already.
             continue
-        note = f"{FORMER_TEAM_NOTE} ({' | '.join(decisions)})"
-        if not key:
-            note += "."
-        elif key in known:
-            note += ": rationale already part of this assessment."
-        else:
-            note += f":\n{entry['text']}"
-        if _normalized(note) not in known:
-            notes.append(note)
-            known += " " + _normalized(note)
-    return "\n\n".join(notes)
+        text = strip_ssvc_details(block["details"]).strip()
+        if text:
+            texts.setdefault(_normalized(text), text)
+    return list(texts.values())
+
+
+def _with_rationale(existing: str, texts: list[str]) -> str:
+    """``existing`` followed by those of ``texts`` it does not contain yet."""
+    parts = [existing] if existing else []
+    known = _normalized(existing)
+    for text in texts:
+        if _normalized(text) not in known:
+            parts.append(text)
+            known += " " + _normalized(text)
+    return "\n\n".join(parts)
 
 
 def _repair_former_teams(
@@ -246,13 +232,15 @@ def _repair_former_teams(
     pending: bool,
     now_ms: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    """Move assessments of teams that no longer own the group into General.
+    """Keep assessments of teams that no longer own the group as historical.
 
-    The former teams' text is always preserved in the global assessment. It
-    only becomes the global *decision* when a current team has no assessment
-    of its own; otherwise the current teams' decisions keep deciding. Teams
-    without an assessment refer to the global one once that is approved,
-    also when there is no former team at all.
+    A former team's block stays with every tag, its ticket and its text, as
+    ``[Historical: yes]``: it no longer counts toward state or coverage. Its
+    decision only becomes the global *decision* when a current team has no
+    assessment of its own and General has none; General then takes the state,
+    justification and date, and a copy of the rationale. Teams without an
+    assessment refer to the global one once that is approved, also when
+    there is no former team at all.
     """
     # An assessment under the name for components no team owns is that of a
     # person for such a component, not a former team's: it stays. Only a
@@ -290,7 +278,9 @@ def _repair_former_teams(
         and _team_key(block["team"]) not in unowned
     ]
     former_ids = {id(block) for block in former}
-    remaining = [block for block in blocks if id(block) not in former_ids]
+    remaining = [
+        _as_historical(block) if id(block) in former_ids else block for block in blocks
+    ]
     covered = {
         canonical_key(block["team"])
         for block in remaining
@@ -298,7 +288,10 @@ def _repair_former_teams(
     }
     uncovered = [team for key, team in current.items() if key not in covered]
 
-    general = next((block for block in remaining if is_general(block)), None)
+    general = next(
+        (block for block in remaining if is_general(block) and not _is_historical(block)),
+        None,
+    )
     if not former and (
         pending
         or not uncovered
@@ -308,20 +301,24 @@ def _repair_former_teams(
         # Without former teams the only repair is pointing teams that have no
         # assessment at a global decision that is already approved.
         return nothing
-    if general is None:
-        general = {
-            "team": "General",
-            "tags": {"Team": "General", "State": "NOT_SET", "Assessed By": user, "Justification": "NOT_SET"},
-            "details": "",
-        }
-        remaining.insert(0, general)
-    else:
-        replacement = {**general, "tags": dict(general["tags"])}
-        remaining[remaining.index(general)] = replacement
-        general = replacement
 
-    promoted = False
-    if uncovered and general["tags"].get("State", "NOT_SET") == "NOT_SET":
+    promoted = bool(former) and bool(uncovered) and (
+        general is None or general["tags"].get("State", "NOT_SET") == "NOT_SET"
+    )
+    if promoted:
+        # Only a General block that decides is written; none is created just
+        # to hold a note, the historical blocks are the record.
+        if general is None:
+            general = {
+                "team": "General",
+                "tags": {"Team": "General", "State": "NOT_SET", "Assessed By": user, "Justification": "NOT_SET"},
+                "details": "",
+            }
+            remaining.insert(0, general)
+        else:
+            replacement = {**general, "tags": dict(general["tags"])}
+            remaining[remaining.index(general)] = replacement
+            general = replacement
         decisive = min(former, key=lambda block: STATE_PRIORITY.get(block["tags"].get("State"), 10))
         general["tags"].update(
             {
@@ -334,17 +331,24 @@ def _repair_former_teams(
         for tag in ("Rescored", "Rescored Vector"):
             if decisive["tags"].get(tag) and not general["tags"].get(tag):
                 general["tags"][tag] = decisive["tags"][tag]
-        promoted = True
-    _carry_tickets(general, former)
-    existing = str(general.get("details") or "").strip()
-    general["details"] = "\n\n".join(
-        part for part in (existing, _former_team_note(former, existing)) if part
-    )
+        # The decision comes with its reasons, so that the global assessment
+        # does not stand without a text.
+        general["details"] = _with_rationale(
+            str(general.get("details") or "").strip(),
+            _decisive_rationale(decisive, former),
+        )
 
     referred: list[str] = []
-    general_state = general["tags"].get("State", "NOT_SET")
+    general_state = (general or {}).get("tags", {}).get("State", "NOT_SET")
+    historical_teams = {
+        canonical_key(block["team"]) for block in remaining if _is_historical(block)
+    }
     if uncovered and general_state != "NOT_SET" and not pending:
         for team in uncovered:
+            if _team_key(team) in historical_teams:
+                # Never two blocks for one team: the historical one stays,
+                # the team is left to assess.
+                continue
             reference = {
                 "team": team,
                 "tags": {
@@ -364,6 +368,10 @@ def _repair_former_teams(
                 ),
                 None,
             )
+            if placeholder is not None and _holds_something(placeholder):
+                # Someone is on it: its text, ticket and assignees stay,
+                # and the team is left to assess.
+                continue
             if placeholder is not None:
                 remaining[remaining.index(placeholder)] = reference
             else:
@@ -392,6 +400,13 @@ def _combine_conflict(
     Only when no current team has an assessment of its own: then nothing a
     responsible team decided is overruled. The worst state wins. Sources that
     disagree on the state produce a new decision, which stays pending review.
+
+    Former teams' blocks stay as historical blocks, as do blocks that were
+    historical already and General decisions the combined one replaces: one
+    per distinct record (team, decision, text, assessor, reviewer, date,
+    rescoring), with the tickets of the identical records it stands for. A
+    team's block without a decision that holds a text, ticket or assignees
+    stays as it is, and that team is not referred to the global assessment.
     """
     if not current:
         return None
@@ -403,11 +418,15 @@ def _combine_conflict(
     generals: list[dict[str, Any]] = []
     former: list[dict[str, Any]] = []
     historical: dict[str, dict[str, Any]] = {}
+    # Blocks without a decision that still say or track something: kept.
+    held: dict[str, dict[str, Any]] = {}
     for instance in instances:
         for block in _parse_blocks(_details(instance)):
             if _is_historical(block):
                 historical.setdefault(_render_block(block), block)
             elif not _is_assessed(block):
+                if _holds_something(block):
+                    held.setdefault(_render_block(block), block)
                 continue
             elif _team_key(block["team"]) == "general":
                 generals.append(block)
@@ -445,24 +464,77 @@ def _combine_conflict(
             tags[tag] = decisive["tags"][tag]
 
     carrier = {"tags": tags}
-    _carry_tickets(carrier, sources)
+    _carry_tickets(carrier, generals)
 
     texts: dict[str, str] = {}
     for block in generals:
         text = strip_ssvc_details(block["details"]).strip()
         if text:
             texts.setdefault(_normalized(text), text)
-    general = {
-        "team": "General",
-        "tags": tags,
-        "details": "\n\n".join(
-            part
-            for part in (*texts.values(), _former_team_note(former, "\n\n".join(texts.values())))
-            if part
-        ),
-    }
+    general_text = "\n\n".join(texts.values()) or _with_rationale(
+        "", _decisive_rationale(decisive, former)
+    )
 
-    referred = [] if pending else list(current.values())
+    # Every record stays a historical block of its own, with its assessor,
+    # date and tags: blocks that were historical already as they are, and
+    # the former teams' blocks. Blocks that differ only in their tickets are
+    # one record, with all the tickets.
+    # A General decision the combined one replaces stays as a record, with
+    # its state, assessor and date. So does a General block without a
+    # decision that holds a text or ticket.
+    def same_decision(block: dict[str, Any]) -> bool:
+        return (
+            block["tags"].get("State", "NOT_SET") == tags["State"]
+            and _same_justification(block["tags"].get("Justification"), tags["Justification"])
+            and str(block["tags"].get("Assessed By") or "") == str(tags["Assessed By"])
+            and str(block["tags"].get("Date") or "") == str(tags["Date"])
+        )
+
+    replaced = [block for block in generals if not same_decision(block)]
+    # Of a team's blocks without a decision, the newest stays as it is (one
+    # block per team); any other one is kept as a record.
+    open_blocks: dict[str, dict[str, Any]] = {}
+    for block in held.values():
+        key = canonical_key(block["team"])
+        if key == "general":
+            replaced.append(block)
+            continue
+        kept_open = open_blocks.get(key)
+        if kept_open is None:
+            open_blocks[key] = block
+            continue
+
+        def date_of(item: dict[str, Any]) -> int:
+            value = str(item["tags"].get("Date") or "").strip()
+            return int(value) if value.isdigit() else 0
+
+        newer, older = (block, kept_open) if date_of(block) > date_of(kept_open) else (kept_open, block)
+        open_blocks[key] = newer
+        historical.setdefault(_render_block(_as_historical(older)), _as_historical(older))
+
+    records: dict[str, dict[str, Any]] = {}
+    for block in [
+        *historical.values(),
+        *(_as_historical(block) for block in replaced),
+        *(_as_historical(block) for block in former),
+    ]:
+        identity = _render_block({**block, "tags": {**block["tags"], "Ticket": ""}})
+        kept = records.get(identity)
+        if kept is None:
+            records[identity] = {**block, "tags": dict(block["tags"])}
+        else:
+            _carry_tickets(kept, [block])
+    kept_blocks = list(records.values())
+    general = {"team": "General", "tags": tags, "details": general_text}
+
+    historical_teams = {
+        canonical_key(block["team"])
+        for block in kept_blocks
+        if _team_key(block["team"]) != "general"
+    } | set(open_blocks)
+    referred = [] if pending else [
+        team for key, team in current.items() if key not in historical_teams
+    ]
     references = [
         {
             "team": team,
@@ -477,14 +549,14 @@ def _combine_conflict(
         }
         for team in referred
     ]
-    details = _render([general, *historical.values(), *references], pending=pending)
+    details = _render([general, *open_blocks.values(), *kept_blocks, *references], pending=pending)
     return details, {
         "state": tags["State"],
         "former_teams": sorted({block["team"] for block in former}, key=str.casefold),
         "had_global": bool(generals),
         "disagreement": disagreement,
         "referred_teams": referred,
-        "open_teams": [] if referred else list(current.values()),
+        "open_teams": [team for team in current.values() if team not in referred],
     }
 
 
@@ -577,8 +649,45 @@ def _dropped_tickets(history: list[dict[str, Any]], current: str) -> list[dict[s
         for block in _parse_blocks(str(before.get("analysisDetails") or "")):
             for key in _ticket_keys(block["tags"].get("Ticket")):
                 if not _names(text, key):
-                    dropped[key] = {"ticket": key, "team": block["team"]}
+                    dropped[key] = {
+                        "ticket": key,
+                        "team": block["team"],
+                        "assessed_by": str(block["tags"].get("Assessed By") or ""),
+                        "date": str(block["tags"].get("Date") or ""),
+                    }
     return [drop for key, drop in dropped.items() if not _names(current, key)]
+
+
+def _ticket_target(blocks: list[dict[str, Any]], drop: dict[str, str]) -> dict[str, Any] | None:
+    """The block a dropped ticket returns to.
+
+    The team's current block, else the current General assessment, else
+    the exact historical record the ticket was dropped from (same team,
+    assessor and date). Any other record is left alone: changing it would
+    change what that record says. ``None`` leaves the ticket for a person.
+    """
+    team = _team_key(drop["team"])
+
+    def of(key: str, historical: bool) -> list[dict[str, Any]]:
+        return [
+            block for block in blocks
+            if _team_key(block["team"]) == key and _is_historical(block) == historical
+        ]
+
+    def same_record(block: dict[str, Any]) -> bool:
+        return (
+            str(block["tags"].get("Assessed By") or "") == drop.get("assessed_by", "")
+            and str(block["tags"].get("Date") or "") == drop.get("date", "")
+        )
+
+    for candidates in (
+        of(team, False),
+        of("general", False),
+        [block for block in of(team, True) if same_record(block)],
+    ):
+        if candidates:
+            return candidates[0]
+    return None
 
 
 def _ticket_stage(
@@ -612,13 +721,7 @@ def _ticket_stage(
             blocks = _parse_blocks(old)
             placed = False
             for drop in drops:
-                target = next(
-                    (block for block in blocks if _team_key(block["team"]) == _team_key(drop["team"])),
-                    None,
-                ) or next(
-                    (block for block in blocks if _team_key(block["team"]) == "general"),
-                    None,
-                )
+                target = _ticket_target(blocks, drop)
                 if target is None:
                     if drop["ticket"] not in unplaced:
                         unplaced.append(drop["ticket"])
@@ -844,7 +947,7 @@ def _former_team_label(former: dict[str, Any]) -> str:
     label = (
         f"Make former team assessment the global decision: {teams}"
         if former["promoted_to_global_decision"]
-        else f"Move former team assessment to global notes: {teams}"
+        else f"Keep former team assessment as historical: {teams}"
     )
     if former["referred_teams"]:
         label += f"; {', '.join(former['referred_teams'])} refer to global"
@@ -1026,8 +1129,8 @@ def create_assessment_repair_workflow(
         id="assessment-repair",
         label="Repair Assessments",
         description=(
-            "Synchronize partial assessments, move assessments of former teams into "
-            "the global assessment, restore lost CVSS vectors, and repair rule-based "
+            "Synchronize partial assessments, keep assessments of former teams as "
+            "historical, restore lost CVSS vectors, and repair rule-based "
             "rescoring. Each vulnerability lists the repairs that apply."
         ),
         preview_builder=lambda context: build_assessment_repair_preview(context, load_rules),

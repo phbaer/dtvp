@@ -19,7 +19,7 @@ from dtvp.bulk_workflows.automatic_assessments import (
     build_automatic_assessment_payloads,
     build_automatic_assessment_preview,
 )
-from dtvp.assessment_model import parse_assessment
+from dtvp.assessment_model import parse_assessment, render_assessment
 from dtvp.bulk_workflows.assessment_repair import (
     _apply_payloads,
     build_assessment_repair_payloads,
@@ -1835,8 +1835,20 @@ def _former_label(preview):
     )
 
 
-def test_repair_moves_superseded_former_team_into_global_notes_without_deciding():
-    both = ("NOT_AFFECTED", f"{_FORMER}\n\n{_CURRENT}")
+_FORMER_RECORD = _FORMER.replace(
+    "[Justification:", "[Date: 1794000000000] [Justification:"
+).replace("] ---", "] [Ticket: EXP-1, EXP-2] ---")
+
+
+def _team(details, name, state="NOT_AFFECTED"):
+    read = parse_assessment(state, details, False)
+    # One block per team: rendering the fields again must not fail.
+    render_assessment(read)
+    return next((team for team in read["teams"] if team["team"] == name), None)
+
+
+def test_repair_keeps_a_superseded_former_team_as_historical_without_deciding():
+    both = ("NOT_AFFECTED", f"{_FORMER_RECORD}\n\n{_CURRENT}")
     group = _repair_group([both, both], tags=["TeamB"])
     assert group["list_metadata"]["lifecycle"] == "ASSESSED"
 
@@ -1845,11 +1857,19 @@ def test_repair_moves_superseded_former_team_into_global_notes_without_deciding(
     assert _labels(preview) == ["former_teams"]
     assert preview["items"][0]["former_teams"] == ["TeamA"]
     assert preview["items"][0]["finding_count"] == 2
-    assert _former_label(preview) == "Move former team assessment to global notes: TeamA"
+    assert _former_label(preview) == "Keep former team assessment as historical: TeamA"
     details = payloads[0][1]["details"]
-    assert "[Team: TeamA]" not in details
-    assert "[Team: General] [State: NOT_SET]" in details
-    assert "Former team assessment (TeamA; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice):\nNot reachable." in details
+    team_a = _team(details, "TeamA")
+    assert team_a["historical"] is True
+    assert (team_a["state"], team_a["assessed_by"], team_a["assessed_at_ms"],
+            team_a["justification"], team_a["ticket"], team_a["details"]) == (
+        "NOT_AFFECTED", "alice", 1794000000000, "CODE_NOT_REACHABLE",
+        "EXP-1, EXP-2", "Not reachable.",
+    )
+    # No General block just to hold a note, and no ticket carried anywhere.
+    assert "[Team: General]" not in details
+    assert "Former team assessment" not in details
+    assert details.count("EXP-1") == 1
     assert "[Team: TeamB] [State: NOT_AFFECTED]" in details and "Not shipped." in details
     assert payloads[0][1]["state"] == "NOT_AFFECTED"
 
@@ -1860,7 +1880,7 @@ def test_repair_moves_superseded_former_team_into_global_notes_without_deciding(
 
 
 def test_repair_promotes_approved_former_team_to_global_and_refers_open_teams():
-    group = _repair_group([("NOT_AFFECTED", _FORMER)], tags=["TeamB", "TeamC"])
+    group = _repair_group([("NOT_AFFECTED", _FORMER_RECORD)], tags=["TeamB", "TeamC"])
 
     preview, payloads, _ = _repair(group)
 
@@ -1870,10 +1890,16 @@ def test_repair_promotes_approved_former_team_to_global_and_refers_open_teams():
         "TeamB, TeamC refer to global"
     )
     details = payloads[0][1]["details"]
-    assert "[Team: TeamA]" not in details
-    assert "[Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
-    assert "[Justification: CODE_NOT_REACHABLE]" in details
-    assert "Not reachable." in details
+    general = _team(details, "General")
+    assert (general["state"], general["justification"], general["assessed_by"],
+            general["assessed_at_ms"], general["historical"]) == (
+        "NOT_AFFECTED", "CODE_NOT_REACHABLE", "reviewer", 1794000000000, False
+    )
+    # The decision comes with its rationale; the ticket stays with TeamA.
+    assert general["details"] == "Not reachable."
+    assert general["ticket"] is None
+    team_a = _team(details, "TeamA")
+    assert team_a["historical"] is True and team_a["ticket"] == "EXP-1, EXP-2"
     for team in ("TeamB", "TeamC"):
         assert f"--- [Team: {team}] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
     assert details.count("See global assessment.") == 2
@@ -1919,7 +1945,7 @@ def test_repair_keeps_pending_former_team_decision_open_for_current_teams():
     assert applied["list_metadata"]["lifecycle"] == "INCOMPLETE"
 
 
-def test_repair_deduplicates_former_teams_and_never_overrides_an_existing_global():
+def test_repair_keeps_former_teams_as_historical_and_never_overrides_an_existing_global():
     other = _FORMER.replace("TeamA", "TeamX").replace("alice", "xavier")
     general = "--- [Team: General] [State: EXPLOITABLE] [Assessed By: rev] [Justification: NOT_SET] ---\nGlobal view."
     group = _repair_group([("EXPLOITABLE", f"{general}\n\n{_FORMER}\n\n{other}")], tags=["TeamB"])
@@ -1927,12 +1953,28 @@ def test_repair_deduplicates_former_teams_and_never_overrides_an_existing_global
     _, payloads, _ = _repair(group)
 
     details = payloads[0][1]["details"]
-    assert "[Team: General] [State: EXPLOITABLE] [Assessed By: rev]" in details
-    assert "Global view." in details
-    assert details.count("Former team assessment (") == 1
-    assert "(TeamA, TeamX; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice, xavier)" in details
+    assert f"{general}\n\n" in details
+    assert "Former team assessment" not in details
+    assert _team(details, "TeamA", "EXPLOITABLE")["historical"] is True
+    assert _team(details, "TeamX", "EXPLOITABLE")["assessed_by"] == "xavier"
     assert "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: reviewer]" in details
     assert payloads[0][1]["state"] == "EXPLOITABLE"
+
+
+def test_repair_writes_no_reference_for_a_team_that_has_a_historical_block():
+    general = "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: NOT_SET] ---\nGlobal view."
+    earlier = _CURRENT.replace("] ---", "] [Historical: yes] ---")
+    group = _repair_group(
+        [("NOT_AFFECTED", f"{general}\n\n{_FORMER}\n\n{earlier}")], tags=["TeamB", "TeamC"],
+    )
+
+    preview, payloads, _ = _repair(group)
+
+    details = payloads[0][1]["details"]
+    assert details.count("[Team: TeamB]") == 1
+    assert _team(details, "TeamB")["historical"] is True
+    assert "--- [Team: TeamC] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
+    assert _former_label(preview).endswith("TeamC refer to global; TeamB still to assess")
 
 
 def test_repair_leaves_current_historical_and_unowned_groups_alone():
@@ -1950,7 +1992,7 @@ def test_repair_leaves_current_historical_and_unowned_groups_alone():
     )[0]["items"] == []
 
 
-def test_repair_synchronizes_and_moves_former_team_in_one_write_per_finding():
+def test_repair_synchronizes_and_keeps_former_team_in_one_write_per_finding():
     both = ("NOT_AFFECTED", f"{_FORMER}\n\n{_CURRENT}")
     group = _repair_group([both, both, ("NOT_SET", "")], tags=["TeamB"])
     assert group["list_metadata"]["lifecycle"] == "INCOMPLETE"
@@ -1964,7 +2006,7 @@ def test_repair_synchronizes_and_moves_former_team_in_one_write_per_finding():
     assert len(payloads) == 3
     assert len({payload["details"] for _, payload in payloads}) == 1
     assert {payload["state"] for _, payload in payloads} == {"NOT_AFFECTED"}
-    assert "[Team: TeamA]" not in payloads[0][1]["details"]
+    assert _team(payloads[0][1]["details"], "TeamA")["historical"] is True
     assert skipped == {}
 
 
@@ -2031,12 +2073,15 @@ def test_repair_combines_agreeing_conflict_into_approved_global_and_refers_teams
         "former teams TeamA, TeamX and existing global assessment; TeamB, TeamC refer to global"
     )
     assert item["finding_count"] == 4 and len(payloads) == 4
-    assert details.count("[Team: General]") == 1
+    # One current General; the one by rev it replaces stays as a record.
+    assert details.count("[Team: General]") == 2
+    assert [team["assessed_by"] for team in _historical(details, "General")] == ["rev"]
     assert "[Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
     assert "Approved earlier." in details
-    assert "Former team assessment (TeamA; " in details and "Not reachable." in details
-    assert "Former team assessment (TeamX; " in details and "Feature disabled." in details
-    assert "[Team: TeamA]" not in details and "[Team: TeamX]" not in details
+    assert "Former team assessment" not in details
+    assert _team(details, "TeamA")["historical"] is True
+    assert _team(details, "TeamX")["details"] == "Feature disabled."
+    assert _team(details, "TeamX")["historical"] is True
     assert details.count("See global assessment.") == 2
     assert "[Status: Pending Review]" not in details
     assert applied["list_metadata"]["lifecycle"] == "ASSESSED"
@@ -2076,42 +2121,138 @@ def test_repair_keeps_previously_pending_conflict_pending():
     assert details.endswith("[Status: Pending Review]")
 
 
-def test_repair_deduplicates_rationale_moved_to_the_global_assessment():
-    shared = "Parser is   only used at build time."
-    general = f"--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: NOT_SET] ---\nGlobal view.\n\n{shared}"
-    same_as_global = f"--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: NOT_SET] ---\nparser is only used at build time."
-    other = "--- [Team: TeamX] [State: NOT_AFFECTED] [Assessed By: xavier] [Justification: NOT_SET] ---\nNot deployed."
-    different_state = "--- [Team: TeamY] [State: EXPLOITABLE] [Assessed By: yara] [Justification: NOT_SET] ---\nNot  deployed."
-    bare = "--- [Team: TeamZ] [State: NOT_AFFECTED] [Assessed By: zoe] [Justification: NOT_SET] ---"
-    details = "\n\n".join([general, same_as_global, other, different_state, bare])
-    group = _repair_group([("NOT_AFFECTED", details)] * 2, tags=["TeamB"])
+def _historical(details, name):
+    return [
+        team for team in parse_assessment("NOT_AFFECTED", details, False)["teams"]
+        if team["team"] == name and team["historical"]
+    ]
 
-    _, payloads, _ = _repair(group)
-    result = payloads[0][1]["details"]
 
-    # A rationale the global assessment already holds is not repeated.
-    assert result.casefold().count("only used at build time") == 1
-    assert "Former team assessment (TeamA; NOT_AFFECTED; assessed by alice): rationale already part of this assessment." in result
-    # One text shared by different decisions is written once, with both decisions.
-    assert result.count("Not deployed.") + result.count("Not  deployed.") == 1
-    assert (
-        "Former team assessment (TeamX; NOT_AFFECTED; assessed by xavier | "
-        "TeamY; EXPLOITABLE; assessed by yara):\nNot deployed."
-    ) in result
-    assert "Former team assessment (TeamZ; NOT_AFFECTED; assessed by zoe)." in result
-    for team in ("TeamA", "TeamX", "TeamY", "TeamZ"):
-        assert f"[Team: {team}]" not in result
-
-    # Moving the same assessments again adds nothing.
-    again = _repair_group(
-        [("NOT_AFFECTED", "\n\n".join([result, same_as_global, other]))] * 2, tags=["TeamB"],
+def test_repair_combines_keeping_every_former_record_as_a_historical_block():
+    newer = _FORMER.replace(
+        "[Justification:", "[Date: 1794000000000] [Justification:"
+    ).replace("] ---", "] [Ticket: EXP-2] ---")
+    older = _FORMER.replace(
+        "[Justification:", "[Date: 1790000000000] [Justification:"
+    ).replace("] ---", "] [Ticket: EXP-1] ---").replace("Not reachable.", "Earlier wording.")
+    general = "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: NOT_SET] ---\nApproved earlier."
+    _, _, details, _ = _conflict_repair(
+        [("NOT_AFFECTED", older), ("NOT_AFFECTED", newer), ("NOT_AFFECTED", general), ("NOT_SET", "")]
     )
-    repeated = _repair(again)[1][0][1]["details"]
-    assert repeated.count("Former team assessment (") == result.count("Former team assessment (")
-    assert repeated.count("Not deployed.") == 1
+
+    # Each record stays a block with its own date, ticket and text; no note.
+    assert sorted(
+        (team["assessed_at_ms"], team["ticket"], team["details"])
+        for team in _historical(details, "TeamA")
+    ) == [
+        (1790000000000, "EXP-1", "Earlier wording."),
+        (1794000000000, "EXP-2", "Not reachable."),
+    ]
+    assert "Former team assessment" not in details
+    assert _team(details, "General")["details"] == "Approved earlier."
+    assert _team(details, "General")["ticket"] is None
+
+
+def test_repair_combines_keeping_each_assessor_and_date_of_blocks_that_say_the_same():
+    later = _FORMER_RECORD.replace("1794000000000", "1794000000001").replace(
+        "EXP-1, EXP-2", "EXP-3"
+    ).replace("alice", "bob")
+    same = _FORMER_RECORD.replace("EXP-1, EXP-2", "EXP-4")
+    _, _, details, _ = _conflict_repair(
+        [("NOT_AFFECTED", _FORMER_RECORD), ("NOT_AFFECTED", later), ("NOT_AFFECTED", same)]
+    )
+
+    # alice's two identical records are one block with both tickets; bob's
+    # is his own, with his date and ticket.
+    assert sorted(
+        (team["assessed_by"], team["assessed_at_ms"], team["ticket"])
+        for team in _historical(details, "TeamA")
+    ) == [
+        ("alice", 1794000000000, "EXP-1, EXP-2, EXP-4"),
+        ("bob", 1794000000001, "EXP-3"),
+    ]
+    assert "Former team assessment" not in details
+    # Without a General text the decision takes the former rationale.
+    assert _team(details, "General")["details"] == "Not reachable."
+
+
+def test_repair_combines_keeping_blocks_that_were_historical_as_they_are():
+    old_general = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: gina] "
+        "[Reviewed By: rita] [Date: 1700000000000] [Justification: CODE_NOT_REACHABLE] "
+        "[Ticket: EXP-9] [Historical: yes] ---\nOld global view."
+    )
+    older_a = (
+        "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: carl] "
+        "[Reviewed By: rob] [Date: 1600000000000] [Justification: NOT_SET] "
+        "[Ticket: EXP-8] [Rescored: 7.5] [Historical: yes] ---\nCarl's view."
+    )
+    _, _, details, _ = _conflict_repair(
+        [("NOT_AFFECTED", f"{_FORMER_RECORD}\n\n{old_general}"),
+         ("NOT_AFFECTED", f"{_GLOBAL}\n\n{older_a}")]
+    )
+
+    assert old_general in details
+    assert older_a in details
+    assert "Former team assessment" not in details
+    assert _team(details, "General")["historical"] is False
 
 
 _GLOBAL = "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: CODE_NOT_PRESENT] ---\nApproved globally."
+
+
+def test_repair_combines_keeping_open_team_blocks_and_the_general_decisions_it_replaces():
+    general = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: gina] [Date: 1700000000000] "
+        "[Justification: CODE_NOT_REACHABLE] [Ticket: GEN-1] ---\nGeneral says no."
+    )
+    former = (
+        "--- [Team: TeamX] [State: EXPLOITABLE] [Assessed By: xavier] [Date: 1710000000000] "
+        "[Justification: NOT_SET] ---\nReachable."
+    )
+    open_b = "--- [Team: TeamB] [State: NOT_SET] [Assigned: bob] [Ticket: OPEN-9] ---"
+    group = _repair_group(
+        [("NOT_AFFECTED", general), ("EXPLOITABLE", f"{former}\n\n{open_b}")],
+        tags=["TeamB"], lifecycle="INCONSISTENT",
+    )
+
+    preview, payloads, _ = _repair(group)
+
+    assert _labels(preview) == ["combine_conflict"]
+    details = payloads[0][1]["details"]
+    assert {payload["details"] for _, payload in payloads} == {details}
+    # TeamB's open block and its ticket stay as they were.
+    assert open_b in details
+    assert "See global assessment." not in details
+    # Gina's decision stays as a record with her state, assessor and date.
+    [record] = _historical(details, "General")
+    assert (record["state"], record["assessed_by"], record["assessed_at_ms"], record["ticket"]) == (
+        "NOT_AFFECTED", "gina", 1700000000000, "GEN-1",
+    )
+    assert record["details"] == "General says no."
+    current = _team(details, "General", "EXPLOITABLE")
+    assert (current["state"], current["historical"]) == ("EXPLOITABLE", False)
+    assert _historical(details, "TeamX")
+
+
+def test_repair_returns_a_dropped_ticket_to_the_current_block_not_a_record():
+    record = (
+        "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: old] [Date: 1600000000000] "
+        "[Justification: NOT_SET] [Historical: yes] ---\nOld."
+    )
+    with_ticket = _CURRENT.replace("] ---", "] [Ticket: B-1] ---")
+    group = _repair_group([("NOT_AFFECTED", f"{record}\n\n{_CURRENT}")], tags=["TeamB"])
+    histories = _versions(
+        ("import", f"{record}\n\n{with_ticket}"),
+        ("bulk-workflow", f"{record}\n\n{_CURRENT}"),
+    )
+
+    details = _repair_with_history(group, histories)[1][0][1]["details"]
+
+    teams = parse_assessment("NOT_AFFECTED", details, False)["teams"]
+    assert sorted((team["historical"], team["ticket"]) for team in teams if team["team"] == "TeamB") == [
+        (False, "B-1"), (True, None),
+    ]
 
 
 def test_repair_refers_unassessed_teams_to_an_approved_global_assessment():
@@ -2151,6 +2292,26 @@ def test_repair_refers_only_teams_without_their_own_assessment():
     details = payloads[0][1]["details"]
     assert "[Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob]" in details and "Not shipped." in details
     assert details.count("See global assessment.") == 1
+
+
+def test_repair_does_not_replace_a_team_block_that_tracks_work_with_a_reference():
+    placeholder = (
+        "--- [Team: TeamB] [State: NOT_SET] [Assessed By: bob] [Date: 1700000000000] "
+        "[Assigned: bob] [Ticket: OPEN-9] ---\nlooking"
+    )
+    empty = "--- [Team: TeamC] [State: NOT_SET] [Assessed By: carl] ---"
+    text = f"{_GLOBAL}\n\n{placeholder}\n\n{empty}"
+    group = _repair_group([("NOT_AFFECTED", text)] * 2, tags=["TeamB", "TeamC"])
+
+    preview, payloads, _ = _repair(group)
+
+    assert preview["items"][0]["repairs"][0]["label"].startswith("Refer TeamC to the approved global assessment")
+    details = payloads[0][1]["details"]
+    # TeamB's block stays as it was, ticket, assignee, text and assessor.
+    assert placeholder in details
+    # Only the empty placeholder becomes a reference.
+    assert details.count("See global assessment.") == 1
+    assert "[Team: TeamC] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
 
 
 def test_repair_does_not_refer_teams_to_a_pending_or_missing_global_assessment():
@@ -2309,13 +2470,10 @@ def test_repair_keeps_the_tickets_of_a_former_team():
 
     details = _repair(group)[1][0][1]["details"]
 
-    # In the note a person reads, and as a field of the block that stays.
-    assert (
-        "Former team assessment (TeamA; NOT_AFFECTED; justification CODE_NOT_REACHABLE; "
-        "assessed by alice; ticket VP-101, SR-7):\nNot reachable."
-    ) in details
-    general = parse_assessment("NOT_AFFECTED", details, False)["teams"][0]
-    assert (general["team"], general["ticket"]) == ("General", "VP-101, SR-7")
+    # On the former team's own block, which stays as historical.
+    team_a = _team(details, "TeamA")
+    assert (team_a["historical"], team_a["ticket"]) == (True, "VP-101, SR-7")
+    assert _team(details, "General") is None
 
 
 def test_repair_keeps_the_tickets_when_it_combines_a_conflict():
@@ -2331,9 +2489,10 @@ def test_repair_keeps_the_tickets_when_it_combines_a_conflict():
 
     details = _repair(group)[1][0][1]["details"]
 
-    general = parse_assessment("EXPLOITABLE", details, False)["teams"][0]
-    assert general["team"] == "General"
-    assert general["ticket"] == "VP-9, VP-101, SR-7"
+    general = _team(details, "General", "EXPLOITABLE")
+    assert general["ticket"] == "VP-9"
+    team_a = _team(details, "TeamA", "EXPLOITABLE")
+    assert (team_a["historical"], team_a["ticket"]) == (True, "VP-101, SR-7")
 
 
 def _repair_with_history(group, histories):
@@ -2457,22 +2616,15 @@ def test_repair_keeps_the_date_of_a_former_team_assessment():
     # 2026-08-12 and 2026-10-16, in milliseconds since 1970.
     first = _FORMER.replace("[Justification:", "[Date: 1786492800000] [Justification:")
     second = first.replace("TeamA", "TeamC").replace("1786492800000", "1792108800000")
-    third = first.replace("TeamA", "TeamD")
     group = _repair_group(
-        [("NOT_AFFECTED", f"{first}\n\n{second}\n\n{third}\n\n{_CURRENT}")],
+        [("NOT_AFFECTED", f"{first}\n\n{second}\n\n{_CURRENT}")],
         tags=["TeamB"], lifecycle="ASSESSED",
     )
 
     details = _repair(group)[1][0][1]["details"]
 
-    # Teams that decided on the same day share a decision; another day is
-    # a decision of its own.
-    assert (
-        "Former team assessment ("
-        "TeamA, TeamD; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice; dated 2026-08-12"
-        " | TeamC; NOT_AFFECTED; justification CODE_NOT_REACHABLE; assessed by alice; dated 2026-10-16"
-        "):\nNot reachable."
-    ) in details
+    assert _team(details, "TeamA")["assessed_at_ms"] == 1786492800000
+    assert _team(details, "TeamC")["assessed_at_ms"] == 1792108800000
 
 
 # --- The analysis response in bulk workflows ---------------------------------
@@ -2540,7 +2692,7 @@ def test_repair_keeps_each_findings_response_when_it_synchronizes():
     assert "finding-1" not in details
 
 
-def test_repair_keeps_the_response_when_it_moves_a_former_team():
+def test_repair_keeps_the_response_when_it_keeps_a_former_team():
     from dtvp.assessment_model import analysis_response
 
     both = ("NOT_AFFECTED", f"[Response: UPDATE]\n\n{_FORMER}\n\n{_CURRENT}")
@@ -2551,7 +2703,7 @@ def test_repair_keeps_the_response_when_it_moves_a_former_team():
     assert len(payloads) == 2
     for _instance, payload in payloads:
         assert analysis_response(payload["details"]) == "UPDATE"
-        assert "[Team: TeamA]" not in payload["details"]
+        assert _team(payload["details"], "TeamA")["historical"] is True
 
 
 def test_rescoring_writers_keep_the_response():
@@ -2645,3 +2797,25 @@ def test_repair_does_not_combine_a_conflict_with_an_assessment_no_team_owns():
     )
     preview, payloads, _ = _repair(group, team_mapping=_UNOWNED_MAPPING)
     assert preview["items"] == [] and payloads == []
+
+
+def test_a_dropped_ticket_never_goes_to_an_unrelated_record():
+    # Only historical records are left, none the ticket came from: changing
+    # one would change what it says. The ticket is left for a person.
+    unrelated = _FORMER.replace("[Assessed By: alice]", "[Assessed By: someone-else]").replace(
+        "] ---", "] [Historical: yes] ---", 1
+    )
+    general_record = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] "
+        "[Justification: CODE_NOT_PRESENT] [Historical: yes] ---\nOld decision."
+    )
+    text = f"{unrelated}\n\n{general_record}"
+    group = _repair_group([("NOT_SET", text)], tags=["TeamB"], lifecycle="ASSESSED")
+    histories = _versions(("import", _TICKETED), ("bulk-workflow", text))
+
+    preview, payloads = _repair_with_history(group, histories)
+
+    assert payloads == []
+    assert preview["items"][0]["review"] == [
+        "A workflow dropped VP-101, SR-7; no assessment of its team or global one to return it to"
+    ]

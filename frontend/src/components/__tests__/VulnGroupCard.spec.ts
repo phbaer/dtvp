@@ -1934,6 +1934,26 @@ describe('VulnGroupCard', () => {
         expect(banner.find('[data-testid="card-differences-open"]').exists()).toBe(false)
     })
 
+    it('does not count a historical record as a team\'s current assessment', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        group.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+        group.affected_versions[0].components[0].analysis_details =
+            '--- [Team: Platform] [State: NOT_AFFECTED] [Assessed By: ana] [Date: 1700000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n'
+            + '--- [Team: Platform] [State: EXPLOITABLE] [Assessed By: old] [Date: 1800000000000] [Justification: NOT_SET] [Historical: yes] ---\nAn older owner thought so.\n\n'
+            + '--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] [Justification: NOT_SET] [Historical: yes] ---\nOverruled.'
+        const wrapper = mount(VulnGroupCard, { props: { group } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const vm = wrapper.vm as any
+        // The newer record does not stand in for Platform's current block,
+        // and a historical General block is no saved Global decision.
+        expect(vm.conflictingTeamStates).toEqual([])
+        expect(vm.hasSavedGlobalAssessment).toBe(false)
+        expect(vm.teamBlockMeta('Platform')?.state).toBe('NOT_AFFECTED')
+        expect(wrapper.find('[data-testid="card-team-states"]').exists()).toBe(false)
+    })
+
     it('marks a suppressed vulnerability in the header', async () => {
         const suppressedGroup = JSON.parse(JSON.stringify(mockGroup))
         suppressedGroup.affected_versions[0].components[0].is_suppressed = true

@@ -1,7 +1,12 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags, assessmentTextToFields, assessmentTextKey } from '../assessment-helpers';
+import parserCasesJson from './fixtures/assessment_parser_cases.json'
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags, assessmentTextToFields, assessmentTextKey, sanitizeAssessmentDetails, withoutHistoricalBlocks, markAssessmentBlocksHistorical } from '../assessment-helpers';
 import { renderAssessmentFields } from './assessmentFieldsText';
+
+// Kept inside the frontend tree: the Docker image builds the frontend
+// without the repository's tests/ folder.
+const parserCases = parserCasesJson as Array<{ name: string; text: string; blocks: any[] }>
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -364,11 +369,52 @@ Details A`;
 
         it('should clean redundant metadata from details', () => {
             const text = `--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] ---
-[Comment] [Team: TeamA] My actual rationale -- UserA`;
+[Team: TeamA] My actual rationale -- UserA`;
             const blocks = parseAssessmentBlocks(text);
             const teamA = blocks.find(b => b.team === 'TeamA');
             expect(teamA).toBeDefined();
             expect(teamA?.details).toBe('My actual rationale');
+        });
+
+        it.each(parserCases)('reads "$name" as the server does', ({ text, blocks }) => {
+            // fixtures/assessment_parser_cases.json is also read by
+            // test_logic.py. Text before the first header is the client's
+            // legacy General block; the server keeps it apart.
+            let read = parseAssessmentBlocks(text)
+            if (!text.trimStart().startsWith('---')) read = read.slice(1)
+            expect(read.map(block => ({
+                team: block.team,
+                state: block.state,
+                justification: block.justification || 'NOT_SET',
+                historical: Boolean(block.historical),
+                ticket: block.ticket || '',
+                details: block.details,
+            }))).toEqual(blocks)
+        });
+
+        it('keeps evidence and coverage values other than yes through a save', () => {
+            const stored = [
+                '--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: b] [Justification: CODE_NOT_REACHABLE] [Evidence Reviewed: partial] [Version Coverage: 6.x only] ---',
+                'Second.',
+                '',
+                '--- [Team: TeamT] [State: EXPLOITABLE] [Assessed By: t] [Date: 1] [Evidence Reviewed: partial] [Historical: yes] ---',
+                'Old.',
+            ].join('\n')
+            const { text } = mergeTeamAssessment(stored, 'TeamA', 'NOT_AFFECTED', 'Not shipped.', 'alice')
+
+            expect(text).toContain('[Team: TeamB] [State: NOT_AFFECTED] [Assessed By: b]')
+            expect(text).toContain('[Evidence Reviewed: partial] [Version Coverage: 6.x only]')
+            expect(text.match(/\[Evidence Reviewed: partial\]/g)).toHaveLength(2)
+            const fields = assessmentTextToFields(text)
+            const teamB = fields.teams.find(team => team.team === 'TeamB')
+            expect([teamB?.evidence_reviewed, teamB?.version_coverage]).toEqual(['partial', '6.x only'])
+        });
+
+        it('reads [Historical: yes ] as historical everywhere', () => {
+            const record = '--- [Team: TeamT] [State: EXPLOITABLE] [Assessed By: t] [Date: 1] [Evidence Reviewed: partial] [Historical: yes ] ---\nOld.';
+            expect(parseAssessmentBlocks(record)[0]?.historical).toBe(true);
+            expect(withoutHistoricalBlocks(record)).toBe('');
+            expect(markAssessmentBlocksHistorical(record, ['TeamT'])).toBe(record);
         });
 
         it('should parse review context metadata from block headers', () => {
@@ -491,6 +537,40 @@ Old Details`;
             expect(result.aggregatedState).not.toBe('NOT_SET');
         });
 
+        it('keeps a team\'s historical block beside its new assessment', () => {
+            const record = '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: olga] [Date: 1700000000000] [Justification: CODE_NOT_REACHABLE] [Ticket: T-1] [Historical: yes] ---\nOld reason.';
+            const { text, aggregatedState } = mergeTeamAssessment(record, 'TeamA', 'EXPLOITABLE', 'New reason.', 'bob', 'NOT_SET');
+
+            const blocks = parseAssessmentBlocks(text).filter(block => block.team === 'TeamA');
+            expect(blocks[0]).toMatchObject({ historical: true, timestamp: 1700000000000, ticket: 'T-1', justification: 'CODE_NOT_REACHABLE', details: 'Old reason.' });
+            expect(blocks.map(block => [block.historical, block.state, block.user])).toEqual([
+                [true, 'NOT_AFFECTED', 'olga'],
+                [false, 'EXPLOITABLE', 'bob'],
+            ]);
+            // The new assessment takes no ticket from the record.
+            expect(blocks[1].ticket || '').toBe('');
+            expect(aggregatedState).toBe('EXPLOITABLE');
+        });
+
+        it('keeps every distinct historical block of one team', () => {
+            const first = '--- [Team: Old] [State: EXPLOITABLE] [Assessed By: o1] [Date: 1600000000000] [Justification: NOT_SET] [Ticket: T-1] [Historical: yes] ---\nFirst.';
+            const second = '--- [Team: Old] [State: NOT_AFFECTED] [Assessed By: o2] [Date: 1650000000000] [Justification: CODE_NOT_REACHABLE] [Ticket: T-2] [Historical: yes] ---\nSecond.';
+            const { text } = mergeTeamAssessment(`${first}\n\n${second}\n\n${second}`, 'TeamA', 'NOT_AFFECTED', 'Alpha.', 'bob', 'CODE_NOT_REACHABLE');
+
+            const old = parseAssessmentBlocks(text).filter(block => block.team === 'Old');
+            expect(old.map(block => [block.historical, block.user, block.ticket, block.details])).toEqual([
+                [true, 'o1', 'T-1', 'First.'],
+                [true, 'o2', 'T-2', 'Second.'],
+            ]);
+        });
+
+        it('never takes a historical General block as the global decision', () => {
+            const text = '--- [Team: General] [State: EXPLOITABLE] [Assessed By: gina] [Justification: NOT_SET] [Historical: yes] ---\nOld global.';
+            const result = mergeTeamAssessment(text, 'TeamA', 'NOT_AFFECTED', 'Alpha.', 'bob', 'CODE_NOT_REACHABLE');
+            expect(result.aggregatedState).toBe('NOT_AFFECTED');
+            expect(result.text).toContain('Old global.');
+        });
+
         it('should preserve rescored tags across merges', () => {
             const initial = `[Rescored: 8.5]
 --- [Team: General] [State: NOT_SET] [Assessed By: Reviewer] [Justification: NOT_SET] ---
@@ -507,6 +587,61 @@ Old details.`;
             expect(text).toContain('[Version Coverage: yes]');
             expect(text).toContain('[Ticket: SEC-77]');
             expect(text).toContain('New details.');
+        });
+
+        describe('attribution', () => {
+            const stored = `--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Reviewed By: rita] [Date: 1790000000000] [Justification: CODE_NOT_REACHABLE] [Assigned: alice] [Ticket: EXP-1] ---
+Not reachable.`;
+            const merge = (overrides: {
+                state?: string, details?: string, justification?: string,
+                assigned?: string[], metadata?: Record<string, unknown>, pending?: boolean,
+            }) => {
+                const { text } = mergeTeamAssessment(
+                    stored, 'TeamA',
+                    overrides.state ?? 'NOT_AFFECTED',
+                    overrides.details ?? 'Not reachable.',
+                    'bob',
+                    overrides.justification ?? 'CODE_NOT_REACHABLE',
+                    undefined,
+                    overrides.pending ?? true,
+                    overrides.assigned ?? ['alice'],
+                    { ticket: 'EXP-1', evidenceReviewed: false, versionCoverageChecked: false, ...overrides.metadata },
+                );
+                return parseAssessmentBlocks(text).find(block => block.team === 'TeamA')!;
+            };
+            const kept = { user: 'alice', timestamp: 1790000000000, reviewer: 'rita' };
+
+            it.each([
+                ['ticket', { metadata: { ticket: 'EXP-1, EXP-2' } }],
+                ['evidence', { metadata: { evidenceReviewed: true } }],
+                ['coverage', { metadata: { versionCoverageChecked: true } }],
+                ['assignees', { assigned: ['alice', 'bob'] }],
+            ])('keeps assessor, date and reviewer when only the %s changes', (_name, overrides) => {
+                expect(merge(overrides)).toMatchObject(kept);
+            });
+
+            it('reads date and justification of a reviewed block', () => {
+                expect(parseAssessmentBlocks(stored)[0]).toMatchObject({
+                    ...kept, justification: 'CODE_NOT_REACHABLE',
+                });
+            });
+
+            it.each([
+                ['state', { state: 'EXPLOITABLE', metadata: { ticket: 'EXP-2' } }],
+                ['text', { details: 'Reachable after all.', metadata: { ticket: 'EXP-2' } }],
+                ['justification', { justification: 'CODE_NOT_PRESENT', metadata: { ticket: 'EXP-2' } }],
+            ])('re-stamps when the %s changes', (_name, overrides) => {
+                const block = merge(overrides);
+                expect(block.user).toBe('bob');
+                expect(block.timestamp).toBeGreaterThan(1790000000000);
+                expect(block.reviewer).toBeUndefined();
+            });
+
+            it('re-stamps an approval that changes only the ticket', () => {
+                const block = merge({ metadata: { ticket: 'EXP-2' }, pending: false });
+                expect(block.user).toBe('bob');
+                expect(block.timestamp).toBeGreaterThan(1790000000000);
+            });
         });
     });
 
@@ -762,4 +897,40 @@ My Policy Comment: track this carefully`
             expect(assessmentTextKey(undefined)).toBe('');
         });
     });
+
+    describe('restored historical blocks', () => {
+        const restored = [
+            '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: CODE_NOT_PRESENT] ---',
+            'Approved globally.',
+            '',
+            '--- [Team: TeamT] [State: EXPLOITABLE] [Assessed By: tom] [Date: 1600000000000] [Justification: NOT_SET] [Ticket: SYN-1] [Rescored: 9.8] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H] [Historical: yes] ---',
+            'Restored old text.',
+        ].join('\n')
+
+        it('keeps a historical block when its team saves', () => {
+            const saved = mergeTeamAssessment(restored, 'TeamT', 'NOT_AFFECTED', 'New decision.', 'tess', 'CODE_NOT_REACHABLE')
+            const final = sanitizeAssessmentDetails(saved.text)
+            const teamT = final.blocks.filter(block => block.team === 'TeamT')
+            expect(teamT.map(block => [block.historical, block.details])).toEqual([
+                [true, 'Restored old text.'],
+                [false, 'New decision.'],
+            ])
+            expect(teamT[0]?.ticket).toBe('SYN-1')
+            expect(teamT[1]?.ticket).toBe('')
+            expect(final.aggregatedState).toBe('NOT_AFFECTED')
+        })
+
+        it('does not take the rescoring of a historical block for the finding', () => {
+            expect(withoutHistoricalBlocks(restored)).not.toContain('Rescored')
+            const saved = mergeTeamAssessment(restored, 'TeamU', 'NOT_AFFECTED', 'Not shipped.', 'ulla', 'CODE_NOT_PRESENT')
+            const final = sanitizeAssessmentDetails(saved.text)
+            const fields = assessmentTextToFields(final.text)
+            expect(fields.rescored_score ?? null).toBeNull()
+            expect(fields.rescored_vector ?? null).toBeNull()
+            // The historical block keeps the rescoring it was recorded with.
+            const historical = fields.teams.find(team => team.historical)
+            expect(historical?.rescored_score).toBe(9.8)
+            expect(historical?.rescored_vector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
+        })
+    })
 });

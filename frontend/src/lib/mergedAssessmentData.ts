@@ -1,4 +1,5 @@
-import { assessmentTeamKey, constructAssessmentDetails, parseAssessmentBlocks, parseAssessmentResponse, type AssessmentBlock } from './assessment-helpers'
+import { assessmentBlockKey, constructAssessmentDetails, parseAssessmentBlocks, parseAssessmentResponse, withoutHistoricalBlocks, type AssessmentBlock } from './assessment-helpers'
+import { stripSsvcDetails } from './ssvc'
 import type { Instance } from '../types'
 
 const RESCORED_TAG_REGEX = /\[Rescored:\s*[\d.]+\]/
@@ -11,12 +12,14 @@ export interface MergedAssessmentData {
     response: string | null
 }
 
+// One active block per team, the newest; a historical block is a record of
+// its own and never stands in for the team's active one.
 const upsertLatestBlock = (
     allBlocks: AssessmentBlock[],
     teamToIndex: Map<string, number>,
     block: AssessmentBlock,
 ) => {
-    const teamKey = assessmentTeamKey(block.team)
+    const teamKey = assessmentBlockKey(block)
     const existingIndex = teamToIndex.get(teamKey)
     if (existingIndex === undefined) {
         teamToIndex.set(teamKey, allBlocks.length)
@@ -55,16 +58,22 @@ export const buildMergedAssessmentData = (allInstances: Instance[], _refreshTick
             upsertLatestBlock(allBlocks, teamToIndex, block)
         }
 
-        const rescoredMatch = RESCORED_TAG_REGEX.exec(instDetails)
+        // A historical block's rescoring is a record, not the finding's.
+        const rescoredMatch = RESCORED_TAG_REGEX.exec(stripSsvcDetails(withoutHistoricalBlocks(instDetails)))
         if (rescoredMatch) {
             allTags.add(rescoredMatch[0])
         }
     }
 
+    // Active blocks first: a lookup of a team's block finds its current one.
+    const blocks = [
+        ...allBlocks.filter(block => !block.historical),
+        ...allBlocks.filter(block => block.historical),
+    ]
     const sharedTags = [...allTags, ...(response ? [`[Response: ${response}]`] : [])]
     return {
-        blocks: allBlocks,
-        fullText: allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, sharedTags, isPendingValue).text : '',
+        blocks,
+        fullText: blocks.length > 0 ? constructAssessmentDetails(blocks, sharedTags, isPendingValue).text : '',
         isPending: isPendingValue,
         response,
     }

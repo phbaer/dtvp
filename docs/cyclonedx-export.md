@@ -106,22 +106,22 @@ separate entries as well.
 | State | `analysis.state` (`in_triage`, `not_affected`, `exploitable`, `false_positive`, `resolved`). Not set: no `analysis` |
 | Justification | `analysis.justification`, for not-affected findings with a CycloneDX justification |
 | [Response](assessment-model.md#response) | `analysis.response`, a list with the one value in lower case (`update`, `rollback`, `workaround_available`, `will_not_fix`, `can_not_fix`). Not set: no `response` |
-| Rationale (the General assessment, else the free text) | `analysis.detail`, without former team assessments and without `[Assessed by: …]` and `[Reviewed by: …]` tags |
+| Rationale (the General assessment, else the free text) | `analysis.detail`, without former team notes and without `[Assessed by: …]` and `[Reviewed by: …]` tags |
 | Date of the assessment | `analysis.lastUpdated`: the date of the General assessment, or, when it has none, the latest date of the live team assessments. A reviewer's approval keeps the date, so it is when the assessment was last written. DTVP does not record when it was first made: no `analysis.firstIssued` |
 | Rescoring | A `ratings` entry whose `source.name` is the assessment source, with `score`, `severity`, `method`, `vector`, and the rationale as `justification`. A rescoring that has a score and no CVSS vector has the `method` `other` and no `vector` |
 | One team's assessment | An entry in the BOM's `annotations`: `subjects` is the vulnerability's `bom-ref`, `annotator.organization.name` the team, `annotator.organization.contact[0].name` the assessor, `text` the team's text. `timestamp` is the team's date; without one, the date of the assessment (the source of `analysis.lastUpdated`, also when the state is not set) and `<prefix>:annotation_dated_by_assessment`; without either, the export time and `<prefix>:undated_annotation`. A team whose text only says "See global assessment." has no annotation |
 | An annotation dated by its assessment (the team recorded no date) | One property `<prefix>:annotation_dated_by_assessment` per such annotation, in annotation order. The value is the annotator's name: the team, or the assessor of an assessment without a team. The date is when the assessment was last written, not the team's own, see [Limits](#limits) |
 | An annotation without any recorded date | One property `<prefix>:undated_annotation` per such annotation, in annotation order. The value is the annotator's name: the team, or the assessor of an assessment without a team |
 | Assessor, reviewer | Properties `<prefix>:assessed_by`, `<prefix>:reviewed_by`, from the assessments' fields and from `[Assessed by: …]`, `[Reviewed by: …]` tags inside their texts |
-| Ticket references | Property `<prefix>:spr`, comma-separated: the tickets recorded with the live and the historical team assessments, then the keys the texts mention (live, former and historical ones), if ticket prefixes are configured. A ticket is about the vulnerability in the product, not about who owned the component |
+| Ticket references | Property `<prefix>:spr`, comma-separated: the tickets recorded with the live and the historical team assessments, then the keys the texts mention (live ones, former team notes and historical ones), if ticket prefixes are configured. A ticket is about the vulnerability in the product, not about who owned the component |
 | Pending review, suppressed | Properties `<prefix>:pending_review`, `<prefix>:suppressed` (`true`; absent otherwise) |
 | State per team | One property `<prefix>:team_state` per team, as `<team>=<STATE>` |
 | State of an assessment without a team | One property `<prefix>:unassigned_state` per such assessment, as `<assessor>=<STATE>` (`-` without an assessor), see [Assessments Without A Team](#assessments-without-a-team) |
 | SSVC decision | Property `<prefix>:ssvc` |
 | Free text beside a General assessment | Property `<prefix>:free_text` |
-| Assessments of teams that no longer own the component, as the repair noted them in the General assessment | One property `<prefix>:former_assessment` per note, as written ("Former team assessment (…)…") |
+| Assessments of teams that no longer own the component, as earlier repairs noted them in the General assessment | One property `<prefix>:former_assessment` per note, as written ("Former team assessment (…)…"). The repair now keeps such assessments as historical blocks (next row); notes come only from earlier repairs |
 | Where the recommendation comes from | Property `<prefix>:recommendation_source` (`advisory`, `fixed_version`), and for a derived one `<prefix>:recommendation_fixed_by` per mirror, see [Recommendation](#recommendation) |
-| Team assessments marked historical (the team no longer owns the component) | One property `<prefix>:historical_assessment` per assessment. The value is a JSON object with `team`, `state`, and where recorded `justification`, `assessed_by`, `reviewed_by`, `date`, `ticket`, `text`. Not a `team_state` and not an annotation |
+| Team assessments marked historical (the team no longer owns the component, a save left the block out, or the repair kept it) | One property `<prefix>:historical_assessment` per assessment. The value is a JSON object with `team`, `state`, and where recorded `justification`, `assessed_by`, `reviewed_by`, `date`, `ticket`, `text`. Not a `team_state` and not an annotation |
 
 The document's `metadata.properties` name the variant, the assessment source,
 the property prefix, and the DTVP version (`<prefix>:export`,
@@ -205,8 +205,9 @@ both per product (`assessment_source` and `sbom_property_prefix` in its
   the project. If they are neither stored nor readable, the document has the
   finding's values only and says so with `<prefix>:export_advisory_records`.
   A CVSS vector that cannot be read is exported without a score.
-- **Former team assessments** are recognised by the line the repair writes
-  ("Former team assessment (…)"). Nothing marks where such a note ends:
+- **Former team notes** are recognised by the line earlier repairs wrote
+  ("Former team assessment (…)"); the repair now keeps a former team's block
+  as a historical assessment instead. Nothing marks where such a note ends:
   everything from the first note to the end of the General assessment is
   exported as former assessments, also text that was added below a note
   later.

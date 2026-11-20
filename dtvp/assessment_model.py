@@ -191,7 +191,10 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
     shared, blocks = parse_assessment_blocks(raw)
     score = _SCORE.search(shared)
     vector = _VECTOR.search(shared)
-    general = next((b for b in blocks if b.get("team") == "General"), None)
+    general = next(
+        (b for b in blocks if b.get("team") == "General" and not b.get("historical")),
+        None,
+    )
     free_text = _PENDING.sub(
         "", _RESPONSE.sub("", _VECTOR.sub("", _SCORE.sub("", shared)))
     ).strip()
@@ -259,9 +262,11 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
         if not name:
             raise ValueError("Every team assessment needs a team name")
         name = "General" if name.casefold() == "general" else name
-        if name.casefold() in seen:
-            raise ValueError(f"More than one assessment for team {name}")
-        seen.add(name.casefold())
+        # Historical blocks are records beside the team's current one.
+        if not team.get("historical"):
+            if name.casefold() in seen:
+                raise ValueError(f"More than one assessment for team {name}")
+            seen.add(name.casefold())
         justification = _header_value(team.get("justification") or "")
         assessed_at = _number(team.get("assessed_at_ms"))
         teams.append(
@@ -302,7 +307,10 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
             ),
         )
     )
-    general = next((team for team in teams if team["team"] == "General"), None)
+    general = next(
+        (team for team in teams if team["team"] == "General" and not team["historical"]),
+        None,
+    )
     score = _number(fields.get("rescored_score"))
     vector = _header_value(fields.get("rescored_vector") or "") or None
     response = normalize_response(fields.get("response"))
@@ -330,7 +338,13 @@ def render_assessment(fields: dict[str, Any]) -> str:
 
 
 def _render_clean(fields: dict[str, Any]) -> str:
-    general = next((team for team in fields["teams"] if team["team"] == "General"), None)
+    general = next(
+        (
+            team for team in fields["teams"]
+            if team["team"] == "General" and not team["historical"]
+        ),
+        None,
+    )
     parts: list[str] = []
     shared = []
     # Written beside the teams only when it is not the General assessment's

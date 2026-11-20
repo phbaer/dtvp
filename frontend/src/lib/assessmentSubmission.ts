@@ -1,4 +1,5 @@
-import { assessmentTeamKey, assessmentTextToFields, constructAssessmentDetails, markAssessmentBlocksHistorical, mergeTeamAssessment, parseAssessmentBlocks, parseAssessmentResponse, sanitizeAssessmentDetails, setAssessmentResponse, type AssessmentBlock } from './assessment-helpers'
+import { assessmentBlockKey, assessmentTeamKey, assessmentTextToFields, constructAssessmentDetails, markAssessmentBlocksHistorical, mergeTeamAssessment, parseAssessmentBlocks, parseAssessmentResponse, sanitizeAssessmentDetails, setAssessmentResponse, withoutHistoricalBlocks, type AssessmentBlock } from './assessment-helpers'
+import { stripSsvcDetails } from './ssvc'
 import { cleanStructuredAssessmentDetails } from './assessmentFormState'
 import type { AssessmentPayload, Instance } from '../types'
 
@@ -89,12 +90,15 @@ export interface SavedAssessmentResultState {
     nextLastRescoredScore: number | null
 }
 
+// One active block per team, the newest; a historical block is a record of
+// its own and never stands in for the team's active one (as in
+// mergedAssessmentData.ts).
 const upsertLatestBlock = (
     allBlocks: AssessmentBlock[],
     teamToIndex: Map<string, number>,
     block: AssessmentBlock,
 ) => {
-    const teamKey = assessmentTeamKey(block.team)
+    const teamKey = assessmentBlockKey(block)
     const existingIndex = teamToIndex.get(teamKey)
     if (existingIndex === undefined) {
         teamToIndex.set(teamKey, allBlocks.length)
@@ -112,7 +116,10 @@ const upsertLatestBlock = (
     }
 }
 
-const collectRescoredTags = (detailsToParse: string, allTags: Set<string>) => {
+// The finding's rescoring: a historical block's rescoring is a record and
+// does not rescore the finding (as sanitizeAssessmentDetails reads it).
+const collectRescoredTags = (fullText: string, allTags: Set<string>) => {
+    const detailsToParse = stripSsvcDetails(withoutHistoricalBlocks(fullText))
     const rescoredMatch = RESCORED_TAG_REGEX.exec(detailsToParse)
     if (rescoredMatch) {
         allTags.add(rescoredMatch[0])
@@ -256,8 +263,8 @@ const changesOtherTeam = (
     if (state === 'NOT_SET' && !details.trim() && justification === 'NOT_SET') return false
     if (takeoverSources?.has(teamName)) return true
     const existing = parseAssessmentBlocks(currentText)
-        .find(block => assessmentTeamKey(block.team) === assessmentTeamKey(teamName))
-    if (!existing || existing.historical) return true
+        .find(block => !block.historical && assessmentTeamKey(block.team) === assessmentTeamKey(teamName))
+    if (!existing) return true
     return !(
         (existing.state || 'NOT_SET') === state
         && (existing.justification || 'NOT_SET') === justification
@@ -403,8 +410,10 @@ export const buildSavedAssessmentResultState = ({
     suppressed: boolean
     currentAssigned: string[]
 }): SavedAssessmentResultState => {
-    const rescoredScoreMatch = RESCORED_TAG_VALUE_REGEX.exec(success.new_details)
-    const rescoredVectorMatch = RESCORED_VECTOR_VALUE_REGEX.exec(success.new_details)
+    // The finding's own rescoring; a historical record's tags do not count.
+    const ownText = stripSsvcDetails(withoutHistoricalBlocks(success.new_details || ''))
+    const rescoredScoreMatch = RESCORED_TAG_VALUE_REGEX.exec(ownText)
+    const rescoredVectorMatch = RESCORED_VECTOR_VALUE_REGEX.exec(ownText)
 
     let rescoredCvss: number | null = rescoredScoreMatch ? Number(rescoredScoreMatch[1]) : null
     let rescoredVector: string | null = rescoredVectorMatch?.[1] || null

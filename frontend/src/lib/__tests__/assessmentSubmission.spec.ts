@@ -77,6 +77,49 @@ describe('assessmentSubmission', () => {
         })
     })
 
+    it('keeps assessor and date when the team changes only its ticket', () => {
+        const stored = [
+            '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1790000000000] [Justification: CODE_NOT_REACHABLE] [Ticket: EXP-1] ---',
+            'Not reachable.',
+            '',
+            '[Status: Pending Review]',
+        ].join('\n')
+        const prepared = prepareAssessmentSubmission({
+            allInstances: [{ ...instances[0]!, analysis_state: 'NOT_AFFECTED', analysis_details: stored }],
+            originalAnalysis: {},
+            selectedTeam: 'TeamA',
+            state: 'NOT_AFFECTED',
+            details: 'Not reachable.',
+            justification: 'CODE_NOT_REACHABLE',
+            currentAssigned: [],
+            evidenceReviewed: false,
+            versionCoverageChecked: false,
+            ticket: 'EXP-1, EXP-2',
+            teamDrafts: new Map(),
+            isReviewer: false,
+            pendingVector: '',
+            pendingScore: null,
+            initialVector: '',
+            initialScore: null,
+            originalVector: '',
+            originalScore: null,
+            currentUser: 'bob',
+            isApprove: false,
+            showRawEdit: false,
+            rawDetailsTouched: false,
+            rawDetails: '',
+            mergedAssessmentFullText: stored,
+            suppressed: false,
+            force: false,
+        })
+
+        const [team] = prepared.payload.fields!.teams
+        expect(team).toMatchObject({
+            team: 'TeamA', ticket: 'EXP-1, EXP-2',
+            assessed_by: 'alice', assessed_at_ms: 1790000000000,
+        })
+    })
+
     it('merges the active draft into the payload and preserves unsaved team drafts', () => {
         const prepared = prepareAssessmentSubmission({
             allInstances: instances,
@@ -289,6 +332,28 @@ describe('assessmentSubmission', () => {
         expect(result.nextLastRescoredScore).toBe(5.4)
     })
 
+    it('does not take a historical record\'s rescoring as the finding\'s after a save', () => {
+        const record = '--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Justification: NOT_SET] '
+            + '[Rescored: 9.8] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H] [Historical: yes] ---\nOld record.'
+        const result = buildSavedAssessmentResultState({
+            success: {
+                new_state: 'NOT_AFFECTED',
+                new_details: `--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n${record}`,
+            },
+            isReviewer: false,
+            pendingVector: '',
+            pendingScore: null,
+            baseVector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+            existingRescoredVector: null,
+            existingRescoredCvss: null,
+            suppressed: false,
+            currentAssigned: [],
+        })
+
+        expect(result.emittedAssessment.rescored_cvss ?? null).toBeNull()
+        expect(result.emittedAssessment.rescored_vector ?? null).toBeNull()
+    })
+
     it('preserves score-only rescored state from saved details when no vector is present', () => {
         const result = buildSavedAssessmentResultState({
             success: {
@@ -342,6 +407,81 @@ describe('assessmentSubmission', () => {
                 dtvpSyncStatus: 'pending',
                 dtvpUpdateId: 'update-1',
             },
+        })
+    })
+
+    const teamSave = (allInstances: Instance[]) => prepareAssessmentSubmission({
+        allInstances,
+        originalAnalysis: {},
+        selectedTeam: 'TeamB',
+        state: 'NOT_AFFECTED',
+        details: 'Not shipped.',
+        justification: 'CODE_NOT_PRESENT',
+        currentAssigned: [],
+        evidenceReviewed: false,
+        versionCoverageChecked: false,
+        ticket: '',
+        teamDrafts: new Map(),
+        isReviewer: false,
+        pendingVector: '',
+        pendingScore: null,
+        initialVector: '',
+        initialScore: null,
+        originalVector: '',
+        originalScore: null,
+        currentUser: 'bob',
+        isApprove: false,
+        showRawEdit: false,
+        rawDetailsTouched: false,
+        rawDetails: '',
+        mergedAssessmentFullText: '',
+        suppressed: false,
+        force: false,
+    })
+    const finding = (id: string, details: string): Instance => ({
+        ...instances[0]!, finding_uuid: id, component_uuid: `component-${id}`, analysis_details: details,
+    })
+
+    it('does not take the rescoring of a historical block as the finding\'s', () => {
+        const prepared = teamSave([finding('f1', [
+            '--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] [Rescored: 9.1] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H] [Historical: yes] ---',
+            'Old record.',
+        ].join('\n'))])
+
+        expect(prepared.finalText.startsWith('---')).toBe(true)
+        expect(prepared.payload.fields!.rescored_score).toBeNull()
+        expect(prepared.payload.fields!.rescored_vector).toBeNull()
+        const record = prepared.payload.fields!.teams.find(team => team.team === 'TeamA')
+        expect(record).toMatchObject({ historical: true, rescored_score: 9.1 })
+    })
+
+    it('keeps a team\'s current block next to a newer historical one of the same team', () => {
+        const live = '--- [Team: TeamX] [State: NOT_AFFECTED] [Assessed By: xa] [Date: 1600000000000] [Justification: CODE_NOT_PRESENT] ---\nCurrent.'
+        const undated = '--- [Team: TeamX] [State: NOT_AFFECTED] [Assessed By: xa] [Justification: CODE_NOT_PRESENT] ---\nCurrent.'
+        const record = '--- [Team: TeamX] [State: EXPLOITABLE] [Assessed By: xo] [Date: 1650000000000] [Justification: NOT_SET] [Historical: yes] ---\nOld.'
+        const older = '--- [Team: TeamX] [State: IN_TRIAGE] [Assessed By: xp] [Date: 1550000000000] [Justification: NOT_SET] [Historical: yes] ---\nOlder.'
+        for (const allInstances of [
+            [finding('f1', `${live}\n\n${record}`)],
+            [finding('f1', `${undated}\n\n${record}`)],
+            // Across the findings of a group.
+            [finding('f1', live), finding('f2', `${record}\n\n${older}`)],
+        ]) {
+            const teams = teamSave(allInstances).payload.fields!.teams
+                .filter(team => team.team === 'TeamX')
+                .map(team => [team.state, team.historical])
+            expect(teams).toHaveLength(allInstances.length === 2 ? 3 : 2)
+            expect(teams).toContainEqual(['NOT_AFFECTED', false])
+            expect(teams).toContainEqual(['EXPLOITABLE', true])
+        }
+    })
+
+    it('sends a historical block\'s text back as written', () => {
+        const stored = '--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] [Historical: yes] ---\n[Comment] Fixed upstream, see [Ticket: ABC-1] for details.'
+        const record = teamSave([finding('f1', stored)]).payload.fields!.teams.find(team => team.team === 'TeamA')
+        expect(record).toMatchObject({
+            historical: true,
+            details: '[Comment] Fixed upstream, see [Ticket: ABC-1] for details.',
+            ticket: null,
         })
     })
 })

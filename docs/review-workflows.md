@@ -308,6 +308,13 @@ tmrescore remain supporting context rather than a synthetic `automation` team.
 A tmrescore proposal stages a normal Global draft and waits for the explicit
 save action. Local drafts survive tab and team-scope changes. Closing or
 switching a vulnerability prompts the user to save, discard, or keep editing.
+A save cannot lose another team's assessment: an assessed block the saved
+text leaves out, other than the saved team's own, is kept as historical, and a
+team save keeps the General assessment (see
+[Assessment model](assessment-model.md)). Only the delete action removes a
+block. A save that changes only a ticket, the evidence or version checks, or
+the assignees keeps the block's assessor, date and reviewer; an approval still
+records the approving reviewer.
 Assessment writes refresh the active task window, and route state preserves
 filters when navigating to statistics or code analysis. Once the transactional
 local save succeeds, the card reports that it is saved locally while
@@ -340,40 +347,51 @@ label per applicable repair and count only the findings that change.
 | Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
 | Restore tickets | Findings whose history shows that a workflow removed a ticket | See below |
 | Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one. The [response](assessment-model.md#response) is kept as well; a finding without one takes the response the other findings agree on |
-| Move former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
-| Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset |
+| Keep former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
+| Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset. A team block without a decision that holds a text, ticket, assignees, evidence or coverage stays as it is, and that team is left to assess |
 | Remove references no team stands behind | A block under the name for components no team owns (the team mapping's `*`, or `Unassigned`) whose text is only `See global assessment.` | The block is removed. An assessment someone wrote under that name stays: it is the assessment of a component without a team, not a former team's |
 | Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |
 | Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
 
-A former team's assessment is never discarded. Its block is removed and its
-decision, justification, assessor, date, ticket, and rationale are recorded as
-a note in the global assessment (`…; assessed by alice; dated 2026-08-12;
-ticket VP-101`). The date is the day the team wrote its assessment, not the
-day of the repair; teams that decided the same on different days are listed as
-separate decisions. Its tickets also become tickets of the global
-assessment: a ticket tracks the vulnerability in the product, whoever owned
-the component when it was opened. Notes are deduplicated, ignoring case and whitespace: a
-rationale shared by several teams or decisions is written once with every
-decision listed, a rationale the global assessment already contains is
-referenced instead of repeated, and a decision that is already recorded adds
-nothing. Who decided what is always kept:
+A former team's assessment is never discarded. Its block stays as
+`[Historical: yes]` with every field: decision, justification, assessor,
+reviewer, date, ticket, and rationale. It no longer counts toward the state or
+the team coverage, its tickets stay on it, and a later save of the global
+assessment cannot drop it. The repair writes no General block just to record
+it:
 
-- When every current team has its own assessment, the note is informational:
-  the global state stays unset and the current teams keep deciding.
+- When every current team has its own assessment, the current teams keep
+  deciding; the global assessment, if any, is left as it is.
 - When a current team has no assessment, the former decision becomes the
   global decision (the worst state when former teams differ), unless a global
-  decision already exists. If that result is approved, each team without an
-  assessment receives a block with the global state and the text
-  `See global assessment.`; while it is pending review those teams stay open
-  and the vulnerability remains Incomplete.
+  decision already exists. The global assessment takes the state,
+  justification, and date of the deciding assessment (the day the team wrote
+  it, not the day of the repair), and a copy of its rationale, so that the
+  decision does not stand without a text. If that result is approved, each
+  team without an assessment receives a block with the global state and the
+  text `See global assessment.`; while it is pending review those teams stay
+  open and the vulnerability remains Incomplete. A current team that already
+  has a historical block gets no reference block and stays open; its own
+  later assessment is written beside the historical block, which stays.
+
+Notes in the global assessment written by earlier repairs ("Former team
+assessment (…)") stay as they are and are still exported.
 
 A Conflicting group is combined only when no current team has an assessment,
 so nothing a responsible team decided is overruled. Its former-team and global
 assessments across all findings become one global assessment written to every
-finding: the worst state wins, distinct global texts are kept, and former-team
-decisions are recorded as notes. If the sources agree on the state and none
-was pending review, each current team receives a `See global assessment.`
+finding: the worst state wins and distinct global texts are kept; without
+one, the global text is the deciding rationale. Former teams' blocks stay as
+historical blocks, and blocks that were historical already stay as they are,
+the global assessment's included: one block per distinct record, so that
+every assessor, reviewer, date, rescoring and text is kept. Blocks that differ
+only in their tickets are one block with all the tickets. A General
+decision the combined one replaces stays as a historical record with its
+state, assessor and date. A team's block without a decision that holds a
+text, ticket or assignees stays as it is, and that team is not referred to
+the global assessment. No "Former team assessment" note is written. If
+the sources agree on the state and none
+was pending review, each other current team receives a `See global assessment.`
 block and the vulnerability becomes Assessed. If the sources disagree, the
 combined decision is new: it is marked pending review and the current teams
 stay open. Conflicts that involve a current team's assessment still need a
@@ -383,8 +401,11 @@ Tickets are restored from DTVP's own [history](import-export.md#history). A
 ticket counts as dropped when one version of a finding's assessment had it in
 a team's ticket field, the next version was written by a bulk workflow and
 names it nowhere, and the current text does not name it either. It returns to
-the block of its team when the team still has one, else to the global
-assessment; without either, the preview lists it for a manual decision. A
+the current block of its team when the team still has one, else to the
+current global assessment, else to the exact historical record it was
+dropped from (same team, assessor and date); without any of these, the
+preview lists it for a manual decision. No other historical record is
+changed. A
 ticket that a person removed stays removed. Versions from before the history
 existed cannot be compared: for those, the text Dependency-Track still holds
 or its audit trail is the only source.
