@@ -232,7 +232,9 @@ assessment again). In the **Assessment** tab of a vulnerability, the delete
 button next to Save offers:
 
 - **Only the open team's assessment** (or the General assessment, on the
-  General tab). The other teams' text is kept exactly as it was. Deleting the
+  General tab). The other teams' text, and the team's own historical
+  assessments, are kept exactly as they were; only when historical
+  assessments are all the team has are they deleted. Deleting the
   General assessment also removes the SSVC decision and the response stored
   with it.
 - **The whole assessment**: every team, the General assessment, rescoring,
@@ -251,6 +253,14 @@ delete.
 `POST /api/assessment/delete` takes `instances` and `team` (a team name,
 `"General"`, or `null` for everything). It answers 422 when there is nothing
 to delete and 409 when a finding changed in the meantime.
+
+## Reading A Dependency-Track Export Back
+
+Dependency-Track keeps the text DTVP last exported. A CycloneDX VDR that
+Dependency-Track exported can therefore be read back to restore team
+assessments DTVP lost: see
+[Restore team assessments from an export](review-workflows.md#restore-team-assessments-from-an-export).
+Nothing else is imported from such a file.
 
 ## Findings That Disappear
 
@@ -361,8 +371,8 @@ vulnerabilities with more than 30 findings only the first 30 are loaded.
 `export-discarded`, `import` (adopted from Dependency-Track), `carried-over`
 and `carried-over-by-vulnerability` (taken over from a replaced finding; see
 [Findings that disappear](#findings-that-disappear)), and
-`conflict-resolution` (only in history written before conflicts were removed). Bulk workflows and imports
-record no author. `GET /api/assessments/history` with `project_uuid`,
+`conflict-resolution` (only in history written before conflicts were removed). A bulk
+workflow records the reviewer who applied it as author; imports record no author. `GET /api/assessments/history` with `project_uuid`,
 `component_uuid`, and `vulnerability_uuid` returns it, newest first.
 
 History starts with the version that introduced it: an assessment edited in

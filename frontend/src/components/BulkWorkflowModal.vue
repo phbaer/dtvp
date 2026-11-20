@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { AlertTriangle, CheckCircle, Copy, Download, ExternalLink, Layers, Loader2, X } from '@lucide/vue'
+import { AlertTriangle, CheckCircle, Copy, Download, ExternalLink, Layers, Loader2, Upload, X } from '@lucide/vue'
 import {
     applyBulkWorkflow,
     buildBulkWorkflowDocument,
     bulkWorkflowFilters,
     getBulkWorkflowSummary,
     previewBulkWorkflow,
+    uploadBulkWorkflowSource,
     type BulkWorkflowApplyResponse,
     type BulkWorkflowFilters,
     type BulkWorkflowPreviewItem,
     type BulkWorkflowPreviewResponse,
+    type BulkWorkflowSourceUpload,
     type BulkWorkflowSummaryItem,
     type BulkWorkflowTaskStatus,
     type RescoreRuleSyncPreviewFinding,
@@ -54,6 +56,11 @@ const ticketCopyState = ref<Record<string, 'copied' | 'error'>>({})
 const jiraCreateUrl = getRuntimeConfig('DTVP_JIRA_CREATE_URL', '').trim()
 const previewCache = new Map<string, BulkWorkflowPreviewResponse>()
 let previewRequestId = 0
+// The uploaded file of a workflow that reads one (requires_source).
+const sourceUpload = ref<BulkWorkflowSourceUpload | null>(null)
+const sourceFileName = ref('')
+const sourceUploading = ref(false)
+const RESTORE_WORKFLOW_ID = 'team-assessment-restore'
 
 type AutomaticOutcomeFilter = 'ALL' | AutomaticAssessmentOutcome
 type AutomaticRescoreFilter = 'ALL' | AutomaticAssessmentRescoreState
@@ -72,6 +79,20 @@ const automaticRescoreFilters = ref<Set<AutomaticAssessmentRescoreState>>(new Se
 const selectedWorkflow = computed(() =>
     workflows.value.find(workflow => workflow.id === selectedWorkflowId.value) || null
 )
+const workflowRequiresSource = (workflowId: string) =>
+    !!workflows.value.find(workflow => workflow.id === workflowId)?.requires_source
+const sourceIdFor = (workflowId: string) =>
+    workflowRequiresSource(workflowId) ? sourceUpload.value?.source_id : undefined
+const previewCacheKey = (workflowId: string) => {
+    const sourceId = sourceIdFor(workflowId)
+    return sourceId ? `${workflowId}:${sourceId}` : workflowId
+}
+// Arguments appended only for a workflow that reads an upload, so the calls
+// of the other workflows stay as they were.
+const sourceArgs = (workflowId: string): [string] | [] => {
+    const sourceId = sourceIdFor(workflowId)
+    return sourceId ? [sourceId] : []
+}
 const selectableIds = computed(() => preview.value?.selectable_group_ids || [])
 const selectedFindingCount = computed(() =>
     (preview.value?.items || [])
@@ -176,6 +197,42 @@ const itemRepairs = (item: BulkWorkflowPreviewItem) =>
 const itemReviewNotes = (item: BulkWorkflowPreviewItem) =>
     (Array.isArray(item.review) ? item.review : []) as string[]
 
+interface RestoreBlock {
+    project_version?: string | null
+    component_name?: string | null
+    component_version?: string | null
+    match: string
+    team: string
+    state: string
+    justification?: string | null
+    assessed_by?: string | null
+    date?: string | null
+    ticket?: string | null
+    source_historical?: boolean
+    text_excerpt?: string
+}
+
+const restoreBlocks = (item: BulkWorkflowPreviewItem) =>
+    (Array.isArray(item.blocks) ? item.blocks : []) as RestoreBlock[]
+
+const restoreNotes = (item: BulkWorkflowPreviewItem) =>
+    (Array.isArray(item.notes) ? item.notes : []) as Array<Record<string, any>>
+
+const restoreNoteText = (note: Record<string, any>) =>
+    note.kind === 'present_ticket_missing'
+        ? `${note.team} is present, but ${(note.tickets || []).join(', ')} is named nowhere (not written)`
+        : `${note.team} is missing; ${note.copied_to} was copied from it (restored as historical)`
+
+const unmatchedCounts = computed(() =>
+    (preview.value?.summary?.unmatched || {}) as Record<string, number>
+)
+const unmatchedTotal = computed(() =>
+    Object.values(unmatchedCounts.value).reduce((total, count) => total + Number(count || 0), 0)
+)
+const unmatchedSamples = computed(() =>
+    (preview.value?.summary?.unmatched_samples || []) as Array<Record<string, any>>
+)
+
 const formatCvssScore = (score: number | null | undefined) =>
     score == null ? '—' : Number(score).toFixed(1)
 
@@ -228,6 +285,10 @@ const itemDetail = (item: BulkWorkflowPreviewItem) => {
             ? `${plural(Number(item.finding_count || 0), 'finding')} will be updated`
             : 'No automatic repair available'
     }
+    if (selectedWorkflowId.value === RESTORE_WORKFLOW_ID) {
+        if (!item.restore_count) return 'Notes only; nothing to restore'
+        return `${item.restore_count || 0} team assessments on ${item.finding_count || 0} findings`
+    }
     return `${item.finding_count || 0} findings`
 }
 
@@ -248,7 +309,13 @@ const loadPreview = async (workflowId: string) => {
     operationMessage.value = ''
     operationProgress.value = 0
     resetAutomaticAssessmentFilters()
-    const cached = previewCache.get(workflowId)
+    if (workflowRequiresSource(workflowId) && !sourceUpload.value) {
+        // Nothing to preview before a file is uploaded.
+        loading.value = false
+        return
+    }
+    const cacheKey = previewCacheKey(workflowId)
+    const cached = previewCache.get(cacheKey)
     if (cached) {
         loading.value = false
         preview.value = cached
@@ -264,9 +331,10 @@ const loadPreview = async (workflowId: string) => {
             status => {
                 if (requestId === previewRequestId) updateOperationStatus(status)
             },
+            ...sourceArgs(workflowId),
         )
         if (requestId !== previewRequestId) return
-        previewCache.set(workflowId, result)
+        previewCache.set(cacheKey, result)
         preview.value = result
         selectedIds.value = defaultSelection(result)
         workflows.value = workflows.value.map(workflow =>
@@ -299,6 +367,8 @@ const loadWorkflows = async () => {
     operationProgress.value = 0
     resetAutomaticAssessmentFilters()
     previewCache.clear()
+    sourceUpload.value = null
+    sourceFileName.value = ''
     previewRequestId += 1
     try {
         const response = await getBulkWorkflowSummary(props.taskId, activeFilters.value)
@@ -308,6 +378,37 @@ const loadWorkflows = async () => {
     } finally {
         loading.value = false
     }
+}
+
+const chooseSourceFile = async (event: Event) => {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    const workflowId = selectedWorkflowId.value
+    if (!file || !workflowId) return
+    // Another file: the preview of the previous one no longer applies.
+    previewRequestId += 1
+    preview.value = null
+    selectedIds.value = new Set()
+    appliedResult.value = null
+    sourceUpload.value = null
+    sourceFileName.value = file.name
+    error.value = ''
+    sourceUploading.value = true
+    try {
+        sourceUpload.value = await uploadBulkWorkflowSource(file)
+    } catch (err: any) {
+        error.value = err?.response?.data?.detail || err?.message || 'Unable to read this file.'
+        return
+    } finally {
+        sourceUploading.value = false
+        input.value = ''
+    }
+    await loadPreview(workflowId)
+}
+
+const formatSourceTime = (value: string) => {
+    const date = new Date(value)
+    return value && !Number.isNaN(date.getTime()) ? date.toLocaleString() : value || 'unknown'
 }
 
 const toggleItem = (item: BulkWorkflowPreviewItem) => {
@@ -392,6 +493,7 @@ const exportTicketDocument = async () => {
             Array.from(selectedIds.value),
             preview.value.preview_token,
             updateOperationStatus,
+            ...sourceArgs(preview.value.workflow.id),
         )
         const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }))
         const link = document.createElement('a')
@@ -420,6 +522,7 @@ const applySelected = async () => {
             Array.from(selectedIds.value),
             preview.value.preview_token,
             updateOperationStatus,
+            ...sourceArgs(preview.value.workflow.id),
         )
         appliedResult.value = result
         emit('applied', result)
@@ -480,7 +583,55 @@ watch(() => props.show, show => {
                     </button>
                 </aside>
 
-                <main class="flex min-h-0 flex-col gap-4 overflow-hidden p-6">
+                <main
+                    class="flex min-h-0 flex-col gap-4 p-6"
+                    :class="selectedWorkflow?.requires_source ? 'overflow-y-auto' : 'overflow-hidden'"
+                >
+                    <section
+                        v-if="selectedWorkflow?.requires_source && !appliedResult"
+                        class="shrink-0 space-y-2 rounded-xl border border-white/5 bg-black/20 p-3"
+                        data-testid="bulk-workflow-source"
+                    >
+                        <div class="flex flex-wrap items-center gap-3">
+                            <label
+                                class="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-blue-400/20 bg-blue-500/5 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-blue-200"
+                                :class="{ 'pointer-events-none opacity-50': processing || sourceUploading }"
+                            >
+                                <Loader2 v-if="sourceUploading" :size="12" class="animate-spin" />
+                                <Upload v-else :size="12" />
+                                {{ sourceUpload ? 'Choose another file' : 'Choose export' }}
+                                <input
+                                    type="file"
+                                    accept=".json,application/json"
+                                    class="sr-only"
+                                    data-testid="bulk-workflow-source-input"
+                                    :disabled="processing || sourceUploading"
+                                    @change="chooseSourceFile"
+                                >
+                            </label>
+                            <p v-if="!sourceUpload" class="min-w-0 flex-1 text-[11px] text-slate-400">
+                                A CycloneDX VDR that Dependency-Track exported for this project; DTVP's own export does not work. The file stays in server memory only.
+                            </p>
+                            <p
+                                v-else
+                                class="min-w-0 flex-1 text-[11px] leading-relaxed text-slate-300"
+                                data-testid="bulk-workflow-source-summary"
+                            >
+                                <span class="font-bold text-white">{{ sourceFileName }}</span>
+                                · {{ sourceUpload.summary.tool || 'unknown tool' }} {{ sourceUpload.summary.tool_version }}
+                                · project {{ sourceUpload.summary.project_name || 'unknown' }} {{ sourceUpload.summary.project_version }}
+                                · exported {{ formatSourceTime(sourceUpload.summary.timestamp) }}
+                                · SHA-256 <span class="font-mono">{{ sourceUpload.summary.sha256.slice(0, 12) }}</span>
+                                · {{ sourceUpload.entries }} entries, {{ sourceUpload.team_blocks }} team assessments
+                            </p>
+                        </div>
+                        <p
+                            v-for="warning in sourceUpload?.summary.warnings || []"
+                            :key="warning"
+                            class="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100"
+                            data-testid="bulk-workflow-source-warning"
+                        >{{ warning }}</p>
+                    </section>
                     <div v-if="loading" class="flex flex-1 items-center justify-center gap-3 text-sm font-semibold text-blue-200">
                         <Loader2 :size="22" class="animate-spin" />
                         {{ operationMessage || 'Preparing workflow preview' }}
@@ -495,6 +646,18 @@ watch(() => props.show, show => {
                         <p class="mt-2 text-xs text-slate-400">
                             {{ appliedResult.summary.succeeded || 0 }} applied · {{ appliedResult.summary.queued || 0 }} queued · {{ appliedResult.summary.failed || 0 }} failed
                         </p>
+                        <p
+                            v-if="appliedResult.summary.changed_since_preview"
+                            class="mt-1 text-xs text-amber-200"
+                            data-testid="bulk-workflow-changed-since-preview"
+                        >
+                            {{ appliedResult.summary.changed_since_preview }} changed since the preview and were left as they are; prepare the preview again to include them.
+                        </p>
+                    </div>
+                    <div v-else-if="!preview && selectedWorkflow?.requires_source" data-testid="bulk-workflow-source-empty-state" class="flex flex-1 flex-col items-center justify-center text-center">
+                        <Upload :size="40" class="text-blue-300" />
+                        <h3 class="mt-3 font-bold text-white">Upload an export to prepare the preview</h3>
+                        <p class="mt-1 max-w-md text-xs text-slate-500">Nothing is written before you review the preview and apply a selection.</p>
                     </div>
                     <div v-else-if="!preview" data-testid="bulk-workflow-empty-state" class="flex flex-1 flex-col items-center justify-center text-center">
                         <Layers :size="40" class="text-blue-300" />
@@ -544,6 +707,27 @@ watch(() => props.show, show => {
                             data-testid="bulk-workflow-note"
                             class="rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-[11px] text-amber-100"
                         >{{ note }}</p>
+
+                        <details
+                            v-if="selectedWorkflowId === RESTORE_WORKFLOW_ID"
+                            class="shrink-0 rounded-xl border border-white/5 bg-black/20 p-3 text-[11px] text-slate-300"
+                            data-testid="bulk-workflow-unmatched"
+                        >
+                            <summary class="cursor-pointer font-bold text-slate-200">
+                                Unmatched entries · {{ unmatchedTotal }}
+                                <span class="ml-2 font-normal text-slate-500">
+                                    {{ unmatchedCounts.no_finding_in_view || 0 }} no finding in view ·
+                                    {{ unmatchedCounts.ambiguous || 0 }} ambiguous ·
+                                    {{ unmatchedCounts.other_project || 0 }} other project
+                                </span>
+                            </summary>
+                            <p class="mt-2 text-slate-500">{{ preview.summary.unmatched_note }}</p>
+                            <ul v-if="unmatchedSamples.length" class="mt-2 max-h-40 space-y-0.5 overflow-y-auto font-mono text-[10px]">
+                                <li v-for="(sample, index) in unmatchedSamples" :key="index">
+                                    {{ sample.id }} · {{ sample.component_name || 'unknown component' }} {{ sample.component_version || '' }} · {{ sample.reason }}
+                                </li>
+                            </ul>
+                        </details>
 
                         <div v-if="selectedWorkflowId === 'automatic-assessments'" class="space-y-3" data-testid="automatic-assessment-actions">
                             <div class="space-y-2 rounded-xl border border-white/5 bg-black/20 p-3">
@@ -626,7 +810,11 @@ watch(() => props.show, show => {
                                 Clear filters
                             </button>
                         </div>
-                        <div v-else class="min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20">
+                        <div
+                            v-else
+                            class="min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20"
+                            :class="{ 'min-h-48': selectedWorkflowId === RESTORE_WORKFLOW_ID }"
+                        >
                             <div
                                 v-for="item in visiblePreviewItems"
                                 :key="item.group_id"
@@ -666,6 +854,44 @@ watch(() => props.show, show => {
                                             class="rounded border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold leading-snug text-amber-100"
                                         >{{ note }}</span>
                                     </span>
+                                    <span
+                                        v-if="selectedWorkflowId === RESTORE_WORKFLOW_ID && (itemReviewNotes(item).length || restoreNotes(item).length)"
+                                        class="mt-2 flex flex-wrap gap-1.5"
+                                        :data-testid="`restore-review-${item.group_id}`"
+                                    >
+                                        <span
+                                            v-for="note in itemReviewNotes(item)"
+                                            :key="note"
+                                            class="rounded border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold leading-snug text-amber-100"
+                                        >{{ note }}</span>
+                                        <span
+                                            v-for="(note, index) in restoreNotes(item)"
+                                            :key="`note-${index}`"
+                                            class="rounded border border-white/10 px-2 py-1 text-[10px] leading-snug text-slate-300"
+                                        >{{ restoreNoteText(note) }}</span>
+                                    </span>
+                                    <details
+                                        v-if="selectedWorkflowId === RESTORE_WORKFLOW_ID && restoreBlocks(item).length"
+                                        class="mt-2 block rounded-lg border border-white/5 bg-black/20 p-2"
+                                        :data-testid="`restore-blocks-${item.group_id}`"
+                                        @click.stop
+                                        @keydown.stop
+                                    >
+                                        <summary class="cursor-pointer text-[10px] font-bold text-blue-200">Team assessments to restore</summary>
+                                        <span
+                                            v-for="(block, index) in restoreBlocks(item)"
+                                            :key="index"
+                                            class="mt-2 block border-t border-white/5 pt-2 text-[10px] leading-relaxed text-slate-300"
+                                        >
+                                            <span class="block font-bold text-white">
+                                                {{ block.team }} · {{ block.state }} · {{ block.date || 'undated' }} · {{ block.assessed_by || 'unknown assessor' }}<template v-if="block.ticket"> · {{ block.ticket }}</template>
+                                            </span>
+                                            <span class="block text-slate-500">
+                                                {{ block.component_name }} {{ block.component_version }} · {{ block.project_version }} · matched by {{ block.match }}
+                                            </span>
+                                            <span v-if="block.text_excerpt" class="mt-1 block whitespace-pre-wrap text-slate-400">{{ block.text_excerpt }}</span>
+                                        </span>
+                                    </details>
                                     <span
                                         v-if="selectedWorkflowId === 'assessment-repair' && rescoreRuleFindings(item).length"
                                         class="mt-3 block space-y-2 rounded-lg border border-white/5 bg-black/20 p-3"

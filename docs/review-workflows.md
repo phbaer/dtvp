@@ -337,6 +337,7 @@ The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time:
 | :--- | :--- |
 | Apply Automatic Assessments | Usable, unapplied analyzer assessments; writes one assessment per owning team plus a global assessment with the worst verdict and its CVSS rescore |
 | Repair Assessments | Every safe, rule-based repair in one operation; each vulnerability lists the repairs that apply |
+| Restore Team Assessments From Export | Team assessments that a Dependency-Track export has and DTVP has in no form; adds them as historical blocks and changes no state ([details](#restore-team-assessments-from-an-export)) |
 
 **Repair Assessments** chains the following repairs. Each stage works on the
 result of the previous one, so a finding is written once. Preview rows carry a
@@ -455,10 +456,118 @@ Lightweight saved-result metadata retains the proposed score and vector for
 this preview; older metadata rows are rebuilt automatically from their stored
 full results.
 
+### Restore team assessments from an export
+
+Dependency-Track keeps the text DTVP last exported for each finding, team
+blocks included. When a team block was lost in DTVP (a save from an
+incomplete view, a raw-text edit, an older repair), a VDR that
+Dependency-Track exported before the loss still has it. This workflow reads
+such an export and brings each lost block back as a `[Historical: yes]`
+block, so the record has it again. It follows
+[ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md): it adds history and
+changes no state.
+
+**Input.** A CycloneDX VDR (JSON, specification 1.4 to 1.6) that
+Dependency-Track exported for one project. DTVP's own
+[CycloneDX export](cyclonedx-export.md) is refused: it carries the
+rationale, not the team blocks. A file written by another tool is read with
+a warning. The reviewer uploads it in the dialog; DTVP keeps it in memory
+only, per reviewer (up to four uploads, six hours each; nothing is written to
+disk or logged), so after a restart it is uploaded again. The limit is
+128 MiB.
+
+**Matching.** The export's project is matched by its UUID (the document's
+`metadata.component.bom-ref`), else by project name and version, for a
+project that was created again. Each entry (a vulnerability and one
+affected component) is then matched to a finding of that project in the
+current view, in this order:
+
+1. component UUID and vulnerability UUID (the export's `bom-ref`s);
+2. vulnerability id, alias or UUID and package URL, for a component that
+   was created again;
+3. vulnerability id, alias or UUID and component group, name and version.
+
+A level with more than one candidate is not guessed. Two entries that match
+one finding leave it to the exact UUID match; without one, none of them
+applies. Unmatched entries are listed by reason: `no_finding_in_view` (the
+finding is no longer reported, or the current filters exclude it),
+`ambiguous`, and `other_project`.
+
+**In no form.** A source block is restored only when the finding has
+nothing of its team today: no block under the team's name or one of its
+[aliases](assessment-model.md#team-mapping-and-analyzer-guidance), live or
+historical, and no `Former team assessment (...)` note naming it. A live
+block that only says `See global assessment.`, or one without a decision,
+text or ticket, records nothing of the team's assessment and does not count. A note
+names a team when the team's name (or an alias) appears literally in its
+list of decisions as one of the teams of a decision, so team names holding
+`)`, `, ` or ` | ` are found as well. The comparison is by team: what a
+finding has of a team in any form already records it. Left out and counted
+are blocks of a team that is
+present (`present`), `NOT_SET` blocks without text or ticket (`empty`), and
+blocks that only say `See global assessment.` (`reference`). The General
+assessment is the finding's own decision and is never restored as a
+historical block (`general`). Rows also list, without writing anything, a
+present team whose ticket is named nowhere in the current text, and a
+missing team that a live block names in `Copied From`. A vulnerability with
+such notes and nothing to restore is listed as `Notes only` and cannot be
+selected; the summary counts these rows (`notes_only_groups`) and all notes
+(`notes`) apart from the vulnerabilities to restore (`groups`).
+
+**What is written.** Each restored block keeps team, state, justification,
+assessor (`unknown` becomes none), reviewer, date, ticket, rescoring, SSVC,
+evidence and coverage tags, `Copied From` and text; it is marked
+`[Historical: yes]` and loses its assignees. A block without a date stays
+undated: neither the export time nor the time of the restore is a date of
+the assessment. The blocks are added after the last block, oldest first,
+undated last; the rescoring, response and text ahead of the blocks, the SSVC
+record and the pending-review marker stay as they are. State,
+justification, suppression, response and rescoring of the finding never
+change: a historical block's rescoring tags and quoted vectors are not read
+as the finding's rescoring, so the score, vector and severity DTVP derives
+stay as they were. Each write is checked: a finding whose aggregated state
+would change, or whose text cannot be read, is skipped and counted. A
+finding whose stored assessment differs from the one the preview read, or
+that is saved while the apply runs, is left as it is and counted as
+`changed_since_preview` (each write carries the revision it is based on);
+prepare the preview again to include it. The writes go through the
+normal path with origin `bulk-workflow` and the reviewer as author, so
+[History](import-export.md#history) shows them and the next export writes
+them to Dependency-Track, where they appear as `historical_assessment` in
+DTVP's [CycloneDX export](cyclonedx-export.md).
+
+**Review first.** A vulnerability starts unselected when a restored block
+has a worse state than its finding has today, when a finding has no
+assessment, or when it was matched by component name and version or by
+project name and version.
+
+**Known limits.**
+
+- A team name holding `; ` is not found in a `Former team assessment (...)`
+  note, so that team's block is restored beside the note.
+- Text outside the team blocks of Dependency-Track's analysis is not
+  restored.
+- Findings that Dependency-Track no longer reports are not in the view and
+  receive nothing.
+
+The upload endpoint is `POST /api/bulk-workflows/sources` (multipart field
+`file`, reviewers only). It returns a `source_id` and a summary (tool and
+version, project, export time, SHA-256, warnings). Preview, apply and
+document requests of this workflow carry that `source_id`; without one they
+fail with 409, with another reviewer's or an expired one with 404. The
+preview token includes the file's SHA-256, so a preview of one file cannot be
+applied with another.
+
 Every candidate set is the intersection of all active project-list filters and
 the selected workflow's applicability rules. The dialog loads plug-in metadata
 first and prepares only the chosen preview. Preview tokens prevent applying a
 stale candidate set; prepared previews are reused while the dialog is open.
+Every workflow's payload carries the revision of the finding it was built
+on (`expected_revision`). A finding whose stored assessment differs from what
+the workflow read, or whose revision changes before the write, is left out;
+the others are written, and the apply summary counts it as
+`changed_since_preview`. A finding without a record yet is written only
+while it still has none.
 Filtering uses compact task summaries, then carries their canonical lifecycle
 metadata onto the hydrated full groups used by workflows. This keeps lifecycle-
 specific repairs such as assessment synchronization aligned with the
@@ -475,7 +584,10 @@ write concurrency.
 Endpoints are:
 
 - `POST /api/bulk-workflows/summary`
-- `POST /api/bulk-workflows/{workflow_id}/{preview|apply|document}-task`
+- `POST /api/bulk-workflows/sources` uploads the input of a workflow that
+  reads one (`requires_source` in the workflow metadata)
+- `POST /api/bulk-workflows/{workflow_id}/{preview|apply|document}-task`,
+  with `source_id` for such a workflow
 - `GET /api/bulk-workflows/tasks/{operation_id}` returns progress and the final result
 
 The synchronous `preview`, `apply`, and optional `document` endpoints remain

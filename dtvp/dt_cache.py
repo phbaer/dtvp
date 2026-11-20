@@ -2438,6 +2438,7 @@ class CacheManager:
                 "project_uuid", "component_uuid", "vulnerability_uuid"
             ))
             analysis = self.get_assessment_overlay(*key)
+            recorded = analysis is not None
             if analysis is None:
                 if key[0] not in readers:
                     readers[key[0]] = self._project_analysis_reader(key[0])
@@ -2465,6 +2466,9 @@ class CacheManager:
                     "suppressed": _get_analysis_suppressed(analysis),
                     "revision": int(analysis.get("dtvpRevision") or 0),
                     "sync_status": analysis.get("dtvpSyncStatus") or "synced",
+                    # Whether DTVP holds a record of the finding, as opposed
+                    # to a value read from the source's findings.
+                    "recorded": recorded,
                 }
             )
         return result

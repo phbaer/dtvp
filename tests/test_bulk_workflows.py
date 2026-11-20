@@ -2799,6 +2799,38 @@ def test_repair_does_not_combine_a_conflict_with_an_assessment_no_team_owns():
     assert preview["items"] == [] and payloads == []
 
 
+def test_every_workflow_leaves_out_a_finding_saved_since_it_was_read():
+    import dataclasses
+
+    group = _repair_group([("NOT_AFFECTED", _GLOBAL)] * 2, tags=["TeamB"])
+    plugin = create_assessment_repair_workflow(lambda: {})
+    first, second = [
+        component for version in group["affected_versions"] for component in version["components"]
+    ]
+    stored = {
+        first["finding_uuid"]: {"state": "NOT_AFFECTED", "details": _GLOBAL, "suppressed": False, "revision": 4},
+        second["finding_uuid"]: {
+            "state": "NOT_AFFECTED", "details": f"{_GLOBAL}\n\n{_CURRENT}", "suppressed": False, "revision": 7,
+        },
+    }
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        stored_assessments=lambda instances: [dict(stored[item["finding_uuid"]]) for item in instances],
+    )
+
+    payloads, skipped = plugin.build_payloads(context, [group["id"]])
+
+    assert [(instance["finding_uuid"], payload["expected_revision"]) for instance, payload in payloads] == [
+        (first["finding_uuid"], 4),
+    ]
+    assert skipped["changed_since_preview"] == 1
+    # Without a way to read the stored assessment nothing is left out.
+    payloads, skipped = plugin.build_payloads(
+        dataclasses.replace(context, stored_assessments=None), [group["id"]]
+    )
+    assert len(payloads) == 2 and "expected_revision" not in payloads[0][1]
+
+
 def test_a_dropped_ticket_never_goes_to_an_unrelated_record():
     # Only historical records are left, none the ticket came from: changing
     # one would change what it says. The ticket is left for a person.

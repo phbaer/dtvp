@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, Any, Awaitable, Callable, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -32,7 +32,7 @@ from .cyclonedx_export import (
 from .finding_lifecycle_services import describe_gone_findings
 from .team_mapping import normalize_team_values
 from .version import get_app_version
-from .assessment_outbox_services import assessment_key
+from .assessment_outbox_services import AssessmentRevisionConflictError, assessment_key
 from .assessment_use_cases import (
     AssessmentConflictError,
     AssessmentPermissionError,
@@ -63,10 +63,20 @@ from .bulk_workflows.automatic_assessments import (
     create_automatic_assessment_workflow,
 )
 from .bulk_workflows.base import (
+    CHANGED_SINCE_PREVIEW,
     BulkWorkflowContext,
     BulkWorkflowRegistry,
     build_preview_token,
 )
+from .bulk_workflows.team_assessment_restore import (
+    create_team_assessment_restore_workflow,
+)
+from .team_assessment_restore_services import (
+    RestoreSourceError,
+    RestoreSourceStore,
+    read_dependency_track_vdr,
+)
+from . import team_assessment_restore_services
 from .code_analysis_assessment_services import (
     assessment_status_for_group,
     build_assessment_match_index,
@@ -162,6 +172,9 @@ class BulkWorkflowFilters(BaseModel):
 class BulkWorkflowRequest(BaseModel):
     task_id: str
     filters: BulkWorkflowFilters = Field(default_factory=BulkWorkflowFilters)
+    # An uploaded input (``POST /bulk-workflows/sources``) for a workflow
+    # that reads one.
+    source_id: Optional[str] = None
 
 
 class BulkWorkflowApplyRequest(BulkWorkflowRequest):
@@ -1870,6 +1883,7 @@ def _bulk_workflow_registry(
         [
             create_automatic_assessment_workflow(),
             create_assessment_repair_workflow(load_rescore_rules_or_raise),
+            create_team_assessment_restore_workflow(),
         ]
     )
 
@@ -1879,6 +1893,7 @@ def _bulk_workflow_context(
     req: BulkWorkflowRequest,
     user: str,
     workflow_id: str,
+    source: Any = None,
 ) -> BulkWorkflowContext:
     needs_assessment_records = (
         workflow_id == "automatic-assessments"
@@ -1911,6 +1926,8 @@ def _bulk_workflow_context(
         assessment_records=assessment_records,
         assessment_diagnostics=assessment_diagnostics,
         ticket_histories=getattr(deps.cache_manager, "get_ticket_histories", None),
+        source=source,
+        stored_assessments=getattr(deps.cache_manager, "get_cached_assessments", None),
     )
 
 
@@ -1919,9 +1936,12 @@ async def _apply_bulk_workflow_payloads(
     client: DTClient,
     payloads: list[tuple[dict[str, Any], dict[str, Any]]],
     *,
+    author: str | None = None,
     progress_callback: Callable[[int, int, dict[str, Any]], Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    persisted = await _persist_local_assessment_payloads(deps, payloads)
+    persisted, payloads, changed = await _persist_local_assessment_payloads(
+        deps, payloads, author=author
+    )
 
     try:
         await asyncio.to_thread(
@@ -1944,18 +1964,60 @@ async def _apply_bulk_workflow_payloads(
         "queued": sum(1 for result in finalized if result.get("queued")),
         "failed": 0,
     }
+    if changed:
+        outcome[CHANGED_SINCE_PREVIEW] = changed
     return finalized, outcome
 
 
 async def _persist_local_assessment_payloads(
     deps: GeneralApiRouteDeps,
     payloads: list[tuple[dict[str, Any], dict[str, Any]]],
-) -> list[dict[str, Any]]:
-    raw_payloads = [payload for _instance, payload in payloads]
+    *,
+    author: str | None = None,
+) -> tuple[
+    list[dict[str, Any]], list[tuple[dict[str, Any], dict[str, Any]]], int
+]:
+    """Persist bulk payloads; returns what was stored, the payloads it was
+    stored for, and how many were left out as changed since the preview.
+
+    A payload carrying ``expected_revision`` is written only while its
+    finding still has that revision. One that no longer has it is left out
+    and the rest is written: a bulk write never replaces a save made after
+    its preview.
+    """
+    expected: dict[tuple[str, str, str], int] = {}
+    for _instance, payload in payloads:
+        revision = payload.pop("expected_revision", None)
+        key = assessment_key(payload)
+        if revision is not None and key is not None:
+            expected[key] = int(revision)
     persist = getattr(deps.cache_manager, "persist_assessment_updates", None)
     if callable(persist):
-        return await persist(raw_payloads, replace=True, origin="bulk-workflow")
+        remaining = list(payloads)
+        changed = 0
+        # Each conflict removes one payload, so this ends.
+        while True:
+            try:
+                # The reviewer who applied the workflow is the author of each change.
+                persisted = await persist(
+                    [payload for _instance, payload in remaining],
+                    replace=True,
+                    origin="bulk-workflow",
+                    author=author,
+                    **({"expected_revisions": expected} if expected else {}),
+                )
+            except AssessmentRevisionConflictError as exc:
+                kept = [item for item in remaining if assessment_key(item[1]) != exc.key]
+                if len(kept) == len(remaining):
+                    raise
+                changed += len(remaining) - len(kept)
+                remaining = kept
+                if not remaining:
+                    return [], [], changed
+                continue
+            return persisted, remaining, changed
 
+    raw_payloads = [payload for _instance, payload in payloads]
     bulk_queue = getattr(deps.cache_manager, "queue_analysis_updates", None)
     if callable(bulk_queue):
         update_ids = await bulk_queue(raw_payloads, replace=True)
@@ -1966,7 +2028,7 @@ async def _persist_local_assessment_payloads(
                 "payload": payload,
             }
             for update_id, payload in zip(update_ids, raw_payloads)
-        ]
+        ], payloads, 0
     raise RuntimeError("Assessment cache does not support durable updates")
 
 
@@ -2051,19 +2113,52 @@ def _register_bulk_workflow_routes(
         return rules
 
     registry = _bulk_workflow_registry(load_rescore_rules_or_raise)
+    # Uploaded inputs of workflows that read one; memory only, per user.
+    source_store = RestoreSourceStore()
 
-    async def prepare_preview_response(
-        plugin: Any,
-        req: BulkWorkflowRequest,
-        user: str,
-    ) -> dict[str, Any]:
+    def resolve_source(plugin: Any, req: BulkWorkflowRequest, user: str) -> Any:
+        if plugin.source_kind is None:
+            return None
+        if not req.source_id:
+            raise HTTPException(
+                status_code=409,
+                detail="This bulk workflow needs an uploaded export; upload it first.",
+            )
+        source = source_store.get(user, req.source_id)
+        if source is None:
+            raise HTTPException(
+                status_code=404, detail="Uploaded export not found; upload it again"
+            )
+        return source
+
+    def token_filters(req: BulkWorkflowRequest, source: Any) -> dict[str, Any]:
+        filters = req.filters.model_dump()
+        if source is None:
+            return filters
+        # Another file gives another token: a preview of one file cannot be
+        # applied with another.
+        return {**filters, "source_sha256": source.sha256}
+
+    async def workflow_context(
+        plugin: Any, req: BulkWorkflowRequest, user: str
+    ) -> tuple[BulkWorkflowContext, Any]:
+        source = resolve_source(plugin, req, user)
         context = await asyncio.to_thread(
             _bulk_workflow_context,
             deps,
             req,
             user,
             plugin.id,
+            source,
         )
+        return context, source
+
+    async def prepare_preview_response(
+        plugin: Any,
+        req: BulkWorkflowRequest,
+        user: str,
+    ) -> dict[str, Any]:
+        context, source = await workflow_context(plugin, req, user)
         preview = await asyncio.to_thread(plugin.preview, context)
         return {
             "task_id": req.task_id,
@@ -2071,7 +2166,7 @@ def _register_bulk_workflow_routes(
             "preview_token": build_preview_token(
                 plugin,
                 task_id=req.task_id,
-                filter_payload=req.filters.model_dump(),
+                filter_payload=token_filters(req, source),
                 preview=preview,
             ),
             "selectable_group_ids": plugin.selectable_ids(preview),
@@ -2085,18 +2180,12 @@ def _register_bulk_workflow_routes(
         client: DTClient,
         progress_callback: Callable[[int, int, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
-        context = await asyncio.to_thread(
-            _bulk_workflow_context,
-            deps,
-            req,
-            user,
-            plugin.id,
-        )
+        context, source = await workflow_context(plugin, req, user)
         preview = await asyncio.to_thread(plugin.preview, context)
         expected_token = build_preview_token(
             plugin,
             task_id=req.task_id,
-            filter_payload=req.filters.model_dump(),
+            filter_payload=token_filters(req, source),
             preview=preview,
         )
         if req.preview_token != expected_token:
@@ -2120,6 +2209,7 @@ def _register_bulk_workflow_routes(
             deps,
             client,
             payloads,
+            author=user,
             progress_callback=progress_callback,
         )
         await asyncio.to_thread(
@@ -2130,15 +2220,20 @@ def _register_bulk_workflow_routes(
             user=user,
             workflow_id=plugin.id,
         )
+        summary = {
+            "selected_groups": len(selected),
+            "attempted": len(payloads),
+            **outcome,
+            **skipped,
+        }
+        if CHANGED_SINCE_PREVIEW in outcome and CHANGED_SINCE_PREVIEW in skipped:
+            summary[CHANGED_SINCE_PREVIEW] = (
+                outcome[CHANGED_SINCE_PREVIEW] + skipped[CHANGED_SINCE_PREVIEW]
+            )
         return {
             "task_id": req.task_id,
             "workflow": plugin.metadata(),
-            "summary": {
-                "selected_groups": len(selected),
-                "attempted": len(payloads),
-                **outcome,
-                **skipped,
-            },
+            "summary": summary,
             "results": finalized,
         }
 
@@ -2151,18 +2246,12 @@ def _register_bulk_workflow_routes(
             raise HTTPException(
                 status_code=409, detail="This bulk workflow does not provide a document"
             )
-        context = await asyncio.to_thread(
-            _bulk_workflow_context,
-            deps,
-            req,
-            user,
-            plugin.id,
-        )
+        context, source = await workflow_context(plugin, req, user)
         preview = await asyncio.to_thread(plugin.preview, context)
         expected_token = build_preview_token(
             plugin,
             task_id=req.task_id,
-            filter_payload=req.filters.model_dump(),
+            filter_payload=token_filters(req, source),
             preview=preview,
         )
         if req.preview_token != expected_token:
@@ -2182,6 +2271,33 @@ def _register_bulk_workflow_routes(
             context,
             selected,
         )
+
+    @router.post("/bulk-workflows/sources")
+    async def upload_bulk_workflow_source(
+        file: Annotated[UploadFile, File(...)],
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Read an export for a workflow that needs one; held in memory only."""
+        require_reviewer(user)
+        limit = team_assessment_restore_services.TEAM_RESTORE_MAX_UPLOAD_BYTES
+        content = await file.read(limit + 1)
+        if len(content) > limit:
+            raise HTTPException(
+                status_code=413,
+                detail=f"The export is larger than {limit // (1024 * 1024)} MiB.",
+            )
+        try:
+            source = await asyncio.to_thread(read_dependency_track_vdr, content)
+        except RestoreSourceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        source_id = source_store.put(user, source)
+        return {
+            "source_id": source_id,
+            "summary": source.summary(),
+            "entries": len(source.entries),
+            "team_blocks": source.team_blocks,
+        }
 
     @router.post("/bulk-workflows/summary")
     async def bulk_workflow_summary(
@@ -2284,6 +2400,7 @@ def _register_bulk_workflow_routes(
         if plugin is None:
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
         _completed_task_full_groups(deps, req.task_id, user)
+        resolve_source(plugin, req, user)  # reject a missing upload up front
         operation = _create_bulk_workflow_task(
             deps,
             kind="preview",
@@ -2334,6 +2451,7 @@ def _register_bulk_workflow_routes(
         if plugin is None:
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
         _completed_task_full_groups(deps, req.task_id, user)
+        resolve_source(plugin, req, user)  # reject a missing upload up front
         settings = deps.dt_settings_cls()
         token = forwardable_bearer(request.headers.get("Authorization"))
         cookies = dict(request.cookies)
@@ -2434,6 +2552,7 @@ def _register_bulk_workflow_routes(
                 detail="This bulk workflow does not provide a document",
             )
         _completed_task_full_groups(deps, req.task_id, user)
+        resolve_source(plugin, req, user)  # reject a missing upload up front
         operation = _create_bulk_workflow_task(
             deps,
             kind="document",
@@ -2830,6 +2949,7 @@ def _register_assessment_routes(
             deps,
             client,
             payloads,
+            author=user,
         )
         return {
             "task_id": req.task_id,
@@ -2857,6 +2977,7 @@ def _register_assessment_routes(
             deps,
             client,
             payloads,
+            author=user,
         )
         return {
             "task_id": req.task_id,
