@@ -2,6 +2,25 @@
 
 This document defines the external HTTP APIs expected by DTVP for the optional integrations.
 
+## Dependency-Track
+
+DTVP reads and writes Dependency-Track through `dtvp/dt_client.py` with the
+API key of `DTVP_DT_API_KEY` (or the user's session). The read that is not
+part of loading a project's findings:
+
+- `GET /api/v1/vulnerability/source/{source}/vuln/{vulnId}`
+  - Permission `VIEW_PORTFOLIO`. Source and ID are URL-encoded.
+  - Read in the background only, for the
+    [derived VDR recommendation](cyclonedx-export.md#recommendation).
+  - Only `affectedComponents` is kept: `identityType`, `identity`,
+    `versionType`, `version`, `versionStartIncluding`,
+    `versionStartExcluding`, `versionEndIncluding`, `versionEndExcluding`,
+    and the distinct `affectedVersionAttributions[].source`. The
+    `components` of other projects and every other field are dropped in the
+    client.
+  - 404: the vulnerability is unknown; asked again after
+    `DTVP_FIXED_VERSIONS_REFRESH_DAYS`.
+
 ## TMRescore Service
 
 DTVP expects the TMRescore backend to expose the following endpoints under its configured base URL (`DTVP_TMRESCORE_URL`):

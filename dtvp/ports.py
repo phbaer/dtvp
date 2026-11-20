@@ -45,6 +45,22 @@ class VulnerabilitySource(Protocol):
 
 
 @runtime_checkable
+class AffectedVersionSource(Protocol):
+    """The affected version ranges a source holds per vulnerability.
+
+    Kept apart from ``VulnerabilitySource``: a source without it still
+    serves findings, and its VDR has no derived recommendation.
+    """
+
+    async def get_vulnerability_affected(
+        self, source: str, vuln_id: str
+    ) -> Optional[dict[str, Any]]:
+        """``{"affectedComponents": [...]}`` with identity, version or
+        bounds, and attribution sources per entry; ``None`` when the
+        vulnerability is unknown. Raises on other failures."""
+
+
+@runtime_checkable
 class AssessmentSink(Protocol):
     """Write access for assessments made in DTVP."""
 

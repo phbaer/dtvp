@@ -1,11 +1,18 @@
 import asyncio
 import os
 import threading
+import time
 
 import httpx
 import pytest
 from unittest.mock import AsyncMock, patch
-from dtvp.dt_cache import CacheManager, PendingUpdateExistsError
+from datetime import datetime, timedelta, timezone
+from dtvp.dt_cache import (
+    CacheManager,
+    PendingUpdateExistsError,
+    fixed_versions_due,
+    fixed_versions_retry_delay,
+)
 
 
 def test_cache_status_reuses_snapshot_until_cache_changes(tmp_path):
@@ -1373,3 +1380,267 @@ async def test_an_export_writes_the_response_of_the_exported_text(tmp_path):
 
     assert client.update_analysis.await_args.kwargs["response"] is None
     assert manager.get_assessment_fields("puuid", "cuuid", "vuuid")["response"] is None
+
+
+# -- version ranges for the VDR recommendation --------------------------------
+
+
+class RangeSource:
+    """A source with findings and the version ranges of their vulnerabilities."""
+
+    def __init__(self, records, *, findings=None, bom=None, ranges=None, delay=0.0):
+        self.records = records
+        self.findings = findings or []
+        self.bom = bom or {"bomFormat": "CycloneDX", "specVersion": "1.5", "components": []}
+        self.ranges = ranges or {}
+        self.delay = delay
+        self.reads = []
+        self.fail = set()
+
+    async def get_projects(self, name=None):
+        return []
+
+    async def get_vulnerabilities(self, project_uuid, cve=None):
+        return [dict(finding) for finding in self.findings]
+
+    async def get_project_vulnerabilities(self, project_uuid):
+        return [dict(record) for record in self.records]
+
+    async def get_bom(self, project_uuid):
+        return self.bom
+
+    async def get_analysis(self, project_uuid, component_uuid, vulnerability_uuid):
+        return None
+
+    async def get_vulnerability_affected(self, source, vuln_id):
+        self.reads.append((source, vuln_id))
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if (source, vuln_id) in self.fail:
+            raise httpx.ConnectError("down")
+        entries = self.ranges.get((source, vuln_id))
+        return None if entries is None else {"affectedComponents": entries}
+
+
+def _record(vuln_id, updated=1, **extra):
+    return {"uuid": f"u-{vuln_id}", "vulnId": vuln_id, "source": "NVD",
+            "updated": updated, **extra}
+
+
+LIB_A_FIX = [{"identityType": "PURL", "identity": "pkg:npm/lib-a", "versionType": "RANGE",
+              "versionEndExcluding": "1.2.3",
+              "affectedVersionAttributions": [{"source": "GITHUB"}]}]
+
+
+async def test_fixed_versions_are_read_when_missing_or_stale_and_capped(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path), fixed_versions_reads_per_cycle=2)
+    records = [
+        _record("CVE-1"), _record("CVE-2"), _record("CVE-3"),
+        _record("CVE-4", recommendation="Upgrade."),  # DT's own text: not read
+    ]
+    client = RangeSource(records, ranges={("NVD", "CVE-1"): LIB_A_FIX})
+
+    await manager.refresh_project("p1", client)
+    # The cap; the reads run concurrently, in no fixed order.
+    assert sorted(client.reads) == [("NVD", "CVE-1"), ("NVD", "CVE-2")]
+    await manager.refresh_project("p1", client)
+    assert client.reads[2:] == [("NVD", "CVE-3")]  # only the missing one
+    await manager.refresh_project("p1", client)
+    assert client.reads[3:] == []  # nothing stale
+
+    rows = manager.store.fixed_version_entries([("NVD", "CVE-1"), ("NVD", "CVE-2")])
+    assert rows[("NVD", "CVE-1")]["status"] == "read"
+    assert rows[("NVD", "CVE-1")]["payload"] == [{
+        "identityType": "PURL", "identity": "pkg:npm/lib-a", "versionType": "RANGE",
+        "versionEndExcluding": "1.2.3", "sources": ["GITHUB"],
+    }]
+    assert rows[("NVD", "CVE-2")]["status"] == "not_found"
+
+    # A changed record is read again at once.
+    client.records = [_record("CVE-1", updated=2), *records[1:]]
+    await manager.refresh_project("p1", client)
+    assert client.reads[3:] == [("NVD", "CVE-1")]
+
+    # After the TTL every entry, also a not-found one, is read again.
+    manager.fixed_versions_refresh_days = 1
+    old = "2020-01-01T00:00:00+00:00"
+    manager.store.save_fixed_version_entry(
+        "NVD", "CVE-2", status="not_found", vuln_updated="1", at=old
+    )
+    await manager.refresh_project("p1", client)
+    assert client.reads[4:] == [("NVD", "CVE-2")]
+
+
+async def test_one_cap_holds_for_a_whole_refresh_cycle(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path), fixed_versions_reads_per_cycle=3)
+    manager.active_project_uuids = {"p1", "p2"}
+    manager._active_project_last_access = {"p1": time.time(), "p2": time.time()}
+    client = RangeSource([_record(f"CVE-{n}") for n in range(5)])
+    await manager._refresh_active_projects(client)
+    # The same five records in both projects: three reads, not six.
+    assert len(client.reads) == 3
+
+
+async def test_a_failed_read_keeps_the_last_good_ranges(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = RangeSource([_record("CVE-1")], ranges={("NVD", "CVE-1"): LIB_A_FIX})
+    await manager.refresh_project("p1", client)
+    [before] = manager.store.fixed_version_entries([("NVD", "CVE-1")]).values()
+
+    client.records = [_record("CVE-1", updated=2)]
+    client.fail.add(("NVD", "CVE-1"))
+    await manager.refresh_project("p1", client)
+    [after] = manager.store.fixed_version_entries([("NVD", "CVE-1")]).values()
+    assert after["status"] == "failed"
+    assert after["payload"] == before["payload"]
+    assert after["read_at"] == before["read_at"]
+    assert after["vuln_updated"] == "1"
+    assert after["attempted_at"] >= before["attempted_at"]
+    assert after["failures"] == 1
+
+    # Not before the retry delay has passed; then retried.
+    client.fail.clear()
+    await manager.refresh_project("p1", client)
+    assert client.reads.count(("NVD", "CVE-1")) == 2
+    _attempted_long_ago(manager, "CVE-1")
+    await manager.refresh_project("p1", client)
+    assert client.reads.count(("NVD", "CVE-1")) == 3
+    [again] = manager.store.fixed_version_entries([("NVD", "CVE-1")]).values()
+    assert again["status"] == "read" and again["vuln_updated"] == "2"
+    assert again["failures"] == 0
+
+
+def _attempted_long_ago(manager, vuln_id, when="2020-01-01T00:00:00+00:00"):
+    connection = manager.store._connection()
+    with connection:
+        connection.execute(
+            "UPDATE source_vulnerability_ranges SET attempted_at = ? WHERE vuln_id = ?",
+            (when, vuln_id),
+        )
+
+
+def test_failed_range_reads_back_off():
+    now = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+    def failed(minutes_ago, failures):
+        return {"status": "failed", "failures": failures, "vuln_updated": "1",
+                "attempted_at": (now - timedelta(minutes=minutes_ago)).isoformat()}
+    ttl = timedelta(days=7)
+    assert fixed_versions_retry_delay(0) == timedelta(minutes=1)  # rows before the count
+    assert fixed_versions_retry_delay(1) == timedelta(minutes=1)
+    assert fixed_versions_retry_delay(3) == timedelta(minutes=4)
+    assert fixed_versions_retry_delay(50) == timedelta(days=1)
+    assert not fixed_versions_due(failed(0, 1), "1", now, ttl)
+    assert fixed_versions_due(failed(1, 1), "1", now, ttl)
+    assert not fixed_versions_due(failed(3, 3), "1", now, ttl)
+    assert fixed_versions_due(failed(4, 3), "1", now, ttl)
+    # A changed record does not skip the delay of a failing read.
+    assert not fixed_versions_due(failed(0, 1), "2", now, ttl)
+
+
+async def test_failing_range_reads_do_not_starve_the_others(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path), fixed_versions_reads_per_cycle=2)
+    client = RangeSource([_record("CVE-1"), _record("CVE-2"), _record("CVE-3")])
+    client.fail = {("NVD", "CVE-1"), ("NVD", "CVE-2")}
+    await manager.refresh_project("p1", client)
+    assert sorted(client.reads) == [("NVD", "CVE-1"), ("NVD", "CVE-2")]
+    # Within the delay the failing ones wait, and the third is read.
+    await manager.refresh_project("p1", client)
+    assert client.reads[2:] == [("NVD", "CVE-3")]
+    await manager.refresh_project("p1", client)
+    assert client.reads[3:] == []
+    # Due again, the failing ones come after one that was never read.
+    _attempted_long_ago(manager, "CVE-1")
+    _attempted_long_ago(manager, "CVE-2", "2020-01-02T00:00:00+00:00")
+    client.records.append(_record("CVE-9"))
+    await manager.refresh_project("p1", client)
+    assert sorted(client.reads[3:]) == [("NVD", "CVE-1"), ("NVD", "CVE-9")]
+    rows = manager.store.fixed_version_entries([("NVD", "CVE-1"), ("NVD", "CVE-2")])
+    assert rows[("NVD", "CVE-1")]["failures"] == 2
+    assert rows[("NVD", "CVE-2")]["failures"] == 1
+
+
+async def test_a_vulnerability_shared_by_two_projects_is_read_once(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = RangeSource([_record("CVE-1")], ranges={("NVD", "CVE-1"): LIB_A_FIX}, delay=0.05)
+    await asyncio.gather(
+        manager.refresh_project("p1", client), manager.refresh_project("p2", client)
+    )
+    assert client.reads == [("NVD", "CVE-1")]
+    await manager.refresh_project("p3", client)
+    assert client.reads == [("NVD", "CVE-1")]
+
+
+async def test_a_source_without_version_ranges_skips_the_step(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    class FindingsOnly:
+        async def get_vulnerabilities(self, project_uuid, cve=None):
+            return []
+
+        async def get_project_vulnerabilities(self, project_uuid):
+            return [_record("CVE-1")]
+
+        async def get_bom(self, project_uuid):
+            return {}
+
+    await manager.refresh_project("p1", FindingsOnly())
+    assert manager.store.fixed_version_entries([("NVD", "CVE-1")]) == {}
+
+
+async def test_an_export_reads_the_stored_ranges_and_never_the_source(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    component = {"uuid": "c1", "name": "lib-a", "version": "1.0", "purl": "pkg:npm/lib-a@1.0"}
+    findings = [
+        {"component": component,
+         "vulnerability": {"uuid": "u-CVE-1", "vulnId": "CVE-1", "source": "NVD"},
+         "analysis": {"analysisState": "NOT_SET", "isSuppressed": False}},
+        {"component": component,
+         "vulnerability": {"uuid": "u-CVE-2", "vulnId": "CVE-2", "source": "NVD"},
+         "analysis": {"analysisState": "NOT_SET", "isSuppressed": False}},
+    ]
+    bom = {"bomFormat": "CycloneDX", "specVersion": "1.5",
+           "components": [{"type": "library", "bom-ref": "c1", "name": "lib-a",
+                           "version": "1.0", "purl": "pkg:npm/lib-a@1.0"}]}
+    client = RangeSource([_record("CVE-1"), _record("CVE-2")], findings=findings, bom=bom,
+                         ranges={("NVD", "CVE-1"): LIB_A_FIX})
+    manager.fixed_versions_reads_per_cycle = 1
+    await manager.refresh_project("p1", client)
+    assert client.reads == [("NVD", "CVE-1")]
+
+    client.get_vulnerability_affected = AsyncMock(side_effect=AssertionError("no read"))
+    document = await manager.export_cyclonedx(
+        client, "p1", "vdr", assessment_source="DTVP", property_prefix="dtvp",
+    )
+    client.get_vulnerability_affected.assert_not_called()
+    first, second = document["vulnerabilities"]
+    assert first["recommendation"] == "Upgrade lib-a to 1.2.3 or later."
+    assert "recommendation" not in second
+    metadata = {item["name"]: item["value"] for item in document["metadata"]["properties"]}
+    assert metadata["dtvp:export_derived_recommendations"] == "1"
+    assert metadata["dtvp:export_fixed_versions_unread"] == "1"  # CVE-2, over the cap
+
+
+def test_the_range_table_is_added_to_an_existing_database(tmp_path):
+    import shutil
+    import sqlite3
+
+    from dtvp.local_store import LocalStore, get_local_store_migrations_path
+    from dtvp.sqlite_migration_services import run_sqlite_migrations
+
+    earlier = tmp_path / "earlier"
+    earlier.mkdir()
+    for path in sorted(get_local_store_migrations_path().glob("*.sql"))[:2]:
+        shutil.copy(path, earlier / path.name)
+    database = tmp_path / "dtvp.sqlite3"
+    connection = sqlite3.connect(database)
+    run_sqlite_migrations(connection, namespace="local_store", migrations_path=earlier)
+    connection.execute(
+        "INSERT INTO known_projects VALUES ('p1', 'App', '1.0', 'then', 'then')"
+    )
+    connection.commit()
+    connection.close()
+
+    store = LocalStore(str(database))
+    store.save_fixed_version_entry("NVD", "CVE-1", status="read", payload=[], vuln_updated="1")
+    assert store.fixed_version_entries([("NVD", "CVE-1")])[("NVD", "CVE-1")]["payload"] == []
+    assert store.describe_projects(["p1"])["p1"]["name"] == "App"
+    store.close()

@@ -14,7 +14,9 @@ markup out of an analysis text:
   ``bom-ref`` as subject, the team as annotator and the assessor as its
   contact;
 - ``properties``: assessor, reviewer, tickets, review status, team states,
-  SSVC, former team assessments.
+  SSVC, former team assessments;
+- ``recommendation``: Dependency-Track's own, else one derived from the
+  version ranges it holds (see ``fixed_versions``), with its provenance.
 
 Every finding is included, also those in triage or without an assessment.
 See docs/cyclonedx-export.md and ADR 0003.
@@ -27,7 +29,7 @@ import json
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from cvss import CVSS2, CVSS3, CVSS4
 from cvss.exceptions import CVSSError
@@ -37,6 +39,7 @@ from .assessment_model import (
     FORMER_TEAM_NOTE,
     SEE_GLOBAL_ASSESSMENT,
 )
+from .fixed_versions import derive_recommendation, display_name
 
 VARIANT_INVENTORY = "inventory"
 VARIANT_VDR = "vdr"
@@ -77,6 +80,7 @@ _ADVISORY_KEYS = (
     "cvssV3", "cvssV3BaseScore", "cvssV3Vector",
     "cvssV2", "cvssV2BaseScore", "cvssV2Vector",
     "published", "updated", "description", "recommendation", "cwes", "aliases",
+    "patchedVersions",
 )
 
 
@@ -606,6 +610,84 @@ def _add_missing_components(
         document.setdefault("components", []).append(entry)
 
 
+class _Recommendations:
+    """The recommendation of each entry and what the document says about them.
+
+    Dependency-Track's own text is kept and marked ``advisory``. Otherwise
+    each affected component gets the sentence its version ranges give
+    (``fixed_version``); a component without a fix gets none, and an entry
+    without any sentence has no recommendation.
+    """
+
+    def __init__(
+        self,
+        fixed_versions: Mapping[tuple[str, str], dict[str, Any]] | None,
+        prefix: str,
+    ) -> None:
+        self.rows = fixed_versions
+        self.prefix = prefix
+        self.derived = 0
+        self.unread = 0
+        self.read_at: list[str] = []
+
+    def of(
+        self, vulnerability: dict[str, Any], components: list[dict[str, Any]]
+    ) -> tuple[str, list[dict[str, str]]]:
+        own = str(vulnerability.get("recommendation") or "").strip()
+        if own:
+            return str(vulnerability["recommendation"]), [
+                {"name": f"{self.prefix}:recommendation_source", "value": "advisory"}
+            ]
+        key = (str(vulnerability.get("source") or ""), str(vulnerability.get("vulnId") or ""))
+        row = (self.rows or {}).get(key)
+        entries = None
+        if row is not None and (row.get("status") != "failed" or row.get("payload") is not None):
+            entries = row.get("payload") or []
+            if row.get("read_at"):
+                self.read_at.append(str(row["read_at"]))
+        elif self.rows is not None:
+            self.unread += 1  # never read: the background read has not come to it yet
+        # Trivy's vulnerability-wide value, from whichever package created
+        # the record: a hint, never the recommendation.
+        patched = str(vulnerability.get("patchedVersions") or "").strip()
+        hint = (
+            [{"name": f"{self.prefix}:patched_versions", "value": patched}]
+            if patched else []
+        )
+        sentences: dict[str, tuple[str, tuple[str, ...]]] = {}
+        for component in components:
+            derived = derive_recommendation(component, entries)
+            if derived is not None:
+                sentences.setdefault(derived.text, (display_name(component), derived.sources))
+        if not sentences:
+            return "", hint
+        self.derived += 1
+        ordered = sorted(sentences.items(), key=lambda item: (item[1][0].casefold(), item[0]))
+        sources = sorted({source for _name, found in sentences.values() for source in found})
+        return " ".join(text for text, _found in ordered), [
+            {"name": f"{self.prefix}:recommendation_source", "value": "fixed_version"},
+            *(
+                {"name": f"{self.prefix}:recommendation_fixed_by", "value": source}
+                for source in sources
+            ),
+            *hint,
+        ]
+
+    def metadata(self) -> list[dict[str, str]]:
+        properties = [
+            {"name": f"{self.prefix}:export_derived_recommendations", "value": str(self.derived)}
+        ]
+        if self.unread:
+            properties.append(
+                {"name": f"{self.prefix}:export_fixed_versions_unread", "value": str(self.unread)}
+            )
+        if self.read_at:
+            properties.append(
+                {"name": f"{self.prefix}:export_fixed_versions_read_at", "value": min(self.read_at)}
+            )
+        return properties
+
+
 # Names of this application's inventories; fixed, so an identity can be
 # derived again from the same content.
 _INVENTORY_NAMESPACE = uuid.UUID("6f1d3c0a-5b0e-5d2f-9a57-2f1c8d3e4b6a")
@@ -693,6 +775,7 @@ def build_vdr(
     unowned_teams: Iterable[str] = (),
     ticket_prefixes: Iterable[str] = (),
     findings_read_at: str = "",
+    fixed_versions: Mapping[tuple[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The BOM with its findings and their assessments.
 
@@ -705,6 +788,9 @@ def build_vdr(
     ``ticket_prefixes`` are the project keys of ticket references
     (``<prefix>-<number>``) to recognise in the texts.
     ``findings_read_at`` is when the findings were last read from the source.
+    ``fixed_versions`` are the stored version ranges per (source, vuln ID),
+    as ``LocalStore.fixed_version_entries`` returns them; ``None`` when they
+    were not looked up, so that no entry counts as unread.
     """
     moment = (generated_at or datetime.now(UTC)).astimezone(UTC).isoformat()
     document = build_inventory(bom, findings, property_prefix=property_prefix)
@@ -785,12 +871,15 @@ def build_vdr(
             ),
         )
         group = groups.setdefault(
-            signature, {"vulnerability": vulnerability, "fields": fields, "refs": []}
+            signature,
+            {"vulnerability": vulnerability, "fields": fields, "refs": [], "components": []},
         )
         ref = _component_ref(component, refs)
         if ref not in group["refs"]:
             group["refs"].append(ref)
+            group["components"].append(component)
 
+    recommendations = _Recommendations(fixed_versions, property_prefix)
     per_id: dict[str, int] = {}
     vulnerabilities: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = list(document.get("annotations") or [])
@@ -818,22 +907,26 @@ def build_vdr(
         ]
         if cwes:
             entry["cwes"] = cwes
-        for name in ("description", "recommendation"):
-            if vulnerability.get(name):
-                entry[name] = str(vulnerability[name])
+        if vulnerability.get("description"):
+            entry["description"] = str(vulnerability["description"])
+        recommendation, provenance = recommendations.of(vulnerability, group["components"])
+        if recommendation:
+            entry["recommendation"] = recommendation
         for name in ("published", "updated"):
             if stated := _date_time(vulnerability.get(name)):
                 entry[name] = stated
         if analysis := _analysis(fields, read):
             entry["analysis"] = analysis
         entry["affects"] = [{"ref": ref} for ref in group["refs"]]
-        if properties := _properties(fields, read, property_prefix):
+        if properties := [*_properties(fields, read, property_prefix), *provenance]:
             entry["properties"] = properties
         vulnerabilities.append(entry)
         annotations.extend(_annotations(read, bom_ref, moment))
         if read["text_only_tickets"]:
             text_only_tickets += 1
         historical_assessments += len(read["historical"])
+
+    metadata["properties"] += recommendations.metadata()
 
     if prefixes:
         metadata["properties"] += [

@@ -195,7 +195,10 @@ AI agent → MCP endpoint (access token) ┘ same assessment rules as the browse
 
 Grouped tasks serve filtered summary windows and hydrate full details on demand.
 Assessment saves commit to the local SQLite database first and are exported to
-Dependency-Track in the background, or on request in manual export mode. Task registries are process-local: the supplied deployment
+Dependency-Track in the background, or on request in manual export mode. The
+background refresh of open projects also reads the affected version ranges of
+their vulnerabilities, from which the CycloneDX VDR derives a recommendation;
+an export itself only reads the local database. Task registries are process-local: the supplied deployment
 uses one backend worker; horizontal scaling requires shared task storage.
 
 [Runtime and capacity](docs/runtime.md) documents the key modules, caching,
@@ -215,7 +218,7 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
 | [Import and export](docs/import-export.md) | The local database as the record for assessments, adoption on import, automatic and manual export, failing exports, vanished findings, and history |
-| [CycloneDX inventory and VDR](docs/cyclonedx-export.md) | Downloading the BOM and a VDR with assessments in standard fields per project version, the field mapping, and its limits |
+| [CycloneDX inventory and VDR](docs/cyclonedx-export.md) | Downloading the BOM and a VDR with assessments in standard fields per project version, the recommendation derived from the fixed versions Dependency-Track holds, the field mapping, and its limits |
 | [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, agent code evidence, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
 | [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |

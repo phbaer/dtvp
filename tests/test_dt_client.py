@@ -555,3 +555,56 @@ async def test_update_analysis_always_writes_the_response(dt_client, respx_mock)
     sent = json.loads(respx_mock.calls.last.request.content)
     assert sent["analysisResponse"] == "NOT_SET"
     assert "analysisJustification" not in sent
+
+
+@pytest.mark.asyncio
+async def test_affected_versions_are_slimmed_before_they_leave_the_client(dt_client, respx_mock):
+    route = respx_mock.get(
+        "http://dt.example.com/api/v1/vulnerability/source/GITHUB/vuln/GHSA-aaaa-bbbb-cccc"
+    ).respond(json={
+        "vulnId": "GHSA-aaaa-bbbb-cccc", "source": "GITHUB", "description": "A flaw.",
+        # Components of every project the vulnerability affects.
+        "components": [{"uuid": "c-other", "name": "lib-a", "project": {"name": "Other"}}],
+        "serviceComponents": [{"name": "svc"}],
+        "affectedComponents": [{
+            "identityType": "PURL", "identity": "pkg:npm/lib-a", "versionType": "RANGE",
+            "versionEndExcluding": "1.2.3", "uuid": "vs-1",
+            "affectedVersionAttributions": [{"source": "GITHUB", "firstSeen": 1}],
+        }],
+    })
+    assert await dt_client.get_vulnerability_affected("GITHUB", "GHSA-aaaa-bbbb-cccc") == {
+        "affectedComponents": [{
+            "identityType": "PURL", "identity": "pkg:npm/lib-a", "versionType": "RANGE",
+            "versionEndExcluding": "1.2.3", "sources": ["GITHUB"],
+        }],
+    }
+    assert route.called
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_vulnerability_has_no_affected_versions(dt_client, respx_mock):
+    respx_mock.get(
+        "http://dt.example.com/api/v1/vulnerability/source/NVD/vuln/CVE-2026-1"
+    ).respond(404)
+    assert await dt_client.get_vulnerability_affected("NVD", "CVE-2026-1") is None
+
+    respx_mock.get(
+        "http://dt.example.com/api/v1/vulnerability/source/NVD/vuln/CVE-2026-2"
+    ).respond(500)
+    with pytest.raises(httpx.HTTPStatusError):
+        await dt_client.get_vulnerability_affected("NVD", "CVE-2026-2")
+
+
+@pytest.mark.asyncio
+async def test_the_source_and_id_are_url_encoded(dt_client, respx_mock):
+    seen = []
+
+    def answer(request):
+        seen.append(request.url.raw_path)
+        return httpx.Response(200, json={"affectedComponents": []})
+
+    respx_mock.route(host="dt.example.com").mock(side_effect=answer)
+    await dt_client.get_vulnerability_affected("OSS INDEX", "sonatype-2026/1?x#y")
+    assert seen == [
+        b"/api/v1/vulnerability/source/OSS%20INDEX/vuln/sonatype-2026%2F1%3Fx%23y"
+    ]

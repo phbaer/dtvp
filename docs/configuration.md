@@ -32,6 +32,8 @@ means the integration or override is disabled.
 | `DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES` | Process-local named-project query LRU entries | `128` |
 | `DTVP_ASSESSMENT_OUTBOX_PATH` | Separate file for local assessments and the export queue. Leave unset to keep them in the database; a former `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` is copied in once | `DTVP_DATABASE_PATH` |
 | `DTVP_EXPORT_MODE` | `auto` exports assessments in the background as they are saved; `manual` keeps them local until a reviewer exports them. See [Import and export](import-export.md) | `auto` |
+| `DTVP_FIXED_VERSIONS_REFRESH_DAYS` | Days after which the background refresh reads a vulnerability's affected version ranges from Dependency-Track again, for the [derived VDR recommendation](cyclonedx-export.md#recommendation); a changed record is read at once. Whole number, at least 1; an unusable value falls back to the default | `7` |
+| `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` | Most vulnerabilities whose version ranges one background refresh cycle reads (four at a time); the rest follow in later cycles | `200` |
 | `DTVP_CYCLONEDX_ASSESSMENT_SOURCE` | `source.name` of DTVP's own rating in [CycloneDX VDR exports](cyclonedx-export.md); a request parameter overrides it | `DTVP` |
 | `DTVP_CYCLONEDX_PROPERTY_PREFIX` | Namespace of the properties in CycloneDX VDR exports; a request parameter overrides it | `dtvp` |
 | `DTVP_CYCLONEDX_TICKET_PREFIXES` | Comma-separated project keys of ticket references (`EXP` for `EXP-123`) that CycloneDX VDR exports recognise in assessment texts; the request parameter `ticket_prefixes` overrides it | unset: only recorded ticket fields are exported |
