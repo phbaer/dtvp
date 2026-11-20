@@ -2098,3 +2098,143 @@ async def test_a_save_during_the_read_is_not_overwritten_by_a_carry_over(
         assert manager.assessment_outbox.get_overlay(("p1", "c-new", "v1")) is None
     assert manager.list_export_queue() == []
     await manager.close()
+
+
+# --- listener hooks for the event stream (ADR 0004) -------------------------
+
+
+class _ProjectListSource:
+    """A source whose project list can be swapped or made to fail."""
+
+    def __init__(self, projects=None, error=None):
+        self.projects = projects or []
+        self.error = error
+
+    async def get_projects(self, name=""):
+        if self.error is not None:
+            raise self.error
+        if name:
+            return [p for p in self.projects if name.lower() in p["name"].lower()]
+        return [dict(project) for project in self.projects]
+
+
+def _recording_manager(tmp_path, **kwargs):
+    manager = CacheManager(base_path=str(tmp_path), **kwargs)
+    calls = {"lists": [], "states": [], "status": 0}
+    manager.add_project_list_listener(
+        lambda previous, current: calls["lists"].append((previous, current))
+    )
+    manager.add_source_state_listener(
+        lambda ok, exc: calls["states"].append((ok, exc))
+    )
+
+    def status_changed():
+        calls["status"] += 1
+
+    manager.add_cache_status_listener(status_changed)
+    return manager, calls
+
+
+@pytest.mark.asyncio
+async def test_project_list_refresh_tells_listeners_previous_and_current(tmp_path):
+    manager, calls = _recording_manager(tmp_path)
+    one = {"name": "App", "uuid": "u1", "version": "1.0"}
+    two = {"name": "App", "uuid": "u2", "version": "2.0"}
+    source = _ProjectListSource([one])
+
+    await manager._refresh_project_list(source)
+    source.projects = [one, two]
+    await manager._refresh_project_list(source)
+
+    assert calls["lists"] == [([], [one]), ([one], [one, two])]
+    assert calls["states"] == [(True, None), (True, None)]
+    # The listener runs after the save: the stored list is the new one.
+    assert manager._load_project_cache(manager._projects_path(), []) == [one, two]
+
+
+@pytest.mark.asyncio
+async def test_project_list_refresh_failure_reports_the_source_state(tmp_path):
+    manager, calls = _recording_manager(tmp_path)
+    error = httpx.ConnectError("refused")
+
+    await manager._refresh_project_list(_ProjectListSource(error=error))
+
+    assert calls["lists"] == []
+    assert calls["states"] == [(False, error)]
+
+
+@pytest.mark.asyncio
+async def test_a_raising_listener_does_not_break_the_refresh(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    seen = []
+
+    def broken(previous, current):
+        raise RuntimeError("listener bug")
+
+    manager.add_project_list_listener(broken)
+    manager.add_project_list_listener(lambda previous, current: seen.append(current))
+    manager.add_source_state_listener(lambda ok, exc: (_ for _ in ()).throw(ValueError()))
+    project = {"name": "App", "uuid": "u1", "version": "1.0"}
+
+    await manager._refresh_project_list(_ProjectListSource([project]))
+
+    assert seen == [[project]]
+    assert manager._load_project_cache(manager._projects_path(), []) == [project]
+
+
+@pytest.mark.asyncio
+async def test_unchanged_refresh_publishes_no_project_event(tmp_path):
+    from dtvp.event_hub import EventHub
+    from dtvp.event_producers import ProjectListEventProducer
+
+    manager, calls = _recording_manager(tmp_path)
+    hub = EventHub(boot_id="b")
+    manager.add_project_list_listener(ProjectListEventProducer(hub))
+    project = {"name": "App", "uuid": "u1", "version": "1.0", "lastRiskScore": 1}
+    source = _ProjectListSource([project])
+
+    await manager._refresh_project_list(source)
+    assert [event.type for event in hub.events_after(0)] == ["projects.changed"]
+
+    # Only the risk score moved, as after an export: no event.
+    source.projects = [{**project, "lastRiskScore": 7}]
+    await manager._refresh_project_list(source)
+    await manager._refresh_project_list(source)
+
+    assert len(calls["lists"]) == 3
+    assert hub.current_seq() == 1
+
+
+@pytest.mark.asyncio
+async def test_get_projects_fetch_tells_listeners_and_failure_reports_state(tmp_path):
+    manager, calls = _recording_manager(tmp_path, project_list_ttl_seconds=0)
+    project = {"name": "App", "uuid": "u1", "version": "1.0"}
+    source = _ProjectListSource([project])
+
+    assert await manager.get_projects(source, name="") == [project]
+    assert calls["lists"] == [([], [project])]
+    assert calls["states"] == [(True, None)]
+
+    error = RuntimeError("dt down")
+    source.error = error
+    assert await manager.get_projects(source, name="") == [project]
+    assert calls["states"][-1] == (False, error)
+
+
+@pytest.mark.asyncio
+async def test_named_search_merge_tells_listeners(tmp_path):
+    manager, calls = _recording_manager(tmp_path)
+    known = {"name": "Known", "uuid": "u1", "version": "1.0"}
+    found = {"name": "Found", "uuid": "u2", "version": "1.0"}
+    manager._save_project_cache(manager._projects_path(), [known])
+
+    await manager.get_projects(_ProjectListSource([found]), name="Found")
+
+    assert calls["lists"] == [([known], [known, found])]
+
+
+def test_invalidating_the_cache_status_tells_listeners(tmp_path):
+    manager, calls = _recording_manager(tmp_path)
+    before = calls["status"]
+    manager._invalidate_cache_status()
+    assert calls["status"] == before + 1

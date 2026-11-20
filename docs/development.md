@@ -130,6 +130,10 @@ which maps to `REVIEWER` in `data/user_roles.json`. Start the frontend with
 Commands are in the [command reference](../README.md#command-reference). README screenshots
 come from `frontend/e2e/capture-readme-screenshots.manual.ts`. Real-stack manual
 flows use `npm run test:ui:real-stack` with the relevant Playwright grep.
+`frontend/e2e/event-stream.spec.ts` opens three tabs against a mocked backend
+and checks that one tab holds the live-update stream and another takes over
+when it closes; run it alone with
+`DTVP_E2E_PORT=<free port> npm run test:ui -- event-stream.spec.ts`.
 
 To exercise apply conflicts, edit the same finding in two sessions or change it
 through mock Dependency-Track before submitting. The expected dialog is shown

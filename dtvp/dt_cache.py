@@ -504,6 +504,13 @@ class CacheManager:
         self._assessment_change_listeners: List[
             Callable[[List[AssessmentKey]], None]
         ] = []
+        self._project_list_listeners: List[
+            Callable[[List[Dict[str, Any]], List[Dict[str, Any]]], None]
+        ] = []
+        self._source_state_listeners: List[
+            Callable[[bool, BaseException | None], None]
+        ] = []
+        self._cache_status_listeners: List[Callable[[], None]] = []
         self._open_stores()
 
     def _open_stores(self) -> None:
@@ -867,6 +874,35 @@ class CacheManager:
         with self._cache_status_lock:
             self._cache_status_snapshot = None
             self._cache_status_expires_at = 0.0
+        self._notify_sync(self._cache_status_listeners)
+
+    def add_project_list_listener(
+        self,
+        listener: Callable[[List[Dict[str, Any]], List[Dict[str, Any]]], None],
+    ) -> None:
+        """Be told ``(previous, current)`` after the stored project list was
+        saved. Called synchronously; the listener must be quick."""
+        self._project_list_listeners.append(listener)
+
+    def add_source_state_listener(
+        self,
+        listener: Callable[[bool, BaseException | None], None],
+    ) -> None:
+        """Be told whether a project-list read from the source succeeded."""
+        self._source_state_listeners.append(listener)
+
+    def add_cache_status_listener(self, listener: Callable[[], None]) -> None:
+        """Be told that the cache status changed. Called on any thread, at
+        times with the cache lock held; the listener must only set a flag."""
+        self._cache_status_listeners.append(listener)
+
+    @staticmethod
+    def _notify_sync(listeners: List[Callable[..., None]], *args: Any) -> None:
+        for listener in list(listeners):
+            try:
+                listener(*args)
+            except Exception:
+                logger.exception("Cache listener failed")
 
     def _project_vulns_path(self, project_uuid: str) -> str:
         return self._address(
@@ -1331,10 +1367,14 @@ class CacheManager:
         try:
             projects = await client.get_projects("")
             async with self.lock:
+                previous = self._load_project_cache(self._projects_path(), []) or []
                 self._mark_project_list_refreshed()
                 self._save_project_cache(self._projects_path(), projects)
             await self.flush_cache_writes()
+            self._notify_sync(self._project_list_listeners, previous, projects)
+            self._notify_sync(self._source_state_listeners, True, None)
         except Exception as exc:
+            self._notify_sync(self._source_state_listeners, False, exc)
             logger.debug("Failed to refresh project list: %s", exc)
 
     async def _refresh_active_projects(self, client: VulnerabilitySource) -> None:
@@ -1511,10 +1551,18 @@ class CacheManager:
                 async def fetch_all_projects() -> List[Dict[str, Any]]:
                     fresh_projects = await client.get_projects("")
                     async with self.lock:
+                        previous = (
+                            self._load_project_cache(self._projects_path(), [])
+                            or []
+                        )
                         self._mark_project_list_refreshed()
                         self._save_project_cache(
                             self._projects_path(), fresh_projects
                         )
+                    self._notify_sync(
+                        self._project_list_listeners, previous, fresh_projects
+                    )
+                    self._notify_sync(self._source_state_listeners, True, None)
                     return fresh_projects
 
                 projects = await self._singleflight_fetch(
@@ -1522,7 +1570,8 @@ class CacheManager:
                     fetch_all_projects,
                 )
                 return projects
-            except Exception:
+            except Exception as exc:
+                self._notify_sync(self._source_state_listeners, False, exc)
                 if projects:
                     logger.warning(
                         "Dependency-Track project list unavailable; using stale "
@@ -1549,6 +1598,8 @@ class CacheManager:
 
             async def fetch_matching_projects() -> List[Dict[str, Any]]:
                 fresh_results = await client.get_projects(name)
+                merged: List[Dict[str, Any]] | None = None
+                previous: List[Dict[str, Any]] = []
                 async with self.lock:
                     self.project_query_cache[name] = fresh_results
                     self.project_query_cache.move_to_end(name)
@@ -1561,6 +1612,7 @@ class CacheManager:
                         current = self._load_project_cache(
                             self._projects_path(), []
                         ) or []
+                        previous = list(current)
                         existing_uuids = {
                             project.get("uuid")
                             for project in current
@@ -1571,6 +1623,10 @@ class CacheManager:
                             if project.get("uuid") not in existing_uuids:
                                 merged.append(project)
                         self._save_project_cache(self._projects_path(), merged)
+                if merged is not None:
+                    self._notify_sync(
+                        self._project_list_listeners, previous, merged
+                    )
                 return fresh_results
 
             results = await self._singleflight_fetch(

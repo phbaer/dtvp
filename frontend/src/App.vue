@@ -5,6 +5,7 @@ import { projectHeaderState } from './lib/projectHeaderStore'
 import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
 import { buildVersionStore, recordServerIdentity } from './lib/buildVersion'
+import { eventStream } from './lib/eventStream'
 import {
     AUTH_EXPIRED_EVENT,
     consumeAuthReturnPath,
@@ -155,6 +156,8 @@ const bootstrapApp = async () => {
         }
 
         bootStatus.value = 'ready'
+        // One live-update stream per browser, shared by its tabs.
+        if (user.value.username) eventStream.start()
     } catch (e) {
         console.error('Failed to initialise DTVP', e)
         bootError.value = describeBootstrapError(e)
@@ -163,6 +166,7 @@ const bootstrapApp = async () => {
 }
 
 const handleAuthExpired = () => {
+    eventStream.stop('auth')
     user.value = { username: '', role: '' }
     realRole.value = ''
     rememberAuthReturnPath(route.fullPath)
@@ -178,7 +182,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
     window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
+    eventStream.stop('manual')
 })
+
+// Tell the other tabs first, so they stop their stream and go to sign-in.
+const handleLogout = () => {
+    eventStream.stop('logout')
+    logout()
+}
 
 const toggleView = () => {
     isAnalystView.value = !isAnalystView.value
@@ -462,7 +473,7 @@ const reloadForUpdate = () => {
                             <span class="text-gray-500 text-xs mt-1">({{ isAnalystView ? 'ANALYST View' : user.role }})</span>
                         </div>
                         <button 
-                            @click="logout"
+                            @click="handleLogout"
                             class="bg-gray-700 hover:bg-gray-600 text-white text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer border border-gray-600"
                         >
                             Logout

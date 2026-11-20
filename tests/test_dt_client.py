@@ -27,6 +27,16 @@ async def test_get_projects(dt_client, respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_projects_carry_neutral_source_marks(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/project").respond(
+        json=[{"name": "P", "uuid": "u1", "lastBomImport": 10, "lastVulnerabilityAnalysis": 20}]
+    )
+    [project] = await dt_client.get_projects()
+    # Generic code compares this value without knowing Dependency-Track's fields.
+    assert project["dtvpSourceMarks"] == {"bom": 10, "analysis": 20}
+
+
+@pytest.mark.asyncio
 async def test_get_projects_paginated(dt_client, respx_mock):
     # Page 1
     respx_mock.get("http://dt.example.com/api/v1/project").mock(
@@ -347,7 +357,9 @@ async def test_find_project_by_name_version_matches_exact_version(dt_client, res
 
     project = await dt_client.find_project_by_name_version("ArchiveApp", "2.0.0")
 
-    assert project == {"name": "ArchiveApp", "version": "2.0.0", "uuid": "p2"}
+    assert {key: value for key, value in project.items() if key != "dtvpSourceMarks"} == {
+        "name": "ArchiveApp", "version": "2.0.0", "uuid": "p2",
+    }
 
 
 @pytest.mark.asyncio

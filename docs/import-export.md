@@ -37,9 +37,27 @@ and [Deployment](deployment.md) for backup notes.
 
 ## Import
 
-Importing happens when a project is opened or refreshed and in the background
-for recently used projects. Source facts (projects, findings, vulnerability
-details, BOMs) replace the stored copy.
+When importing happens (implemented, checked against `dtvp/dt_cache.py` on
+2026-11-20):
+
+- A version is imported from Dependency-Track the first time it is opened, and
+  the view waits for it. Afterwards it is served from the database: opening it
+  again does not read Dependency-Track.
+- Every `DTVP_DT_CACHE_REFRESH_SECONDS` (60) the background re-reads the
+  project list and up to `DTVP_DT_ACTIVE_PROJECT_LIMIT` (8) versions opened
+  within `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` (900). Each re-read renews the
+  version's access time, so a version stays in that set until eight more
+  recently opened versions push it out.
+- The dashboard reads the project list from Dependency-Track when the stored
+  list is older than `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (30).
+- The automatic code-analysis sweep imports versions nobody opened.
+
+Source facts (projects, findings, vulnerability details, BOMs) replace the
+stored copy.
+
+Planned: [ADR 0004](adr/0004-background-sync-and-event-stream.md) moves all
+reads from Dependency-Track to a background scheduler that keeps every active
+version current, and readers serve only the database.
 
 Assessments are **not** replaced by an import. Per finding:
 

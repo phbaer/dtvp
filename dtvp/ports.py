@@ -19,7 +19,13 @@ class VulnerabilitySource(Protocol):
     """Read access to projects, their findings, and current assessments."""
 
     async def get_projects(self, name: Optional[str] = None) -> list[dict[str, Any]]:
-        """Project versions, optionally filtered by name."""
+        """Project versions, optionally filtered by name.
+
+        Each version may carry ``dtvpSourceMarks``, an opaque value that
+        changes whenever the source's data for the version changes (for
+        Dependency-Track: a BOM upload or a new analysis). Without it,
+        changes are only noticed by reading the version again.
+        """
 
     async def get_vulnerabilities(
         self, project_uuid: str, cve: Optional[str] = None

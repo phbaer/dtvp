@@ -50,9 +50,13 @@ Deployment rules:
   project tabs renew their lightweight task lease and rebuild an expired task
   automatically after a suspended browser resumes, so details and bulk actions
   do not require a full-page reload.
-- Background Dependency-Track refresh tracks a timestamped, bounded set of
-  recently viewed projects. Older projects remain on disk and load on demand;
-  they no longer receive three upstream refresh calls every minute forever.
+- Background Dependency-Track refresh re-reads a bounded set of at most
+  `DTVP_DT_ACTIVE_PROJECT_LIMIT` (8) recently opened versions every minute.
+  Each re-read renews the version's access time, so a version stays in the set
+  until eight more recently opened versions push it out; the 15-minute idle
+  expiry applies only to versions that left it. Other versions stay in the
+  database and are served from there. [ADR 0004](adr/0004-background-sync-and-event-stream.md)
+  plans to replace this with a background scheduler.
 - Process-local cache objects and named project searches use LRU limits, and
   completed grouped tasks have a separate retained-count cap. These bounds keep
   long-running and multi-user instances from growing without limit.
@@ -60,9 +64,24 @@ Deployment rules:
   `DTVP_HTTP_PORT` changes the host gateway port. Direct-container deployments
   must publish port `8000` and include the context path in the URL.
 - The Compose nginx gateway keeps upstream HTTP/1.1 connections open,
-  compresses JSON/static text responses, and disables buffering for grouped
-  task event streams. Uvicorn keeps those upstream connections for 30 seconds
+  compresses JSON/static text responses, and disables buffering and
+  compression for the live-update stream `/api/events`, the grouped task
+  event streams, and the project archive task streams (the archive stream was
+  buffered before). Uvicorn keeps those upstream connections for 30 seconds
   and uses a 2048-connection accept backlog.
+- An external proxy in front of DTVP must not buffer or compress
+  `text/event-stream` responses on `/api/events`, `/api/tasks/*/events`, and
+  `/api/project-archives/tasks/*/events`, and must allow idle reads longer
+  than 15 seconds (1 hour recommended). Clients whose proxy cannot stream
+  (it buffers the stream, or holds the response headers for more than
+  35 seconds) fall back to polling `/api/events/poll` after three failed
+  attempts. See [Event channel](runtime.md#event-channel).
+- Stop the container with SIGTERM (`docker stop` does). The signal ends open
+  `/api/events` streams at once, so the graceful shutdown does not wait for
+  them.
+- Serve DTVP over HTTP/2 at the TLS-terminating proxy. With HTTP/1.1 browsers
+  open about six connections per host, and every long-lived stream holds one;
+  the Compose nginx itself listens with HTTP/1.1.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
   logs time cache and integration initialization.
 - Database and data migrations run during startup and report what they are

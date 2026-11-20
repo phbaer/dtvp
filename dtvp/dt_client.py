@@ -84,6 +84,18 @@ class DTClient:
         response.raise_for_status()
         return response.json()
 
+    @staticmethod
+    def _with_source_marks(project: Dict[str, Any]) -> Dict[str, Any]:
+        """Add ``dtvpSourceMarks``: a value that changes whenever
+        Dependency-Track's data for the version changes (a BOM upload or a
+        new analysis). Generic code compares it without knowing the fields."""
+        if isinstance(project, dict):
+            project["dtvpSourceMarks"] = {
+                "bom": project.get("lastBomImport"),
+                "analysis": project.get("lastVulnerabilityAnalysis"),
+            }
+        return project
+
     async def get_projects(self, name: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Search for projects by name.
@@ -116,7 +128,7 @@ class DTClient:
             if not projects:
                 break
 
-            all_projects.extend(projects)
+            all_projects.extend(self._with_source_marks(project) for project in projects)
 
             # If we got fewer than page_size, we reached the end
             if len(projects) < page_size:
