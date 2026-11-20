@@ -567,3 +567,336 @@ async def test_code_evidence_applications_are_recorded_after_the_save(deps, tmp_
     assert application["applied_by"] == "bob"
     assert application["status"] == "queued"
     assert application["workflow_id"] == "individual-assessment"
+
+
+# --- A save never drops another team's block ------------------------------
+
+from dtvp.assessment_model import parse_assessment, render_assessment  # noqa: E402
+
+_TEAM_B_STORED = {
+    "team": "TeamB", "state": "EXPLOITABLE", "assessed_by": "bob",
+    "assessed_at_ms": 1794561289027, "justification": "PROTECTED_BY_MITIGATING_CONTROL",
+    "ticket": "EXP-1", "details": "TeamB confirmed it.",
+}
+_TEAM_A_FIELDS = {
+    "team": "TeamA", "state": "NOT_AFFECTED", "assessed_by": "alice",
+    "assessed_at_ms": 1794561289100, "justification": "CODE_NOT_REACHABLE",
+    "details": "TeamA does not reach it.",
+}
+
+
+async def _store(deps, *teams, instance=INSTANCE, free_text=None, pending=True):
+    """The starting text, stored through a reviewer's save of all blocks."""
+    fields = {"teams": list(teams), "pending_review": pending}
+    if free_text is not None:
+        fields["free_text"] = free_text
+    await save_assessment(
+        deps, _request(team=None, state="NOT_SET", fields=fields,
+                       instances=[dict(instance)]),
+        user="rita", role="REVIEWER", client=None,
+    )
+
+
+def _stored(instance=INSTANCE):
+    return dt_cache.cache_manager.get_assessment_overlay(
+        instance["project_uuid"], instance["component_uuid"],
+        instance["vulnerability_uuid"],
+    )
+
+
+def _teams(instance=INSTANCE):
+    stored = _stored(instance)
+    record = parse_assessment(
+        stored["analysisState"], stored["analysisDetails"], stored["isSuppressed"]
+    )
+    # One block per team: rendering the fields again must not fail.
+    render_assessment(record)
+    return {team["team"]: team for team in record["teams"]}
+
+
+async def test_a_team_save_without_another_teams_block_keeps_it_as_historical(deps):
+    await _store(deps, _TEAM_B_STORED)
+    revision = _stored()["dtvpRevision"]
+
+    # TeamA's form did not show TeamB's block.
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED",
+                 fields={"pending_review": True, "teams": [_TEAM_A_FIELDS]}),
+        user="alice", client=None,
+    )
+
+    teams = _teams()
+    team_b = teams["TeamB"]
+    assert team_b["historical"] is True
+    assert (team_b["state"], team_b["assessed_by"], team_b["assessed_at_ms"],
+            team_b["justification"], team_b["ticket"], team_b["details"]) == (
+        "EXPLOITABLE", "bob", 1794561289027, "PROTECTED_BY_MITIGATING_CONTROL",
+        "EXP-1", "TeamB confirmed it.",
+    )
+    assert teams["TeamA"]["historical"] is False
+    # TeamB no longer counts: the finding has TeamA's state.
+    assert _stored()["analysisState"] == "NOT_AFFECTED"
+    assert _stored()["dtvpRevision"] == revision + 1
+
+
+async def test_a_reviewers_whole_text_without_a_block_keeps_it_as_historical(deps):
+    await _store(deps, _TEAM_B_STORED, {**_TEAM_A_FIELDS})
+    text = (
+        "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] "
+        "[Justification: CODE_NOT_REACHABLE] ---\nTeamA does not reach it."
+    )
+
+    await save_assessment(
+        deps, _request(team=None, state="NOT_AFFECTED", details=text,
+                       comparison_mode="REPLACE"),
+        user="rita", role="REVIEWER", client=None,
+    )
+
+    teams = _teams()
+    assert teams["TeamB"]["historical"] is True
+    assert teams["TeamB"]["ticket"] == "EXP-1"
+    assert _stored()["analysisState"] == "NOT_AFFECTED"
+
+
+async def test_a_team_clearing_its_own_block_leaves_no_historical_block(deps):
+    await _store(deps, _TEAM_A_FIELDS, _TEAM_B_STORED)
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="EXPLOITABLE",
+                 fields={"pending_review": True, "teams": [_TEAM_B_STORED]}),
+        user="alice", client=None,
+    )
+
+    assert set(_teams()) == {"TeamB"}
+    assert _teams()["TeamB"]["historical"] is False
+
+
+async def test_a_team_save_never_removes_the_general_assessment(deps):
+    general = {"team": "General", "state": "FALSE_POSITIVE", "assessed_by": "rita",
+               "assessed_at_ms": 1794561289000, "details": "Not this package."}
+    await _store(deps, general, {**_TEAM_A_FIELDS, "state": "IN_TRIAGE"})
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED",
+                 fields={"pending_review": True, "teams": [_TEAM_A_FIELDS]}),
+        user="alice", client=None,
+    )
+
+    teams = _teams()
+    assert list(teams) == ["General", "TeamA"]
+    assert teams["General"]["historical"] is False
+    assert (teams["General"]["state"], teams["General"]["details"],
+            teams["General"]["assessed_at_ms"]) == (
+        "FALSE_POSITIVE", "Not this package.", 1794561289000
+    )
+    assert teams["TeamA"]["state"] == "NOT_AFFECTED"
+    # The General assessment still decides the finding's state.
+    assert _stored()["analysisState"] == "FALSE_POSITIVE"
+    assert _stored()["analysisDetails"].endswith("[Status: Pending Review]")
+
+
+async def test_a_historical_block_a_save_leaves_out_is_kept(deps):
+    await _store(deps, _TEAM_A_FIELDS, {**_TEAM_B_STORED, "historical": True})
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED",
+                 fields={"pending_review": True,
+                         "teams": [{**_TEAM_A_FIELDS, "details": "Rechecked."}]}),
+        user="alice", client=None,
+    )
+
+    teams = _teams()
+    assert teams["TeamB"]["historical"] is True
+    assert teams["TeamB"]["ticket"] == "EXP-1"
+    assert teams["TeamA"]["details"] == "Rechecked."
+
+
+def _all_blocks(instance=INSTANCE):
+    stored = _stored(instance)
+    record = parse_assessment(
+        stored["analysisState"], stored["analysisDetails"], stored["isSuppressed"]
+    )
+    render_assessment(record)
+    return record["teams"]
+
+
+@pytest.mark.parametrize("by_fields", [True, False])
+async def test_a_teams_save_keeps_its_own_historical_block(deps, by_fields):
+    # TeamB's former assessment, kept by the repair; TeamB owns it again.
+    await _store(deps, {**_TEAM_B_STORED, "historical": True})
+
+    if by_fields:
+        request = _request(
+            team="TeamB", state="NOT_AFFECTED",
+            fields={"pending_review": True, "teams": [{
+                "team": "TeamB", "state": "NOT_AFFECTED", "assessed_by": "bert",
+                "justification": "CODE_NOT_REACHABLE", "details": "Rechecked.",
+            }]},
+        )
+    else:
+        request = _request(team="TeamB", state="NOT_AFFECTED", details="Rechecked.",
+                           justification="CODE_NOT_REACHABLE")
+    await save_assessment(deps, request, user="bert", client=None)
+
+    team_b = sorted(
+        (team for team in _all_blocks() if team["team"] == "TeamB"),
+        key=lambda team: not team["historical"],
+    )
+    assert [(team["historical"], team["state"], team["assessed_by"]) for team in team_b] == [
+        (True, "EXPLOITABLE", "bob"), (False, "NOT_AFFECTED", "bert"),
+    ]
+    record = team_b[0]
+    assert (record["assessed_at_ms"], record["justification"], record["ticket"],
+            record["details"]) == (
+        1794561289027, "PROTECTED_BY_MITIGATING_CONTROL", "EXP-1", "TeamB confirmed it.",
+    )
+    assert team_b[1]["details"] == "Rechecked."
+    assert _stored()["analysisState"] == "NOT_AFFECTED"
+
+
+async def test_an_open_block_a_save_leaves_out_stays_open(deps):
+    # Another team's block without a decision but with assignees tracks
+    # work: a save whose view lacked it keeps it as it was, still open.
+    await _store(deps, _TEAM_A_FIELDS, {"team": "TeamB", "state": "NOT_SET",
+                                         "assigned": ["bob"]})
+    assert "TeamB" in _teams()
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED",
+                 fields={"pending_review": True, "teams": [_TEAM_A_FIELDS]}),
+        user="alice", client=None,
+    )
+
+    teams = _teams()
+    assert set(teams) == {"TeamA", "TeamB"}
+    assert teams["TeamB"]["historical"] is False
+    assert teams["TeamB"]["assigned"] == ["bob"]
+
+
+async def test_an_empty_block_a_save_leaves_out_is_not_brought_back(deps):
+    await _store(deps, _TEAM_A_FIELDS, {"team": "TeamB", "state": "NOT_SET"})
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED",
+                 fields={"pending_review": True, "teams": [_TEAM_A_FIELDS]}),
+        user="alice", client=None,
+    )
+
+    assert set(_teams()) == {"TeamA"}
+
+
+async def test_only_the_finding_that_had_the_block_gets_it_back(deps):
+    other = {**INSTANCE, "component_uuid": "c2", "finding_uuid": "f2"}
+    await _store(deps, _TEAM_B_STORED)
+    await _store(deps, {**_TEAM_A_FIELDS, "state": "IN_TRIAGE"}, instance=other)
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED",
+                 instances=[dict(INSTANCE), dict(other)],
+                 fields={"pending_review": True, "teams": [_TEAM_A_FIELDS]}),
+        user="alice", client=None,
+    )
+
+    assert _teams()["TeamB"]["historical"] is True
+    assert set(_teams(other)) == {"TeamA"}
+
+
+async def test_a_merge_save_from_a_stale_view_keeps_the_block_it_did_not_see(deps):
+    """A save as text merges into the text the client loaded; a block that
+    text lacked is still not lost."""
+    await _store(deps, _TEAM_B_STORED)
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED", details="TeamA checked.",
+                 instances=[{**INSTANCE, "analysis_details": ""}]),
+        user="alice", client=None,
+    )
+
+    teams = _teams()
+    assert teams["TeamB"]["historical"] is True
+    assert teams["TeamA"]["details"] == "TeamA checked."
+
+
+# --- A save that changes only metadata keeps who assessed and when --------
+
+_TEAM_A_STORED = {**_TEAM_A_FIELDS, "ticket": "EXP-1", "assessed_by": "alice",
+                  "assessed_at_ms": 1794561289100}
+
+
+async def _save_team_a(deps, team_a, *others, pending=True, role=None, user="carol"):
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state=team_a["state"],
+                 fields={"pending_review": pending, "teams": [team_a, *others]}),
+        user=user, role=role, client=None,
+    )
+
+
+async def test_a_ticket_change_keeps_assessor_and_date(deps):
+    await _store(deps, _TEAM_A_STORED)
+
+    await _save_team_a(deps, {**_TEAM_A_STORED, "ticket": "EXP-1, EXP-2",
+                              "assessed_by": "carol", "assessed_at_ms": 1794561299999})
+
+    team_a = _teams()["TeamA"]
+    assert (team_a["ticket"], team_a["assessed_by"], team_a["assessed_at_ms"]) == (
+        "EXP-1, EXP-2", "alice", 1794561289100
+    )
+    assert _stored()["analysisDetails"].endswith("[Status: Pending Review]")
+
+
+async def test_a_changed_text_takes_the_new_assessor_and_date(deps):
+    await _store(deps, _TEAM_A_STORED)
+
+    await _save_team_a(deps, {**_TEAM_A_STORED, "ticket": "EXP-2", "details": "Rechecked.",
+                              "assessed_by": "carol", "assessed_at_ms": 1794561299999})
+
+    team_a = _teams()["TeamA"]
+    assert (team_a["assessed_by"], team_a["assessed_at_ms"]) == ("carol", 1794561299999)
+
+
+async def test_an_approval_takes_the_assessor_and_date_it_sends(deps):
+    await _store(deps, _TEAM_A_STORED)
+
+    await _save_team_a(deps, {**_TEAM_A_STORED, "ticket": "EXP-2",
+                              "assessed_by": "rita", "assessed_at_ms": 1794561299999},
+                       pending=False, role="REVIEWER", user="rita")
+
+    team_a = _teams()["TeamA"]
+    assert (team_a["assessed_by"], team_a["assessed_at_ms"]) == ("rita", 1794561299999)
+
+
+async def test_another_teams_unchanged_block_keeps_its_attribution(deps):
+    await _store(deps, _TEAM_A_STORED, _TEAM_B_STORED)
+
+    await _save_team_a(deps, {**_TEAM_A_STORED, "details": "Rechecked."},
+                       {**_TEAM_B_STORED, "assessed_by": "carol",
+                        "assessed_at_ms": 1794561299999})
+
+    team_b = _teams()["TeamB"]
+    assert (team_b["assessed_by"], team_b["assessed_at_ms"]) == ("bob", 1794561289027)
+
+
+async def test_a_merge_save_that_only_assigns_keeps_assessor_and_date(deps):
+    await _store(deps, _TEAM_A_STORED)
+    stored = _stored()["analysisDetails"]
+
+    await save_assessment(
+        deps,
+        _request(team="TeamA", state="NOT_AFFECTED", details="TeamA does not reach it.",
+                 assigned=["dave"],
+                 instances=[{**INSTANCE, "analysis_details": stored}]),
+        user="carol", client=None,
+    )
+
+    team_a = _teams()["TeamA"]
+    assert team_a["assigned"] == ["dave"]
+    assert (team_a["assessed_by"], team_a["assessed_at_ms"]) == ("alice", 1794561289100)

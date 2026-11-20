@@ -318,7 +318,7 @@ describe('BulkWorkflowModal', () => {
                 repairable: true,
                 repairs: [
                     { id: 'sync_findings', label: 'Synchronize assessment to 1 finding' },
-                    { id: 'former_teams', label: 'Move former team assessment to global notes: TeamA' },
+                    { id: 'former_teams', label: 'Keep former team assessment as historical: TeamA' },
                     { id: 'rescoring', label: 'Repair rescoring on 1 finding' },
                 ],
                 review: ['CVSS vector not recoverable on 1 finding'],
@@ -353,7 +353,7 @@ describe('BulkWorkflowModal', () => {
 
         const labels = wrapper.get('[data-testid="repair-labels-CVE-2026-RULE"]').text()
         expect(labels).toContain('Synchronize assessment to 1 finding')
-        expect(labels).toContain('Move former team assessment to global notes: TeamA')
+        expect(labels).toContain('Keep former team assessment as historical: TeamA')
         expect(labels).toContain('Repair rescoring on 1 finding')
         expect(labels).toContain('CVSS vector not recoverable on 1 finding')
         const repairable = wrapper.get('[data-testid="bulk-workflow-item-CVE-2026-RULE"]').text()

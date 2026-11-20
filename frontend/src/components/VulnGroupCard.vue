@@ -266,9 +266,14 @@ const differingFindingCount = computed(() => visibleInstances.value.length - Mat
     ...groupedAssessments.value.map(assessment => assessment.instances.length),
 ))
 const inconsistencyIssues = computed(() => assessmentSyncIssues.value.filter(issue => issue.kind === 'inconsistent'))
+/**
+ * The team assessments that count: historical records are listed in
+ * mergedAssessmentData too, but they are not any team's current decision.
+ */
+const activeAssessmentBlocks = computed(() => mergedAssessmentData.value.blocks.filter(block => !block.historical))
 /** The decision of every team, when the teams do not agree. */
 const conflictingTeamStates = computed(() => {
-    const entries = mergedAssessmentData.value.blocks
+    const entries = activeAssessmentBlocks.value
         .filter(block => block.team.toLocaleLowerCase() !== 'general' && block.state && block.state !== 'NOT_SET')
         .map(block => ({ team: block.team, state: block.state }))
     return new Set(entries.map(entry => entry.state)).size > 1 ? entries : []
@@ -1048,7 +1053,7 @@ const handleApplyCodeEvidence = (payload: { evidenceId: string; reference: strin
 
 const stageCodeAnalysisGlobalReference = (): AssessmentDraftState | null => {
     const assessments = new Map<string, CodeAnalysisTeamDraft>()
-    for (const block of mergedAssessmentData.value.blocks) {
+    for (const block of activeAssessmentBlocks.value) {
         if (block.team.toLocaleLowerCase() === 'general') continue
         assessments.set(block.team.toLocaleLowerCase(), {
             team: block.team,
@@ -1065,7 +1070,7 @@ const stageCodeAnalysisGlobalReference = (): AssessmentDraftState | null => {
 
     const generalDraftEntry = [...teamDrafts.value.entries()]
         .find(([team]) => team.toLocaleLowerCase() === 'general')
-    const savedGeneral = mergedAssessmentData.value.blocks
+    const savedGeneral = activeAssessmentBlocks.value
         .find(block => block.team.toLocaleLowerCase() === 'general')
     const activeGlobal = !selectedTeam.value && formTouched.value
         ? {
@@ -1181,7 +1186,7 @@ const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[
     const preservedTeams: string[] = []
     for (const draft of prepared.teamDrafts) {
         const existingDraft = teamDrafts.value.get(draft.team)
-        const savedBlock = mergedAssessmentData.value.blocks.find(block => (
+        const savedBlock = activeAssessmentBlocks.value.find(block => (
             block.team.toLocaleLowerCase() === draft.team.toLocaleLowerCase()
         ))
         const hasTeamAssessment = Boolean(
@@ -1351,7 +1356,7 @@ const isRescoredOrModified = computed(() => {
     return Math.abs(Number(current) - Number(base)) > 0.05
 })
 
-const hasSavedGlobalAssessment = computed(() => mergedAssessmentData.value.blocks.some(block =>
+const hasSavedGlobalAssessment = computed(() => activeAssessmentBlocks.value.some(block =>
     block.team.toLocaleLowerCase() === 'general' && block.state !== 'NOT_SET'
 ))
 /** True while the Global form holds a decision taken over from the teams. */
@@ -1736,7 +1741,7 @@ const updateFormFromGroup = (force = true) => {
         const formValues = resolveAssessmentFormValues({
             selectedTeam: selectedTeam.value,
             isReviewer: isReviewer.value,
-            teamBlocks: mergedAssessmentData.value.blocks,
+            teamBlocks: activeAssessmentBlocks.value,
             instances: allInstances.value,
         })
 
@@ -1751,7 +1756,7 @@ const updateFormFromGroup = (force = true) => {
 
         // Initialize assigned users from the current team block
         const teamKey = selectedTeam.value || 'General'
-        const assignedBlock = mergedAssessmentData.value.blocks.find(b => b.team === teamKey)
+        const assignedBlock = activeAssessmentBlocks.value.find(b => b.team === teamKey)
         currentAssigned.value = assignedBlock?.assigned ? [...assignedBlock.assigned] : []
         evidenceReviewed.value = Boolean(assignedBlock?.evidenceReviewed)
         versionCoverageChecked.value = Boolean(assignedBlock?.versionCoverageChecked)
@@ -1787,7 +1792,7 @@ const updateFormFromGroup = (force = true) => {
 const syncAllAssessments = () => {
     if (displayState.value !== 'INCOMPLETE') return
 
-    const allBlocks = mergedAssessmentData.value.blocks
+    const allBlocks = activeAssessmentBlocks.value
 
     if (allBlocks.length === 0) {
         showAlert('No Analysis Data', 'No assessments found to pull from.')
@@ -1833,7 +1838,7 @@ const handleApplyAllAssessment = async (assessmentDetails: string, assessmentSta
 
     // Parse the full structured text and extract only the General block's details.
     const blocks = parseAssessmentBlocks(assessmentDetails)
-    const generalBlock = blocks.find(b => b.team === 'General')
+    const generalBlock = blocks.find(b => b.team === 'General' && !b.historical)
     if (generalBlock) {
         details.value = stripPendingReviewStatus(stripSsvcDocumentation(generalBlock.details || '')).trim()
         state.value = generalBlock.state || assessmentState || 'NOT_SET'
@@ -2605,7 +2610,7 @@ type EffectiveTeamAssessment = {
 
 const effectiveTeamAssessments = computed<EffectiveTeamAssessment[]>(() => allAssessmentTeams.value.map(team => {
     const teamKey = team.toLocaleLowerCase()
-    const saved = mergedAssessmentData.value.blocks.find(block => block.team.toLocaleLowerCase() === teamKey)
+    const saved = activeAssessmentBlocks.value.find(block => block.team.toLocaleLowerCase() === teamKey)
     const draft = [...teamDrafts.value.entries()].find(([key]) => key.toLocaleLowerCase() === teamKey)?.[1]
     const isAutomaticFallback = automaticFallbackTeams.value.has(teamKey)
     const current = !isAutomaticFallback && selectedTeam.value.toLocaleLowerCase() === teamKey && state.value !== 'NOT_SET'
@@ -2662,7 +2667,7 @@ const scopedAssessmentProgress = computed(() => {
     const covered = visibleInstances.value.every(instance => {
         const rawInstance = instance as Record<string, any>
         const instanceDetails = String(rawInstance.analysis_details || rawInstance.analysisDetails || '')
-        const blocks = parseAssessmentBlocks(instanceDetails)
+        const blocks = parseAssessmentBlocks(instanceDetails).filter(block => !block.historical)
         const hasApplicableBlock = blocks.some(block => {
             const blockTeam = block.team.toLocaleLowerCase()
             return (
@@ -2902,7 +2907,7 @@ watch(isWorkspace, (open, wasOpen) => {
 }, { immediate: true })
 
 const teamBlockMeta = (team: string): AssessmentBlock | undefined => {
-    return mergedAssessmentData.value.blocks.find(b => b.team === team)
+    return activeAssessmentBlocks.value.find(b => b.team === team)
 }
 
 const teamBlockStateColor = (state?: string): string => {

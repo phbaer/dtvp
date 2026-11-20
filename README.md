@@ -116,9 +116,12 @@ constraints, and CI conventions.
    for context and assessment details.
 3. Record team assessments, optionally using earlier team assessments,
    threat-model or code-analysis proposals. Reviewers approve global decisions
-   and adjust CVSS scores.
+   and adjust CVSS scores. A save never drops another team's assessment; a
+   block it leaves out is kept as historical, and a team's historical block
+   stays beside its new assessment.
 4. Use **Bulk Changes** to apply automatic assessments or run the combined
-   repair (synchronization, former-team cleanup, CVSS restore, rescoring);
+   repair (synchronization, former-team assessments kept as historical, CVSS
+   restore, rescoring);
    use archives to export and restore project data.
 
 | Lifecycle | Meaning |

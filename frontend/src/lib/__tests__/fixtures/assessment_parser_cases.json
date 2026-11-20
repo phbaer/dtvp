@@ -1,0 +1,150 @@
+[
+  {
+    "name": "tag-like text in a body stays as written",
+    "text": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] [Historical: yes ] ---\nTracked in [Ticket: SYN-1]; see [Comment] above. [Assigned: bob] [Evidence Reviewed: yes] [Version Coverage: yes] [Copied From: TeamB] [Historical: yes]",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "EXPLOITABLE",
+        "justification": "NOT_SET",
+        "historical": true,
+        "ticket": "",
+        "details": "Tracked in [Ticket: SYN-1]; see [Comment] above. [Assigned: bob] [Evidence Reviewed: yes] [Version Coverage: yes] [Copied From: TeamB] [Historical: yes]"
+      }
+    ]
+  },
+  {
+    "name": "historical tag with a trailing space",
+    "text": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] [Historical: yes ] ---\nOld.",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "EXPLOITABLE",
+        "justification": "NOT_SET",
+        "historical": true,
+        "ticket": "",
+        "details": "Old."
+      }
+    ]
+  },
+  {
+    "name": "pending review marker in any case is removed",
+    "text": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] ---\nNot reachable. [status: pending review] [STATUS: Pending Review]",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "EXPLOITABLE",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "Not reachable."
+      }
+    ]
+  },
+  {
+    "name": "'Assessed -- user' is removed",
+    "text": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] ---\nChecked. Assessed -- alice",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "EXPLOITABLE",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "Checked."
+      }
+    ]
+  },
+  {
+    "name": "a trailing one-word signature is removed",
+    "text": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] ---\nFixed upstream -- alice",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "EXPLOITABLE",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "Fixed upstream"
+      }
+    ]
+  },
+  {
+    "name": "a multi-word signature stays",
+    "text": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: John Doe] [Justification: CODE_NOT_PRESENT] ---\nFixed upstream -- John Doe",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "NOT_AFFECTED",
+        "justification": "CODE_NOT_PRESENT",
+        "historical": false,
+        "ticket": "",
+        "details": "Fixed upstream -- John Doe"
+      }
+    ]
+  },
+  {
+    "name": "header tags in any order",
+    "text": "--- [Team: TeamA] [Assessed By: a] [Date: 1700000000000] [State: FALSE_POSITIVE] [Ticket: SYN-2] [Justification: NOT_SET] ---\nWrong match.",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "FALSE_POSITIVE",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "SYN-2",
+        "details": "Wrong match."
+      }
+    ]
+  },
+  {
+    "name": "a body starting with a tag after the header",
+    "text": "--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] ---\n[Team: TeamA] My actual rationale -- UserA",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "IN_TRIAGE",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "My actual rationale"
+      }
+    ]
+  },
+  {
+    "name": "header tags in a body are removed",
+    "text": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] ---\n[Rescored: 9.8] [Rescored Vector: CVSS:3.1/AV:N] [Reviewed By: rita] Reachable.",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "EXPLOITABLE",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "Reachable."
+      }
+    ]
+  },
+  {
+    "name": "text before the first block and two blocks",
+    "text": "Legacy text.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] [Ticket: SYN-3, SYN-4] ---\nFirst.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: b] [Justification: CODE_NOT_REACHABLE] [Evidence Reviewed: partial] ---\nSecond.",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "EXPLOITABLE",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "SYN-3, SYN-4",
+        "details": "First."
+      },
+      {
+        "team": "TeamB",
+        "state": "NOT_AFFECTED",
+        "justification": "CODE_NOT_REACHABLE",
+        "historical": false,
+        "ticket": "",
+        "details": "Second."
+      }
+    ]
+  }
+]

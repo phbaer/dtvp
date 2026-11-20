@@ -143,6 +143,16 @@ def test_two_assessments_of_one_team_are_refused():
         render_assessment({"teams": [_team(" ")]})
 
 
+def test_a_team_s_historical_assessments_stand_beside_its_live_one():
+    """ADR 0003: one live assessment per team; its historical ones are kept."""
+    old = {**_team("Core"), "historical": True, "assessed_at_ms": 1600000000000, "details": "Old."}
+    older = {**old, "assessed_at_ms": 1500000000000, "details": "Older."}
+    fields = {"teams": [old, older, {**_team("core"), "details": "Now."}]}
+    _text, read = _roundtrip(fields, state="NOT_AFFECTED")
+    assert [(team["historical"], team["details"]) for team in read["teams"]] == [
+        (True, "Old."), (True, "Older."), (False, "Now."),
+    ]
+
 
 def test_known_limit_a_line_ending_in_a_signature_like_suffix_loses_it():
     """Reading removes the former "-- user" signature at a line's end, in the
@@ -237,7 +247,6 @@ def test_the_texts_dtvp_writes_itself_are_named_once():
     from dtvp.bulk_workflows import assessment_repair
 
     assert assessment_repair.SEE_GLOBAL_ASSESSMENT is assessment_model.SEE_GLOBAL_ASSESSMENT
-    assert assessment_repair.FORMER_TEAM_NOTE is assessment_model.FORMER_TEAM_NOTE
 
 
 

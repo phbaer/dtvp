@@ -1014,9 +1014,11 @@ def group_vulnerabilities(
             # Parse rescored value if present
             rescored_score = None
             rescored_vector = None
-            if details:
+            # Historical blocks are records; they do not rescore the finding.
+            rescoring_text = without_historical_blocks(details)
+            if rescoring_text:
                 # Parse Score
-                match_score = RE_SCORE.search(details)
+                match_score = RE_SCORE.search(rescoring_text)
                 if match_score:
                     try:
                         rescored_score = float(match_score.group(1))
@@ -1024,12 +1026,12 @@ def group_vulnerabilities(
                         pass
 
                 # Parse Vector
-                match_vector = RE_VECTOR.search(details)
+                match_vector = RE_VECTOR.search(rescoring_text)
                 if match_vector:
                     rescored_vector = match_vector.group(1).strip()
                 else:
                     # Fallback: Search for any CVSS vector string in the details
-                    match_any_vector = RE_ANY_VECTOR.search(details)
+                    match_any_vector = RE_ANY_VECTOR.search(rescoring_text)
                     if match_any_vector:
                         rescored_vector = match_any_vector.group(1).strip()
 
@@ -1305,6 +1307,12 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
     return stats
 
 
+# One team block header. Also read by the web client
+# (``parseAssessmentBlocks``); tests/fixtures/assessment_parser_cases.json
+# holds the cases both must read alike.
+HEADER_PATTERN = re.compile(r"---(?=\s*\[Team:)\s*(?P<tags>(?:\[[^\]\n]*\]\s*)+)---")
+
+
 def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Parses assessment details string into shared text and a list of team blocks.
@@ -1316,20 +1324,17 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
 
     blocks = []
 
-    # JSON is a separate payload, never assessment prose or team headers.
-    headers = list(re.finditer(r"---(?=\s*\[Team:)", mask_ssvc_details(details)))
+    # JSON is a separate payload, never assessment prose or team headers. A
+    # header is read whole: "---", tags starting with [Team:], "---". Its
+    # closing "---" is never the start of the next header, even when the
+    # text after it begins with a tag.
+    headers = list(HEADER_PATTERN.finditer(mask_ssvc_details(details)))
     shared_text = details[:headers[0].start()].strip() if headers else details.strip()
 
     for index, match in enumerate(headers):
         end = headers[index + 1].start() if index + 1 < len(headers) else len(details)
-        rb = details[match.end():end]
-        # Find the header ends with '---'
-        header_end = rb.find("---")
-        if header_end == -1:
-            continue
-
-        header = rb[:header_end]
-        content = rb[header_end + 3 :].strip()
+        header = match.group("tags")
+        content = details[match.end():end].strip()
         ssvc_details = "\n\n".join(match[0].lstrip() for match in SSVC_DETAILS.finditer(content))
         content = strip_ssvc_details(content)
 
@@ -1406,16 +1411,57 @@ def _assessment_team_key(value: Any) -> str:
     return str(value or "").strip().casefold()
 
 
+def _tickets(value: Any) -> List[str]:
+    # As ``_ticket_keys`` in the repair reads a ``Ticket`` tag.
+    return list(dict.fromkeys(
+        key for key in (part.strip() for part in str(value or "").split(",")) if key
+    ))
+
+
+def _record_key(block: Dict[str, Any]) -> Tuple[Any, ...]:
+    """What makes a historical block one record: its team, what it says,
+    who made it, when, and under which ticket."""
+
+    def score(value: Any) -> Optional[float]:
+        try:
+            return None if value in (None, "") else float(value)
+        except (TypeError, ValueError):
+            return None
+
+    justification = block.get("justification")
+    return (
+        _assessment_team_key(block.get("team")),
+        block.get("state") or "NOT_SET",
+        "" if justification in (None, "", "NOT_SET") else str(justification),
+        _collapsed(block.get("details")),
+        *_attribution(block),
+        tuple(_tickets(block.get("ticket"))),
+        score(block.get("rescored")),
+        block.get("vector") or None,
+    )
+
+
+def _block_key(block: Dict[str, Any]) -> Tuple[Any, ...]:
+    """One active block per team; historical blocks are records of their
+    own and are only merged with an identical record."""
+    if block.get("historical"):
+        return ("historical", *_record_key(block))
+    return ("active", _assessment_team_key(block.get("team")))
+
+
 def _deduplicate_assessment_blocks(
     blocks: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    unique: dict[str, tuple[int, Dict[str, Any]]] = {}
+    """One active block per team, the newest, plus every distinct
+    historical block. A historical block never stands in for a team's
+    active one, nor the other way round."""
+    unique: dict[Tuple[Any, ...], tuple[int, Dict[str, Any]]] = {}
     for index, block in enumerate(blocks):
-        key = _assessment_team_key(block.get("team"))
-        if not key:
+        if not _assessment_team_key(block.get("team")):
             continue
+        key = _block_key(block)
         candidate = dict(block)
-        if key == "general":
+        if key[1] == "general":
             candidate["team"] = "General"
         existing = unique.get(key)
         if existing is None:
@@ -1453,17 +1499,296 @@ def remove_assessment_blocks(details: str, team: Optional[str] = None) -> str:
     if wanted == "general":
         # The response is part of the General assessment and goes with it.
         lead = set_shared_response(lead, None)
+    spans = _team_block_spans(text)
+    # Deleting a team's assessment deletes its current one; its historical
+    # records stay unless they are all the team has.
+    active = any(key == wanted and not historical for _s, _e, key, historical in spans)
     kept = [lead]
+    for start, end, key, historical in spans:
+        if key == wanted and (not historical or not active):
+            continue
+        kept.append(text[start:end])
+    return "\n\n".join(part.strip() for part in kept if part.strip())
+
+
+_PENDING_MARKER = re.compile(r"\[Status: Pending Review\]", re.IGNORECASE)
+
+
+_HISTORICAL_TAG = re.compile(r"\[Historical:\s*yes\s*\]", re.IGNORECASE)
+
+
+def _team_block_spans(text: str) -> List[Tuple[int, int, str, bool]]:
+    """Start, end, team key and whether it is historical, of each block."""
+    headers = list(re.finditer(r"---(?=\s*\[Team:)", mask_ssvc_details(text)))
+    spans = []
     for index, match in enumerate(headers):
         end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
         block = text[match.start():end]
         header_end = block.find("---", 3)
         header = block[3:header_end] if header_end != -1 else block[3:]
         name = re.search(r"\[Team:\s*([^\]]+)\]", header)
-        if name and _assessment_team_key(name.group(1).strip()) == wanted:
+        spans.append(
+            (
+                match.start(),
+                end,
+                _assessment_team_key(name.group(1)) if name else "",
+                bool(_HISTORICAL_TAG.search(header)),
+            )
+        )
+    return spans
+
+
+def replace_assessment_block(details: str, team: str, rendered: str) -> str:
+    """``details`` with ``team``'s active block replaced by ``rendered``;
+    all other text, the team's historical blocks included, stays exactly as
+    it was."""
+    wanted = _assessment_team_key(team)
+    for start, end, key, historical in _team_block_spans(details):
+        if key != wanted or historical:
             continue
-        kept.append(block)
-    return "\n\n".join(part.strip() for part in kept if part.strip())
+        block = details[start:end]
+        # The review marker after the last block is not part of the block.
+        marker = _PENDING_MARKER.search(block)
+        if marker:
+            end = start + marker.start()
+            block = details[start:end]
+        trailing = block[len(block.rstrip()):]
+        return details[:start] + rendered.strip() + trailing + details[end:]
+    return details
+
+
+def insert_assessment_blocks(
+    details: str, rendered_blocks: List[str], *, first: bool = False
+) -> str:
+    """``details`` with ``rendered_blocks`` added: before the first block when
+    ``first``, otherwise after the last one. A pending-review marker stays
+    at the very end."""
+    if not rendered_blocks:
+        return details
+    pending = bool(_PENDING_MARKER.search(details or ""))
+    text = _PENDING_MARKER.sub("", details or "").strip()
+    added = "\n\n".join(block.strip() for block in rendered_blocks)
+    spans = _team_block_spans(text)
+    if first and spans:
+        start = spans[0][0]
+        parts = [text[:start], added, text[start:]]
+    else:
+        parts = [text, added]
+    result = "\n\n".join(part.strip() for part in parts if part.strip())
+    return f"{result}\n\n[Status: Pending Review]" if pending else result
+
+
+def _same_justification(left: Any, right: Any) -> bool:
+    def norm(value: Any) -> str:
+        return "" if value in (None, "", "NOT_SET") else str(value)
+
+    return norm(left) == norm(right)
+
+
+def _collapsed(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _same_assessment(stored: Dict[str, Any], new: Dict[str, Any]) -> bool:
+    """Whether two blocks say the same, apart from attribution and metadata."""
+
+    def score(value: Any) -> Optional[float]:
+        try:
+            return None if value in (None, "") else float(value)
+        except (TypeError, ValueError):
+            return None
+
+    return (
+        stored.get("state") == new.get("state")
+        and _same_justification(stored.get("justification"), new.get("justification"))
+        and _collapsed(stored.get("details")) == _collapsed(new.get("details"))
+        and score(stored.get("rescored")) == score(new.get("rescored"))
+        and (stored.get("vector") or None) == (new.get("vector") or None)
+        and (stored.get("ssvc") or None) == (new.get("ssvc") or None)
+        and _collapsed(stored.get("ssvc_details")) == _collapsed(new.get("ssvc_details"))
+        and (stored.get("copied_from") or None) == (new.get("copied_from") or None)
+    )
+
+
+def _metadata_differs(stored: Dict[str, Any], new: Dict[str, Any]) -> bool:
+    """Whether ticket, evidence, coverage or assignment differ."""
+
+    def tickets(value: Any) -> List[str]:
+        # As ``_ticket_keys`` in the repair reads a ``Ticket`` tag.
+        return list(dict.fromkeys(
+            key for key in (part.strip() for part in str(value or "").split(",")) if key
+        ))
+
+    return (
+        tickets(stored.get("ticket")) != tickets(new.get("ticket"))
+        or (stored.get("evidence_reviewed") or None) != (new.get("evidence_reviewed") or None)
+        or (stored.get("version_coverage") or None) != (new.get("version_coverage") or None)
+        or sorted(stored.get("assigned") or []) != sorted(new.get("assigned") or [])
+    )
+
+
+def _attribution(block: Dict[str, Any]) -> Tuple[Any, ...]:
+    user = block.get("user")
+    return (
+        None if user in (None, "", "unknown") else user,
+        float(block["timestamp"]) if block.get("timestamp") else None,
+        block.get("reviewer") or None,
+    )
+
+
+def _holds_something(block: Dict[str, Any]) -> bool:
+    """Whether a block tracks anything beside a decision: a text, a ticket,
+    assignees, evidence, version coverage or an SSVC decision. As
+    ``_holds_something`` in the repair reads it."""
+    return bool(
+        str(block.get("details") or "").strip()
+        or block.get("ticket")
+        or block.get("assigned")
+        or block.get("evidence_reviewed")
+        or block.get("version_coverage")
+        or block.get("ssvc")
+    )
+
+
+def _worth_keeping(block: Dict[str, Any]) -> bool:
+    return bool(
+        block.get("historical")
+        or (block.get("state") or "NOT_SET") != "NOT_SET"
+        or _holds_something(block)
+    )
+
+
+def keep_team_records(stored: str, new: str, *, saved_team: Optional[str]) -> str:
+    """``new`` with every assessed block of ``stored`` that it drops kept.
+
+    A save replaces the saved team's own block (``saved_team``; ``None`` is
+    the General assessment); leaving that block out clears it. Any other
+    team's assessed block a save leaves out, for example because the
+    client's view lacked it, stays as ``[Historical: yes]`` with every tag
+    and its text: it no longer counts, and nothing is lost (ADR 0003). When
+    the save sends only historical records of that team, its current block
+    stays current: a record never retires a team's assessment. A
+    team save never removes the General assessment; it comes back as it was.
+    A historical block is a record, never a team's current assessment: a
+    save that leaves it out, the saved team's own included, gets it back.
+    Deleting a block is ``remove_assessment_blocks``' job.
+
+    A save that is not an approval (``new`` is pending review) does not
+    re-attribute a block whose assessment it leaves as it was: another
+    team's block, or the saved team's when only its ticket, evidence,
+    coverage or assignment changed, keeps assessor, date and reviewer.
+    """
+    if not stored:
+        return new
+    _shared, stored_blocks = _parse_assessment_blocks(stored)
+    stored_blocks = _deduplicate_assessment_blocks(stored_blocks)
+    if not stored_blocks:
+        return new
+    _shared, new_blocks = _parse_assessment_blocks(new or "")
+    new_blocks = _deduplicate_assessment_blocks(new_blocks)
+    saved = _assessment_team_key(saved_team or "General")
+    by_team = {
+        _assessment_team_key(block["team"]): block
+        for block in new_blocks
+        if not block.get("historical")
+    }
+    new_records = {
+        _record_key(block) for block in new_blocks if block.get("historical")
+    }
+    # Teams the new text has only historical records of. A client that took
+    # such a record for the team's current block must not retire it.
+    recorded_only = {
+        _assessment_team_key(block["team"])
+        for block in new_blocks
+        if block.get("historical")
+    } - set(by_team)
+    # A team whose assessment another team took over ([Copied From]) is
+    # retired by the save, even where it sent only that team's records.
+    recorded_only -= {
+        _assessment_team_key(block.get("copied_from"))
+        for block in new_blocks
+        if block.get("copied_from") and not block.get("historical")
+    }
+
+    result = new or ""
+    if _PENDING_MARKER.search(result):
+        # Not an approval: a block whose assessment did not change keeps
+        # who made it and when. A change of ticket, evidence, coverage or
+        # assignment alone is not a new assessment.
+        for block in stored_blocks:
+            key = _assessment_team_key(block["team"])
+            current = by_team.get(key)
+            if (
+                block.get("historical")
+                or current is None
+                or not _same_assessment(block, current)
+                or not (key != saved or _metadata_differs(block, current))
+                or _attribution(block) == _attribution(current)
+            ):
+                continue
+            result = replace_assessment_block(
+                result,
+                current["team"],
+                render_team_block(
+                    {
+                        **current,
+                        "user": block.get("user"),
+                        "timestamp": block.get("timestamp"),
+                        "reviewer": block.get("reviewer"),
+                    }
+                ),
+            )
+    general: List[str] = []
+    kept: List[str] = []
+    for block in stored_blocks:
+        key = _assessment_team_key(block["team"])
+        if not _worth_keeping(block):
+            continue
+        if not block.get("historical") and (key in by_team or key == saved):
+            continue
+        if _record_key({**block, "historical": True}) in new_records:
+            # The save sends this record back as it was.
+            continue
+        if key == "general" and not block.get("historical"):
+            general.append(render_team_block(block))
+        elif not block.get("historical") and key in recorded_only:
+            # Another team's current assessment stays current: the save
+            # sent only that team's historical records, nobody retired it.
+            kept.append(render_team_block(block))
+        elif (
+            not block.get("historical")
+            and (block.get("state") or "NOT_SET") == "NOT_SET"
+            and not (block.get("copied_from") or None)
+            and key not in {
+                _assessment_team_key(b.get("copied_from"))
+                for b in new_blocks if b.get("copied_from")
+            }
+        ):
+            # An open block (ticket, assignees, notes; no decision yet) is
+            # nobody's decision to retire: it stays as it is.
+            kept.append(render_team_block(block))
+        else:
+            kept.append(render_team_block({**block, "historical": True}))
+    result = insert_assessment_blocks(result, general, first=True)
+    result = insert_assessment_blocks(result, kept)
+    return result
+
+
+def without_historical_blocks(details: str) -> str:
+    """``details`` without its historical team blocks.
+
+    A historical block is a record, not the finding's decision: its
+    rescoring tags and the CVSS vectors its text quotes do not rescore the
+    finding. Read a finding's rescoring from this text. Everything else is
+    kept as it is.
+    """
+    text = str(details or "")
+    spans = _team_block_spans(text)
+    if not spans:
+        return text
+    kept = [text[: spans[0][0]]]
+    kept.extend(text[start:end] for start, end, _key, historical in spans if not historical)
+    return "".join(kept)
 
 
 def parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
@@ -1535,7 +1860,8 @@ def process_assessment_details(
 
     # 4. Handle Legacy text: If shared_text exists but no General block, move it
     if shared_text and not any(
-        _assessment_team_key(b["team"]) == "general" for b in blocks_list
+        _assessment_team_key(b["team"]) == "general" and not b.get("historical")
+        for b in blocks_list
     ):
         blocks_list.insert(
             0,
@@ -1550,13 +1876,15 @@ def process_assessment_details(
         )
         shared_text = ""
 
-    # 5. Update Target Team Block
+    # 5. Update Target Team Block. A historical block of the team is a
+    # record; it stays beside the team's new assessment.
     target_key = _assessment_team_key(target_team)
     target_block = next(
         (
             block
             for block in blocks_list
             if _assessment_team_key(block["team"]) == target_key
+            and not block.get("historical")
         ),
         None,
     )
@@ -1624,12 +1952,14 @@ def process_assessment_details(
         final_parts.append(shared_text)
 
     for b in blocks_list:
-        # Skip empty blocks if they aren't the target and aren't set
+        # Skip empty blocks if they aren't the target and aren't set. A
+        # block with a ticket, assignees, evidence or coverage is kept: it
+        # tracks work even without a decision.
         if (
             _assessment_team_key(b["team"]) != target_key
+            and not b.get("historical")
             and b["state"] == "NOT_SET"
-            and not b.get("details")
-            and not b.get("ssvc")
+            and not _holds_something(b)
         ):
             continue
 
@@ -1669,6 +1999,7 @@ def calculate_aggregated_state(details: str) -> str:
             block
             for block in blocks_list
             if _assessment_team_key(block["team"]) == "general"
+            and not block.get("historical")
         ),
         None,
     )

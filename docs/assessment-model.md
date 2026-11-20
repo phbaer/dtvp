@@ -61,9 +61,40 @@ aggregate state follows these rules:
   The current team's copied block records `[Copied From: TeamA]`, and its
   assessment remains pending review. Takeover copies decision, justification,
   and rationale, but resets assignees and review checks. The bulk
-  [Repair Assessments](review-workflows.md#bulk-changes) operation instead
-  moves a former team's active block into the global assessment.
-- Structured details retain at most one block per team (case-insensitive).
+  [Repair Assessments](review-workflows.md#bulk-changes) operation marks a
+  former team's block historical in the same way. A historical block is a record, not the finding's decision: its rescoring
+  tags and the CVSS vectors its text quotes do not rescore the finding
+  (`without_historical_blocks` in `dtvp/logic.py`, `withoutHistoricalBlocks`
+  in the frontend).
+- A save never drops another team's assessment. When the text a save writes
+  leaves out an assessed block (a state) of a team other than the saved one,
+  for example because the client's view lacked it or a raw-text edit removed
+  it, the server keeps that block as `[Historical: yes]` with every tag and
+  its text; it no longer counts toward coverage or state. A block without a
+  decision that still tracks work (a text, ticket, assignees, evidence or
+  coverage) stays as it is, open. A save that sends only historical records
+  of a team keeps that team's current block current, unless the save took
+  the team's assessment over (`Copied From`): then it is retired. Only the
+  saved team's own block, and the explicit delete action, remove a block. A
+  team save never removes the General assessment: left out, it is kept
+  unchanged and still counts.
+- A historical block is a record, never a team's current assessment. A team
+  that has one (for example because it owns the component again after the
+  repair kept its former assessment) gets its new assessment as a block of
+  its own beside it; a save never overwrites or drops a historical block, the
+  saved team's own included, and one the saved text leaves out is put back.
+  Deleting a team's assessment removes its current block and keeps its
+  historical ones, unless they are all the team has.
+- A save that is not an approval keeps a block's `[Assessed By]`, `[Date]`
+  and `[Reviewed By]` when it changes only the block's ticket, evidence,
+  version coverage or assignees; the server checks this for every client.
+  Another team's block that a save sends back unchanged keeps them as well.
+  A change of state, justification, text or rescoring, and every approval,
+  records the saving user and the time as before.
+- Structured details retain at most one active block per team
+  (case-insensitive), plus any number of historical blocks; historical blocks
+  are merged only when they are the same record (team, decision, text,
+  assessor, reviewer, date, ticket, rescoring).
   Code-analysis assessment drafts keep evidence in the owning-team blocks and
   maintain one General block that references those teams and takes their worst
   effective state. An independently authored General assessment is preserved;

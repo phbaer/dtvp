@@ -1561,3 +1561,216 @@ def test_deleting_the_general_assessment_removes_the_response():
     assert analysis_response(remove_assessment_blocks(_RESPONSE_EXISTING, "Core")) == (
         "UPDATE"
     )
+
+
+_OWN_RECORD = (
+    "--- [Team: Alpha] [State: NOT_AFFECTED] [Assessed By: olga] [Date: 1700000000000] "
+    "[Justification: CODE_NOT_REACHABLE] [Ticket: T-1] [Historical: yes] ---\nOld reason."
+)
+
+
+def _alpha_blocks(text):
+    from dtvp.assessment_model import parse_assessment, render_assessment
+
+    read = parse_assessment("NOT_SET", text, False)
+    # A historical block beside the active one is a valid record.
+    render_assessment(read)
+    return [team for team in read["teams"] if team["team"] == "Alpha"]
+
+
+def test_a_teams_save_keeps_its_own_historical_block():
+    from dtvp.logic import keep_team_records
+
+    new, state = process_assessment_details(
+        "New text.", "bob", "ANALYST", team="Alpha", state="EXPLOITABLE",
+        existing_details=_OWN_RECORD,
+    )
+    kept = keep_team_records(_OWN_RECORD, new, saved_team="Alpha")
+
+    assert _OWN_RECORD in kept
+    blocks = _alpha_blocks(kept)
+    assert [(b["historical"], b["state"], b["assessed_by"]) for b in blocks] == [
+        (True, "NOT_AFFECTED", "olga"), (False, "EXPLOITABLE", "bob"),
+    ]
+    # The new block takes no ticket from the record.
+    assert blocks[1]["ticket"] is None
+    assert state == "EXPLOITABLE"
+    assert logic.calculate_aggregated_state(kept) == "EXPLOITABLE"
+
+
+def test_a_save_without_its_teams_historical_block_gets_it_back():
+    from dtvp.logic import keep_team_records
+
+    # A client (web form, MCP) that sends only the team's new assessment.
+    new = (
+        "--- [Team: Alpha] [State: EXPLOITABLE] [Assessed By: bob] "
+        "[Justification: NOT_SET] ---\nNew text.\n\n[Status: Pending Review]"
+    )
+    kept = keep_team_records(_OWN_RECORD, new, saved_team="Alpha")
+
+    assert _OWN_RECORD in kept
+    assert kept.endswith("[Status: Pending Review]")
+    # Sent back as it was, the record is there once.
+    assert keep_team_records(_OWN_RECORD, kept, saved_team="Alpha").count("Old reason.") == 1
+
+
+def test_every_historical_record_of_one_team_is_kept():
+    from dtvp.logic import keep_team_records
+
+    first = (
+        "--- [Team: Old] [State: EXPLOITABLE] [Assessed By: o1] [Date: 1600000000000] "
+        "[Justification: NOT_SET] [Ticket: T-1] [Historical: yes] ---\nFirst."
+    )
+    second = (
+        "--- [Team: Old] [State: NOT_AFFECTED] [Assessed By: o2] [Date: 1650000000000] "
+        "[Justification: CODE_NOT_REACHABLE] [Ticket: T-2] [Historical: yes] ---\nSecond."
+    )
+    general = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] "
+        "[Justification: NOT_SET] ---\nGlobal."
+    )
+    stored = f"{general}\n\n{first}\n\n{second}"
+    alpha = (
+        "--- [Team: Alpha] [State: NOT_AFFECTED] [Assessed By: bob] "
+        "[Justification: NOT_SET] ---\nAlpha.\n\n[Status: Pending Review]"
+    )
+
+    for new in (alpha, f"{second}\n\n{alpha}"):
+        kept = keep_team_records(stored, new, saved_team="Alpha")
+        assert first in kept and second in kept and general in kept
+
+    # A reviewer's save of the whole text keeps both as well.
+    merged, _ = process_assessment_details(
+        "Rechecked.", "rita", "REVIEWER", team="Alpha", state="NOT_AFFECTED",
+        existing_details=stored,
+    )
+    assert first in merged and second in merged
+
+
+def test_the_general_decision_is_never_a_historical_general_block():
+    text = (
+        "--- [Team: General] [State: EXPLOITABLE] [Assessed By: gina] "
+        "[Justification: NOT_SET] [Historical: yes] ---\nOld global.\n\n"
+        "--- [Team: Alpha] [State: NOT_AFFECTED] [Assessed By: bob] "
+        "[Justification: CODE_NOT_REACHABLE] ---\nAlpha."
+    )
+    assert logic.calculate_aggregated_state(text) == "NOT_AFFECTED"
+
+
+def test_deleting_a_teams_assessment_keeps_its_historical_record():
+    from dtvp.logic import remove_assessment_blocks
+
+    active = (
+        "--- [Team: Alpha] [State: EXPLOITABLE] [Assessed By: bob] "
+        "[Justification: NOT_SET] ---\nNew text."
+    )
+    assert remove_assessment_blocks(f"{_OWN_RECORD}\n\n{active}", "Alpha") == _OWN_RECORD
+    # A team with only its record: deleting it deletes the record.
+    assert remove_assessment_blocks(_OWN_RECORD, "Alpha") == ""
+
+
+def test_keep_team_records_keeps_a_current_block_current_next_to_a_sent_record():
+    """A save that sends only a team's historical record does not retire
+    the team's current assessment (ADR 0003)."""
+    from dtvp.logic import calculate_aggregated_state, keep_team_records, _parse_assessment_blocks
+
+    live = (
+        "--- [Team: TeamT] [State: NOT_AFFECTED] [Assessed By: ta] [Date: 1700000000000] "
+        "[Justification: CODE_NOT_PRESENT] ---\nCurrent."
+    )
+    record = (
+        "--- [Team: TeamT] [State: EXPLOITABLE] [Assessed By: to] [Date: 1750000000000] "
+        "[Justification: NOT_SET] [Historical: yes] ---\nOld."
+    )
+    saved = (
+        "--- [Team: TeamU] [State: NOT_AFFECTED] [Assessed By: u] [Date: 1800000000000] "
+        "[Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+    )
+    kept = keep_team_records(live, f"{record}\n\n{saved}", saved_team="TeamU")
+
+    teams = [
+        (block["team"], block["state"], block["historical"])
+        for block in _parse_assessment_blocks(kept)[1]
+    ]
+    assert sorted(teams) == [
+        ("TeamT", "EXPLOITABLE", True),
+        ("TeamT", "NOT_AFFECTED", False),
+        ("TeamU", "NOT_AFFECTED", False),
+    ]
+    assert calculate_aggregated_state(kept) == "NOT_AFFECTED"
+    # The team's own save may still replace it.
+    own = keep_team_records(live, record, saved_team="TeamT")
+    assert "Current." not in own
+
+
+def test_blocks_parse_as_the_shared_cases_say():
+    """frontend/src/lib/__tests__/fixtures/assessment_parser_cases.json: the web client's
+    parseAssessmentBlocks reads every case the same (assessment-helpers.spec.ts)."""
+    import json
+    from pathlib import Path
+
+    from dtvp.logic import parse_assessment_blocks
+
+    cases = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "__tests__"
+            / "fixtures" / "assessment_parser_cases.json"
+        ).read_text()
+    )
+    assert len(cases) >= 10
+    for case in cases:
+        _shared, blocks = parse_assessment_blocks(case["text"])
+        read = [
+            {"team": b["team"], "state": b["state"], "justification": b["justification"],
+             "historical": b["historical"], "ticket": b["ticket"] or "", "details": b["details"]}
+            for b in blocks
+        ]
+        assert read == case["blocks"], case["name"]
+
+
+def test_a_takeover_retires_the_source_team_on_every_finding():
+    # The client sends T's new block copied from S and S's newest block as
+    # a record. A finding whose older S block differs must still retire S.
+    from dtvp.logic import calculate_aggregated_state, keep_team_records, parse_assessment_blocks
+
+    stored = (
+        "--- [Team: S] [State: EXPLOITABLE] [Assessed By: sam] [Date: 1600000000000] "
+        "[Justification: NOT_SET] ---\nOlder view."
+    )
+    new = (
+        "--- [Team: T] [State: NOT_AFFECTED] [Assessed By: tia] [Date: 1800000000000] "
+        "[Justification: CODE_NOT_PRESENT] [Copied From: S] ---\nTaken over.\n\n"
+        "--- [Team: S] [State: NOT_AFFECTED] [Assessed By: sam] [Date: 1700000000000] "
+        "[Justification: CODE_NOT_PRESENT] [Historical: yes] ---\nNewer view.\n\n"
+        "[Status: Pending Review]"
+    )
+
+    kept = keep_team_records(stored, new, saved_team="T")
+
+    _shared, blocks = parse_assessment_blocks(kept)
+    live = [b["team"] for b in blocks if not b["historical"]]
+    assert live == ["T"]
+    assert {b["details"] for b in blocks if b["team"] == "S"} == {"Older view.", "Newer view."}
+    assert calculate_aggregated_state(kept) == "NOT_AFFECTED"
+
+
+def test_a_text_save_keeps_another_teams_open_block():
+    from dtvp.logic import parse_assessment_blocks, process_assessment_details
+
+    existing = (
+        "--- [Team: TeamX] [State: NOT_SET] [Assessed By: xena] [Justification: NOT_SET] "
+        "[Assigned: bob] [Ticket: ABC-1] ---\n\n"
+        "--- [Team: TeamY] [State: NOT_SET] [Assessed By: yan] [Justification: NOT_SET] "
+        "[Assigned: carol] ---"
+    )
+
+    text, _state = process_assessment_details(
+        "Not reachable.", "ursula", "ANALYST", team="TeamU",
+        state="NOT_AFFECTED", existing_details=existing,
+    )
+
+    _shared, blocks = parse_assessment_blocks(text)
+    by_team = {b["team"]: b for b in blocks}
+    assert by_team["TeamX"]["historical"] is False
+    assert (by_team["TeamX"]["ticket"], by_team["TeamX"]["assigned"]) == ("ABC-1", ["bob"])
+    assert by_team["TeamY"]["assigned"] == ["carol"]

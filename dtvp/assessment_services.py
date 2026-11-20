@@ -13,6 +13,7 @@ from .assessment_model import (
     with_analysis_response,
 )
 from .dt_client import DTClient
+from .logic import keep_team_records
 from .assessment_use_cases import AssessmentRequest
 from .ssvc_services import new_record, preserve_record, write_record
 
@@ -280,6 +281,16 @@ def build_assessment_payloads(
                 assigned=req.assigned,
                 justification=req.justification,
             )
+
+        # Whatever a client left out of its text (a block it did not see, a
+        # raw-text edit), a save never loses another team's assessment.
+        base = req._stored_details.get(finding_key(instance), existing_details)
+        kept_details = keep_team_records(
+            base, final_details_str, saved_team=req.team
+        )
+        if kept_details != final_details_str:
+            final_details_str = kept_details
+            aggregated_state = deps.calculate_aggregated_state(final_details_str)
 
         final_details_str = (
             write_record(final_details_str, ssvc_record)
