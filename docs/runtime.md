@@ -6,6 +6,7 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 - [Runtime Shape](#runtime-shape)
 - [Runtime Behavior](#runtime-behavior)
+- [Event Channel](#event-channel)
 - [Capacity Planning](#capacity-planning)
 
 ## Runtime Shape
@@ -40,6 +41,8 @@ Important backend components:
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
 | `dtvp/tmrescore_*` | Threat-model integration, inventory, cache, execution, and task state |
 | `dtvp/code_analysis_*` and `analysis_queue_*` | Analyzer integration, result store, queue, and automatic scans |
+| `dtvp/event_hub.py`, `event_routes.py`, `event_producers.py` | The app-wide live-update stream: sequence, replay buffer, `/api/events`, and the producers fed by cache-manager listeners |
+| `dtvp/shutdown_signals.py` | Runs a callback (closing the event hub) on SIGINT/SIGTERM before uvicorn waits for open connections |
 
 Important frontend components:
 
@@ -125,9 +128,16 @@ Important frontend components:
   on first start, in one transaction; its files are left in place, are no
   longer read, and can be deleted after the database has been verified. Concurrent
   misses for the same resource share one Dependency-Track request, the complete
-  project list has a short freshness TTL across clients, and API-key requests
+  project list has a short freshness TTL across clients
+  (`DTVP_DT_PROJECT_LIST_TTL_SECONDS`, 30 s), and API-key requests
   reuse one application-lifetime HTTP connection pool. The background cache
-  sync also retains its client between refreshes. Each caller still receives an
+  sync also retains its client between refreshes. A version is imported the
+  first time it is opened and served from the database afterwards. Every
+  `DTVP_DT_CACHE_REFRESH_SECONDS` the background sync re-reads the project
+  list and up to eight recently opened versions; each re-read renews the
+  version's access time, so a version leaves that set only when more recently
+  opened versions push it out. The automatic code-analysis sweep uses its own
+  cache manager and imports versions nobody opened. Each caller still receives an
   isolated mutable snapshot. The last step of a project refresh reads the
   affected version ranges of the project's vulnerabilities that have no
   recommendation and are missing or stale in the table
@@ -184,11 +194,119 @@ Important frontend components:
   Dependency-Track assessments, the workspace-wide analyzer queue and saved
   analysis results, and cached project proposal snapshots remain collaborative
   application data.
+- Background sync (planned, [ADR 0004](adr/0004-background-sync-and-event-stream.md)):
+  one scheduler will own every Dependency-Track read, keep all active versions
+  current within a request budget, and announce changes on an app-wide event
+  stream; readers will serve only the database. The design lives in the ADR.
 - Live task registries are process-local; the supplied Uvicorn/PM2 launch uses
   one backend worker. A horizontally scaled deployment needs a shared task and
   result store before enabling multiple backend workers.
 - Startup status exists at `/startup` and `/api/startup`, in the static first
   paint, and in the Vue initialization view.
+
+## Event Channel
+
+Status: implemented for the producers listed below (2026-11-20, checked
+against `tests/test_event_hub.py`, `tests/test_event_routes.py`,
+`tests/test_event_producers.py`, `tests/test_shutdown_signals.py`,
+`tests/test_dt_cache.py`, `frontend/src/lib/__tests__/eventStream.spec.ts`,
+`frontend/src/lib/__tests__/useCacheStatus.spec.ts`,
+`frontend/src/components/__tests__/ExportIssuesIndicator.spec.ts`, and
+`frontend/e2e/event-stream.spec.ts` in Chromium, Firefox, and WebKit). The design and
+the later producers are in [ADR 0004](adr/0004-background-sync-and-event-stream.md).
+
+`GET /api/events` is one app-wide stream in the Server-Sent Events format
+(`text/event-stream`), read by the browser with `fetch`. It accepts the
+session cookie or a read-scoped access token. Each frame has an `id` of the
+form `<boot id>:<seq>`, an `event` type, and one `data` line holding the
+envelope `{seq, at, type, product, data}`. Events carry identifiers, counts,
+and times, never data; clients fetch the data from the usual endpoints.
+
+| Event | Data | Sent |
+| :--- | :--- | :--- |
+| `hello` | `{boot_id, seq, build, source}` | First frame of every connection |
+| `resync` | `{seq, reason}`: `restart`, `gap`, or `invalid_cursor` | When the cursor sent cannot be served; refetch everything |
+| `auth` | `{status}` | The heartbeat check failed; the stream ends |
+| `projects.changed` | `{added, removed, changed, truncated, count}` with `{uuid, name, version}` entries (`changed` adds `fields`), or `{initial: true, count}` for the first list | After a stored project-list change. Risk score and metrics alone are no change |
+| `assessments.changed` | `{product, project_uuids, keys_count, origin: "local"}` | After an import merge or a discarded export changed DTVP's records, once the open views were updated. `dt` and `export_echo` are reserved for the scheduler |
+| `export.state` | `{pending, failed, oldest_pending_at}` | Reviewers only, when the export queue numbers change (checked at most every 2 s, and every 60 s) |
+| `cache.refreshed` | `{last_refreshed_at}` | When the cache's refresh time moved, for example after the background refresh of active versions saved new data (checked at most every 2 s, and every 60 s) |
+| `source.state` | `{dt: unknown\|ok\|down\|misconfigured, since, last_success_at, error_class}` | When a project-list read from Dependency-Track changes the state; 401/403 is `misconfigured` |
+
+- **Heartbeat and authentication.** Every 15 seconds the server sends the
+  comment `: hb` with the current cursor as `id:`, re-runs the authentication
+  of the request that opened the stream, and re-reads the role. A failed check
+  sends `auth` and closes the stream: a revoked or expired access token ends
+  it, and a role change switches the reviewer filter in place. A browser
+  session cookie cannot fail this check: the session is a stateless token
+  without expiry and the open request keeps its cookie, so a logout in another
+  browser does not end the stream on the server. Server-side session
+  revocation and expiry plug into the `session_valid` hook of the event routes
+  when sessions get server-side state (branch `fix/session-key-and-expiry`).
+  A logout in the browser itself stops the stream in every tab (see the
+  browser client below). Streams end after 27 to 30 minutes (the lifetime is
+  shortened by up to 10 % at random, so streams opened together do not
+  rotate together) and the client reconnects.
+- **Cursor of filtered clients.** Events a client may not see (reviewer-only
+  `export.state` for analysts) send no frame, but the heartbeat `id:`, and a
+  last one when the stream rotates, moves the client's cursor past them, so a
+  reconnect replays from there instead of hitting a `gap`.
+- **Resume.** A client reconnects with `?since=<boot id>:<seq>` or the
+  `Last-Event-ID` header (the query wins) and receives every event after it.
+  A cursor from another process start (`restart`), one older than the buffer
+  (`gap`), or a malformed one (`invalid_cursor`) gets one `resync`.
+- **Limits.** The last `DTVP_EVENT_BUFFER_SIZE` (2,000) events are kept for
+  replay. Each connection is a cursor into that buffer, so a slow client only
+  falls behind. Above `DTVP_EVENT_MAX_CONNECTIONS` (200) open streams the
+  server answers `503` with `Retry-After: 30`. One user may hold at most
+  `DTVP_EVENT_MAX_CONNECTIONS_PER_USER` (20) streams; more get `429` with
+  `Retry-After: 30`, so one principal cannot take every slot.
+- **Polling.** `GET /api/events/poll?since=` returns the same events as JSON
+  `{boot_id, cursor, events, resync, more}`, at most 500 per call, for clients
+  whose proxy cannot stream. Without `since` it returns the current cursor.
+  The browser gives up a poll after 20 s and makes the next one, so a proxy
+  that holds a poll does not end the fallback.
+- **Scope.** The hub is process-local, like the task registries: one backend
+  worker.
+- **Shutdown.** Uvicorn runs the application's shutdown only after open
+  connections have finished, and a stream never finishes on its own before it
+  rotates. The application therefore chains its own handler in front of
+  uvicorn's SIGINT and SIGTERM handlers (`dtvp/shutdown_signals.py`): the
+  signal closes the hub, every open stream ends at once, and uvicorn's
+  graceful shutdown proceeds. The lifespan teardown closes the hub again as a
+  backstop.
+- **Browser client** (`frontend/src/lib/eventStream.ts`). One stream per
+  browser and DTVP instance: the tabs elect a leader with the Web Locks API
+  (lock `dtvp:events:leader:<API base>`) and share its events, cursor, and
+  status over the BroadcastChannel `dtvp:events:<API base>`. Both names carry
+  the API base (for example `/dtvp/api`), so two instances under different
+  context paths on one origin keep separate leaders, events, and sign-outs.
+  When the leader's tab closes, another tab takes the lock and resumes from
+  the last cursor it saw. Without these APIs each tab holds its own stream.
+  The leader reconnects with full-jitter backoff from 1 to 30 seconds, within
+  5 seconds after a server rotation, and after a `503` or `429` at
+  `Retry-After` plus up to the same time again at random, so refused browsers
+  do not come back together. A connection whose response headers do not
+  arrive within 35 seconds (a proxy that holds the response) and a stream
+  silent for 35 seconds count as failed. After three failures in a row
+  it also polls `/api/events/poll` every 15 seconds until a stream says
+  `hello` again. A 401 or an `auth` frame signs every tab out, and a logout in
+  one tab stops the stream in all of them. The task streams and the event
+  stream share one line reader (`streamLines.ts`).
+- **Consumers.** The cache status (`useCacheStatus`) refetches one second
+  after `hello`, `resync`, `projects.changed`, `source.state`,
+  `export.state`, `assessments.changed`, or `cache.refreshed`; it polls every
+  30 seconds only while the stream is not live, and every 5 minutes as a
+  safety net while it is. The reviewers' export warning takes its numbers
+  from `export.state`, refetches when its tab becomes visible, and polls
+  every 60 seconds only while the stream is not live.
+- **Known limits.** Saves by users publish no event yet. The project-list
+  reads of the automatic code-analysis sweep, which uses its own cache
+  manager, are not announced. A background refresh announces only that the
+  cache's refresh time moved (`cache.refreshed`), not which products
+  changed. Per-product events come with the scheduler of ADR 0004. A cookie
+  session ends a stream server-side only once sessions have server-side state
+  (see the heartbeat above).
 
 ## Capacity Planning
 

@@ -5,9 +5,27 @@ import {
     onMounted,
     onUnmounted,
     ref,
+    watch,
 } from 'vue'
 import { getCacheStatus } from './api'
+import { eventStream, useServerEvents } from './eventStream'
 import type { CacheStatus } from '../types'
+
+// While the live-update stream is up, events trigger refetches; a background
+// refresh announces itself with `cache.refreshed`. A slow safety refetch stays
+// for changes that publish no event yet (ADR 0004, step 5).
+const LIVE_SAFETY_REFRESH_MS = 300_000
+const CLOCK_TICK_MS = 30_000
+const EVENT_DEBOUNCE_MS = 1_000
+const CACHE_STATUS_EVENTS = [
+    'hello',
+    'resync',
+    'projects.changed',
+    'source.state',
+    'export.state',
+    'assessments.changed',
+    'cache.refreshed',
+]
 
 interface UseCacheStatusOptions {
     pollIntervalMs?: number
@@ -21,6 +39,9 @@ export function useCacheStatus({ pollIntervalMs = 30_000 }: UseCacheStatusOption
     const cacheStatusTimer = ref<ReturnType<typeof setInterval> | null>(null)
     const cacheStatusRefreshInProgress = ref(false)
     let visibilityListenerAttached = false
+    let active = false
+    let clockTimer: ReturnType<typeof setInterval> | null = null
+    let eventDebounce: ReturnType<typeof setTimeout> | null = null
 
     const cacheLastRefreshedDate = computed(() => {
         if (!cacheStatus.value?.last_refreshed_at) return null
@@ -103,16 +124,26 @@ export function useCacheStatus({ pollIntervalMs = 30_000 }: UseCacheStatusOption
         }
     }
 
-    const startCacheStatusPolling = () => {
-        if (cacheStatusTimer.value !== null) return
-        void refreshCacheStatus()
+    const isVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible'
 
+    const scheduleCacheStatusPolling = () => {
+        if (cacheStatusTimer.value !== null) {
+            globalThis.clearInterval(cacheStatusTimer.value)
+        }
+        const interval = eventStream.status.value === 'live' ? LIVE_SAFETY_REFRESH_MS : pollIntervalMs
         cacheStatusTimer.value = globalThis.setInterval(() => {
+            if (isVisible()) void refreshCacheStatus()
+        }, interval)
+    }
+
+    const startCacheStatusPolling = () => {
+        if (active) return
+        active = true
+        void refreshCacheStatus()
+        scheduleCacheStatusPolling()
+        clockTimer = globalThis.setInterval(() => {
             now.value = Date.now()
-            if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-                void refreshCacheStatus()
-            }
-        }, pollIntervalMs)
+        }, CLOCK_TICK_MS)
 
         if (typeof document !== 'undefined' && !visibilityListenerAttached) {
             document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -121,15 +152,38 @@ export function useCacheStatus({ pollIntervalMs = 30_000 }: UseCacheStatusOption
     }
 
     const stopCacheStatusPolling = () => {
+        active = false
         if (cacheStatusTimer.value !== null) {
             globalThis.clearInterval(cacheStatusTimer.value)
             cacheStatusTimer.value = null
+        }
+        if (clockTimer !== null) {
+            globalThis.clearInterval(clockTimer)
+            clockTimer = null
+        }
+        if (eventDebounce !== null) {
+            globalThis.clearTimeout(eventDebounce)
+            eventDebounce = null
         }
         if (typeof document !== 'undefined' && visibilityListenerAttached) {
             document.removeEventListener('visibilitychange', handleVisibilityChange)
             visibilityListenerAttached = false
         }
     }
+
+    // Poll often only while no live stream is up.
+    watch(() => eventStream.status.value, () => {
+        if (active) scheduleCacheStatusPolling()
+    })
+
+    useServerEvents(CACHE_STATUS_EVENTS, () => {
+        if (!active || eventDebounce !== null) return
+        eventDebounce = globalThis.setTimeout(() => {
+            eventDebounce = null
+            now.value = Date.now()
+            if (active && isVisible()) void refreshCacheStatus()
+        }, EVENT_DEBOUNCE_MS)
+    })
 
     onMounted(startCacheStatusPolling)
     onActivated(startCacheStatusPolling)

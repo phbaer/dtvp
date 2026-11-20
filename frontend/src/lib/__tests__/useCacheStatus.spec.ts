@@ -2,16 +2,47 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCacheStatus } from '../useCacheStatus'
+import * as liveEvents from '../eventStream'
 
 vi.mock('../api', () => ({
     getCacheStatus: vi.fn(),
 }))
+
+vi.mock('../eventStream', async () => {
+    const { createFakeEventStreamModule } = await import('./fakeEventStreamTestUtils')
+    return createFakeEventStreamModule()
+})
+
+const fakeStream = liveEvents as unknown as {
+    emit: (type: string, data?: unknown) => void
+    status: { value: string }
+    reset: () => void
+}
+
+const someStatus = () => ({
+    fully_cached: true,
+    last_refreshed_at: new Date().toISOString(),
+    projects: 1,
+    active_projects: 1,
+    cached_findings: 1,
+    cached_boms: 1,
+    cached_analyses: 1,
+    pending_updates: 0,
+})
+
+const Plain = defineComponent({
+    setup() {
+        return useCacheStatus()
+    },
+    template: '<span>{{ cacheStatusLabel }}</span>',
+})
 
 describe('useCacheStatus', () => {
     beforeEach(() => {
         vi.resetModules()
         vi.clearAllMocks()
         vi.useFakeTimers()
+        fakeStream.reset()
     })
 
     afterEach(() => {
@@ -109,5 +140,75 @@ describe('useCacheStatus', () => {
 
         wrapper.unmount()
         visibilitySpy.mockRestore()
+    })
+
+    it('refetches once, debounced, after live events', async () => {
+        const api = await import('../api')
+        vi.mocked(api.getCacheStatus).mockResolvedValue(someStatus())
+        fakeStream.status.value = 'live'
+        const wrapper = mount(Plain)
+        await flushPromises()
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(1)
+
+        fakeStream.emit('projects.changed', { added: [] })
+        fakeStream.emit('export.state', { pending: 1 })
+        fakeStream.emit('source.state', { dt: 'down' })
+        await vi.advanceTimersByTimeAsync(999)
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(2)
+
+        wrapper.unmount()
+        fakeStream.emit('resync', { reason: 'restart' })
+        await vi.advanceTimersByTimeAsync(5_000)
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(2)
+    })
+
+    it('follows a background refresh while live within one debounce', async () => {
+        const api = await import('../api')
+        const first = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+        vi.mocked(api.getCacheStatus).mockResolvedValue({ ...someStatus(), last_refreshed_at: first })
+        fakeStream.status.value = 'live'
+        const wrapper = mount(Plain)
+        await flushPromises()
+        expect((wrapper.vm as any).cacheStatusText).toContain('updated 10m ago')
+
+        vi.mocked(api.getCacheStatus).mockResolvedValue({ ...someStatus(), last_refreshed_at: new Date().toISOString() })
+        fakeStream.emit('cache.refreshed', { last_refreshed_at: new Date().toISOString() })
+        await vi.advanceTimersByTimeAsync(1_000)
+        await flushPromises()
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(2)
+        expect((wrapper.vm as any).cacheStatusText).toContain('updated < 1 min ago')
+        wrapper.unmount()
+    })
+
+    it('polls every 30 seconds while the stream is not live', async () => {
+        const api = await import('../api')
+        vi.mocked(api.getCacheStatus).mockResolvedValue(someStatus())
+        fakeStream.status.value = 'polling'
+        const wrapper = mount(Plain)
+        await flushPromises()
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(2)
+        wrapper.unmount()
+    })
+
+    it('only refetches for safety while live, and polls again when the stream drops', async () => {
+        const api = await import('../api')
+        vi.mocked(api.getCacheStatus).mockResolvedValue(someStatus())
+        fakeStream.status.value = 'live'
+        const wrapper = mount(Plain)
+        await flushPromises()
+
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(270_000)
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(2)
+
+        fakeStream.status.value = 'connecting'
+        await nextTick()
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(api.getCacheStatus).toHaveBeenCalledTimes(3)
+        wrapper.unmount()
     })
 })

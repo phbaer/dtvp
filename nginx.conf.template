@@ -31,8 +31,10 @@ server {
         return 301 ${DTVP_CONTEXT_PATH}/;
     }
 
-    # Event streams must reach clients immediately and stay unbuffered.
-    location ~ ^${DTVP_CONTEXT_PATH}/api/tasks/[^/]+/events$ {
+    # Event streams must reach clients immediately and stay unbuffered: the
+    # app-wide live-update stream and the task and archive progress streams.
+    # /api/events/poll is plain JSON and uses the normal location.
+    location ~ ^${DTVP_CONTEXT_PATH}/api/(events|tasks/[^/]+/events|project-archives/tasks/[^/]+/events)$ {
         proxy_pass http://dtvp_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

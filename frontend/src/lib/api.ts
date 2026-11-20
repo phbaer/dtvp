@@ -20,8 +20,9 @@ import type {
     BackendPerformanceStatus,
     DTVPVersionInfo,
 } from '../types';
-import { getRuntimeConfig } from './env';
+import { API_BASE, AUTH_BASE, BASE_WITH_CONTEXT } from './apiBase';
 import { notifyAuthExpired } from './authSession';
+import { readStreamLines } from './streamLines';
 import type { SsvcEnrichment, SsvcModel } from './ssvc';
 import { EVIDENCE_UPDATED_EVENT } from './evidence';
 
@@ -38,23 +39,6 @@ export async function getSsvcModels(): Promise<SsvcModel[]> {
     return (await api.get<{ models: SsvcModel[] }>('/ssvc/models')).data.models;
 }
 
-const envApiUrl = getRuntimeConfig('DTVP_API_URL', '').replace(/\/$/, '');
-const envFrontendUrl = getRuntimeConfig('DTVP_FRONTEND_URL', '').replace(/\/$/, '');
-const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '';
-
-const BASE_URL = (envApiUrl || runtimeOrigin || envFrontendUrl).replace(/\/$/, '');
-const CONTEXT_PATH = getRuntimeConfig('DTVP_CONTEXT_PATH', '/').replace(/\/$/, '');
-
-// Ensure CONTEXT_PATH starts with / if not empty
-const NORMALIZED_CONTEXT_PATH = CONTEXT_PATH ? (CONTEXT_PATH.startsWith('/') ? CONTEXT_PATH : '/' + CONTEXT_PATH) : '';
-
-// Avoid double-appending context path if BASE_URL already includes it.
-const BASE_WITH_CONTEXT = NORMALIZED_CONTEXT_PATH && BASE_URL.endsWith(NORMALIZED_CONTEXT_PATH)
-    ? BASE_URL
-    : BASE_URL + NORMALIZED_CONTEXT_PATH;
-
-const API_BASE = BASE_WITH_CONTEXT + '/api';
-const AUTH_BASE = BASE_URL + NORMALIZED_CONTEXT_PATH + '/auth';
 const api = axios.create({
     baseURL: API_BASE,
     withCredentials: true, // For cookies
@@ -156,31 +140,11 @@ export const streamProjectArchiveTaskEvents = async (
     });
     requireFetchResponse(response, 'Archive task event stream unavailable');
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const flushLines = async () => {
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            await onStatus(JSON.parse(trimmed));
-        }
-    };
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (value) {
-            buffer += decoder.decode(value, { stream: !done });
-            await flushLines();
-        }
-        if (done) break;
-    }
-    buffer += decoder.decode();
-    if (buffer.trim()) {
-        await onStatus(JSON.parse(buffer));
-    }
+    await readStreamLines(response.body, async line => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        await onStatus(JSON.parse(trimmed));
+    });
 };
 
 export const uploadProjectArchiveImport = async (
@@ -539,49 +503,18 @@ export const streamTaskEvents = async (
     });
     requireFetchResponse(response, 'Task event stream unavailable');
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    const flushLines = async () => {
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            await onStatus(JSON.parse(trimmed));
-        }
-    };
-
     try {
-        while (true) {
-            let idleTimer: ReturnType<typeof setTimeout> | undefined;
-            const idleTimeout = new Promise<never>((_resolve, reject) => {
-                idleTimer = setTimeout(() => {
-                    reject(new Error('Task event stream became idle'));
-                }, 35_000);
-            });
-            let chunk: ReadableStreamReadResult<Uint8Array>;
-            try {
-                chunk = await Promise.race([reader.read(), idleTimeout]);
-            } finally {
-                if (idleTimer !== undefined) clearTimeout(idleTimer);
-            }
-            const { done, value } = chunk;
-            if (value) {
-                buffer += decoder.decode(value, { stream: !done });
-                await flushLines();
-            }
-            if (done) break;
-        }
-
-        buffer += decoder.decode();
-        if (buffer.trim()) {
-            await onStatus(JSON.parse(buffer));
-        }
+        await readStreamLines(
+            response.body,
+            async line => {
+                const trimmed = line.trim();
+                if (!trimmed) return;
+                await onStatus(JSON.parse(trimmed));
+            },
+            { idleTimeoutMs: 35_000, idleMessage: 'Task event stream became idle' },
+        );
     } finally {
         abortController.abort();
-        await reader.cancel().catch(() => undefined);
     }
 };
 

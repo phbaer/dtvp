@@ -165,6 +165,16 @@ from .startup_page_services import (
     contextual_path,
 )
 from .task_event_services import TaskEventHub
+from .event_hub import EventHub
+from .event_producers import (
+    AssessmentEventProducer,
+    CacheRefreshProducer,
+    ExportStateProducer,
+    ProjectListEventProducer,
+    SourceStateTracker,
+)
+from .event_routes import EventRouteDeps, create_event_router
+from .shutdown_signals import chain_shutdown_signals
 from .tmrescore_cache_services import (
     load_tmrescore_project_cache as load_tmrescore_project_cache_impl,
 )
@@ -339,6 +349,10 @@ async def _initialize_application_runtime() -> None:
         )
         background_tasks.add(grouped_task_cleanup)
         grouped_task_cleanup.add_done_callback(background_tasks.discard)
+        for producer in (export_state_producer, cache_refresh_producer):
+            producer_task = asyncio.create_task(producer.run())
+            background_tasks.add(producer_task)
+            producer_task.add_done_callback(background_tasks.discard)
         _set_runtime_state("ready", "DTVP is ready.")
     except asyncio.CancelledError:
         _set_runtime_state("stopped", "DTVP startup was stopped.")
@@ -356,6 +370,10 @@ async def _initialize_application_runtime() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runtime_tasks, _startup_task
     _runtime_tasks = None
+    event_hub.reopen()
+    # Uvicorn runs the teardown below only after open connections finished;
+    # end live-update streams when the stop signal arrives instead.
+    restore_signal_handlers = chain_shutdown_signals(event_hub.close)
     _startup_task = asyncio.create_task(_initialize_application_runtime())
     try:
         try:
@@ -365,6 +383,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with mcp_endpoint.lifespan():
             yield
     finally:
+        restore_signal_handlers()
+        # Backstop for shutdowns without a signal (tests, embedding).
+        event_hub.close()
         if _startup_task and not _startup_task.done():
             _startup_task.cancel()
             try:
@@ -477,6 +498,28 @@ async def startup_status():
 
 tasks = {}
 task_event_hub = TaskEventHub()
+# The app-wide live-update stream (ADR 0004). Process-local, like the task
+# registries.
+event_hub = EventHub(
+    buffer_size=get_env_int_with_floor(
+        "DTVP_EVENT_BUFFER_SIZE", default=2000, minimum=100, logger=logger
+    ),
+    max_connections=get_env_int_with_floor(
+        "DTVP_EVENT_MAX_CONNECTIONS", default=200, minimum=1, logger=logger
+    ),
+    max_connections_per_user=get_env_int_with_floor(
+        "DTVP_EVENT_MAX_CONNECTIONS_PER_USER", default=20, minimum=1, logger=logger
+    ),
+)
+source_state_tracker = SourceStateTracker(event_hub)
+export_state_producer = ExportStateProducer(event_hub, cache_manager)
+cache_refresh_producer = CacheRefreshProducer(
+    event_hub, lambda: cache_manager.cache_meta.get("last_refreshed_at")
+)
+cache_manager.add_project_list_listener(ProjectListEventProducer(event_hub))
+cache_manager.add_source_state_listener(source_state_tracker)
+cache_manager.add_cache_status_listener(export_state_producer.mark_dirty)
+cache_manager.add_cache_status_listener(cache_refresh_producer.mark_dirty)
 project_archive_tasks: Dict[str, Dict[str, Any]] = {}
 tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
 tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
@@ -708,6 +751,11 @@ general_api_route_deps = build_general_api_route_deps(
 # snapshots users are looking at in step.
 cache_manager.add_assessment_change_listener(
     lambda keys: refresh_task_snapshots_for_assessments(general_api_route_deps, keys)
+)
+# Runs after the snapshot refresh above (listeners run in order), so a client
+# that refetches on the event sees the refreshed snapshot.
+cache_manager.add_assessment_change_listener(
+    AssessmentEventProducer(event_hub, cache_manager.get_cached_project_versions)
 )
 
 api_router.include_router(
@@ -1131,6 +1179,23 @@ api_router.include_router(
         access_token_store,
         session_user_dependency=get_session_user,
         get_user_role=lambda user: get_user_role(user),
+    )
+)
+
+
+api_router.include_router(
+    create_event_router(
+        EventRouteDeps(
+            hub=event_hub,
+            authenticate=get_current_user,
+            get_user_role=lambda user: get_user_role(user),
+            build=(
+                f"{VERSION}+{BUILD_COMMIT}"
+                if BUILD_COMMIT and BUILD_COMMIT != "unknown"
+                else VERSION
+            ),
+            source_state=source_state_tracker.snapshot,
+        )
     )
 )
 

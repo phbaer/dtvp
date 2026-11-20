@@ -205,6 +205,12 @@ uses one backend worker; horizontal scaling requires shared task storage.
 
 [Runtime and capacity](docs/runtime.md) documents the key modules, caching,
 concurrency, access boundaries, benchmarks, and sizing guidance.
+[ADR 0004](docs/adr/0004-background-sync-and-event-stream.md) (accepted, in
+progress) moves every Dependency-Track read into a background scheduler and
+announces changes to clients on one event stream. The stream exists:
+`GET /api/events` tells clients about project-list, assessment, export,
+cache-refresh, and Dependency-Track state changes
+([Event channel](docs/runtime.md#event-channel)).
 
 ## Documentation
 

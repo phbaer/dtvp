@@ -21,7 +21,23 @@ const mocks = vi.hoisted(() => ({
     getUserInfo: vi.fn(),
     getChangelog: vi.fn(),
     logout: vi.fn(),
+    streamStart: vi.fn(),
+    streamStop: vi.fn(),
 }))
+
+vi.mock('../lib/eventStream', async () => {
+    const { ref } = await import('vue')
+    return {
+        eventStream: {
+            status: ref('idle'),
+            start: mocks.streamStart,
+            stop: mocks.streamStop,
+            on: () => () => undefined,
+            cursor: null,
+        },
+        useServerEvents: () => undefined,
+    }
+})
 
 vi.mock('vue-router', () => ({
     useRoute: () => mocks.route,
@@ -159,6 +175,33 @@ describe('App bootstrap state', () => {
         expect(sessionStorage.getItem('dtvp:auth-return-path')).toBe(
             '/project/Example?vuln=CVE-1',
         )
+    })
+
+    it('opens the live-update stream once signed in and stops it on expiry and logout', async () => {
+        mocks.getVersion.mockResolvedValue({ version: '1.2.3', build: 'abc123' })
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+        expect(mocks.streamStart).toHaveBeenCalledTimes(1)
+
+        await wrapper.get('button.cursor-pointer.border-gray-600').trigger('click')
+        expect(mocks.streamStop).toHaveBeenCalledWith('logout')
+        expect(mocks.logout).toHaveBeenCalledTimes(1)
+        expect(mocks.streamStop.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.logout.mock.invocationCallOrder[0],
+        )
+
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+        expect(mocks.streamStop).toHaveBeenLastCalledWith('auth')
+    })
+
+    it('does not open the stream without a signed-in user', async () => {
+        mocks.getVersion.mockResolvedValue({ version: '1.2.3', build: 'abc123' })
+        mocks.getUserInfo.mockRejectedValue({ response: { status: 401 } })
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+        expect(mocks.streamStart).not.toHaveBeenCalled()
     })
 
     it('offers a return to the last vulnerability list from code analysis', async () => {

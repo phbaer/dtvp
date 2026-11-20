@@ -35,6 +35,24 @@ def test_nginx_reuses_upstreams_compresses_json_and_preserves_event_streaming():
     assert "proxy_http_version 1.1;" in template
     assert 'proxy_set_header Connection "";' in template
     assert "gzip_types application/json" in template
-    assert "location ~ ^${DTVP_CONTEXT_PATH}/api/tasks/[^/]+/events$" in template
+    assert (
+        "location ~ ^${DTVP_CONTEXT_PATH}/api/"
+        "(events|tasks/[^/]+/events|project-archives/tasks/[^/]+/events)$"
+    ) in template
     assert "proxy_buffering off;" in template
     assert "add_header X-Accel-Buffering no always;" in template
+
+
+def test_nginx_streams_every_event_endpoint_but_not_the_poll():
+    import re
+
+    template = (ROOT / "nginx.conf.template").read_text()
+    match = re.search(r"location ~ (\^\$\{DTVP_CONTEXT_PATH\}\S+) \{", template)
+    assert match is not None
+    pattern = re.compile(match.group(1).replace("${DTVP_CONTEXT_PATH}", "/dtvp"))
+
+    assert pattern.match("/dtvp/api/events")
+    assert pattern.match("/dtvp/api/tasks/abc/events")
+    assert pattern.match("/dtvp/api/project-archives/tasks/abc/events")
+    assert not pattern.match("/dtvp/api/events/poll")
+    assert not pattern.match("/dtvp/api/tasks/abc/groups")

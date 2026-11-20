@@ -84,6 +84,9 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | `DTVP_CONTEXT_PATH` | Application mount path | app `/`; Compose `/dtvp` |
 | `DTVP_HTTP_PORT` | Compose nginx host port | `80` |
 | `DTVP_UVICORN_KEEP_ALIVE_SECONDS` | Backend upstream keep-alive timeout | `30` |
+| `DTVP_EVENT_BUFFER_SIZE` | Events kept for clients that reconnect to `/api/events`; at least 100. See [Event channel](runtime.md#event-channel) | `2000` |
+| `DTVP_EVENT_MAX_CONNECTIONS` | Open `/api/events` streams; more get `503`; at least 1 | `200` |
+| `DTVP_EVENT_MAX_CONNECTIONS_PER_USER` | Open `/api/events` streams of one user; more get `429`; at least 1 | `20` |
 | `DTVP_REQUIRE_FREE_THREADED` | Fail startup unless CPython supports free threading and its GIL is actually disabled | local Python: `false`; Compose: `true` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
 | `DTVP_CORS_ORIGINS` | Comma-separated CORS origins. A set value replaces the built-in list (the localhost development origins, `DTVP_FRONTEND_URL`, and the host name) for the application; the startup page shown while DTVP loads adds it to that list instead | unset |
