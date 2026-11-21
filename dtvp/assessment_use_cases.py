@@ -20,10 +20,14 @@ from .assessment_model import (
     RESPONSE_NOT_SET,
     analysis_response,
     finding_key,
+    normalize_override_label,
     normalize_response,
+    normalize_version_override,
     parse_assessment,
     render_assessment,
+    version_override,
     with_response,
+    with_version_override,
 )
 from .assessment_outbox_services import (
     AssessmentRevisionConflictError,
@@ -96,6 +100,10 @@ class AssessmentFields(BaseModel):
     # ``NOT_SET`` removes it. A save that leaves it out, and every save by
     # someone who is not a reviewer, keeps what each finding has.
     response: Optional[str] = None
+    # The finding's version override (ADR 0010), ``{label, reason}``. Read
+    # only for saves: each finding keeps its stored one; a save may repeat
+    # it, never change it.
+    version_override: Optional[dict[str, Optional[str]]] = None
     teams: list[TeamAssessmentFields] = Field(default_factory=list)
 
     @field_validator("response", mode="before")
@@ -518,6 +526,34 @@ def _validate_response_change(req: AssessmentRequest, role: str) -> None:
         )
 
 
+def _same_override(left: Any, right: Any) -> bool:
+    left, right = normalize_version_override(left), normalize_version_override(right)
+    if left is None or right is None:
+        return left is right
+    return normalize_override_label(left["label"]) == normalize_override_label(
+        right["label"]
+    ) and (left["reason"] or None) == (right["reason"] or None)
+
+
+def _validate_version_override_change(
+    req: AssessmentRequest, stored_details: list[str]
+) -> None:
+    """A save keeps each finding's version override. It may name the one a
+    finding has, or none; any other marker needs an override operation."""
+    sent = (
+        req.fields.version_override
+        if req.fields is not None
+        else version_override(req.details)
+    )
+    if normalize_version_override(sent) is None:
+        return
+    for existing in stored_details:
+        if not _same_override(sent, version_override(existing)):
+            raise AssessmentValidationError(
+                "A save cannot change a finding's version override"
+            )
+
+
 def _changes_response(req: AssessmentRequest, role: str) -> bool:
     """Whether this save decides the response. Only a reviewer's does, and
     only when it names one: in its fields, or beside its text. Any other
@@ -624,6 +660,7 @@ async def save_assessment(
 
     _validate_ssvc_change(req, role)
     _validate_response_change(req, role)
+    _validate_version_override_change(req, stored_details)
     _validate_analysis_runs(deps, req)
     evidence_ids = _validate_code_evidence(deps, req)
 
@@ -641,6 +678,12 @@ async def save_assessment(
                 payload["details"] = with_response(
                     payload["details"], analysis_response(existing)
                 )
+    # Until override scopes exist (ADR 0010 step 7), every save keeps each
+    # finding's stored version override exactly.
+    for (_instance, payload), existing in zip(payloads, stored_details):
+        payload["details"] = with_version_override(
+            payload["details"], version_override(existing)
+        )
     if not keep_response and req.fields is None:
         # A reviewer's save as text names the response beside the text.
         for _instance, payload in payloads:

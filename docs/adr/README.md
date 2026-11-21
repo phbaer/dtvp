@@ -15,4 +15,4 @@ Decision status and implementation status are tracked separately in each record.
 | [0007: The VDR recommendation comes from the ranges Dependency-Track holds](0007-recommendation-from-dependency-track-ranges.md) | Proposed | Implemented |
 | [0008: Expiring, revocable session tokens](0008-expiring-revocable-session-tokens.md) | Accepted | Implemented |
 | [0009: DTVP matches vulnerabilities itself from mirrored advisories](0009-native-vulnerability-matcher.md) | Accepted | Not started |
-| [0010: Version overrides of an assessment](0010-version-overrides.md) | Accepted; amends decisions 2 and 6 of 0003 | Not started |
+| [0010: Version overrides of an assessment](0010-version-overrides.md) | Accepted; amends decisions 2 and 6 of 0003 | In progress (steps 0-4) |

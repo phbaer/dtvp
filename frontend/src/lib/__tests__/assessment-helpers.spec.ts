@@ -1,12 +1,12 @@
 
 import { describe, it, expect } from 'vitest';
 import parserCasesJson from './fixtures/assessment_parser_cases.json'
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags, assessmentTextToFields, assessmentTextKey, sanitizeAssessmentDetails, withoutHistoricalBlocks, markAssessmentBlocksHistorical } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags, assessmentTextToFields, assessmentTextKey, sanitizeAssessmentDetails, withoutHistoricalBlocks, markAssessmentBlocksHistorical, parseVersionOverride } from '../assessment-helpers';
 import { renderAssessmentFields } from './assessmentFieldsText';
 
 // Kept inside the frontend tree: the Docker image builds the frontend
 // without the repository's tests/ folder.
-const parserCases = parserCasesJson as Array<{ name: string; text: string; blocks: any[] }>
+const parserCases = parserCasesJson as Array<{ name: string; text: string; blocks: any[]; version_override?: any }>
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -376,12 +376,17 @@ Details A`;
             expect(teamA?.details).toBe('My actual rationale');
         });
 
-        it.each(parserCases)('reads "$name" as the server does', ({ text, blocks }) => {
+        it.each(parserCases)('reads "$name" as the server does', ({ text, blocks, version_override }) => {
             // fixtures/assessment_parser_cases.json is also read by
             // test_logic.py. Text before the first header is the client's
-            // legacy General block; the server keeps it apart.
+            // legacy General block; the server keeps it apart. Tags that are
+            // fields of their own (response, version override) make none.
             let read = parseAssessmentBlocks(text)
-            if (!text.trimStart().startsWith('---')) read = read.slice(1)
+            const legacy = read[0]
+            if (!text.trimStart().startsWith('---') && legacy?.team === 'General' && legacy.user === 'Unknown') {
+                read = read.slice(1)
+            }
+            if (version_override !== undefined) expect(parseVersionOverride(text)).toEqual(version_override)
             expect(read.map(block => ({
                 team: block.team,
                 state: block.state,
@@ -848,6 +853,21 @@ My Policy Comment: track this carefully`
             // A rescoring inside a block is that team's, not the finding's.
             expect(fields.rescored_score).toBeNull();
         });
+
+        it('reads the version override as a field, never as text or a General block', () => {
+            const text = [
+                '[Response: UPDATE] [Version Override: LTS 2.x] [Override Reason: Backported fix]',
+                '',
+                '--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: NOT_SET] ---',
+                'Checked.',
+            ].join('\n')
+            const fields = assessmentTextToFields(text)
+            expect(fields.version_override).toEqual({ label: 'LTS 2.x', reason: 'Backported fix' })
+            expect(fields.free_text).toBeNull()
+            expect(parseAssessmentBlocks(text).map(block => block.team)).toEqual(['Core'])
+            expect(renderAssessmentFields(fields)).toBe(text)
+            expect(assessmentTextToFields('Plain.').version_override).toBeUndefined()
+        })
 
         it('treats text without team blocks as free text, not as a General assessment', () => {
             expect(assessmentTextToFields('Legacy note.\n[Status: Pending Review]')).toEqual({

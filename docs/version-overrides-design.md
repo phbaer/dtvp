@@ -4,7 +4,7 @@
 
 | | |
 | :--- | :--- |
-| Status | Design, not implemented. Steps 0 to 3 of the [plan](#19-plan) are in progress |
+| Status | Steps 0 to 4 of the [plan](#19-plan) implemented (step 4: the marker as a read-only field) |
 | Decision | [ADR 0010: Version overrides of an assessment](adr/0010-version-overrides.md), accepted 2026-11-20 |
 | Checked | Against the code at origin/main fc999882 on 2026-11-20, by reading it, not by running it. File and line references are those of that commit; the code wins where it has moved since |
 | Changes marked **(v2)** | Resolutions of the second design review |

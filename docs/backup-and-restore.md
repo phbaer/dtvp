@@ -413,7 +413,10 @@ Three axes are versioned separately.
    writes the records through the current code. Every migration that
    changes rows (`INSERT`, `UPDATE`, `DELETE`) needs an entry in
    `dtvp/backup/migration_effects.py`: applied before dump/1 (`Baseline`),
-   no effect on dumped records, or an upcaster. A test enforces it. Raw
+   no effect on dumped records, or an upcaster. A test enforces it.
+   (`assessment_outbox` 0009, the version override columns, only rebuilds
+   the derived fields tables. Its `import-review` revisions are ordinary
+   `origin` values of the `revision` entity.) Raw
    database copies across versions are unsafe because the migration runner
    does not refuse a database newer than the code.
 

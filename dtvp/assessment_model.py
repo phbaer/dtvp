@@ -46,7 +46,7 @@ RESERVED_DETAIL_PATTERN = re.compile(
     # a closing bracket, so unclosed tags are as dangerous as closed ones.
     r"---|\[\s*/?\s*(?:Team|State|Assessed By|Reviewed By|Rescored|"
     r"Rescored Vector|Status|SSVC|Assigned|Historical|Copied From|"
-    r"Justification|Date)\b",
+    r"Justification|Date|Version Override|Override Reason)\b",
     re.IGNORECASE,
 )
 # Only a tag with a value of the list is the field. Anything else in
@@ -55,6 +55,146 @@ RESPONSE_TAG_PATTERN = (
     r"\[Response:\s*(" + "|".join((*ANALYSIS_RESPONSES, RESPONSE_NOT_SET)) + r")\s*\]"
 )
 _RESPONSE = re.compile(RESPONSE_TAG_PATTERN, re.IGNORECASE)
+
+# A version override (ADR 0010): the finding's version has its own
+# assessment, shared by all versions with the same label. Only a tag with a
+# valid value is the field; anything else stays the text it is.
+VERSION_OVERRIDE_TAG_PATTERN = r"\[Version Override:\s*([A-Za-z0-9._+\- ]{1,40}?)\s*\]"
+OVERRIDE_REASON_TAG_PATTERN = r"\[Override Reason:\s*((?:(?!---)[^\[\]\r\n]){1,200}?)\s*\]"
+_VERSION_OVERRIDE = re.compile(VERSION_OVERRIDE_TAG_PATTERN, re.IGNORECASE)
+_OVERRIDE_REASON = re.compile(OVERRIDE_REASON_TAG_PATTERN, re.IGNORECASE)
+RESERVED_OVERRIDE_LABELS = ("base", "ambiguous")
+FORMER_OVERRIDE_NOTE = "Former version override"
+
+
+def normalize_override_label(label: Any) -> str:
+    """A label as compared: casefolded, white space collapsed."""
+    return " ".join(str(label or "").split()).casefold()
+
+
+def _valid_label(label: Any) -> str | None:
+    text = str(label or "").strip()
+    if (
+        not text
+        or len(text) > 40
+        or not re.fullmatch(r"[A-Za-z0-9._+\- ]+", text)
+        or normalize_override_label(text) in RESERVED_OVERRIDE_LABELS
+    ):
+        return None
+    return text
+
+
+def _valid_reason(reason: Any) -> str | None:
+    text = str(reason or "").strip()
+    if not text or len(text) > 200 or re.search(r"[\[\]\r\n]|---", text):
+        return None
+    return text
+
+
+def normalize_version_override(value: Any) -> dict[str, str | None] | None:
+    """``{label, reason}`` with valid values; ``None`` without a valid label."""
+    if not isinstance(value, dict):
+        return None
+    label = _valid_label(value.get("label"))
+    if label is None:
+        return None
+    return {"label": label, "reason": _valid_reason(value.get("reason"))}
+
+
+def _shared_version_override(shared: str) -> dict[str, str | None] | None:
+    label = next(
+        (
+            valid
+            for match in _VERSION_OVERRIDE.finditer(shared)
+            if (valid := _valid_label(match.group(1)))
+        ),
+        None,
+    )
+    if label is None:
+        return None
+    reason = next(
+        (
+            valid
+            for match in _OVERRIDE_REASON.finditer(shared)
+            if (valid := _valid_reason(match.group(1)))
+        ),
+        None,
+    )
+    return {"label": label, "reason": reason}
+
+
+def _strip_override_tags(text: str) -> str:
+    """``text`` without the valid override tags (invalid ones are text)."""
+    text = _VERSION_OVERRIDE.sub(
+        lambda m: "" if _valid_label(m.group(1)) else m.group(0), text
+    )
+    return _OVERRIDE_REASON.sub(
+        lambda m: "" if _valid_reason(m.group(1)) else m.group(0), text
+    )
+
+
+def _head_and_blocks(details: Any) -> tuple[str, str]:
+    from .ssvc_services import mask_details as mask_ssvc_details
+
+    text = str(details or "")
+    first = _BLOCK_START.search(mask_ssvc_details(text))
+    return (text[: first.start()], text[first.start():]) if first else (text, "")
+
+
+def version_override(details: Any) -> dict[str, str | None] | None:
+    """The version override an assessment text carries beside its blocks."""
+    from .logic import parse_assessment_blocks
+
+    shared, _blocks = parse_assessment_blocks(str(details or ""))
+    return _shared_version_override(shared)
+
+
+def _override_tags(value: dict[str, str | None] | None) -> str:
+    if not value:
+        return ""
+    tags = f"[Version Override: {value['label']}]"
+    if value.get("reason"):
+        tags += f" [Override Reason: {value['reason']}]"
+    return tags
+
+
+def set_shared_version_override(shared: str, value: Any) -> str:
+    """The text ahead of the team blocks with ``value`` as its override tags,
+    after the rescoring and response tags (none for ``None``)."""
+    rest = "\n".join(
+        re.sub(r"[ \t]{2,}", " ", line).rstrip()
+        for line in _strip_override_tags(shared).splitlines()
+    ).strip()
+    tags = _override_tags(normalize_version_override(value))
+    if not tags:
+        return rest
+    lead = re.match(
+        r"(?:\s*\[(?:Rescored(?: Vector)?|Response):[^\]]*\])+", rest
+    )
+    if lead:
+        return f"{rest[:lead.end()].strip()} {tags}{rest[lead.end():]}"
+    return f"{tags}\n\n{rest}" if rest else tags
+
+
+def with_version_override(details: Any, value: Any) -> str:
+    """``details`` with ``value`` (``{label, reason}``) as its version
+    override; ``None`` removes it. Nothing else of the text changes."""
+    text = str(details or "")
+    if version_override(text) == normalize_version_override(value):
+        return text
+    head, blocks = _head_and_blocks(text)
+    return "\n\n".join(
+        part
+        for part in (set_shared_version_override(head, value), blocks.strip())
+        if part
+    )
+
+
+def preserve_version_override(details: Any, existing: Any) -> str:
+    """``details`` with the version override of ``existing``: a writer that
+    builds a new text keeps the finding's marker as it is (the marker
+    changes only through the override operations)."""
+    return with_version_override(details, version_override(existing))
 _LEADING_RESCORING = re.compile(r"(?:\s*\[Rescored(?: Vector)?:[^\]]*\])+")
 
 
@@ -196,7 +336,10 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
         None,
     )
     free_text = _PENDING.sub(
-        "", _RESPONSE.sub("", _VECTOR.sub("", _SCORE.sub("", shared)))
+        "",
+        _strip_override_tags(
+            _RESPONSE.sub("", _VECTOR.sub("", _SCORE.sub("", shared)))
+        ),
     ).strip()
     teams = [team_from_block(block) for block in blocks]
     return {
@@ -211,6 +354,7 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
             vector.group(1).strip() if vector else (general or {}).get("vector") or None
         ),
         "response": _shared_response(shared),
+        "version_override": _shared_version_override(shared),
         "free_text": free_text,
         "form": FORM_STRUCTURED if teams else FORM_TEXT if raw.strip() else FORM_EMPTY,
         "teams": teams,
@@ -302,8 +446,11 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
     free_text = _body(
         _PENDING.sub(
             "",
-            _RESPONSE.sub(
-                "", _VECTOR.sub("", _SCORE.sub("", str(fields.get("free_text") or "")))
+            _strip_override_tags(
+                _RESPONSE.sub(
+                    "",
+                    _VECTOR.sub("", _SCORE.sub("", str(fields.get("free_text") or ""))),
+                )
             ),
         )
     )
@@ -314,6 +461,7 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
     score = _number(fields.get("rescored_score"))
     vector = _header_value(fields.get("rescored_vector") or "") or None
     response = normalize_response(fields.get("response"))
+    override = normalize_version_override(fields.get("version_override"))
     return {
         "state": str(fields.get("state") or "NOT_SET"),
         "suppressed": bool(fields.get("suppressed")),
@@ -323,9 +471,10 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
         "rescored_score": score if score is not None else (general or {}).get("rescored_score"),
         "rescored_vector": vector or (general or {}).get("rescored_vector"),
         "response": response,
+        "version_override": override,
         "free_text": free_text,
         "form": FORM_STRUCTURED if teams else FORM_TEXT if (
-            free_text or score is not None or vector or response
+            free_text or score is not None or vector or response or override
             or fields.get("pending_review")
         ) else FORM_EMPTY,
         "teams": teams,
@@ -359,6 +508,8 @@ def _render_clean(fields: dict[str, Any]) -> str:
         shared.append(f"[Rescored Vector: {fields['rescored_vector']}]")
     if fields.get("response"):
         shared.append(f"[Response: {fields['response']}]")
+    if fields.get("version_override"):
+        shared.append(_override_tags(fields["version_override"]))
     if shared:
         parts.append(" ".join(shared))
     if fields["free_text"]:

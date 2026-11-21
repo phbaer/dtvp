@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .assessment_model import parse_assessment
+from .assessment_model import PENDING_REVIEW_MARKER, parse_assessment, version_override
 from .local_store import get_database_path
 from .sqlite_migration_services import run_sqlite_migrations
 from .startup_progress import report_startup_progress
@@ -104,6 +104,9 @@ SYNC_SUPERSEDED = "superseded"
 
 ORIGIN_USER = "user"
 ORIGIN_IMPORT = "import"
+# A source value with a version override marker was adopted; the marker
+# says something about the other versions that DTVP checks with a review.
+ORIGIN_IMPORT_REVIEW = "import-review"
 ORIGIN_RESOLUTION = "conflict-resolution"
 ORIGIN_DISCARD = "export-discarded"
 
@@ -594,15 +597,18 @@ class AssessmentOutboxStore:
                         project_uuid, component_uuid, vulnerability_uuid,
                         revision, details_digest, state, suppressed,
                         pending_review, rescored_score, rescored_vector,
-                        free_text, form, response
+                        free_text, form, response,
+                        version_override, version_override_reason
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         *key, int(row["revision"]), digest, fields["state"],
                         int(fields["suppressed"]), int(fields["pending_review"]),
                         fields["rescored_score"], fields["rescored_vector"],
                         fields["free_text"], fields["form"], fields["response"],
+                        (fields["version_override"] or {}).get("label"),
+                        (fields["version_override"] or {}).get("reason"),
                     ),
                 )
                 connection.executemany(
@@ -699,6 +705,11 @@ class AssessmentOutboxStore:
             "rescored_score": row["rescored_score"],
             "rescored_vector": row["rescored_vector"],
             "response": row["response"],
+            "version_override": (
+                {"label": row["version_override"], "reason": row["version_override_reason"]}
+                if row["version_override"]
+                else None
+            ),
             "free_text": row["free_text"],
             "form": row["form"],
             "teams": [
@@ -1225,7 +1236,69 @@ class AssessmentOutboxStore:
             """,
             (*key, ORIGIN_IMPORT),
         )
+        self._review_adopted_override(connection, key, value, 0, now)
         return True
+
+    def _review_adopted_override(
+        self,
+        connection: sqlite3.Connection,
+        key: AssessmentKey,
+        value: dict[str, Any],
+        revision: int,
+        now: str,
+    ) -> None:
+        """After adopting ``value`` (stored unchanged as ``revision``): when it
+        carries a version override marker, the next revision (origin
+        ``import-review``) marks it pending review and is exported. Nothing
+        else of the value changes (ADR 0010, design section 9)."""
+        details = str(value["details"] or "")
+        if version_override(details) is None or PENDING_REVIEW_MARKER.casefold() in details.casefold():
+            return
+        reviewed = {**value, "details": f"{details.rstrip()}\n\n{PENDING_REVIEW_MARKER}"}
+        revision += 1
+        update_id = str(uuid.uuid4())
+        connection.execute(
+            """
+            UPDATE assessment_state
+            SET revision = ?, analysis_details = ?, update_id = ?
+            WHERE project_uuid = ? AND component_uuid = ?
+              AND vulnerability_uuid = ?
+            """,
+            (revision, reviewed["details"], update_id, *key),
+        )
+        self._set_sync_fields(
+            connection, key, status=SYNC_PENDING, base=value, remote=None, now=now
+        )
+        self._append_revision(
+            connection, key, revision, reviewed,
+            origin=ORIGIN_IMPORT_REVIEW, author=None, now=now,
+        )
+        payload = {
+            "project_uuid": key[0],
+            "component_uuid": key[1],
+            "vulnerability_uuid": key[2],
+            "state": reviewed["state"],
+            "details": reviewed["details"],
+            "suppressed": bool(reviewed["suppressed"]),
+        }
+        connection.execute(
+            """
+            INSERT INTO assessment_outbox (
+                project_uuid, component_uuid, vulnerability_uuid, revision,
+                update_id, payload_json, attempts, next_attempt_at,
+                last_error, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?)
+            ON CONFLICT (project_uuid, component_uuid, vulnerability_uuid)
+            DO UPDATE SET
+                revision = excluded.revision,
+                update_id = excluded.update_id,
+                payload_json = excluded.payload_json,
+                attempts = 0, next_attempt_at = NULL, last_error = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (*key, revision, update_id, _payload_json(payload), now, now),
+        )
 
     def _set_sync_fields(
         self,
@@ -1305,6 +1378,8 @@ class AssessmentOutboxStore:
         self._append_revision(
             connection, key, revision, value, origin=origin, author=author, now=now
         )
+        if origin == ORIGIN_IMPORT:
+            self._review_adopted_override(connection, key, value, revision, now)
 
     def _queue_export(
         self,

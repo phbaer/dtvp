@@ -11,6 +11,9 @@ from .assessment_model import (
     analysis_response,
     render_team_block,
     set_shared_response,
+    set_shared_version_override,
+    version_override,
+    with_version_override,
 )
 from .assessment_restore_services import (
     build_missing_rescoring_vector_restore_candidate,
@@ -1488,9 +1491,13 @@ def remove_assessment_blocks(details: str, team: Optional[str] = None) -> str:
     anything stored ahead of them is kept exactly as it was, except the
     response, which is removed with the General assessment. The pending
     review marker is dropped; the caller decides whether the result needs one.
+    A whole delete keeps the version override tags only: the finding stays
+    in its override scope, unassessed.
     """
-    if team is None or not details:
+    if not details:
         return ""
+    if team is None:
+        return with_version_override("", version_override(details))
     text = re.sub(r"\[Status: Pending Review\]", "", details, flags=re.IGNORECASE)
     headers = list(re.finditer(r"---(?=\s*\[Team:)", mask_ssvc_details(text)))
     if not headers:
@@ -1842,6 +1849,10 @@ def process_assessment_details(
     # is neither moved into a General block with legacy text nor lost.
     final_response = analysis_response(existing_details)
     shared_text = set_shared_response(shared_text, None)
+    # So is the version override: it belongs to the finding, and only the
+    # override operations change it.
+    final_override = version_override(existing_details)
+    shared_text = set_shared_version_override(shared_text, None)
 
     # 2. Extract Metadata from New Content (if Reviewer)
     new_rescored_val = None
@@ -1963,7 +1974,9 @@ def process_assessment_details(
 
     # 6. Reconstruct Final String
     final_parts = []
-    shared_text = set_shared_response(shared_text, final_response)
+    shared_text = set_shared_version_override(
+        set_shared_response(shared_text, final_response), final_override
+    )
     if shared_text:
         final_parts.append(shared_text)
 

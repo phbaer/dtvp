@@ -64,6 +64,7 @@ Assessments are **not** replaced by an import. Per finding:
 | DTVP's record | Dependency-Track | Result |
 | :--- | :--- | :--- |
 | None yet | holds an assessment | It is adopted once as DTVP's record (revision 0, origin `import`) |
+| None yet | holds an assessment with a [version override](assessment-model.md#version-override) marker | Adopted as revision 0 (origin `import`); revision 1 (origin `import-review`) marks it pending review and is exported |
 | None yet | holds nothing | Nothing happens |
 | Exists | holds the same value | Nothing happens; a waiting export is dropped |
 | Exists, synchronized | holds something else, or nothing | DTVP's value is exported again |
@@ -368,7 +369,9 @@ vulnerabilities with more than 30 findings only the first 30 are loaded.
 
  Origins are `before-history`, `individual-assessment` (a save in the UI),
 `mcp-assessment` (an agent), `bulk-workflow`, `assessment-deletion`,
-`export-discarded`, `import` (adopted from Dependency-Track), `carried-over`
+`export-discarded`, `import` (adopted from Dependency-Track), `import-review`
+(an adopted value with a version override marker, marked pending review),
+`carried-over`
 and `carried-over-by-vulnerability` (taken over from a replaced finding; see
 [Findings that disappear](#findings-that-disappear)), and
 `conflict-resolution` (only in history written before conflicts were removed). A bulk
