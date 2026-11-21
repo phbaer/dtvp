@@ -116,8 +116,11 @@ class ProjectListEventProducer:
 
 
 class SourceStateTracker:
-    """Whether Dependency-Track answered the last project-list read.
+    """Whether Dependency-Track can be reached, and the sync backlog.
 
+    Called directly (``tracker(ok, exc)``) it follows single reads; with the
+    scheduler, its circuit breaker sets the state (``set_state``), reads only
+    note their success, and ``set_backlog`` adds how many versions wait.
     Publishes ``source.state`` on a transition only."""
 
     def __init__(
@@ -132,10 +135,42 @@ class SourceStateTracker:
             "since": _iso(clock()),
             "last_success_at": None,
             "error_class": None,
+            "backlog": 0,
         }
+        self._published_backlog = 0
 
     def snapshot(self) -> Dict[str, Any]:
         return dict(self._state)
+
+    def note_success(self) -> None:
+        """A read succeeded: ``ok`` once known, otherwise only the time."""
+        if self._state.get("dt") == "unknown":
+            self.set_state("ok")
+            return
+        self._state = {**self._state, "last_success_at": _iso(self._clock())}
+
+    def set_state(self, dt_state: str, error_class: Optional[str] = None) -> None:
+        now = _iso(self._clock())
+        state = dict(self._state)
+        if dt_state == "ok":
+            state["last_success_at"] = now
+        state["error_class"] = error_class
+        changed = state["dt"] != dt_state
+        if changed:
+            state["dt"] = dt_state
+            state["since"] = now
+        self._state = state
+        if changed:
+            self._hub.publish("source.state", dict(state))
+
+    def set_backlog(self, backlog: int) -> None:
+        """How many versions wait for a sync; published when it changes
+        between empty and not, or by at least ten, so the stream stays calm."""
+        before = self._published_backlog
+        self._state = {**self._state, "backlog": int(backlog)}
+        if (before == 0) != (backlog == 0) or abs(backlog - before) >= 10:
+            self._published_backlog = int(backlog)
+            self._hub.publish("source.state", dict(self._state))
 
     def __call__(self, ok: bool, exc: BaseException | None = None) -> None:
         now = _iso(self._clock())
@@ -165,9 +200,11 @@ class SourceStateTracker:
 
 
 class AssessmentEventProducer:
-    """Publishes ``assessments.changed`` (origin ``local``) per product after
-    a merge or a discarded export changed DTVP's records. Registered after the
-    task-snapshot listener, so open views are already up to date."""
+    """Publishes ``assessments.changed`` per product, with its origin:
+    ``local`` (a save, a carry-over, a discarded export), ``dt`` (the source
+    changed an assessment) or ``export_echo`` (the source now holds DTVP's
+    own export). Registered after the task-snapshot listener, so open views
+    are already up to date."""
 
     def __init__(
         self,
@@ -177,7 +214,9 @@ class AssessmentEventProducer:
         self._hub = hub
         self._project_versions = project_versions
 
-    def __call__(self, keys: Iterable[Any], *, value_changed: bool = True) -> None:
+    def __call__(
+        self, keys: Iterable[Any], *, value_changed: bool = True, origin: str = "local"
+    ) -> None:
         by_project: Dict[str, int] = {}
         for key in keys or []:
             if not key:
@@ -204,7 +243,7 @@ class AssessmentEventProducer:
                     "product": product,
                     "project_uuids": sorted(counts),
                     "keys_count": sum(counts.values()),
-                    "origin": "local",
+                    "origin": origin,
                 },
                 product=product,
             )

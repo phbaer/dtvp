@@ -81,7 +81,7 @@ describe('Settings.vue', () => {
                 memory_entries: 32, memory_entry_limit: 256,
                 dirty_entries: 0, write_pending: false, write_errors: 0,
                 named_project_queries: 2, named_project_query_limit: 128,
-                active_projects: 3, active_project_limit: 8,
+                active_projects: 3,
             },
         })
     })

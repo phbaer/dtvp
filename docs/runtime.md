@@ -146,23 +146,20 @@ Important frontend components:
   unavailable. An existing JSON cache in `DTVP_DT_CACHE_PATH` is imported once
   on first start, in one transaction; its files are left in place, are no
   longer read, and can be deleted after the database has been verified. Concurrent
-  misses for the same resource share one Dependency-Track request, the complete
-  project list has a short freshness TTL across clients
-  (`DTVP_DT_PROJECT_LIST_TTL_SECONDS`, 30 s), and API-key requests
-  reuse one application-lifetime HTTP connection pool. The background cache
-  sync also retains its client between refreshes. A version is imported the
-  first time it is opened and served from the database afterwards. Every
-  `DTVP_DT_CACHE_REFRESH_SECONDS` the background sync re-reads the project
-  list and up to eight recently opened versions; each re-read renews the
-  version's access time, so a version leaves that set only when more recently
-  opened versions push it out. The automatic code-analysis sweep uses its own
+  misses for the same resource share one Dependency-Track request, the
+  stored project list is served once it was read (the
+  [sync scheduler](#sync-scheduler) keeps it current), and API-key requests
+  reuse one application-lifetime HTTP connection pool. The sync scheduler
+  also retains its client between passes. A version not yet imported in the
+  background is imported when it is opened and served from the database
+  afterwards. The automatic code-analysis sweep uses its own
   cache manager and imports versions nobody opened. Each caller still receives an
   isolated mutable snapshot. The last step of a project refresh reads the
   affected version ranges of the project's vulnerabilities that have no
   recommendation and are missing or stale in the table
   `source_vulnerability_ranges` (rebuildable source data, shared by all
-  projects): at most `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` per refresh
-  cycle, four at a time, one read per vulnerability across projects, and
+  projects): at most `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` per scheduler
+  pass, four at a time, one read per vulnerability across projects, and
   again after `DTVP_FIXED_VERSIONS_REFRESH_DAYS` or when the record changed.
   A failed read backs off, from one minute doubling to a day per failure in
   a row, and failed reads come after never-read and stale ones, so they
@@ -264,17 +261,121 @@ response (before DTVP's overlay), the attempt and success times, and resets
 the failures; a failed read records its error class and counts failures.
 A version changes (`last_change_at`, `generation` + 1) only when a known
 digest differs; an unknown one (after the upgrade) is stored without
-counting a change. An analysis that differs from the previous read is an
-`export_echo` when Dependency-Track now holds the value on DTVP's record,
-otherwise a change in Dependency-Track; only the latter changes the
-version, and the counts of the last read are kept. `lastRiskScore` is not
+counting a change. Only analyses changed in Dependency-Track change the
+version (see below); the counts of the last read are kept. `lastRiskScore` is not
 part of the grouped snapshot's revision: every export changes it.
+
+An analysis that differs from the previous read is an `export_echo` when
+Dependency-Track now holds the value DTVP last exported for it (the record's
+base, set by `mark_synced` and `note_exported`), even while a newer local
+value waits for export; otherwise it is a change in Dependency-Track.
 
 `GET /api/sync/versions?product=&changed_since=` lists the rows (with
 `changed_since`, only versions changed after that time); `GET
-/api/sync/status` counts them by status. Nothing is scheduled from the sync
-state yet; the reads still happen in the cache refresh. The table is not in
-the dump: the next reads rebuild it.
+/api/sync/status` counts them by status and adds the scheduler's state
+(`scheduler_state`: breaker, queue, running versions, watched products). The
+table is not in the dump: the next reads rebuild it.
+
+### Sync scheduler
+
+Status: implemented 2026-11-21 (ADR 0004 step 5; checked against
+`tests/test_source_sync.py`, `tests/test_source_sync_state.py` and
+`tests/test_dt_cache.py`).
+
+`SourceSync` (`dtvp/source_sync.py`) is the background loop of the
+backend. Each pass (at least once a second, and at once after a save) it:
+
+1. runs the automatic export, then reads the project list when
+   `DTVP_DT_CACHE_REFRESH_SECONDS` have passed;
+2. plans every row of `sync_versions` when something changed (the list, a
+   finished sync, the watched products, the breaker closing) or 15 seconds
+   have passed:
+
+   | Priority | Due |
+   | :--- | :--- |
+   | P0 | a pending user request (`requested_at`; the request route comes with step 8) |
+   | P1 | the first import of a version of a watched product |
+   | P2 | a changed list signal (BOM import: all kinds; vulnerability analysis: findings and vulnerability records), or a watched product's findings after 120 s, vulnerability records after 6 h, BOM after 24 h |
+   | P3 | the first import of any other active version (backfill) |
+   | P4 | the safety re-read, 12 h after the last success |
+
+   Gone and inactive versions are skipped; a failed one, requested or
+   not, waits for its backoff (60 s doubling per failure in a row, at most
+   1 h). An item rises one priority level per 10 minutes of waiting. A
+   queued version that is no longer due returns to its settled status. The
+   queued statuses are written in one transaction per plan.
+3. starts syncs in the free slots of `DTVP_SYNC_CONCURRENCY` (2): the kinds
+   of one version in order (findings, vulnerability records, BOM), then the
+   version ranges of the recommendation within one budget per pass. A sync
+   holds only its own slot: the next passes, the export and a save's wakeup
+   do not wait for it.
+
+A sync is staged: its reads keep their digests, counts and read times beside
+the committed ones and note which kinds changed; the version is committed
+once, in one transaction that applies them, moves the generation (on a
+change or the first import) and settles the status. The list signals seen
+when the sync started count as read only for the kinds it read (the BOM
+import signal for the BOM, the analysis signal for the findings), and only a
+request made before it started is answered. A failed sync, or a restart,
+drops the stage: the committed digests are untouched, so the next sync sees
+the change again, and versions interrupted by a restart are queued again
+first. A failed read on the request path counts as a failure but leaves a
+running sync's stage alone. A sync that fails outside a recorded read (a
+cache write, a merge, a busy database) is recorded as a failure too, so it
+backs off like any other. A call the open breaker refused is no failure of
+the version. Until the store-only readers of step 6, views read the stored
+documents as soon as each kind is written. Migration `0006_sync_schedule.sql`
+counts versions read before the upgrade as read as of their last success,
+so an upgrade does not re-read the whole portfolio at once.
+
+Watched products are the union of the browsers' leases
+([Product interest](#product-interest)) and short 15-minute leases from a
+user's own reads: starting a project's grouped view, polling its task, and
+the MCP project tools (`ProductInterest.touch`, renewed at most once a
+minute, at most 50 per user, apart from the browsers' 20). Sync work never renews interest. The cache status's
+`active_projects` counts the versions of watched products.
+
+Every HTTP request of the scheduler and the export to Dependency-Track takes
+a token from one bucket (`DTVP_DT_REQUESTS_PER_SECOND` 4, burst 8): the
+client runs the budget as a request hook, so each page of a paginated list
+and each per-finding read pays (`BudgetedTransport` in `dtvp/ports.py`; a
+source without the hook pays per call). Each call reports to a circuit
+breaker, once: five transport, 5xx, or 429 failures in a row open it as
+`down`, a 401 or 403 at once as `misconfigured`; while it is open no call is
+made (the export waits too) and a probe every 30 s, one `GET /api/version`
+within the budget, closes it again; a failed probe waits another 30 s. A
+`misconfigured` breaker is closed only by the scheduler's own calls: a
+user's read with other credentials succeeding says nothing about the
+scheduler's key.
+
+Per project, export writes share a gate and a findings read holds it alone
+(a waiting read goes before new writes), so DTVP's own export, including
+the record of an export a newer save overtook, cannot land between a read
+and its classification and count as a change in Dependency-Track. A batch
+skips the keys of a project being read; they go with the next batch. Gates
+of idle projects are dropped. The automatic export runs as a task of its
+own, one at a time, so an export waiting on a read never holds up the list
+reads, the planning or new syncs.
+
+When the loop stops, it cancels its running syncs and the shared reads they
+wait on, and waits up to 5 s for them, before its client closes. The
+breaker sets `source.state`; a first successful read turns an `unknown`
+state to `ok`.
+
+At startup, `queued` and `syncing` rows return to their settled status,
+staged syncs are dropped and their versions queued again first; the rest of
+the queue is rebuilt from the rows on the first pass.
+
+Events: `version.sync_state` `{uuid, product, status, position}` (queued,
+syncing, and the settled result; at most one every 5 s per version unless
+the status settles; when a plan queues more than 20 versions at once, as on
+a first start, only the backlog in `source.state` tells), `version.synced` on a change or a first import (kinds
+changed, findings added and removed, up to 20 new vulnerability ids),
+`version.sync_failed` on the transition to failing, `source.state` with
+`backlog` (versions queued or syncing; published when it turns empty or
+not, or moves by ten), and `assessments.changed` with origin `dt` (the
+source changed an assessment) or `export_echo` (the source now holds
+DTVP's export; open views are not refreshed for it).
 
 ### Product interest
 
@@ -291,8 +392,8 @@ says goodbye on `pagehide`. The leader sends the union to
 server (`dtvp/product_interest.py`) keeps one lease per user and `client_id`
 for `DTVP_SYNC_WATCH_TTL_SECONDS` (default 900) after its last renewal, at
 most 20 per user; an empty list, or a leader tab that closes, ends it. The
-leases are held in the process. Nothing reads them yet: the scheduler of
-step 5 will, and then retires the self-renewal of active projects.
+leases are held in the process. The [sync scheduler](#sync-scheduler) reads
+them; the self-renewal of recently opened versions is retired.
 ## Event Channel
 
 Status: implemented for the producers listed below (2026-11-20, checked

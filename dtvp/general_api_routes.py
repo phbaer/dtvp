@@ -246,6 +246,9 @@ class GeneralApiRouteDeps:
     code_analysis_result_store: Any = None
     # Agent code evidence (see code_evidence_services); None disables it.
     code_evidence_store: Any = None
+    # A user's read of a product renews its interest for the background sync
+    # (``ProductInterest.touch``; ADR 0004, "Interest and leases").
+    note_interest: Callable[[str, Optional[str]], None] = lambda *_args: None
     get_grouped_vuln_cache_revision: Callable[..., Any] = lambda **_kwargs: None
     group_query_executor: Any = None
     detail_executor: Any = None
@@ -962,6 +965,7 @@ def start_grouped_vuln_task(
 ) -> dict[str, Any]:
     """Start the grouped-vulnerability computation for a project, or join a
     matching one. Returns ``{"task_id", "reused"}``."""
+    deps.note_interest(user, name)
     task_key = _grouped_vuln_task_key(
         deps,
         name=name,
@@ -1249,6 +1253,8 @@ def _register_task_routes(
         task = _task_for_user(deps, task_id, user)
         if not task:
             return {"status": "not_found"}
+        # The task lease of an open project.
+        deps.note_interest(user, task.get("_project_name"))
         return _public_task_status(task, include_result=include_result)
 
     @router.get("/tasks/{task_id}/events")

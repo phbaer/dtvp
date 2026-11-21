@@ -69,6 +69,26 @@ class DTClient:
     async def close(self):
         await self.client.aclose()
 
+    def add_request_hook(self, hook) -> None:
+        """Run ``await hook()`` before every HTTP request, pages and retries
+        included: the sync scheduler's request budget (ADR 0004, "Limits")
+        counts requests, not method calls."""
+
+        async def before(_request: httpx.Request) -> None:
+            await hook()
+
+        self.client.event_hooks["request"] = [
+            *self.client.event_hooks.get("request", []),
+            before,
+        ]
+
+    async def ping(self) -> bool:
+        """One cheap request: whether Dependency-Track answers. The circuit
+        breaker's probe."""
+        response = await self.client.get(f"{self.base_url}/api/version")
+        response.raise_for_status()
+        return True
+
     async def __aenter__(self):
         return self
 

@@ -51,8 +51,8 @@ export interface BackendPerformanceStatus {
         write_errors: number;
         named_project_queries: number;
         named_project_query_limit: number;
+        /** Versions of products a user is watching (ADR 0004). */
         active_projects: number;
-        active_project_limit: number;
     };
 }
 

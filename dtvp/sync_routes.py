@@ -14,6 +14,7 @@ def create_sync_router(
     sync_state: Callable[[], SyncStateStore],
     *,
     current_user_dependency: Callable[..., Any],
+    scheduler_status: Optional[Callable[[], dict[str, Any]]] = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -43,6 +44,10 @@ def create_sync_router(
     def get_sync_status(
         _user: str = Depends(current_user_dependency),
     ) -> dict[str, Any]:
-        return sync_state().status()
+        status = sync_state().status()
+        if scheduler_status is not None:
+            # The scheduler's breaker, queue and watched products.
+            status["scheduler_state"] = scheduler_status()
+        return status
 
     return router

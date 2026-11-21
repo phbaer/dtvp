@@ -982,7 +982,7 @@ watch(() => activeTab.value, (newTab) => {
                     <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500">Process cache</h4>
                     <dl class="mt-3 grid grid-cols-2 gap-3 text-xs">
                         <div><dt class="text-gray-500">Memory entries</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.memory_entries }} / {{ runtimeStatus.cache.memory_entry_limit }}</dd></div>
-                        <div><dt class="text-gray-500">Active projects</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.active_projects }} / {{ runtimeStatus.cache.active_project_limit }}</dd></div>
+                        <div><dt class="text-gray-500">Watched versions</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.active_projects }}</dd></div>
                         <div><dt class="text-gray-500">Named queries</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.named_project_queries }} / {{ runtimeStatus.cache.named_project_query_limit }}</dd></div>
                         <div><dt class="text-gray-500">Dirty / errors</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.dirty_entries }} / {{ runtimeStatus.cache.write_errors }}</dd></div>
                     </dl>

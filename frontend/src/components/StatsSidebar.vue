@@ -1015,7 +1015,7 @@ const handleCopy = () => {
                                 <span class="text-gray-300 font-medium tabular-nums">{{ props.cacheStatusDetail.projects }}</span>
                             </div>
                             <div class="flex justify-between">
-                                <span class="text-gray-500">Active</span>
+                                <span class="text-gray-500" title="Versions of products someone is watching; kept current every two minutes">Watched</span>
                                 <span class="text-gray-300 font-medium tabular-nums">{{ props.cacheStatusDetail.active_projects }}</span>
                             </div>
                             <div class="flex justify-between">

@@ -20,6 +20,10 @@ from typing import Callable
 
 DEFAULT_WATCH_TTL_SECONDS = 900
 MAX_LEASES_PER_USER = 20
+# Short leases from a user's own reads (``touch``): a cap of their own, so
+# reading many products never pushes out a browser's lease.
+MAX_READ_LEASES_PER_USER = 50
+_READ_PREFIX = "read:"
 
 
 def watch_ttl_seconds() -> int:
@@ -67,13 +71,36 @@ class ProductInterest:
                 return None
             lease = Lease(user, client_id, names, now + self.ttl_seconds)
             self._leases[key] = lease
+            is_read = client_id.startswith(_READ_PREFIX)
+            cap = MAX_READ_LEASES_PER_USER if is_read else MAX_LEASES_PER_USER
             own = sorted(
-                (item for item in self._leases.values() if item.user == user),
+                (
+                    item
+                    for item in self._leases.values()
+                    if item.user == user
+                    and item.client_id.startswith(_READ_PREFIX) == is_read
+                ),
                 key=lambda item: item.expires_at,
             )
-            for stale in own[: max(0, len(own) - MAX_LEASES_PER_USER)]:
+            for stale in own[: max(0, len(own) - cap)]:
                 del self._leases[(stale.user, stale.client_id)]
             return lease
+
+    def touch(self, user: str, product: str | None) -> None:
+        """A short lease for one product, from a user's own read: polling a
+        task of the product, an MCP project tool, or opening it. Renewed at
+        most once a minute; never from sync work (ADR 0004, "Interest and
+        leases")."""
+        name = str(product or "").strip()
+        if not user or not name:
+            return
+        key = (user, f"{_READ_PREFIX}{name.lower()}")
+        with self._lock:
+            now = self._clock()
+            current = self._leases.get(key)
+            if current is not None and current.expires_at - now > self.ttl_seconds - 60:
+                return
+        self.put(user, key[1], [name])
 
     def watched(self) -> set[str]:
         """The products of every live lease."""

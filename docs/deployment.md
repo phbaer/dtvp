@@ -124,12 +124,14 @@ Deployment rules:
   project tabs renew their lightweight task lease and rebuild an expired task
   automatically after a suspended browser resumes, so details and bulk actions
   do not require a full-page reload.
-- Background Dependency-Track refresh re-reads a bounded set of at most
-  `DTVP_DT_ACTIVE_PROJECT_LIMIT` (8) recently opened versions every minute.
-  Each re-read renews the version's access time, so a version stays in the set
-  until eight more recently opened versions push it out; the 15-minute idle
-  expiry applies only to versions that left it. Other versions stay in the
-  database and are served from there. [ADR 0004](adr/0004-background-sync-and-event-stream.md)
+- A sync scheduler reads Dependency-Track in the background: the project
+  list every minute, the findings of watched products every two minutes, and
+  every other active version once and then on Dependency-Track's change
+  signals or every 12 hours, within 4 requests per second shared with the
+  export. Plan the first start of a large instance accordingly: the backfill
+  imports every active version at that rate. See
+  [Sync scheduler](runtime.md#sync-scheduler) and
+  [ADR 0004](adr/0004-background-sync-and-event-stream.md).
   plans to replace this with a background scheduler.
 - Process-local cache objects and named project searches use LRU limits, and
   completed grouped tasks have a separate retained-count cap. These bounds keep

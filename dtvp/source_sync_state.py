@@ -23,12 +23,19 @@ KIND_VULNS = "vulns"
 KIND_BOM = "bom"
 
 STATUS_NEVER_SYNCED = "never_synced"
+STATUS_QUEUED = "queued"
+STATUS_SYNCING = "syncing"
 STATUS_SYNCED = "synced"
 STATUS_FAILED = "failed"
 STATUS_GONE = "gone"
 
 ORIGIN_DT = "dt"
 ORIGIN_EXPORT_ECHO = "export_echo"
+
+
+class SourceUnavailable(RuntimeError):
+    """The scheduler's circuit breaker is open: Dependency-Track is not
+    called, and that is no failure of the version asked for."""
 
 
 def _now() -> str:
@@ -183,7 +190,10 @@ _COLUMNS = (
     "findings_digest", "analyses_digest", "vulns_digest", "bom_digest",
     "analyses_changed_in_dt", "analyses_export_echoes", "generation",
     "staged_generation", "requested_at", "requested_by", "request_id",
+    "findings_read_at", "vulns_read_at", "bom_read_at", "read_bom_signal",
+    "read_analysis_signal", "staged_kinds", "staged_digests_json",
 )
+_READ_AT = {KIND_FINDINGS: "findings_read_at", KIND_VULNS: "vulns_read_at", KIND_BOM: "bom_read_at"}
 _DIGEST_COLUMNS = {
     KIND_FINDINGS: ("findings_digest", "analyses_digest"),
     KIND_VULNS: ("vulns_digest",),
@@ -281,7 +291,8 @@ class SyncStateStore:
         origins: Optional[Mapping[str, list[str]]] = None,
     ) -> bool:
         """A successful read of one kind. Returns whether its content changed
-        (a known digest differs); that bumps the generation."""
+        (a known digest differs); that bumps the generation, or, while the
+        scheduler stages a sync of the version, is noted for its commit."""
         at = at or _now()
         columns = _DIGEST_COLUMNS[kind]
         connection = self._connection()
@@ -309,6 +320,26 @@ class SyncStateStore:
                     and not origins.get(ORIGIN_DT)
                 ):
                     changed = False
+            assignments[_READ_AT[kind]] = at
+            if row["staged_generation"] is not None:
+                # Staged: the digests, counts and read time wait beside the
+                # committed ones; only ``commit`` applies them. A sync that
+                # never commits leaves the committed digests as they were,
+                # so the next sync sees the change again.
+                staged = json.loads(row["staged_digests_json"] or "{}")
+                staged.update(assignments)
+                kinds = set(filter(None, (row["staged_kinds"] or "").split(",")))
+                if changed:
+                    kinds.add(kind)
+                connection.execute(
+                    """
+                    UPDATE sync_versions SET staged_digests_json = ?, staged_kinds = ?,
+                        last_attempt_at = ?
+                    WHERE project_uuid = ?
+                    """,
+                    (json.dumps(staged), ",".join(sorted(kinds)), at, project_uuid),
+                )
+                return changed
             status = row["status"] if row["status"] == STATUS_GONE else STATUS_SYNCED
             assignments.update(
                 status=status,
@@ -342,22 +373,220 @@ class SyncStateStore:
         return json.loads(row[0])
 
     def record_failure(
-        self, project_uuid: str, error: BaseException, *, at: Optional[str] = None
-    ) -> None:
+        self,
+        project_uuid: str,
+        error: BaseException,
+        *,
+        at: Optional[str] = None,
+        next_due_at: Optional[str] = None,
+    ) -> int:
+        """A failed read. Returns the consecutive failures. A staged sync is
+        left alone (a failed request-path read must not drop the scheduler's
+        stage; the scheduler drops its own with ``drop_stage``), and a call
+        the circuit breaker refused is not the version's failure."""
         at = at or _now()
         connection = self._connection()
         with connection:
             row = self._ensure(connection, project_uuid, at)
-            status = row["status"] if row["status"] == STATUS_GONE else STATUS_FAILED
+            if isinstance(error, SourceUnavailable):
+                return int(row["consecutive_failures"] or 0)
+            settled = row["status"] if row["status"] == STATUS_GONE else STATUS_FAILED
+            # While staged, the transient status shows the running sync.
+            status = row["status"] if row["staged_generation"] is not None else settled
             connection.execute(
                 """
                 UPDATE sync_versions SET status = ?, settled_status = ?,
                     last_attempt_at = ?, consecutive_failures = consecutive_failures + 1,
-                    last_error_class = ?, last_error = ?
+                    last_error_class = ?, last_error = ?,
+                    next_due_at = COALESCE(?, next_due_at)
                 WHERE project_uuid = ?
                 """,
-                (status, status, at, type(error).__name__, str(error)[:500], project_uuid),
+                (
+                    status, settled, at, type(error).__name__, str(error)[:500],
+                    next_due_at, project_uuid,
+                ),
             )
+            return int(row["consecutive_failures"] or 0) + 1
+
+    # -- the scheduler's transitions (ADR 0004, "Generations", "Recovery") ----
+
+    def rows(self) -> list[dict[str, Any]]:
+        """Every version with all scheduling columns, for planning."""
+        rows = self._connection().execute(
+            f"SELECT {', '.join(_COLUMNS)} FROM sync_versions"
+        ).fetchall()
+        return [dict(zip(_COLUMNS, row)) for row in rows]
+
+    def row(self, project_uuid: str) -> Optional[dict[str, Any]]:
+        row = self._row(self._connection(), project_uuid)
+        if row is not None:
+            row.pop("analyses_index_json", None)
+        return row
+
+    def set_status(self, project_uuid: str, status: str) -> None:
+        """``queued`` or ``syncing``: transient, the settled status stays."""
+        self.set_statuses([project_uuid], status)
+
+    def set_statuses(self, project_uuids: Iterable[str], status: str) -> None:
+        """One transaction for many versions (a plan queues many at once)."""
+        uuids = list(project_uuids)
+        if not uuids:
+            return
+        connection = self._connection()
+        with connection:
+            connection.executemany(
+                "UPDATE sync_versions SET status = ? WHERE project_uuid = ? AND status != ?",
+                [(status, uuid, STATUS_GONE) for uuid in uuids],
+            )
+
+    def settle(self, project_uuids: Iterable[str]) -> None:
+        """Back to the settled status: versions dropped from the queue."""
+        uuids = list(project_uuids)
+        if not uuids:
+            return
+        connection = self._connection()
+        with connection:
+            connection.executemany(
+                "UPDATE sync_versions SET status = settled_status "
+                "WHERE project_uuid = ? AND staged_generation IS NULL",
+                [(uuid,) for uuid in uuids],
+            )
+
+    def drop_stage(self, project_uuid: str) -> None:
+        """The scheduler's sync ended without a commit: its staged reads are
+        forgotten and the status settles."""
+        connection = self._connection()
+        with connection:
+            connection.execute(
+                """
+                UPDATE sync_versions SET status = settled_status, staged_generation = NULL,
+                    staged_kinds = NULL, staged_digests_json = NULL
+                WHERE project_uuid = ?
+                """,
+                (project_uuid,),
+            )
+
+    def stage(self, project_uuid: str, *, at: Optional[str] = None) -> None:
+        """Start a staged sync: reads note their changes for ``commit``."""
+        at = at or _now()
+        connection = self._connection()
+        with connection:
+            row = self._ensure(connection, project_uuid, at)
+            connection.execute(
+                """
+                UPDATE sync_versions SET status = ?, staged_generation = ?,
+                    staged_kinds = '', staged_digests_json = ?, last_attempt_at = ?
+                WHERE project_uuid = ?
+                """,
+                (
+                    STATUS_GONE if row["status"] == STATUS_GONE else STATUS_SYNCING,
+                    int(row["generation"] or 0) + 1,
+                    # What the list said when the sync started: what it reads.
+                    json.dumps(
+                        {
+                            "_signals": {
+                                "bom": row["dt_last_bom_import"],
+                                "analysis": row["dt_last_vuln_analysis"],
+                            },
+                            "_started_at": at,
+                        }
+                    ),
+                    at,
+                    project_uuid,
+                ),
+            )
+
+    def commit(
+        self,
+        project_uuid: str,
+        *,
+        at: Optional[str] = None,
+        kinds_read: Iterable[str] = (KIND_FINDINGS, KIND_VULNS, KIND_BOM),
+    ) -> tuple[list[str], bool, int]:
+        """Commit a staged sync in one transaction: its digests apply, the
+        generation moves once when a kind changed or on a first import, and
+        the status settles. The list signals seen when the sync started count
+        as read only for the kinds it read (BOM import: the BOM; vulnerability
+        analysis: the findings), and only a request made before it started is
+        answered. Returns the changed kinds, whether it was the first import,
+        and the generation."""
+        at = at or _now()
+        kinds_read = set(kinds_read)
+        connection = self._connection()
+        with connection:
+            row = self._ensure(connection, project_uuid, at)
+            if row["staged_generation"] is None:
+                # Dropped meanwhile (recovery, or a failure): nothing to commit.
+                return [], False, int(row["generation"] or 0)
+            staged = json.loads(row["staged_digests_json"] or "{}")
+            signals = staged.pop("_signals", {})
+            started_at = staged.pop("_started_at", None)
+            kinds = sorted(filter(None, (row["staged_kinds"] or "").split(",")))
+            first = row["last_success_at"] is None
+            generation = int(row["generation"] or 0)
+            if kinds or first:
+                generation += 1
+            status = STATUS_GONE if row["status"] == STATUS_GONE else STATUS_SYNCED
+            assignments = {
+                **staged,
+                "status": status,
+                "settled_status": status,
+                "generation": generation,
+                "staged_generation": None,
+                "staged_kinds": None,
+                "staged_digests_json": None,
+                "last_success_at": at,
+                "consecutive_failures": 0,
+                "last_error_class": None,
+                "last_error": None,
+                "next_due_at": None,
+            }
+            if kinds or first:
+                assignments["last_change_at"] = at
+            if KIND_BOM in kinds_read:
+                assignments["read_bom_signal"] = signals.get("bom")
+            if KIND_FINDINGS in kinds_read:
+                assignments["read_analysis_signal"] = signals.get("analysis")
+            if row["requested_at"] and started_at and row["requested_at"] <= started_at:
+                assignments.update(requested_at=None, requested_by=None, request_id=None)
+            connection.execute(
+                f"UPDATE sync_versions SET {', '.join(f'{name} = ?' for name in assignments)} "
+                "WHERE project_uuid = ?",
+                (*assignments.values(), project_uuid),
+            )
+        return kinds, first, generation
+
+    def set_next_due(self, project_uuid: str, next_due_at: Optional[str]) -> None:
+        """When a failed version may be tried again (its backoff)."""
+        connection = self._connection()
+        with connection:
+            connection.execute(
+                "UPDATE sync_versions SET next_due_at = ? WHERE project_uuid = ?",
+                (next_due_at, project_uuid),
+            )
+
+    def recover(self) -> list[str]:
+        """At startup: transient statuses return to their settled status and
+        staged syncs are dropped (their committed digests are untouched, so
+        a new sync sees the change again). Returns the versions whose sync
+        was interrupted, to be synced again first."""
+        connection = self._connection()
+        with connection:
+            interrupted = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT project_uuid FROM sync_versions WHERE staged_generation IS NOT NULL"
+                ).fetchall()
+            ]
+            connection.execute(
+                """
+                UPDATE sync_versions SET status = settled_status,
+                    staged_generation = NULL, staged_kinds = NULL, staged_digests_json = NULL
+                WHERE status IN (?, ?) OR staged_generation IS NOT NULL
+                """,
+                (STATUS_QUEUED, STATUS_SYNCING),
+            )
+        return interrupted
 
     def list_versions(
         self, *, product: Optional[str] = None, changed_since: Optional[str] = None
@@ -387,8 +616,7 @@ class SyncStateStore:
             "SELECT MAX(last_success_at), MAX(last_change_at) FROM sync_versions"
         ).fetchone()
         return {
-            # No scheduler yet: reads happen in the cache refresh.
-            "scheduler": "refresh",
+            "scheduler": "source_sync",
             "versions": sum(counts.values()),
             "by_status": counts,
             "last_success_at": last_success,
@@ -401,5 +629,6 @@ def _signal(value: Any) -> Optional[str]:
 
 
 def _public(row: dict[str, Any]) -> dict[str, Any]:
+    row.pop("staged_digests_json", None)
     row["active_in_dt"] = bool(row["active_in_dt"])
     return row

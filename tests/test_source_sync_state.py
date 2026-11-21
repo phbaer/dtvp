@@ -10,6 +10,7 @@ from dtvp.local_store import LocalStore
 from dtvp.source_sync_state import (
     KIND_BOM,
     KIND_FINDINGS,
+    KIND_VULNS,
     SyncStateStore,
     bom_digest,
     classify_analysis_changes,
@@ -151,10 +152,19 @@ async def test_the_import_records_digests_and_tells_echoes_from_changes(tmp_path
     [row] = manager.sync_state.list_versions()
     assert row["status"] == "synced" and row["generation"] == 1
 
-    # DTVP's own value comes back from the source: an echo, not a change.
+    # DTVP's own value comes back from the source after its export: an
+    # echo, not a change. A newer local value waiting for export does not
+    # change that: the source holds what DTVP last exported.
     await manager.persist_assessment_updates(
         [{"project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1",
           "state": "NOT_AFFECTED", "details": "Ours.", "suppressed": False}],
+        replace=True,
+    )
+    client.update_analysis.return_value = {}
+    await manager.flush_pending_updates(client)
+    await manager.persist_assessment_updates(
+        [{"project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1",
+          "state": "EXPLOITABLE", "details": "Newer, not exported yet.", "suppressed": False}],
         replace=True,
     )
     client.get_vulnerabilities.return_value = [
@@ -228,3 +238,100 @@ def test_the_routes_report_versions_and_status(tmp_path):
     status = client.get("/api/sync/status").json()
     assert status["versions"] == 1 and status["by_status"] == {"synced": 1}
     local.close()
+
+
+# -- staged syncs (review of #324) ------------------------------------------------
+
+
+async def test_a_change_read_before_a_crash_is_seen_again(tmp_path):
+    """Staged digests wait beside the committed ones; a crash drops them, so
+    the next sync still sees the change and moves the generation."""
+    from dtvp.dt_cache import CacheManager
+
+    manager = CacheManager(base_path=str(tmp_path))
+    store = manager.sync_state
+    store.stage("p"); store.record_read("p", KIND_VULNS, ("d1",)); store.commit("p")
+    store.stage("p"); assert store.record_read("p", KIND_VULNS, ("d2",))
+    assert store.recover() == ["p"]
+    store.stage("p"); assert store.record_read("p", KIND_VULNS, ("d2",))
+    kinds, _first, generation = store.commit("p")
+    assert (kinds, generation) == (["vulns"], 2)
+    await manager.close()
+
+
+async def test_a_failed_request_path_read_keeps_the_schedulers_stage(tmp_path):
+    from dtvp.dt_cache import CacheManager
+
+    manager = CacheManager(base_path=str(tmp_path))
+    store = manager.sync_state
+    store.stage("p"); store.record_read("p", KIND_VULNS, ("d1",)); store.commit("p")
+    store.stage("p"); store.record_read("p", KIND_VULNS, ("d2",))
+    store.record_failure("p", RuntimeError("a user's read failed meanwhile"))
+    kinds, _first, generation = store.commit("p")
+    assert (kinds, generation) == (["vulns"], 2)
+    await manager.close()
+
+
+async def test_a_refused_call_is_not_the_versions_failure(tmp_path):
+    from dtvp.dt_cache import CacheManager
+    from dtvp.source_sync_state import SourceUnavailable
+
+    manager = CacheManager(base_path=str(tmp_path))
+    store = manager.sync_state
+    store.stage("p"); store.commit("p")
+    assert store.record_failure("p", SourceUnavailable("open")) == 0
+    assert store.row("p")["status"] == "synced"
+    await manager.close()
+
+
+async def test_a_commit_marks_only_the_signals_of_what_it_read(tmp_path):
+    """And a request made while the sync ran stays pending."""
+    from dtvp.dt_cache import CacheManager
+
+    manager = CacheManager(base_path=str(tmp_path))
+    store = manager.sync_state
+    marks = {"bom": "b1", "analysis": "a1"}
+    store.record_project_list([{"uuid": "p", "name": "App", "version": "1", "dtvpSourceMarks": marks}])
+    store.stage("p", at="2026-11-21T10:00:00+00:00")
+    connection = store._connection()
+    with connection:
+        connection.execute(
+            "UPDATE sync_versions SET requested_at = '2026-11-21T10:00:05+00:00' WHERE project_uuid = 'p'"
+        )
+    store.commit("p", kinds_read=("findings",))
+    row = store.row("p")
+    assert (row["read_analysis_signal"], row["read_bom_signal"]) == ("a1", None)
+    assert row["requested_at"] == "2026-11-21T10:00:05+00:00"
+    await manager.close()
+
+
+def test_the_upgrade_counts_earlier_reads_as_read(tmp_path):
+    """Migration 0006 backfills the read columns, so an upgraded instance
+    does not re-read its whole portfolio at once."""
+    import sqlite3
+
+    from dtvp.local_store import get_local_store_migrations_path
+    from dtvp.sqlite_migration_services import run_sqlite_migrations
+
+    path = tmp_path / "store.sqlite3"
+    connection = sqlite3.connect(path)
+    migrations = get_local_store_migrations_path()
+    # Up to 0005: a version read before the upgrade.
+    staging = tmp_path / "upto5"
+    staging.mkdir()
+    for file in sorted(migrations.glob("*.sql")):
+        if file.name < "0006":
+            (staging / file.name).write_text(file.read_text())
+    run_sqlite_migrations(connection, namespace="local_store", migrations_path=staging)
+    connection.execute(
+        "INSERT INTO sync_versions (project_uuid, first_seen_at, last_success_at, "
+        "dt_last_bom_import, dt_last_vuln_analysis, status) VALUES "
+        "('p', 'x', '2026-11-20T00:00:00+00:00', 'b', 'a', 'synced')"
+    )
+    connection.commit()
+    run_sqlite_migrations(connection, namespace="local_store", migrations_path=migrations)
+    row = connection.execute(
+        "SELECT read_bom_signal, read_analysis_signal, findings_read_at FROM sync_versions"
+    ).fetchone()
+    assert row == ("b", "a", "2026-11-20T00:00:00+00:00")
+    connection.close()
