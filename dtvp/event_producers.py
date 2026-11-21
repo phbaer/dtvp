@@ -177,7 +177,7 @@ class AssessmentEventProducer:
         self._hub = hub
         self._project_versions = project_versions
 
-    def __call__(self, keys: Iterable[Any]) -> None:
+    def __call__(self, keys: Iterable[Any], *, value_changed: bool = True) -> None:
         by_project: Dict[str, int] = {}
         for key in keys or []:
             if not key:

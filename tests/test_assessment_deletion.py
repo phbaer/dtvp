@@ -124,6 +124,23 @@ def test_analyst_deletes_a_team_assessment_and_it_is_exported(
     ]
 
 
+def test_a_deletion_keeps_the_grouped_snapshot(client, assessed):
+    """It is patched into the snapshot, so the next request does not build
+    the project again."""
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        response = client.post(
+            "/api/assessment/delete", json={"instances": [INSTANCE], "team": "Team B"}
+        )
+    assert response.status_code == 200
+
+    again = client.post("/api/tasks/group-vulns?name=TestApp&response_mode=summary")
+
+    assert again.json() == {"task_id": assessed, "reused": True}
+    detail = client.get(f"/api/tasks/{assessed}/groups/CVE-2026-0001").json()
+    component = detail["affected_versions"][0]["components"][0]
+    assert "[Team: Team B]" not in component["analysis_details"]
+
+
 async def test_reviewer_deletes_everything_and_the_source_is_cleared_for_good(
     client, assessed, mock_dt_client
 ):

@@ -317,6 +317,7 @@ def _finalize_grouped_vuln_task_key(
             sort_keys=True,
             default=str,
         )
+        covered_at_start = _task_project_uuids(task)
         task["_task_key"] = (
             task_key[0],
             task_key[1],
@@ -325,6 +326,70 @@ def _finalize_grouped_vuln_task_key(
             task_key[4],
         )
         task["_task_key_finalized"] = True
+        read_seq = getattr(_ASSESSMENT_WRITE_TRACKER, "assessment_write_seq", None)
+        if (
+            not _task_project_uuids(task) <= covered_at_start
+            and callable(read_seq)
+            and int(read_seq()) > int(task.get("_assessment_write_seq") or 0)
+        ):
+            # The build covers versions it did not know when it started (the
+            # project list was not loaded, or a version was added), so saves
+            # on them during the build did not mark it. Assume one was missed.
+            task["_assessment_patch_missed"] = True
+        created_at = task.get("created_at")
+        logger = getattr(deps, "logger", None)
+        if logger is not None and isinstance(created_at, datetime):
+            logger.info(
+                "Grouped snapshot of %s: built in %.1f s (task %s)",
+                task_key[0] or "all projects",
+                (datetime.now(timezone.utc) - created_at).total_seconds(),
+                task_id,
+            )
+
+
+# The cache manager that knows which local assessment writes the live
+# snapshots do not show yet (``CacheManager.confirm_assessment_writes_applied``).
+# Without one, a snapshot is reused on its revision alone.
+_ASSESSMENT_WRITE_TRACKER: Any = None
+
+
+def configure_assessment_write_tracker(tracker: Any) -> None:
+    global _ASSESSMENT_WRITE_TRACKER
+    _ASSESSMENT_WRITE_TRACKER = tracker
+
+
+def _task_project_uuids(task: dict[str, Any]) -> set[str]:
+    """The project versions a grouped task covers, from its revision."""
+    task_key = task.get("_task_key")
+    if not isinstance(task_key, tuple) or len(task_key) != 5:
+        return set()
+    try:
+        revision = json.loads(task_key[3])
+    except (TypeError, ValueError):
+        return set()
+    versions = revision.get("versions") if isinstance(revision, dict) else None
+    return {
+        str(version[0])
+        for version in versions or []
+        if isinstance(version, (list, tuple)) and version and version[0]
+    }
+
+
+def _snapshot_lacks_assessment_write(task: dict[str, Any]) -> str | None:
+    """Why a snapshot, built or still building, cannot stand for the current assessments,
+    or ``None`` when it can."""
+    if task.get("_assessment_patch_missed"):
+        return "an assessment change could not be patched into the snapshot"
+    tracker = _ASSESSMENT_WRITE_TRACKER
+    check = getattr(tracker, "has_unapplied_assessment_writes", None)
+    if not callable(check):
+        return None
+    if check(
+        _task_project_uuids(task),
+        after_seq=int(task.get("_assessment_write_seq") or 0),
+    ):
+        return "an assessment was saved that the snapshot does not show yet"
+    return None
 
 
 def _claim_reusable_grouped_vuln_task(
@@ -332,7 +397,10 @@ def _claim_reusable_grouped_vuln_task(
     *,
     task_key: tuple[str, str, str, str, str],
     user: str,
+    reasons: list[str] | None = None,
 ) -> dict[str, Any] | None:
+    """A running or current task for the same request, claimed for ``user``.
+    ``reasons`` collects why snapshots of the same project were passed over."""
     task_identity = _grouped_vuln_task_identity(task_key)
     with _TASK_SNAPSHOT_REFRESH_LOCK:
         for task in reversed(list(deps.tasks.values())):
@@ -342,18 +410,25 @@ def _claim_reusable_grouped_vuln_task(
             existing_key = task.get("_task_key")
             if not isinstance(existing_key, tuple) or len(existing_key) != 5:
                 continue
-            if status in {"pending", "running"}:
-                matches = (
-                    _grouped_vuln_task_identity(existing_key) == task_identity
-                )
+            same_request = _grouped_vuln_task_identity(existing_key) == task_identity
+            if status in {"pending", "running"} or (
+                status == "completed" and task.get("_task_key_finalized") is not True
+            ):
+                # Still building, or built and not yet finalized: join it
+                # unless it is already known to lack an assessment write.
+                matches = same_request
             elif status == "completed":
-                matches = (
-                    existing_key == task_key
-                    if task.get("_task_key_finalized") is True
-                    else _grouped_vuln_task_identity(existing_key) == task_identity
-                )
+                matches = existing_key == task_key
+                if same_request and not matches and reasons is not None:
+                    reasons.append("the stored source data changed")
             else:
                 matches = False
+            if matches:
+                lacking = _snapshot_lacks_assessment_write(task)
+                if lacking is not None:
+                    matches = False
+                    if reasons is not None:
+                        reasons.append(lacking)
             if not matches:
                 continue
             owners = task.setdefault(
@@ -598,27 +673,108 @@ def _refresh_grouped_vuln_task_snapshots(
     tasks: dict[str, Any],
     payloads: list[tuple[dict, dict]],
     team_mapping: dict[str, Any],
+    *,
+    value_changed: bool = True,
 ) -> int:
+    """Patch the live snapshots with these assessment changes.
+    ``value_changed`` is False when only the sync status changed (an
+    export): a build in progress then still shows the right assessment."""
+    tracker = _ASSESSMENT_WRITE_TRACKER
     with _TASK_SNAPSHOT_REFRESH_LOCK:
-        return _refresh_grouped_vuln_task_snapshots_locked(
+        # Read the record inside the lock: patches can run in any order,
+        # and the last one must not put an older value back.
+        payloads = _payloads_as_recorded(tracker, payloads)
+        refreshed = _refresh_grouped_vuln_task_snapshots_locked(
             tasks,
             payloads,
             team_mapping,
+            flag_running=value_changed,
         )
+        # Inside the lock: a request that starts now either sees the write
+        # as unapplied, or the snapshots patched.
+        confirm = getattr(tracker, "confirm_assessment_writes_applied", None)
+        if callable(confirm):
+            confirm(
+                (identity, payload)
+                for instance, payload in payloads
+                if (identity := _assessment_identity_key(instance)) is not None
+            )
+        return refreshed
+
+
+def _payloads_as_recorded(
+    tracker: Any,
+    payloads: list[tuple[dict, dict]],
+) -> list[tuple[dict, dict]]:
+    """The payloads with the value and sync status on record. A payload the
+    record has moved past (a later save, patched first) is replaced by the
+    recorded value, so the snapshot never goes back to an older one. A save
+    changes the sync status too (to pending), and the patched snapshot is
+    all that shows it until the next build."""
+    read = getattr(tracker, "get_assessment_overlay", None)
+    if not callable(read):
+        return payloads
+    current = []
+    for instance, payload in payloads:
+        identity = _assessment_identity_key(instance)
+        if identity is None:
+            current.append((instance, payload))
+            continue
+        try:
+            analysis = read(*identity)
+        except Exception:
+            analysis = None
+        if isinstance(analysis, dict):
+            recorded = _assessment_payload_from_analysis(analysis)
+            if (
+                recorded["state"] != str(payload.get("state") or "NOT_SET")
+                or str(recorded["details"]).strip()
+                != str(payload.get("details") or "").strip()
+                or recorded["suppressed"] != bool(payload.get("suppressed"))
+            ):
+                payload = {**payload, **recorded}
+            elif analysis.get("dtvpSyncStatus") and "sync_status" not in payload:
+                payload = {
+                    **payload,
+                    "sync_status": analysis["dtvpSyncStatus"],
+                    "source_assessment": analysis.get("dtvpRemote"),
+                }
+        current.append((instance, payload))
+    return current
 
 
 def _refresh_grouped_vuln_task_snapshots_locked(
     tasks: dict[str, Any],
     payloads: list[tuple[dict, dict]],
     team_mapping: dict[str, Any],
+    *,
+    flag_running: bool = True,
 ) -> int:
     refreshed = 0
     now = datetime.now(timezone.utc)
     by_finding_uuid, by_identity = _build_assessment_payload_lookup(payloads)
 
+    changed_projects = {
+        str(instance.get("project_uuid"))
+        for instance, _payload in payloads
+        if instance.get("project_uuid")
+    }
+
     for task in list(tasks.values()):
         if not isinstance(task, dict):
             continue
+        if (
+            flag_running
+            and changed_projects
+            and str(task.get("status") or "").lower() in {"pending", "running"}
+        ):
+            covered = _task_project_uuids(task)
+            # Still building: what it already read may lack this change and
+            # there may be nothing to patch yet. Do not reuse it afterwards.
+            # A build that started without knowing its versions (project
+            # list not loaded yet) may cover any of them.
+            if not covered or changed_projects & covered:
+                task["_assessment_patch_missed"] = True
 
         for _attempt in range(3):
             full_result = task.get("_full_result")
@@ -763,6 +919,9 @@ def _refresh_grouped_vuln_task_snapshots_locked(
             task["updated_at"] = now
             refreshed += 1
             break
+        else:
+            # The snapshot kept changing under the patch: it was not applied.
+            task["_assessment_patch_missed"] = True
 
     return refreshed
 
@@ -785,16 +944,20 @@ def start_grouped_vuln_task(
         cve=cve,
         response_mode=response_mode,
     )
+    reasons: list[str] = []
     reusable_task = _claim_reusable_grouped_vuln_task(
         deps,
         task_key=task_key,
         user=user,
+        reasons=reasons,
     )
     if reusable_task is not None:
+        _log_grouped_snapshot_choice(deps, name, reusable_task, None)
         return {"task_id": reusable_task["id"], "reused": True}
 
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
+    read_seq = getattr(_ASSESSMENT_WRITE_TRACKER, "assessment_write_seq", None)
     with _TASK_SNAPSHOT_REFRESH_LOCK:
         # Recheck under the registry lock so simultaneous requests cannot
         # create duplicate computations between the first lookup and insert.
@@ -804,6 +967,7 @@ def start_grouped_vuln_task(
             user=user,
         )
         if reusable_task is not None:
+            _log_grouped_snapshot_choice(deps, name, reusable_task, None)
             return {"task_id": reusable_task["id"], "reused": True}
         deps.tasks[task_id] = {
             "id": task_id,
@@ -812,6 +976,9 @@ def start_grouped_vuln_task(
             "_project_name": name,
             "_task_key": task_key,
             "_task_key_finalized": False,
+            # Every local assessment write up to here is in what the build
+            # reads; later ones have to be patched in.
+            "_assessment_write_seq": int(read_seq()) if callable(read_seq) else 0,
             "_reuse_count": 0,
             "status": "pending",
             "message": "Starting...",
@@ -841,8 +1008,34 @@ def start_grouped_vuln_task(
             )
             _finalize_grouped_vuln_task_key(deps, task_id)
 
+    _log_grouped_snapshot_choice(
+        deps, name, None, "; ".join(dict.fromkeys(reasons)) or "no snapshot yet"
+    )
     deps.create_tracked_task(task_wrapper())
     return {"task_id": task_id, "reused": False}
+
+
+def _log_grouped_snapshot_choice(
+    deps: GeneralApiRouteDeps,
+    name: str,
+    reused: dict[str, Any] | None,
+    rebuild_reason: str | None,
+) -> None:
+    """One line per request for a project's grouped snapshot: whether an
+    existing one served it, or why a new one is built."""
+    logger = getattr(deps, "logger", None)
+    if logger is None:
+        return
+    if reused is not None:
+        logger.info(
+            "Grouped snapshot of %s: reused task %s (%s)",
+            name or "all projects", reused.get("id"), reused.get("status"),
+        )
+    else:
+        logger.info(
+            "Grouped snapshot of %s: building a new one (%s)",
+            name or "all projects", rebuild_reason,
+        )
 
 
 def refresh_grouped_vuln_task_snapshots(
@@ -857,9 +1050,12 @@ def refresh_grouped_vuln_task_snapshots(
 def refresh_task_snapshots_for_assessments(
     deps: GeneralApiRouteDeps,
     keys: list[tuple[str, str, str]],
+    *,
+    value_changed: bool = True,
 ) -> int:
     """Bring the live task snapshots up to date with the stored assessments
-    of the given findings, for changes that did not come through a save."""
+    of the given findings, for changes that did not come through a save.
+    ``value_changed`` is False when only their sync status changed."""
     payloads = []
     for project_uuid, component_uuid, vulnerability_uuid in keys:
         analysis = deps.cache_manager.get_assessment_overlay(
@@ -880,7 +1076,10 @@ def refresh_task_snapshots_for_assessments(
     if not payloads:
         return 0
     return _refresh_grouped_vuln_task_snapshots(
-        deps.tasks, payloads, deps.load_team_mapping()
+        deps.tasks,
+        payloads,
+        deps.load_team_mapping(),
+        value_changed=value_changed,
     )
 
 
