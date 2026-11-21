@@ -249,6 +249,32 @@ Important frontend components:
 - Startup status exists at `/startup` and `/api/startup`, in the static first
   paint, and in the Vue initialization view.
 
+
+## Sync state
+
+Every read of a project version from Dependency-Track is recorded in
+`sync_versions` (local store, migration `0005_source_sync.sql`;
+[ADR 0004](adr/0004-background-sync-and-event-stream.md#sync-state)), by
+`dtvp/source_sync_state.py`. The project list adds versions as
+`never_synced` and marks inactive ones, and, from a complete list, missing
+ones, `gone`; it stores the source's change signals (`dtvpSourceMarks`:
+Dependency-Track's last BOM import and vulnerability analysis). A
+findings, vulnerability, or BOM read stores a sha256 digest over the raw
+response (before DTVP's overlay), the attempt and success times, and resets
+the failures; a failed read records its error class and counts failures.
+A version changes (`last_change_at`, `generation` + 1) only when a known
+digest differs; an unknown one (after the upgrade) is stored without
+counting a change. An analysis that differs from the previous read is an
+`export_echo` when Dependency-Track now holds the value on DTVP's record,
+otherwise a change in Dependency-Track; only the latter changes the
+version, and the counts of the last read are kept. `lastRiskScore` is not
+part of the grouped snapshot's revision: every export changes it.
+
+`GET /api/sync/versions?product=&changed_since=` lists the rows (with
+`changed_since`, only versions changed after that time); `GET
+/api/sync/status` counts them by status. Nothing is scheduled from the sync
+state yet; the reads still happen in the cache refresh. The table is not in
+the dump: the next reads rebuild it.
 ## Event Channel
 
 Status: implemented for the producers listed below (2026-11-20, checked

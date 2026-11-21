@@ -178,6 +178,7 @@ from .event_producers import (
     SourceStateTracker,
 )
 from .event_routes import EventRouteDeps, create_event_router
+from .sync_routes import create_sync_router
 from .shutdown_signals import chain_shutdown_signals
 from .tmrescore_cache_services import (
     load_tmrescore_project_cache as load_tmrescore_project_cache_impl,
@@ -1203,6 +1204,14 @@ api_router.include_router(
         access_token_store,
         session_user_dependency=get_session_user,
         get_user_role=lambda user: get_user_role(user),
+    )
+)
+
+
+api_router.include_router(
+    create_sync_router(
+        lambda: cache_manager.sync_state,
+        current_user_dependency=get_current_user,
     )
 )
 

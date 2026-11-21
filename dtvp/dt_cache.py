@@ -49,6 +49,16 @@ from .finding_lifecycle_services import (
 )
 from .instance_stores import claim_instance, get_dt_cache_path, release_instance
 from .ports import AffectedVersionSource, AssessmentSink, VulnerabilitySource
+from .source_sync_state import (
+    KIND_BOM,
+    KIND_FINDINGS,
+    KIND_VULNS,
+    SyncStateStore,
+    bom_digest,
+    classify_analysis_changes,
+    findings_digests,
+    vulns_digest,
+)
 from .local_store import (
     KIND_ANALYSIS,
     KIND_BOM,
@@ -541,6 +551,8 @@ class CacheManager:
             get_assessment_outbox_path(self.base_path), logger=logger
         )
         self.finding_lifecycle.backfill_once(self.store.stored_findings)
+        # Per-version sync state (ADR 0004), in the local store's database.
+        self.sync_state = SyncStateStore(self.store._connection)
 
     def _ensure_directories(self) -> None:
         os.makedirs(self.base_path, exist_ok=True)
@@ -927,7 +939,7 @@ class CacheManager:
                 str(project.get("name") or ""),
                 str(project.get("version") or ""),
                 str(project.get("lastBomImport") or ""),
-                str(project.get("lastRiskScore") or ""),
+                # Not lastRiskScore: every export changes it (ADR 0004).
                 bool(project.get("active", True)),
             )
             for project in selected_versions
@@ -1507,6 +1519,7 @@ class CacheManager:
                 self._mark_project_list_refreshed()
                 self._save_project_cache(self._projects_path(), projects)
             await self.flush_cache_writes()
+            self._record_sync_state(self.sync_state.record_project_list, projects)
             self._notify_sync(self._project_list_listeners, previous, projects)
             self._notify_sync(self._source_state_listeners, True, None)
         except Exception as exc:
@@ -1695,6 +1708,9 @@ class CacheManager:
                         self._save_project_cache(
                             self._projects_path(), fresh_projects
                         )
+                    self._record_sync_state(
+                        self.sync_state.record_project_list, fresh_projects
+                    )
                     self._notify_sync(
                         self._project_list_listeners, previous, fresh_projects
                     )
@@ -1760,6 +1776,9 @@ class CacheManager:
                                 merged.append(project)
                         self._save_project_cache(self._projects_path(), merged)
                 if merged is not None:
+                    self._record_sync_state(
+                        self.sync_state.record_project_list, merged, complete=False
+                    )
                     self._notify_sync(
                         self._project_list_listeners, previous, merged
                     )
@@ -1850,7 +1869,27 @@ class CacheManager:
         """
         path = self._findings_path(project_uuid)
         fetch_started_at = datetime.now(timezone.utc)
-        fresh_findings = await client.get_vulnerabilities(project_uuid, cve=None)
+        try:
+            fresh_findings = await client.get_vulnerabilities(project_uuid, cve=None)
+        except Exception as exc:
+            self._record_sync_state(self.sync_state.record_failure, project_uuid, exc)
+            raise
+        # Over the raw response, before anything of DTVP's is read into it.
+        findings_identity, analyses, analyses_index = findings_digests(fresh_findings)
+        # Which analyses the source changed, and which are DTVP's own export
+        # coming back; against the record before this read is merged into it.
+        try:
+            analysis_origins = classify_analysis_changes(
+                self.sync_state.previous_analyses_index(project_uuid),
+                analyses_index,
+                fresh_findings,
+                lambda component_uuid, vulnerability_uuid: self._recorded_value(
+                    (project_uuid, component_uuid, vulnerability_uuid)
+                ),
+            )
+        except Exception:
+            logger.exception("Failed to classify the analysis changes")
+            analysis_origins = {}
         await self._read_texts_without_state(client, project_uuid, fresh_findings)
         source_analyses = {
             key: finding.get("analysis")
@@ -1887,6 +1926,15 @@ class CacheManager:
         async with self.lock:
             self._save_project_cache(path, fresh_findings, project_uuid=project_uuid)
         result.findings = fresh_findings
+        self._record_sync_state(
+            self.sync_state.record_read,
+            project_uuid,
+            KIND_FINDINGS,
+            (findings_identity, analyses),
+            at=fetch_started_at.isoformat(),
+            analyses_index=analyses_index,
+            origins=analysis_origins,
+        )
         if plan is not None:
             await asyncio.to_thread(
                 self.finding_lifecycle.record_read, project_uuid, [], read_summary(plan)
@@ -1903,6 +1951,27 @@ class CacheManager:
                     self._touch_cache_meta(project_uuids={project_uuid})
                 await self._notify_assessments_changed(changed)
         return result
+
+    def _record_sync_state(self, record: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        """Record a read in the sync state; never fails the read itself."""
+        try:
+            record(*args, **kwargs)
+        except Exception:
+            logger.exception("Failed to record the sync state")
+
+    def _recorded_value(
+        self, key: AssessmentKey
+    ) -> Optional[Tuple[str, str, bool]]:
+        """The value DTVP holds for a finding (what it exports), or ``None``."""
+        overlay = self.assessment_outbox.get_overlay(key)
+        if overlay is None:
+            return None
+        value = self.assessment_outbox._local_value(overlay)
+        return (
+            str(value.get("state") or "NOT_SET"),
+            str(value.get("details") or ""),
+            bool(value.get("suppressed")),
+        )
 
     async def _stored_bom_index(self, project_uuid: str) -> Optional[BomIndex]:
         async with self.lock:
@@ -2065,7 +2134,19 @@ class CacheManager:
         if vulns is None:
 
             async def fetch_project_vulnerabilities() -> List[Dict[str, Any]]:
-                fresh_vulns = await client.get_project_vulnerabilities(project_uuid)
+                try:
+                    fresh_vulns = await client.get_project_vulnerabilities(project_uuid)
+                except Exception as exc:
+                    self._record_sync_state(
+                        self.sync_state.record_failure, project_uuid, exc
+                    )
+                    raise
+                self._record_sync_state(
+                    self.sync_state.record_read,
+                    project_uuid,
+                    KIND_VULNS,
+                    (vulns_digest(fresh_vulns),),
+                )
                 async with self.lock:
                     self._save_project_cache(
                         path,
@@ -2095,7 +2176,19 @@ class CacheManager:
         if bom is None:
 
             async def fetch_bom() -> Optional[Dict[str, Any]]:
-                fresh_bom = await client.get_bom(project_uuid)
+                try:
+                    fresh_bom = await client.get_bom(project_uuid)
+                except Exception as exc:
+                    self._record_sync_state(
+                        self.sync_state.record_failure, project_uuid, exc
+                    )
+                    raise
+                self._record_sync_state(
+                    self.sync_state.record_read,
+                    project_uuid,
+                    KIND_BOM,
+                    (bom_digest(fresh_bom),),
+                )
                 async with self.lock:
                     self._save_project_cache(
                         path,
