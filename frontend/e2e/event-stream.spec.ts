@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * One live-update stream per browser: tabs elect a leader (Web Locks) and
@@ -23,58 +23,62 @@ const sseBody = [
     '',
 ].join('\n');
 
+async function mockLiveUpdates(context: BrowserContext) {
+    await context.addInitScript(() => {
+        window.localStorage.setItem('dtvp_last_seen_version', '1.0.4');
+    });
+
+    // Playwright checks routes in reverse registration order: catch-alls first.
+    await context.route('**/api/**', route => route.fulfill({ status: 200, body: '{}' }));
+    await context.route('**/auth/**', route => route.fulfill({ status: 200, body: '{}' }));
+    await context.route('**/auth/me', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ username: 'reviewer', role: 'REVIEWER' }),
+    }));
+    await context.route('**/api/version', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: '1.0.4', build: 'test' }),
+    }));
+    await context.route('**/api/cache-status', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            fully_cached: true,
+            last_refreshed_at: new Date().toISOString(),
+            projects: 1,
+            active_projects: 0,
+            cached_findings: 0,
+            cached_boms: 0,
+            cached_analyses: 0,
+            pending_updates: 0,
+            failed_exports: 0,
+            oldest_pending_at: null,
+        }),
+    }));
+    await context.route('**/api/projects*', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+            { name: 'Example', uuid: 'p1', version: '1.0.0', classifier: 'APPLICATION' },
+        ]),
+    }));
+    await context.route(url => url.pathname.endsWith('/api/events'), route => route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        body: sseBody,
+    }));
+    await context.route('**/api/events/poll*', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ boot_id: 'e2e', cursor: 'e2e:2', events: [], resync: null, more: false }),
+    }));
+}
+
 test.describe('Live update stream across tabs', () => {
     test('one tab holds the stream and another takes over when it closes', async ({ context }) => {
-        await context.addInitScript(() => {
-            window.localStorage.setItem('dtvp_last_seen_version', '1.0.4');
-        });
-
-        // Playwright checks routes in reverse registration order: catch-alls first.
-        await context.route('**/api/**', route => route.fulfill({ status: 200, body: '{}' }));
-        await context.route('**/auth/**', route => route.fulfill({ status: 200, body: '{}' }));
-        await context.route('**/auth/me', route => route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({ username: 'reviewer', role: 'REVIEWER' }),
-        }));
-        await context.route('**/api/version', route => route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({ version: '1.0.4', build: 'test' }),
-        }));
-        await context.route('**/api/cache-status', route => route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({
-                fully_cached: true,
-                last_refreshed_at: new Date().toISOString(),
-                projects: 1,
-                active_projects: 0,
-                cached_findings: 0,
-                cached_boms: 0,
-                cached_analyses: 0,
-                pending_updates: 0,
-                failed_exports: 0,
-                oldest_pending_at: null,
-            }),
-        }));
-        await context.route('**/api/projects*', route => route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify([
-                { name: 'Example', uuid: 'p1', version: '1.0.0', classifier: 'APPLICATION' },
-            ]),
-        }));
-        await context.route(url => url.pathname.endsWith('/api/events'), route => route.fulfill({
-            status: 200,
-            headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
-            body: sseBody,
-        }));
-        await context.route('**/api/events/poll*', route => route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({ boot_id: 'e2e', cursor: 'e2e:2', events: [], resync: null, more: false }),
-        }));
+        await mockLiveUpdates(context);
 
         const streamRequests = new Map<Page, number>();
         const isStream = (url: string) => new URL(url).pathname.endsWith('/api/events');
@@ -110,5 +114,23 @@ test.describe('Live update stream across tabs', () => {
             () => others.filter(page => (streamRequests.get(page) || 0) > 0).length,
             { timeout: 10_000 },
         ).toBe(1);
+    });
+
+    test('two tabs on different products yield one interest request with both', async ({ context }) => {
+        await mockLiveUpdates(context);
+        const bodies: Array<{ client_id: string; products: string[] }> = [];
+        await context.route('**/api/events/interest', route => {
+            bodies.push(JSON.parse(route.request().postData() || '{}'));
+            return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+        });
+
+        const first = await context.newPage();
+        await first.goto('/project/Alpha');
+        const second = await context.newPage();
+        await second.goto('/project/Beta');
+
+        await expect.poll(() => bodies.at(-1)?.products, { timeout: 15_000 }).toEqual(['Alpha', 'Beta']);
+        // One browser, one leader, one lease.
+        expect(new Set(bodies.map(body => body.client_id)).size).toBe(1);
     });
 });

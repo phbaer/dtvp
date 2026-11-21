@@ -178,6 +178,7 @@ from .event_producers import (
     SourceStateTracker,
 )
 from .event_routes import EventRouteDeps, create_event_router
+from .product_interest import ProductInterest
 from .sync_routes import create_sync_router
 from .shutdown_signals import chain_shutdown_signals
 from .tmrescore_cache_services import (
@@ -529,6 +530,9 @@ event_hub = EventHub(
         "DTVP_EVENT_MAX_CONNECTIONS_PER_USER", default=20, minimum=1, logger=logger
     ),
 )
+# What the browsers' tabs show (ADR 0004 step 4a); read by the sync
+# scheduler of step 5. Process-local as well.
+product_interest = ProductInterest()
 source_state_tracker = SourceStateTracker(event_hub)
 export_state_producer = ExportStateProducer(event_hub, cache_manager)
 cache_refresh_producer = CacheRefreshProducer(
@@ -1228,6 +1232,7 @@ api_router.include_router(
                 else VERSION
             ),
             source_state=source_state_tracker.snapshot,
+            interest=product_interest,
         )
     )
 )

@@ -275,6 +275,24 @@ part of the grouped snapshot's revision: every export changes it.
 /api/sync/status` counts them by status. Nothing is scheduled from the sync
 state yet; the reads still happen in the cache refresh. The table is not in
 the dump: the next reads rebuild it.
+
+### Product interest
+
+Status: implemented 2026-11-21 (ADR 0004 step 4a; checked against
+`tests/test_product_interest.py`, `frontend/src/lib/__tests__/eventStream.spec.ts`
+and `frontend/e2e/event-stream.spec.ts` in Chromium, Firefox and WebKit).
+
+Each tab tells the browser's leader, over the live-update channel, which
+product it shows (a project page shows its project), when its route changes
+and every 60 seconds; the leader forgets a tab silent for 2 minutes or that
+says goodbye on `pagehide`. The leader sends the union to
+`PUT /api/events/interest` `{client_id, products}` when it changes and every
+60 seconds while it is not empty. `client_id` is random per leader term; the
+server (`dtvp/product_interest.py`) keeps one lease per user and `client_id`
+for `DTVP_SYNC_WATCH_TTL_SECONDS` (default 900) after its last renewal, at
+most 20 per user; an empty list, or a leader tab that closes, ends it. The
+leases are held in the process. Nothing reads them yet: the scheduler of
+step 5 will, and then retires the self-renewal of active projects.
 ## Event Channel
 
 Status: implemented for the producers listed below (2026-11-20, checked

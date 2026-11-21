@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     logout: vi.fn(),
     streamStart: vi.fn(),
     streamStop: vi.fn(),
+    setInterest: vi.fn(),
 }))
 
 vi.mock('../lib/eventStream', async () => {
@@ -32,6 +33,7 @@ vi.mock('../lib/eventStream', async () => {
             status: ref('idle'),
             start: mocks.streamStart,
             stop: mocks.streamStop,
+            setInterest: mocks.setInterest,
             on: () => () => undefined,
             cursor: null,
         },
@@ -100,6 +102,17 @@ const flushBootstrapDom = async (wrapper: VueWrapper) => {
 }
 
 describe('App bootstrap state', () => {
+    it('reports the product a project page shows as this tab\'s interest', async () => {
+        mocks.setInterest.mockClear()
+        ;(mocks.route as any).path = '/project/App'
+        ;(mocks.route as any).params = { name: 'App' }
+        const wrapper = mountApp()
+        await flushPromises()
+        expect(mocks.setInterest).toHaveBeenLastCalledWith(['App'])
+        wrapper.unmount()
+        delete (mocks.route as any).params
+    })
+
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.route.path = '/'

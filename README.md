@@ -233,7 +233,9 @@ cache-refresh, and Dependency-Track state changes
 ([Event channel](docs/runtime.md#event-channel)). Every read of a project
 version is recorded in its sync state, with content digests:
 `GET /api/sync/versions?product=&changed_since=` and `GET /api/sync/status`
-([Sync state](docs/runtime.md#sync-state)).
+([Sync state](docs/runtime.md#sync-state)). The browser announces the
+products its tabs show with `PUT /api/events/interest`
+([Product interest](docs/runtime.md#product-interest)).
 
 ## Documentation
 

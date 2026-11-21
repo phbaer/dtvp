@@ -176,6 +176,14 @@ const handleAuthExpired = () => {
     }
 }
 
+// The product this tab shows; the browser's leader keeps it watched by the
+// server's sync (ADR 0004 step 4a).
+watch(
+    () => (route.path?.startsWith('/project/') ? String(route.params?.name || '') : ''),
+    name => eventStream.setInterest(name ? [name] : []),
+    { immediate: true },
+)
+
 onMounted(() => {
     window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
     void bootstrapApp()
