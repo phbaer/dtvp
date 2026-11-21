@@ -1447,9 +1447,13 @@ watch(currentUserRole, (role) => {
               : ''
       ]"
   >
+    <!-- z-40: the toolbar's popups (Filter, Gone findings, CycloneDX,
+         Archive) open over the cards below, whose sticky header bars are
+         z-30; full-screen dialogs stay above at z-[60] and up. -->
     <div
         v-if="viewMode === 'analysis' && !error"
-        class="relative z-30 mb-3 shrink-0 rounded-2xl border border-white/10 bg-gray-900/85 p-2 shadow-xl shadow-black/20 backdrop-blur-2xl"
+        data-testid="project-toolbar"
+        class="relative z-40 mb-3 shrink-0 rounded-2xl border border-white/10 bg-gray-900/85 p-2 shadow-xl shadow-black/20 backdrop-blur-2xl"
         @keydown.esc="showSearchTokenMenu = false"
     >
         <div class="flex flex-col gap-2">
