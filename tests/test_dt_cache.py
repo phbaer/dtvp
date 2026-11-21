@@ -135,10 +135,7 @@ async def test_get_projects_caches_results(tmp_path):
 
 @pytest.mark.asyncio
 async def test_get_all_projects_reuses_fresh_complete_list(tmp_path):
-    manager = CacheManager(
-        base_path=str(tmp_path),
-        project_list_ttl_seconds=30,
-    )
+    manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
     client.get_projects.return_value = [
         {"name": "TestApp", "uuid": "uuid1", "version": "1.0"},
@@ -154,11 +151,12 @@ async def test_get_all_projects_reuses_fresh_complete_list(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_all_projects_refreshes_expired_complete_list(tmp_path):
-    manager = CacheManager(
-        base_path=str(tmp_path),
-        project_list_ttl_seconds=30,
-    )
+async def test_a_stored_project_list_is_served_and_the_background_read_replaces_it(
+    tmp_path,
+):
+    """No request-time read once a list is stored, however old: the
+    scheduler re-reads it every refresh interval (ADR 0004)."""
+    manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
     client.get_projects.side_effect = [
         [{"name": "First", "uuid": "uuid1", "version": "1.0"}],
@@ -167,8 +165,11 @@ async def test_get_all_projects_refreshes_expired_complete_list(tmp_path):
 
     await manager.get_projects(client, name="")
     manager.cache_meta["projects_refreshed_at"] = "2000-01-01T00:00:00+00:00"
+    stored = await manager.get_projects(client, name="")
+    await manager._refresh_project_list(client)
     refreshed = await manager.get_projects(client, name="")
 
+    assert [project["name"] for project in stored] == ["First"]
     assert [project["name"] for project in refreshed] == ["Second"]
     assert client.get_projects.call_count == 2
 
@@ -280,52 +281,15 @@ async def test_failed_shared_fetch_can_be_retried_immediately(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_record_project_access_skips_redundant_persistence(tmp_path, monkeypatch):
+async def test_reads_do_not_make_a_project_active(tmp_path):
+    """Interest comes from users (ADR 0004); a read, which sync work does
+    too, never renews it."""
     manager = CacheManager(base_path=str(tmp_path))
-    saved: list[dict[str, float]] = []
-    monkeypatch.setattr(
-        manager,
-        "_save_active_projects",
-        lambda project_uuids: saved.append(project_uuids),
-    )
-
-    await asyncio.gather(
-        manager.record_project_access("project-1"),
-        manager.record_project_access("project-1"),
-        manager.record_project_access("project-1"),
-    )
-
-    assert len(saved) == 1
-    assert set(saved[0]) == {"project-1"}
-
-
-@pytest.mark.asyncio
-async def test_active_project_refresh_is_recent_and_bounded(tmp_path, monkeypatch):
-    now = 10_000.0
-    manager = CacheManager(
-        base_path=str(tmp_path),
-        active_project_ttl_seconds=60,
-        active_project_limit=2,
-    )
-    manager._active_project_last_access = {
-        "expired": now - 61,
-        "older": now - 30,
-        "newer": now - 10,
-        "newest": now - 1,
-    }
-    manager.active_project_uuids = set(manager._active_project_last_access)
-    monkeypatch.setattr("dtvp.dt_cache.time.time", lambda: now)
-    refresh_project = AsyncMock()
-    monkeypatch.setattr(manager, "refresh_project", refresh_project)
-
-    await manager._refresh_active_projects(AsyncMock())
-
-    assert manager.active_project_uuids == {"newer", "newest"}
-    assert set(manager._load_active_projects()) == {"newer", "newest"}
-    assert {call.args[0] for call in refresh_project.await_args_list} == {
-        "newer",
-        "newest",
-    }
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = []
+    await manager.get_vulnerabilities(client, "project-1", refresh=True)
+    assert manager.active_project_uuids == set()
+    assert not hasattr(manager, "record_project_access")
 
 
 def test_memory_file_cache_evicts_least_recently_used_entries(tmp_path):
@@ -1458,10 +1422,11 @@ async def test_fixed_versions_are_read_when_missing_or_stale_and_capped(tmp_path
 
 async def test_one_cap_holds_for_a_whole_refresh_cycle(tmp_path):
     manager = CacheManager(base_path=str(tmp_path), fixed_versions_reads_per_cycle=3)
-    manager.active_project_uuids = {"p1", "p2"}
-    manager._active_project_last_access = {"p1": time.time(), "p2": time.time()}
     client = RangeSource([_record(f"CVE-{n}") for n in range(5)])
-    await manager._refresh_active_projects(client)
+    # The scheduler hands one budget to every version of a pass.
+    budget = manager.read_budget()
+    for project_uuid in ("p1", "p2"):
+        await manager.refresh_project(project_uuid, client, fixed_versions_budget=budget)
     # The same five records in both projects: three reads, not six.
     assert len(client.reads) == 3
 
@@ -2408,7 +2373,7 @@ async def test_unchanged_refresh_publishes_no_project_event(tmp_path):
 
 @pytest.mark.asyncio
 async def test_get_projects_fetch_tells_listeners_and_failure_reports_state(tmp_path):
-    manager, calls = _recording_manager(tmp_path, project_list_ttl_seconds=0)
+    manager, calls = _recording_manager(tmp_path)
     project = {"name": "App", "uuid": "u1", "version": "1.0"}
     source = _ProjectListSource([project])
 
@@ -2418,7 +2383,9 @@ async def test_get_projects_fetch_tells_listeners_and_failure_reports_state(tmp_
 
     error = RuntimeError("dt down")
     source.error = error
+    # Requests are served from the store; the background read reports.
     assert await manager.get_projects(source, name="") == [project]
+    await manager._refresh_project_list(source)
     assert calls["states"][-1] == (False, error)
 
 

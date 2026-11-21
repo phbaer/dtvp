@@ -22,12 +22,9 @@ means the integration or override is disabled.
 | `DEPENDENCY_TRACK_URL` / `DEPENDENCY_TRACK_API_KEY` | Deployment aliases | unset |
 | `DTVP_DT_CACHE_PATH` | Directory of the local database and the pending update queue. Persistent data, not a disposable cache | `data/dt_cache` |
 | `DTVP_DATABASE_PATH` | The local SQLite database: imported projects, findings, vulnerability details, BOMs, last known source assessments, local assessments with their export queue, and access tokens | `<DTVP_DT_CACHE_PATH>/dtvp.sqlite3` |
-| `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval in whole seconds, at least 1; an unusable value falls back to the default | `60` |
+| `DTVP_DT_CACHE_REFRESH_SECONDS` | How often the sync scheduler reads the project list, in whole seconds, at least 1; an unusable value falls back to the default. See [Sync scheduler](runtime.md#sync-scheduler) | `60` |
 | `DTVP_SSVC_ENRICHMENT_ENABLED` | Fetch exploitation evidence for SSVC from the sources listed in `dtvp/resources/ssvc-sources.json` over the network. Off with anything but `true`, `1`, or `yes` | `true` |
 | `DTVP_SSVC_CACHE_PATH` | Cache of that evidence | `<DTVP_DT_CACHE_PATH>/ssvc_enrichment.sqlite3` |
-| `DTVP_DT_PROJECT_LIST_TTL_SECONDS` | Freshness window for serving the complete cached project list without an upstream request | `30` |
-| `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` | Idle window for periodic per-project background refresh | `900` |
-| `DTVP_DT_ACTIVE_PROJECT_LIMIT` | Most-recent projects eligible for periodic refresh | `8` |
 | `DTVP_DT_MEMORY_CACHE_MAX_ENTRIES` | Process-local LRU of decoded documents; the database remains the persistent copy | `256` |
 | `DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES` | Process-local named-project query LRU entries | `128` |
 | `DTVP_ASSESSMENT_OUTBOX_PATH` | Separate file for local assessments and the export queue. Leave unset to keep them in the database; a former `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` is copied in once | `DTVP_DATABASE_PATH` |
@@ -111,6 +108,12 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | `DTVP_EVENT_MAX_CONNECTIONS` | Open `/api/events` streams; more get `503`; at least 1 | `200` |
 | `DTVP_EVENT_MAX_CONNECTIONS_PER_USER` | Open `/api/events` streams of one user; more get `429`; at least 1 | `20` |
 | `DTVP_SYNC_WATCH_TTL_SECONDS` | How long a browser's product interest lease lives after its last renewal (`PUT /api/events/interest`); see [Product interest](runtime.md#product-interest) | `900` |
+| `DTVP_SYNC_WATCHED_FINDINGS_SECONDS` | How often the findings of each version of a watched product are re-read; at least 1. See [Sync scheduler](runtime.md#sync-scheduler) | `120` |
+| `DTVP_SYNC_SAFETY_SECONDS` | Safety re-read of every other active version; at least 60 | `43200` |
+| `DTVP_SYNC_CONCURRENCY` | Versions synced at a time | `2` |
+| `DTVP_DT_REQUESTS_PER_SECOND` / `DTVP_DT_REQUEST_BURST` | One budget for every Dependency-Track call of the scheduler and the export | `4` / `8` |
+
+Retired in ADR 0004 step 5: `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (a stored project list is always served; the scheduler re-reads it), `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` and `DTVP_DT_ACTIVE_PROJECT_LIMIT` (watched products replace recently opened versions). Set values are ignored.
 | `DTVP_REQUIRE_FREE_THREADED` | Fail startup unless CPython supports free threading and its GIL is actually disabled | local Python: `false`; Compose: `true` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
 | `DTVP_CORS_ORIGINS` | Comma-separated CORS origins. A set value replaces the built-in list (the localhost development origins, `DTVP_FRONTEND_URL`, and the host name) for the application; the startup page shown while DTVP loads adds it to that list instead | unset |

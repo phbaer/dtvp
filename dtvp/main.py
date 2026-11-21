@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import logging
 import os
 import socket
@@ -179,6 +180,7 @@ from .event_producers import (
 )
 from .event_routes import EventRouteDeps, create_event_router
 from .product_interest import ProductInterest
+from .source_sync import SourceSync
 from .sync_routes import create_sync_router
 from .shutdown_signals import chain_shutdown_signals
 from .tmrescore_cache_services import (
@@ -530,16 +532,29 @@ event_hub = EventHub(
         "DTVP_EVENT_MAX_CONNECTIONS_PER_USER", default=20, minimum=1, logger=logger
     ),
 )
-# What the browsers' tabs show (ADR 0004 step 4a); read by the sync
-# scheduler of step 5. Process-local as well.
+# What the browsers' tabs show (ADR 0004 step 4a) and users read; read by
+# the sync scheduler. Process-local as well.
 product_interest = ProductInterest()
 source_state_tracker = SourceStateTracker(event_hub)
+# The background owner of every Dependency-Track read (ADR 0004 step 5).
+source_sync = SourceSync(
+    cache_manager,
+    hub=event_hub,
+    interest=product_interest,
+    source_state=source_state_tracker,
+)
+cache_manager.attach_scheduler(source_sync)
 export_state_producer = ExportStateProducer(event_hub, cache_manager)
 cache_refresh_producer = CacheRefreshProducer(
     event_hub, lambda: cache_manager.cache_meta.get("last_refreshed_at")
 )
 cache_manager.add_project_list_listener(ProjectListEventProducer(event_hub))
-cache_manager.add_source_state_listener(source_state_tracker)
+# Every project-list read counts for the circuit breaker, which sets
+# ``source.state``; a success is also noted for ``last_success_at``.
+cache_manager.add_source_state_listener(source_sync.breaker.observe)
+cache_manager.add_source_state_listener(
+    lambda ok, exc=None: source_state_tracker.note_success() if ok else None
+)
 cache_manager.add_cache_status_listener(export_state_producer.mark_dirty)
 cache_manager.add_cache_status_listener(cache_refresh_producer.mark_dirty)
 project_archive_tasks: Dict[str, Dict[str, Any]] = {}
@@ -771,6 +786,10 @@ general_api_route_deps = build_general_api_route_deps(
     detail_executor=detail_executor,
     task_event_hub=task_event_hub,
 )
+# Opening a project, polling its task and MCP project tools renew interest.
+general_api_route_deps = dataclasses.replace(
+    general_api_route_deps, note_interest=product_interest.touch
+)
 
 # A save patches the live snapshots and confirms it here; a snapshot that
 # lacks a save is built again instead of reused.
@@ -779,8 +798,12 @@ configure_assessment_write_tracker(cache_manager)
 # A merge with the source can change assessments without a save; keep the
 # snapshots users are looking at in step.
 cache_manager.add_assessment_change_listener(
-    lambda keys, value_changed=True: refresh_task_snapshots_for_assessments(
-        general_api_route_deps, keys, value_changed=value_changed
+    lambda keys, value_changed=True, origin="local": (
+        refresh_task_snapshots_for_assessments(
+            general_api_route_deps, keys, value_changed=value_changed
+        )
+        if origin != "export_echo"
+        else 0
     )
 )
 # Runs after the snapshot refresh above (listeners run in order), so a client
@@ -1216,6 +1239,7 @@ api_router.include_router(
     create_sync_router(
         lambda: cache_manager.sync_state,
         current_user_dependency=get_current_user,
+        scheduler_status=source_sync.status,
     )
 )
 

@@ -235,7 +235,11 @@ version is recorded in its sync state, with content digests:
 `GET /api/sync/versions?product=&changed_since=` and `GET /api/sync/status`
 ([Sync state](docs/runtime.md#sync-state)). The browser announces the
 products its tabs show with `PUT /api/events/interest`
-([Product interest](docs/runtime.md#product-interest)).
+([Product interest](docs/runtime.md#product-interest)). A sync scheduler
+reads Dependency-Track in the background: watched products every two
+minutes, every other active version once and then on change signals, within
+one request budget shared with the export
+([Sync scheduler](docs/runtime.md#sync-scheduler)).
 
 ## Documentation
 

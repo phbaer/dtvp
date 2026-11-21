@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import copy
 import json
 import os
@@ -56,6 +57,7 @@ from .source_sync_state import (
     KIND_BOM,
     KIND_FINDINGS,
     KIND_VULNS,
+    ORIGIN_EXPORT_ECHO,
     SyncStateStore,
     bom_digest,
     classify_analysis_changes,
@@ -422,14 +424,81 @@ def _vulnerability_cache_identity(vulnerability: Dict[str, Any]) -> Optional[Tup
     return tuple(sorted(identifiers))
 
 
+class _ExchangeGate:
+    """Export writes of one project share it; a findings read of the project
+    holds it alone, so no export lands between the read and its
+    classification. A waiting read goes before new writes.
+
+    Releasing never awaits, so a cancellation cannot leave it held; waiters
+    are woken by a separate task. ``on_idle`` is told when nobody holds or
+    waits for it any more, so idle gates can be dropped."""
+
+    def __init__(self, on_idle: Callable[[], None] = lambda: None) -> None:
+        self._condition = asyncio.Condition()
+        self._writers = 0
+        self._reading = False
+        self._read_waiting = 0
+        self._write_waiting = 0
+        self._on_idle = on_idle
+
+    def read_pending(self) -> bool:
+        """A read holds the gate or waits for it: a write now would wait."""
+        return self._reading or self._read_waiting > 0
+
+    def _idle(self) -> bool:
+        return not (
+            self._writers or self._reading or self._read_waiting or self._write_waiting
+        )
+
+    async def _wake(self) -> None:
+        async with self._condition:
+            self._condition.notify_all()
+        if self._idle():
+            self._on_idle()
+
+    def _released(self) -> None:
+        asyncio.get_running_loop().create_task(self._wake())
+
+    @contextlib.asynccontextmanager
+    async def write(self):
+        self._write_waiting += 1
+        try:
+            async with self._condition:
+                await self._condition.wait_for(
+                    lambda: not self._reading and not self._read_waiting
+                )
+                self._writers += 1
+        finally:
+            self._write_waiting -= 1
+        try:
+            yield
+        finally:
+            self._writers -= 1
+            self._released()
+
+    @contextlib.asynccontextmanager
+    async def read(self):
+        self._read_waiting += 1
+        try:
+            async with self._condition:
+                await self._condition.wait_for(
+                    lambda: not self._reading and self._writers == 0
+                )
+                self._reading = True
+        finally:
+            self._read_waiting -= 1
+        try:
+            yield
+        finally:
+            self._reading = False
+            self._released()
+
+
 class CacheManager:
     def __init__(
         self,
         base_path: str = None,
         refresh_interval_seconds: int = None,
-        project_list_ttl_seconds: int = None,
-        active_project_ttl_seconds: int = None,
-        active_project_limit: int = None,
         memory_cache_max_entries: int = None,
         project_query_cache_max_entries: int = None,
         fixed_versions_refresh_days: int = None,
@@ -440,25 +509,6 @@ class CacheManager:
             _refresh_seconds_from_env()
             if refresh_interval_seconds is None
             else refresh_interval_seconds
-        )
-        self.project_list_ttl_seconds = (
-            _positive_int_env("DTVP_DT_PROJECT_LIST_TTL_SECONDS", 30, minimum=0)
-            if project_list_ttl_seconds is None
-            else max(0, project_list_ttl_seconds)
-        )
-        self.active_project_ttl_seconds = (
-            _positive_int_env(
-                "DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS",
-                900,
-                minimum=60,
-            )
-            if active_project_ttl_seconds is None
-            else max(60, active_project_ttl_seconds)
-        )
-        self.active_project_limit = (
-            _positive_int_env("DTVP_DT_ACTIVE_PROJECT_LIMIT", 8)
-            if active_project_limit is None
-            else max(1, active_project_limit)
         )
         self.memory_cache_max_entries = (
             _positive_int_env("DTVP_DT_MEMORY_CACHE_MAX_ENTRIES", 256)
@@ -482,8 +532,11 @@ class CacheManager:
         )
         self.lock = asyncio.Lock()
         self.pending_updates: List[Dict[str, Any]] = []
+        # The versions of watched products; the scheduler keeps it current.
         self.active_project_uuids: Set[str] = set()
-        self._active_project_last_access: Dict[str, float] = {}
+        # Set by the app (``attach_scheduler``); without one the background
+        # loop runs a scheduler of its own.
+        self.scheduler: Any = None
         self.project_query_cache: OrderedDict[str, List[Dict[str, Any]]] = (
             OrderedDict()
         )
@@ -600,12 +653,6 @@ class CacheManager:
     def _pending_path(self) -> str:
         return os.path.join(self.base_path, "pending_updates.json")
 
-    def _active_projects_path(self) -> str:
-        return self._address(
-            os.path.join(self.base_path, "active_projects.json"),
-            DocumentRef(KIND_METADATA, name="active_projects"),
-        )
-
     def _findings_path(self, project_uuid: str) -> str:
         return self._address(
             os.path.join(
@@ -642,7 +689,7 @@ class CacheManager:
 
     def _read_startup_cache_state(
         self,
-    ) -> tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         meta_default = {
             "fully_cached": False,
             "last_refreshed_at": None,
@@ -652,22 +699,17 @@ class CacheManager:
             "source_revisions": {},
         }
         pending = self._load_pending_updates()
-        active = self._normalize_active_projects(
-            self._read_document(self._active_projects_path(), {})
-        )
         meta = (
             self._read_document(self._projects_meta_path(), meta_default)
             or meta_default
         )
-        return pending, active, meta
+        return pending, meta
 
     def _remember_startup_cache_state(
         self,
         pending: List[Dict[str, Any]],
-        active: Dict[str, float],
         meta: Dict[str, Any],
     ) -> None:
-        self._cache_memory_value(self._active_projects_path(), active)
         self._cache_memory_value(self._projects_meta_path(), meta)
 
     def _save_projects_meta(self, meta: Dict[str, Any]) -> None:
@@ -740,7 +782,6 @@ class CacheManager:
             "named_project_queries": len(self.project_query_cache),
             "named_project_query_limit": self.project_query_cache_max_entries,
             "active_projects": len(self.active_project_uuids),
-            "active_project_limit": self.active_project_limit,
         }
 
     def get_cached_project_versions(self) -> List[Dict[str, Any]]:
@@ -983,23 +1024,12 @@ class CacheManager:
             ]
         return revision
 
-    def _project_list_is_fresh(self) -> bool:
-        if (
-            not self.cache_meta.get("fully_cached")
-            or self.project_list_ttl_seconds <= 0
-        ):
-            return False
-        refreshed_value = self.cache_meta.get("projects_refreshed_at")
-        if not refreshed_value:
-            return False
-        try:
-            refreshed_at = datetime.fromisoformat(str(refreshed_value))
-            if refreshed_at.tzinfo is None:
-                refreshed_at = refreshed_at.replace(tzinfo=timezone.utc)
-        except (TypeError, ValueError):
-            return False
-        return datetime.now(timezone.utc) - refreshed_at <= timedelta(
-            seconds=self.project_list_ttl_seconds
+    def _project_list_is_stored(self) -> bool:
+        """Whether a complete project list was read once. From then on the
+        scheduler keeps it current and requests are served from the store."""
+        return bool(
+            self.cache_meta.get("fully_cached")
+            and self.cache_meta.get("projects_refreshed_at")
         )
 
     def _mark_project_list_refreshed(self) -> None:
@@ -1092,61 +1122,6 @@ class CacheManager:
                 imported,
             )
 
-    def _normalize_active_projects(self, value: Any) -> Dict[str, float]:
-        now = time.time()
-        if isinstance(value, list):
-            return {
-                str(project_uuid): now
-                for project_uuid in value
-                if str(project_uuid or "").strip()
-            }
-        if not isinstance(value, dict):
-            return {}
-
-        normalized: Dict[str, float] = {}
-        for raw_uuid, raw_accessed_at in value.items():
-            project_uuid = str(raw_uuid or "").strip()
-            if not project_uuid:
-                continue
-            try:
-                accessed_at = float(raw_accessed_at)
-            except (TypeError, ValueError):
-                accessed_at = now
-            normalized[project_uuid] = accessed_at
-        return normalized
-
-    def _load_active_projects(self) -> Dict[str, float]:
-        return self._normalize_active_projects(
-            self._load_cache_file(self._active_projects_path(), {})
-        )
-
-    def _save_active_projects(self, accesses: Dict[str, float]) -> None:
-        self._save_cache_file(
-            self._active_projects_path(),
-            dict(sorted(accesses.items())),
-            touch_meta=False,
-        )
-
-    def _prune_active_projects(self, *, now: float | None = None) -> bool:
-        current_time = time.time() if now is None else now
-        cutoff = current_time - self.active_project_ttl_seconds
-        retained = sorted(
-            (
-                (project_uuid, accessed_at)
-                for project_uuid, accessed_at in self._active_project_last_access.items()
-                if accessed_at >= cutoff
-            ),
-            key=lambda item: item[1],
-            reverse=True,
-        )[: self.active_project_limit]
-        retained_accesses = dict(retained)
-        changed = retained_accesses != self._active_project_last_access
-        self._active_project_last_access = retained_accesses
-        self.active_project_uuids = set(retained_accesses)
-        if changed:
-            self._invalidate_cache_status()
-        return changed
-
     def _release_instance(self) -> None:
         claim, self._instance_claim = self._instance_claim, None
         release_instance(claim)
@@ -1160,7 +1135,6 @@ class CacheManager:
         self.lock = asyncio.Lock()
         self.pending_updates = []
         self.active_project_uuids = set()
-        self._active_project_last_access = {}
         self.project_query_cache = OrderedDict()
         self._cache_meta_lock = threading.RLock()
         self.cache_meta = {
@@ -1216,6 +1190,15 @@ class CacheManager:
                 await self._remove_inflight_fetch(key, task)
         return copy.deepcopy(result)
 
+    def cancel_inflight_fetches(self) -> list[asyncio.Task[Any]]:
+        """At shutdown: the shared upstream reads are shielded from their
+        callers' cancellation, so the background loop cancels them itself
+        before its client closes. Returns them, to be awaited."""
+        tasks = [task for task in self._inflight_fetches.values() if not task.done()]
+        for task in tasks:
+            task.cancel()
+        return tasks
+
     async def _remove_inflight_fetch(
         self,
         key: Tuple[str, ...],
@@ -1227,23 +1210,11 @@ class CacheManager:
 
     def load_persisted_runtime_state(self) -> None:
         self._report_legacy_import()
-        (
-            pending_updates,
-            active_project_uuids,
-            cache_meta,
-        ) = self._read_startup_cache_state()
+        pending_updates, cache_meta = self._read_startup_cache_state()
         self.pending_updates = pending_updates
-        self._active_project_last_access = dict(active_project_uuids)
-        active_changed = self._prune_active_projects()
         self.cache_meta = cache_meta
         self._invalidate_cache_status()
-        self._remember_startup_cache_state(
-            pending_updates,
-            self._active_project_last_access,
-            cache_meta,
-        )
-        if active_changed:
-            self._save_active_projects(self._active_project_last_access)
+        self._remember_startup_cache_state(pending_updates, cache_meta)
 
     def _load_cache_file(self, path: str, default: Any = None) -> Any:
         with self._memory_cache_lock:
@@ -1466,53 +1437,45 @@ class CacheManager:
 
     async def initialize(self) -> None:
         self._report_legacy_import()
-        pending_updates, active_project_uuids, cache_meta = await asyncio.to_thread(
+        pending_updates, cache_meta = await asyncio.to_thread(
             self._read_startup_cache_state
         )
         async with self.lock:
             self.pending_updates = pending_updates
-            self._active_project_last_access = dict(active_project_uuids)
-            active_changed = self._prune_active_projects()
             self.cache_meta = cache_meta
             self._invalidate_cache_status()
-            self._remember_startup_cache_state(
-                pending_updates,
-                self._active_project_last_access,
-                cache_meta,
-            )
-            if active_changed:
-                self._save_active_projects(self._active_project_last_access)
-        if active_changed:
-            await self.flush_cache_writes()
+            self._remember_startup_cache_state(pending_updates, cache_meta)
+
+    def _project_exchange(self, project_uuid: str) -> "_ExchangeGate":
+        """Per project: export writes run together, a findings read runs
+        alone. Created on first use, in the event loop's thread."""
+        gates = self.__dict__.setdefault("_exchange_gates", {})
+        gate = gates.get(project_uuid)
+        if gate is None:
+
+            def drop() -> None:
+                if gates.get(project_uuid) is gate and gate._idle():
+                    del gates[project_uuid]
+
+            gate = gates[project_uuid] = _ExchangeGate(on_idle=drop)
+        return gate
+
+    def attach_scheduler(self, scheduler: Any) -> None:
+        """The app's ``SourceSync`` (ADR 0004 step 5), which owns every
+        background read of the source."""
+        self.scheduler = scheduler
+
+    def read_budget(self) -> ReadBudget:
+        """One cap on the version-range reads for a scheduler pass."""
+        return ReadBudget(self.fixed_versions_reads_per_cycle)
 
     async def background_sync_loop(self) -> None:
+        from .source_sync import SourceSync
+
+        scheduler = self.scheduler or SourceSync(self)
         settings = DTSettings()
         async with DTClient(settings.api_url, api_key=settings.api_key) as client:
-            next_cache_refresh = 0.0
-            while True:
-                try:
-                    await self.export_if_automatic(client)
-                    now = time.monotonic()
-                    if now >= next_cache_refresh:
-                        await self._refresh_project_list(client)
-                        await self._refresh_active_projects(client)
-                        next_cache_refresh = now + self.refresh_interval_seconds
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    logger.warning("Cache background sync failed: %s", exc)
-                self._assessment_sync_wakeup.clear()
-                timeout = max(
-                    0.1,
-                    min(1.0, next_cache_refresh - time.monotonic()),
-                )
-                try:
-                    await asyncio.wait_for(
-                        self._assessment_sync_wakeup.wait(),
-                        timeout=timeout,
-                    )
-                except TimeoutError:
-                    pass
+            await scheduler.run(client, wakeup=self._assessment_sync_wakeup)
 
     async def _refresh_project_list(self, client: VulnerabilitySource) -> None:
         try:
@@ -1528,24 +1491,6 @@ class CacheManager:
         except Exception as exc:
             self._notify_sync(self._source_state_listeners, False, exc)
             logger.debug("Failed to refresh project list: %s", exc)
-
-    async def _refresh_active_projects(self, client: VulnerabilitySource) -> None:
-        async with self.lock:
-            changed = self._prune_active_projects()
-            active = list(self.active_project_uuids)
-            if changed:
-                self._save_active_projects(self._active_project_last_access)
-        if changed:
-            await self.flush_cache_writes()
-        # One cap on the version-range reads for the whole cycle.
-        budget = ReadBudget(self.fixed_versions_reads_per_cycle)
-        for project_uuid in active:
-            try:
-                await self.refresh_project(
-                    project_uuid, client, fixed_versions_budget=budget
-                )
-            except Exception as exc:
-                logger.debug("Failed to refresh project %s: %s", project_uuid, exc)
 
     async def refresh_project(
         self,
@@ -1668,35 +1613,18 @@ class CacheManager:
         )
         return status
 
-    async def record_project_access(self, project_uuid: str) -> None:
-        project_uuid = str(project_uuid or "").strip()
-        if not project_uuid:
-            return
-        should_persist = False
-        async with self.lock:
-            now = time.time()
-            previous_access = self._active_project_last_access.get(project_uuid)
-            self._active_project_last_access[project_uuid] = now
-            changed = self._prune_active_projects(now=now)
-            should_persist = (
-                previous_access is None
-                or now - previous_access
-                >= min(300, max(30, self.refresh_interval_seconds))
-                or changed
-            )
-            if should_persist:
-                self._save_active_projects(self._active_project_last_access)
-
     async def get_projects(
         self, client: VulnerabilitySource, name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         async with self.lock:
             projects = self._load_project_cache(self._projects_path(), []) or []
             projects_meta = self.cache_meta
-            full_list_is_fresh = self._project_list_is_fresh()
+            full_list_is_stored = self._project_list_is_stored()
 
         if not name:
-            if full_list_is_fresh:
+            # The scheduler re-reads the list every refresh interval; only a
+            # list never read is fetched here (ADR 0004: no request-time read).
+            if full_list_is_stored:
                 return copy.deepcopy(projects)
             try:
 
@@ -1815,7 +1743,6 @@ class CacheManager:
         cve: Optional[str] = None,
         refresh: bool = False,
     ) -> List[Dict[str, Any]]:
-        await self.record_project_access(project_uuid)
         path = self._findings_path(project_uuid)
         findings = None
 
@@ -1872,27 +1799,33 @@ class CacheManager:
         """
         path = self._findings_path(project_uuid)
         fetch_started_at = datetime.now(timezone.utc)
-        try:
-            fresh_findings = await client.get_vulnerabilities(project_uuid, cve=None)
-        except Exception as exc:
-            self._record_sync_state(self.sync_state.record_failure, project_uuid, exc)
-            raise
-        # Over the raw response, before anything of DTVP's is read into it.
-        findings_identity, analyses, analyses_index = findings_digests(fresh_findings)
-        # Which analyses the source changed, and which are DTVP's own export
-        # coming back; against the record before this read is merged into it.
-        try:
-            analysis_origins = classify_analysis_changes(
-                self.sync_state.previous_analyses_index(project_uuid),
-                analyses_index,
-                fresh_findings,
-                lambda component_uuid, vulnerability_uuid: self._recorded_value(
-                    (project_uuid, component_uuid, vulnerability_uuid)
-                ),
-            )
-        except Exception:
-            logger.exception("Failed to classify the analysis changes")
-            analysis_origins = {}
+        # No export of this project's assessments between the read and its
+        # classification: an export landing in between would leave the
+        # source holding DTVP's value before ``mark_synced`` records it as
+        # exported, and the echo would count as a change in the source.
+        async with self._project_exchange(project_uuid).read():
+            try:
+                fresh_findings = await client.get_vulnerabilities(project_uuid, cve=None)
+            except Exception as exc:
+                self._record_sync_state(self.sync_state.record_failure, project_uuid, exc)
+                raise
+            # Over the raw response, before anything of DTVP's is read into it.
+            findings_identity, analyses, analyses_index = findings_digests(fresh_findings)
+            # Which analyses the source changed, and which are DTVP's own
+            # export coming back; against the record before this read is
+            # merged into it.
+            try:
+                analysis_origins = classify_analysis_changes(
+                    self.sync_state.previous_analyses_index(project_uuid),
+                    analyses_index,
+                    fresh_findings,
+                    lambda component_uuid, vulnerability_uuid: self._exported_value(
+                        (project_uuid, component_uuid, vulnerability_uuid)
+                    ),
+                )
+            except Exception:
+                logger.exception("Failed to classify the analysis changes")
+                analysis_origins = {}
         await self._read_texts_without_state(client, project_uuid, fresh_findings)
         source_analyses = {
             key: finding.get("analysis")
@@ -1938,6 +1871,15 @@ class CacheManager:
             analyses_index=analyses_index,
             origins=analysis_origins,
         )
+        echoes = [
+            (project_uuid, *key.split(":", 1))
+            for key in (analysis_origins or {}).get(ORIGIN_EXPORT_ECHO, [])
+        ]
+        if echoes:
+            # The source now holds DTVP's own export: nothing changed here.
+            await self._notify_assessments_changed(
+                echoes, value_changed=False, origin=ORIGIN_EXPORT_ECHO
+            )
         if plan is not None:
             await asyncio.to_thread(
                 self.finding_lifecycle.record_read, project_uuid, [], read_summary(plan)
@@ -1962,14 +1904,19 @@ class CacheManager:
         except Exception:
             logger.exception("Failed to record the sync state")
 
-    def _recorded_value(
+    def _exported_value(
         self, key: AssessmentKey
     ) -> Optional[Tuple[str, str, bool]]:
-        """The value DTVP holds for a finding (what it exports), or ``None``."""
+        """The value DTVP last exported for a finding (``mark_synced``,
+        ``note_exported``; the record's base), or ``None``. A source value
+        equal to it is DTVP's own export coming back (ADR 0004, "Echoes"),
+        even when a newer local value is waiting for export."""
         overlay = self.assessment_outbox.get_overlay(key)
         if overlay is None:
             return None
-        value = self.assessment_outbox._local_value(overlay)
+        value = overlay.get("base")
+        if not isinstance(value, dict):
+            return None
         return (
             str(value.get("state") or "NOT_SET"),
             str(value.get("details") or ""),
@@ -2234,7 +2181,6 @@ class CacheManager:
         project_uuid: str,
         refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        await self.record_project_access(project_uuid)
         path = self._bom_path(project_uuid)
         bom = None
         if not refresh:
@@ -2553,7 +2499,7 @@ class CacheManager:
             self._invalidate_cache_status()
             self._touch_cache_meta(project_uuids={key[0] for key in changed})
         self._assessment_sync_wakeup.set()
-        await self._notify_assessments_changed(sorted(changed))
+        await self._notify_assessments_changed(sorted(changed), origin="dt")
 
     def add_assessment_change_listener(
         self,
@@ -2561,17 +2507,23 @@ class CacheManager:
     ) -> None:
         """Be told when a merge changed local assessments outside a save, so
         views built from them can follow. Called on a worker thread as
-        ``listener(keys, value_changed=...)``; ``value_changed`` is False
-        when only the sync status changed (an export)."""
+        ``listener(keys, value_changed=..., origin=...)``; ``value_changed``
+        is False when only the sync status changed (an export); ``origin`` is
+        ``local``, ``dt`` (the source changed it) or ``export_echo`` (the
+        source now holds DTVP's own export; nothing changed here)."""
         self._assessment_change_listeners.append(listener)
 
     async def _notify_assessments_changed(
-        self, keys: List[AssessmentKey], *, value_changed: bool = True
+        self,
+        keys: List[AssessmentKey],
+        *,
+        value_changed: bool = True,
+        origin: str = "local",
     ) -> None:
         for listener in list(self._assessment_change_listeners):
             try:
                 await asyncio.to_thread(
-                    listener, keys, value_changed=value_changed
+                    listener, keys, value_changed=value_changed, origin=origin
                 )
             except Exception:
                 logger.exception("Assessment change listener failed")
@@ -3103,25 +3055,35 @@ class CacheManager:
                         # value is queued and goes out with the next batch.
                         continue
                     try:
-                        await client.update_analysis(
-                            **with_analysis_response(payload)
-                        )
-                        marked = await asyncio.to_thread(
-                            self.assessment_outbox.mark_synced,
-                            key,
-                            revision,
-                        )
+                        # The write and its record as exported, together:
+                        # a findings read of the project waits (see
+                        # ``import_findings``).
+                        gate = self._project_exchange(key[0])
+                        if gate.read_pending():
+                            # Its project is being read: it goes with the
+                            # next batch instead of holding this one up.
+                            continue
+                        async with gate.write():
+                            await client.update_analysis(
+                                **with_analysis_response(payload)
+                            )
+                            marked = await asyncio.to_thread(
+                                self.assessment_outbox.mark_synced,
+                                key,
+                                revision,
+                            )
+                            if not marked:
+                                # Saved again while the write was in flight:
+                                # the source now holds this older value of
+                                # ours. Recorded before a read may compare.
+                                await asyncio.to_thread(
+                                    self.assessment_outbox.note_exported, key, payload
+                                )
                         if marked:
                             async with self.lock:
                                 self._save_local_analysis(payload, exported=True)
                                 saved_local = True
                                 exported_keys.append(key)
-                        else:
-                            # Saved again while the write was in flight. The
-                            # source now holds this older value of ours.
-                            await asyncio.to_thread(
-                                self.assessment_outbox.note_exported, key, payload
-                            )
                     except Exception as exc:
                         failure_message = str(exc)
                         if _is_missing_finding_error(exc):

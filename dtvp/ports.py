@@ -120,5 +120,19 @@ class AssessmentSink(Protocol):
 
 
 @runtime_checkable
+class BudgetedTransport(Protocol):
+    """Optional: a source that lets the sync scheduler count every HTTP
+    request against its budget, and answer a cheap health probe (ADR 0004,
+    "Limits"). Without it, the scheduler counts method calls and probes
+    with ``get_projects``."""
+
+    def add_request_hook(self, hook: Any) -> None:
+        """Run ``await hook()`` before every request."""
+
+    async def ping(self) -> bool:
+        """One cheap request; raises when the source does not answer."""
+
+
+@runtime_checkable
 class SourceAndSink(VulnerabilitySource, AssessmentSink, Protocol):
     """A system DTVP both imports from and exports to."""
