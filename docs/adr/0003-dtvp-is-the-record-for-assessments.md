@@ -7,7 +7,7 @@
 | Decision status | Accepted (2026-11-18, repository owner) |
 | Implementation status | Partly implemented (2026-11-18); see [Implementation progress](#implementation-progress) |
 | Supersedes | The assessment merge and conflict handling of [ADR 0002](0002-local-first-database-with-import-and-export.md). Its database, export queue, history, and ports remain. |
-| Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md) |
+| Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md). Decisions 2 and 6 are amended by [ADR 0010](0010-version-overrides.md#amendments-to-adr-0003) (2026-11-20) |
 
 ## Context
 
@@ -49,6 +49,9 @@ DTVP's markup out of the text, which is lossy.
    never made in Dependency-Track itself, so its separate justification and
    response fields carry nothing of DTVP's and are not part of the record.
    After adoption the record is DTVP's.
+   *Amended 2026-11-20 by [ADR 0010](0010-version-overrides.md#amendments-to-adr-0003):*
+   an adopted value that carries a version override marker gets a second
+   revision (origin `import-review`) that marks it pending review.
 3. **Dependency-Track is a rendering target.** Where it holds a different
    value, or none, DTVP's value is exported again. There are no conflicts and
    no resolution step. A value Dependency-Track repeatedly does not keep is
@@ -65,6 +68,10 @@ DTVP's markup out of the text, which is lossy.
    generator reads these instead of Dependency-Track's exports.
 6. **A finding that a new project version adds to an assessed vulnerability
    is marked as new**, not assessed automatically.
+   *Amended 2026-11-20 by [ADR 0010](0010-version-overrides.md#amendments-to-adr-0003):*
+   this holds for copying another version's assessment. An analyzer's or
+   agent's assessment whose analysis covered the new version itself may
+   assess it.
 
 ## Alternatives
 
