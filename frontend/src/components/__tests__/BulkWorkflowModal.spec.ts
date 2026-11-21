@@ -437,6 +437,100 @@ describe('BulkWorkflowModal', () => {
         expect(mocks.applyBulkWorkflow.mock.calls[0][3]).toEqual(['CVE-CONFLICT'])
     })
 
+    describe('findings of a new version', () => {
+        const openRepair = async (items: Array<Record<string, unknown>>, selectable: string[]) => {
+            mocks.previewBulkWorkflow.mockResolvedValue({
+                task_id: 'task-1',
+                workflow,
+                preview_token: 'preview-1',
+                selectable_group_ids: selectable,
+                items,
+                summary: { groups: items.length },
+            })
+            const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+            await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+            await flushPromises()
+            return wrapper
+        }
+        const item = {
+            group_id: 'CVE-2026-1', finding_count: 1, new_finding_count: 2, repairable: true,
+            repairs: [{ id: 'sync_findings', label: 'Synchronize' }], review: [],
+        }
+
+        it('lists them as not synchronized and leaves them out by default', async () => {
+            const wrapper = await openRepair([item], ['CVE-2026-1'])
+
+            expect(wrapper.get('[data-testid="new-findings-CVE-2026-1"]').text())
+                .toContain('2 new findings of a new version, not synchronized')
+            const optIn = wrapper.get('[data-testid="include-new-findings-CVE-2026-1"]')
+            expect((optIn.element as HTMLInputElement).checked).toBe(false)
+            expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-2026-1"]').text())
+                .toContain('1 finding will be updated')
+
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+            // No opt-in is sent: the call has no list of included vulnerabilities.
+            expect(mocks.applyBulkWorkflow.mock.calls[0]).toHaveLength(6)
+        })
+
+        it('sends the vulnerabilities whose new findings the reviewer included', async () => {
+            const wrapper = await openRepair([item], ['CVE-2026-1'])
+
+            await wrapper.get('[data-testid="include-new-findings-CVE-2026-1"]').setValue(true)
+            expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-2026-1"]').text())
+                .toContain('3 findings will be updated')
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+
+            const call = mocks.applyBulkWorkflow.mock.calls[0]
+            expect(call[3]).toEqual(['CVE-2026-1'])
+            expect(call[7]).toEqual(['CVE-2026-1'])
+        })
+
+        it('does not preselect a vulnerability that has new findings only; including them selects it', async () => {
+            const onlyNew = { ...item, finding_count: 0, repairs: [], requires_review: true }
+            const wrapper = await openRepair([onlyNew], ['CVE-2026-1'])
+
+            expect(wrapper.get('[data-testid="bulk-workflow-apply"]').attributes('disabled')).toBeDefined()
+            await wrapper.get('[data-testid="include-new-findings-CVE-2026-1"]').setValue(true)
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+
+            const call = mocks.applyBulkWorkflow.mock.calls[0]
+            expect(call[3]).toEqual(['CVE-2026-1'])
+            expect(call[7]).toEqual(['CVE-2026-1'])
+        })
+
+        it('drops the opt-in of a vulnerability that is no longer selected', async () => {
+            const other = { ...item, group_id: 'CVE-2026-2', new_finding_count: 0 }
+            const wrapper = await openRepair([item, other], ['CVE-2026-1', 'CVE-2026-2'])
+
+            await wrapper.get('[data-testid="include-new-findings-CVE-2026-1"]').setValue(true)
+            await wrapper.get('[data-testid="bulk-workflow-item-CVE-2026-1"]').trigger('click')
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+
+            const call = mocks.applyBulkWorkflow.mock.calls[0]
+            expect(call[3]).toEqual(['CVE-2026-2'])
+            expect(call).toHaveLength(6)
+        })
+
+        it('reports the new findings a run left unassessed', async () => {
+            mocks.applyBulkWorkflow.mockResolvedValue({
+                task_id: 'task-1', workflow, results: [],
+                summary: { attempted: 1, succeeded: 1, queued: 0, failed: 0, new_finding: 2 },
+            })
+            const wrapper = await openRepair([item], ['CVE-2026-1'])
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+
+            expect(wrapper.get('[data-testid="bulk-workflow-new-findings-left"]').text())
+                .toContain('2 new findings of a new version left unassessed')
+        })
+    })
+
     it('reuses a prepared preview when returning to a workflow', async () => {
         const secondWorkflow = { ...workflow, id: 'automatic-assessments', label: 'Restore CVSS' }
         mocks.getBulkWorkflowSummary.mockResolvedValue({

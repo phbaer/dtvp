@@ -180,6 +180,9 @@ class BulkWorkflowRequest(BaseModel):
 class BulkWorkflowApplyRequest(BulkWorkflowRequest):
     group_ids: list[str] = Field(default_factory=list)
     preview_token: str
+    # Selected groups whose new findings (added by a new project version)
+    # are to be synchronized too. Nothing is copied onto them otherwise.
+    include_new_findings: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -2126,6 +2129,9 @@ def _bulk_workflow_context(
         assessment_diagnostics=assessment_diagnostics,
         ticket_histories=getattr(deps.cache_manager, "get_ticket_histories", None),
         source=source,
+        include_new_findings=frozenset(
+            str(group_id) for group_id in getattr(req, "include_new_findings", None) or []
+        ),
         stored_assessments=getattr(deps.cache_manager, "get_cached_assessments", None),
     )
 

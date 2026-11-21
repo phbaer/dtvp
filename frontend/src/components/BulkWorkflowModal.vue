@@ -103,7 +103,7 @@ const selectedFindingCount = computed(() =>
             || item.recoverable_finding_count
             || item.syncable_finding_count
             || 0
-        ), 0)
+        ) + (includeNewIds.value.has(item.group_id) ? Number(item.new_finding_count || 0) : 0), 0)
 )
 const activeFilterCount = computed(() => Object.entries(activeFilters.value).filter(([, value]) =>
     Array.isArray(value) ? value.length > 0 : value !== '' && value != null && value !== false
@@ -111,6 +111,27 @@ const activeFilterCount = computed(() => Object.entries(activeFilters.value).fil
 
 const itemSelectable = (item: BulkWorkflowPreviewItem) =>
     selectableIds.value.includes(item.group_id)
+
+// Findings a new project version added stay unassessed unless the reviewer
+// includes them, per vulnerability.
+const includeNewIds = ref<Set<string>>(new Set())
+const newFindingCount = (item: BulkWorkflowPreviewItem) => Number(item.new_finding_count || 0)
+const offersNewFindings = (item: BulkWorkflowPreviewItem) =>
+    selectedWorkflowId.value === 'assessment-repair' && newFindingCount(item) > 0 && itemSelectable(item)
+const toggleIncludeNew = (item: BulkWorkflowPreviewItem) => {
+    if (processing.value || !offersNewFindings(item)) return
+    const next = new Set(includeNewIds.value)
+    if (next.has(item.group_id)) {
+        next.delete(item.group_id)
+    } else {
+        next.add(item.group_id)
+        // Including the new findings is a decision about this vulnerability.
+        if (!selectedIds.value.has(item.group_id)) {
+            selectedIds.value = new Set([...selectedIds.value, item.group_id])
+        }
+    }
+    includeNewIds.value = next
+}
 
 const automaticItemMatchesFilters = (item: BulkWorkflowPreviewItem) =>
     (automaticOutcomeFilters.value.size === 0
@@ -281,9 +302,10 @@ const itemDetail = (item: BulkWorkflowPreviewItem) => {
         return automaticAssessmentDetail(item)
     }
     if (selectedWorkflowId.value === 'assessment-repair') {
-        return item.repairable
-            ? `${plural(Number(item.finding_count || 0), 'finding')} will be updated`
-            : 'No automatic repair available'
+        if (!item.repairable) return 'No automatic repair available'
+        const updated = Number(item.finding_count || 0)
+        const added = includeNewIds.value.has(item.group_id) ? newFindingCount(item) : 0
+        return `${plural(updated + added, 'finding')} will be updated`
     }
     if (selectedWorkflowId.value === RESTORE_WORKFLOW_ID) {
         if (!item.restore_count) return 'Notes only; nothing to restore'
@@ -303,6 +325,7 @@ const loadPreview = async (workflowId: string) => {
     selectedWorkflowId.value = workflowId
     preview.value = null
     selectedIds.value = new Set()
+    includeNewIds.value = new Set()
     appliedResult.value = null
     ticketCopyState.value = {}
     error.value = ''
@@ -320,6 +343,7 @@ const loadPreview = async (workflowId: string) => {
         loading.value = false
         preview.value = cached
         selectedIds.value = defaultSelection(cached)
+        includeNewIds.value = new Set()
         return
     }
     loading.value = true
@@ -337,6 +361,7 @@ const loadPreview = async (workflowId: string) => {
         previewCache.set(cacheKey, result)
         preview.value = result
         selectedIds.value = defaultSelection(result)
+        includeNewIds.value = new Set()
         workflows.value = workflows.value.map(workflow =>
             workflow.id === workflowId
                 ? {
@@ -389,6 +414,7 @@ const chooseSourceFile = async (event: Event) => {
     previewRequestId += 1
     preview.value = null
     selectedIds.value = new Set()
+    includeNewIds.value = new Set()
     appliedResult.value = null
     sourceUpload.value = null
     sourceFileName.value = file.name
@@ -514,6 +540,12 @@ const applySelected = async () => {
     error.value = ''
     operationMessage.value = ''
     operationProgress.value = 0
+    const includeNew = Array.from(includeNewIds.value).filter(id => selectedIds.value.has(id))
+    const source = sourceArgs(preview.value.workflow.id)
+    // The list of included vulnerabilities is only sent when there is one.
+    const applyExtras = (
+        includeNew.length ? [source[0], includeNew] : source
+    ) as [string?, string[]?]
     try {
         const result = await applyBulkWorkflow(
             preview.value.workflow.id,
@@ -522,7 +554,7 @@ const applySelected = async () => {
             Array.from(selectedIds.value),
             preview.value.preview_token,
             updateOperationStatus,
-            ...sourceArgs(preview.value.workflow.id),
+            ...applyExtras,
         )
         appliedResult.value = result
         emit('applied', result)
@@ -652,6 +684,13 @@ watch(() => props.show, show => {
                             data-testid="bulk-workflow-changed-since-preview"
                         >
                             {{ appliedResult.summary.changed_since_preview }} changed since the preview and were left as they are; prepare the preview again to include them.
+                        </p>
+                        <p
+                            v-if="appliedResult.summary.new_finding"
+                            class="mt-1 text-xs text-slate-300"
+                            data-testid="bulk-workflow-new-findings-left"
+                        >
+                            {{ plural(appliedResult.summary.new_finding, 'new finding') }} of a new version left unassessed.
                         </p>
                     </div>
                     <div v-else-if="!preview && selectedWorkflow?.requires_source" data-testid="bulk-workflow-source-empty-state" class="flex flex-1 flex-col items-center justify-center text-center">
@@ -837,6 +876,28 @@ watch(() => props.show, show => {
                                     <span class="block truncate text-sm font-bold text-white">{{ item.group_id }}</span>
                                     <span class="block truncate text-[11px] italic text-slate-500">{{ item.title || itemDetail(item) }}</span>
                                     <span class="mt-1 block text-[10px] text-slate-400">{{ itemDetail(item) }}</span>
+                                    <span
+                                        v-if="newFindingCount(item) && !offersNewFindings(item)"
+                                        class="mt-1 block text-[10px] text-sky-200"
+                                        :data-testid="`new-findings-${item.group_id}`"
+                                    >{{ plural(newFindingCount(item), 'new finding') }} of a new version, not assessed by this workflow</span>
+                                    <label
+                                        v-if="offersNewFindings(item)"
+                                        class="mt-1 flex w-fit cursor-pointer items-center gap-2 text-[10px] text-sky-200"
+                                        :data-testid="`new-findings-${item.group_id}`"
+                                        @click.stop
+                                        @keydown.stop
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            class="h-3 w-3"
+                                            :checked="includeNewIds.has(item.group_id)"
+                                            :disabled="processing"
+                                            :data-testid="`include-new-findings-${item.group_id}`"
+                                            @change="toggleIncludeNew(item)"
+                                        />
+                                        <span>{{ plural(newFindingCount(item), 'new finding') }} of a new version, not synchronized. Synchronize {{ newFindingCount(item) === 1 ? 'it' : 'them' }} as well</span>
+                                    </label>
                                     <span
                                         v-if="selectedWorkflowId === 'assessment-repair'"
                                         class="mt-2 flex flex-wrap gap-1.5"

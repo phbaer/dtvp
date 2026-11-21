@@ -45,6 +45,7 @@ from .incomplete_sync import (
     _render_block,
     _sync_group,
     _team_key,
+    new_finding_ids,
 )
 
 
@@ -755,7 +756,7 @@ def _team_stage(
     groups: list[dict[str, Any]],
     context: BulkWorkflowContext,
     now_ms: int,
-) -> tuple[list[Payload], dict[str, dict[str, Any]], int]:
+) -> tuple[list[Payload], dict[str, dict[str, Any]], int, int]:
     """Synchronize incomplete groups and move former-team assessments."""
     payloads: list[Payload] = []
     info: dict[str, dict[str, Any]] = {}
@@ -769,6 +770,15 @@ def _team_stage(
         former: dict[str, Any] | None = None
         conflict: dict[str, Any] | None = None
         synchronized = 0
+        # Findings a new project version added stay unassessed: nothing is
+        # copied onto them unless the reviewer includes them for this
+        # vulnerability (ADR 0010 decision 7).
+        new = (
+            new_finding_ids(group)
+            if lifecycle in ("INCONSISTENT", "INCOMPLETE") else set()
+        )
+        include_new = group_id in context.include_new_findings
+        left_new = 0
 
         if lifecycle == "INCONSISTENT":
             # A conflict between current teams needs a human decision. One
@@ -782,11 +792,14 @@ def _team_stage(
             merged, conflict = combined
             rescored = _with_rescoring(merged, instances)
             for instance in instances:
+                if id(instance) in new and not include_new:
+                    left_new += 1
+                    continue
                 old = _details(instance)
                 details = preserve_ssvc_record(rescored(old), old)
                 if _differs(details, old) or calculate_aggregated_state(details) != _state(instance):
                     targets.append((instance, details))
-            if not targets:
+            if not targets and not left_new:
                 continue
         elif lifecycle == "INCOMPLETE":
             pending = any(_PENDING_RE.search(_details(instance)) for instance in instances)
@@ -803,6 +816,9 @@ def _team_stage(
             rescored = _with_rescoring(_render(blocks, pending=pending), instances)
             rescored_sync = _with_rescoring(sync_only, instances)
             for instance in instances:
+                if id(instance) in new and not include_new:
+                    left_new += 1
+                    continue
                 old = _details(instance)
                 details = preserve_ssvc_record(rescored(old), old)
                 if _differs(details, old) or calculate_aggregated_state(details) != _state(instance):
@@ -843,9 +859,15 @@ def _team_stage(
                 missing_identity += 1
                 continue
             payloads.append((instance, _payload(instance, calculate_aggregated_state(details), details)))
-        if synchronized or former or conflict:
-            info[group_id] = {"synchronized": synchronized, "former": former, "conflict": conflict}
-    return payloads, info, missing_identity
+        if synchronized or former or conflict or new:
+            info[group_id] = {
+                "synchronized": synchronized, "former": former, "conflict": conflict,
+                # All new findings of the group, and how many this run left.
+                "new_findings": len(new), "new_findings_left": left_new,
+            }
+    return payloads, info, missing_identity, sum(
+        entry["new_findings_left"] for entry in info.values()
+    )
 
 
 def _apply_payloads(
@@ -910,10 +932,10 @@ def _run(
     ticket_payloads, ticket_info = _ticket_stage(keep_alive[-1], context)
     record(ticket_payloads, {})
 
-    team_payloads, team_info, missing_identity = _team_stage(
+    team_payloads, team_info, missing_identity, new_left = _team_stage(
         keep_alive[-1], context, int(time.time() * 1000)
     )
-    record(team_payloads, {"missing_identity": missing_identity})
+    record(team_payloads, {"missing_identity": missing_identity, "new_finding": new_left})
 
     rescore_preview: dict[str, Any] = {"items": []}
     try:
@@ -1059,7 +1081,10 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
         if manual:
             review.append(f"Rescoring needs manual review on {_plural(manual, 'finding')}")
 
-    if not repairs and not review:
+    # Findings a new project version added: listed, and synchronized only
+    # when the reviewer includes them for this vulnerability.
+    new_findings = int(team.get("new_findings") or 0)
+    if not repairs and not review and not new_findings:
         return None
     return {
         "group_id": group_id,
@@ -1068,10 +1093,16 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
         "repairs": repairs,
         "review": review,
         "finding_count": finding_count,
-        "repairable": finding_count > 0,
-        # Not selected by default: the repair makes a decision, or part of
-        # the vulnerability cannot be repaired automatically.
-        "requires_review": bool(review) or any(repair.get("needs_review") for repair in repairs),
+        "new_finding_count": new_findings,
+        "repairable": finding_count > 0 or new_findings > 0,
+        # Not selected by default: the repair makes a decision, part of the
+        # vulnerability cannot be repaired automatically, or all it could
+        # do is fill new findings, which is the reviewer's choice.
+        "requires_review": (
+            bool(review)
+            or any(repair.get("needs_review") for repair in repairs)
+            or (new_findings > 0 and finding_count == 0)
+        ),
         "former_teams": (team.get("former") or team.get("conflict") or {}).get("former_teams", []),
         "rescore_findings": (rescore or {}).get("findings", []),
     }
@@ -1107,6 +1138,7 @@ def build_assessment_repair_preview(
         summary[f"{repair_id}_groups"] = count
         if count:
             topics.append({"id": repair_id, "label": label, "groups": count})
+    summary["new_findings"] = sum(item["new_finding_count"] for item in items)
     summary["review_first_groups"] = sum(
         item["repairable"] and item["requires_review"] for item in items
     )

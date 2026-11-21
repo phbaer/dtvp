@@ -118,7 +118,7 @@ The CVSS modal provides an interactive vector editor for contextual score adjust
 
 ![Bulk Changes dialog](screenshots/bulk-sync-modal.png)
 
-The Bulk Changes dialog previews the selected workflow before applying it in one action. Repair Assessments labels each applicable repair per vulnerability. Restore Team Assessments From Export first asks for a Dependency-Track export, shows the uploaded file (tool, project, export time, start of its SHA-256), and then lists per vulnerability the team assessments it would add as historical blocks, with the entries it could not match.
+The Bulk Changes dialog previews the selected workflow before applying it in one action. Repair Assessments labels each applicable repair per vulnerability; where a new version added findings, the row states their number and offers a checkbox to synchronize them as well ([New findings](review-workflows.md#new-findings)). Restore Team Assessments From Export first asks for a Dependency-Track export, shows the uploaded file (tool, project, export time, start of its SHA-256), and then lists per vulnerability the team assessments it would add as historical blocks, with the entries it could not match.
 
 ### Conflict Resolution
 

@@ -33,6 +33,9 @@ class BulkWorkflowContext:
     # The earlier versions of the assessments that ever named a ticket, per
     # finding (project, component, vulnerability), oldest first.
     ticket_histories: Optional[Callable[[], dict[tuple[str, str, str], list[dict[str, Any]]]]] = None
+    # Groups whose new findings (added by a new project version) the
+    # reviewer chose to include; nothing is copied onto them otherwise.
+    include_new_findings: frozenset[str] = frozenset()
     # The uploaded input of a workflow that reads one (``source_kind``).
     source: Any = None
     # The stored assessment of each given finding (state, details,
