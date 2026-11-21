@@ -108,6 +108,10 @@ class SsvcEnrichmentService:
         self.network_slots = asyncio.Semaphore(4)
         self.snapshot_lock = threading.RLock()
         self.snapshot_cache = None
+        # Counts this process's cache writes. The file's mtime and size alone
+        # can stay the same across a write within one clock tick of a coarse
+        # filesystem clock; the count makes the snapshot see its own writes.
+        self.write_count = 0
 
     def filter_snapshot(self) -> dict:
         """Read-only, shared snapshot for list filters; never fetch on a query."""
@@ -116,7 +120,7 @@ class SsvcEnrichmentService:
             unavailable = False
             try:
                 stat = Path(self.path).stat()
-                stamp = (stat.st_mtime_ns, stat.st_size)
+                stamp = (stat.st_mtime_ns, stat.st_size, self.write_count)
             except FileNotFoundError:
                 stamp = None
             except OSError:
@@ -157,6 +161,8 @@ class SsvcEnrichmentService:
                 connection.execute("INSERT OR REPLACE INTO entries VALUES (?, ?, ?)", (key, json.dumps(value), self.clock()))
                 connection.execute("DELETE FROM entries WHERE key IN (SELECT key FROM entries WHERE key != 'kev' ORDER BY touched DESC LIMIT -1 OFFSET ?)", (MAX_CACHE_ENTRIES,))
                 connection.commit()
+                with self.snapshot_lock:
+                    self.write_count += 1
                 return value
             row = connection.execute("SELECT value FROM entries WHERE key = ?", (key,)).fetchone()
             return json.loads(row[0]) if row else {}
