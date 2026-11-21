@@ -37,7 +37,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
      id="radar"
      transform="translate(22 22) scale(3.667)"
      fill="none"
-     stroke="#006568"
+     stroke="#169499"
      stroke-width="2"
      stroke-linecap="round"
      stroke-linejoin="round">
@@ -69,7 +69,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
        id="path7" />
   </g>
   <g
-     fill="#202B30"
+     fill="#6B7F88"
      font-family="Segoe UI, sans-serif"
      id="g8">
     <path
