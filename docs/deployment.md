@@ -212,6 +212,9 @@ DTVP's root `pyproject.toml` is its release-version source. Regenerate the root
 lockfile after changing that version. A manually pushed `v*` tag must match
 DTVP's packaged version before the container is published. The workflow
 publishes version tags and `latest` for the `dtvp` container package only.
+A pre-release version in PEP 440 form (`2.0.0rc1`, `2.0.0b2`, `2.0.0a1`;
+tag `v2.0.0rc1`) gets its version tag but does not move `latest`, and its
+Forgejo release is marked as a pre-release.
 External code-analysis services have their own releases and dependency state.
 
 The pipeline builds the image with Buildah inside the job container, so the
