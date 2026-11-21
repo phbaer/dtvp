@@ -4,7 +4,7 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff, Maximize2, Minimize2 } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
 
 import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
@@ -3189,14 +3189,22 @@ const teamBlockStateColor = (state?: string): string => {
         <div
             v-if="inconsistencyIssues.length > 0 || assessmentVariantCount > 1"
             data-testid="card-differences-banner"
-            class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded border border-indigo-500/40 bg-indigo-950/30 px-3 py-2 text-xs text-indigo-100"
+            :data-inconsistent="inconsistencyIssues.length > 0"
+            class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded border px-3 py-2 text-xs"
+            :class="inconsistencyIssues.length > 0
+                ? 'border-indigo-500/40 bg-indigo-950/30 text-indigo-100'
+                : 'border-white/10 bg-white/[0.03] text-slate-300'"
             role="status"
         >
             <div class="flex min-w-0 flex-1 items-start gap-2">
-                <AlertTriangle :size="14" class="mt-0.5 shrink-0 text-indigo-300" />
+                <!-- Only an inconsistency is a warning. Findings that carry
+                     different assessments (teams or versions decide
+                     differently) are expected and only noted. -->
+                <AlertTriangle v-if="inconsistencyIssues.length > 0" :size="14" class="mt-0.5 shrink-0 text-indigo-300" />
+                <Info v-else :size="14" class="mt-0.5 shrink-0 text-slate-400" />
                 <div class="min-w-0 space-y-1">
-                    <div class="font-bold">
-                        {{ inconsistencyIssues.length > 0 ? 'Why this is inconsistent' : 'The findings carry different assessments' }}
+                    <div :class="inconsistencyIssues.length > 0 ? 'font-bold' : 'font-semibold'">
+                        {{ inconsistencyIssues.length > 0 ? 'Why this is inconsistent' : 'Assessments differ between findings' }}
                     </div>
                     <div v-if="assessmentVariantCount > 1" data-testid="card-differences-variants">
                         <strong>{{ differingFindingCount }} of {{ visibleInstances.length }}</strong>

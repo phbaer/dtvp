@@ -26,6 +26,7 @@ vi.mock('../../lib/api', async () => {
 vi.mock('@lucide/vue', () => ({
     ChevronDown: { template: '<span />' },
     ChevronUp: { template: '<span />' },
+    Info: { template: '<span />' },
     Shield: { template: '<span />' },
     Calculator: { template: '<span />' },
     ExternalLink: { template: '<span />' },

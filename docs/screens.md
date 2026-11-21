@@ -94,7 +94,7 @@ A banner above the tabs (at the top of the context pane in the [assessment works
 
 ![Differences between findings](screenshots/assessment-differences.png)
 
-When findings carry different assessments, each one has a letter in the matrix and "Show differences" compares them field by field.
+When findings carry different assessments, each one has a letter in the matrix and "Show differences" compares them field by field. The card shows a warning ("Why this is inconsistent") only when the differences make the vulnerability inconsistent; differences that are expected, such as version-specific parts, get a neutral note ("Assessments differ between findings").
 
 ### Rescored CVSS
 
