@@ -1228,3 +1228,95 @@ def test_a_general_assessment_does_not_hide_the_teams_assessors():
     assessed_by = [p["value"] for p in entry["properties"] if p["name"] == "acme:assessed_by"]
     assert assessed_by == ["503309468, 550018796, 223057156"]
     assert _schema_errors(document) is None
+
+
+# -- version overrides (ADR 0010 section 11) ----------------------------------
+
+OVERRIDE = "[Version Override: legacy] [Override Reason: Not shipped in 1.x]"
+OVERRIDDEN = (
+    f"{OVERRIDE}\n\n--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: bob] "
+    "[Justification: CODE_NOT_PRESENT] ---\nThe parser is not in this line."
+)
+
+
+def _scope(entry):
+    return {
+        name: _property(entry, f"dtvp:{name}")
+        for name in (
+            "assessment_scope", "version_override", "version_override_reason",
+            "version_override_status",
+        )
+    }
+
+
+def test_an_approved_override_is_named_on_every_finding_of_the_version():
+    document = _vdr(
+        [_finding(C1), _finding(C2)],
+        # The second finding is inherited: untouched, only the marker.
+        [("NOT_AFFECTED", OVERRIDDEN), ("NOT_SET", OVERRIDE)],
+    )
+
+    entries = document["vulnerabilities"]
+    assert len(entries) == 2
+    for entry in entries:
+        assert _scope(entry) == {
+            "assessment_scope": ["version_override"],
+            "version_override": ["legacy"],
+            "version_override_reason": ["Not shipped in 1.x"],
+            "version_override_status": ["approved"],
+        }
+        # The finding's own pending marker is a different thing.
+        assert _property(entry, "dtvp:pending_review") == []
+    assert _valid(document)
+
+
+def test_a_pending_override_is_pending_also_on_an_inherited_finding():
+    document = _vdr(
+        [_finding(C1), _finding(C2)],
+        [
+            ("NOT_AFFECTED", f"{OVERRIDDEN}\n\n[Status: Pending Review]"),
+            ("NOT_SET", OVERRIDE),
+        ],
+    )
+
+    by_ref = {entry["affects"][0]["ref"]: entry for entry in document["vulnerabilities"]}
+    assert {tuple(_property(entry, "dtvp:version_override_status")) for entry in by_ref.values()} == {
+        ("pending",)
+    }
+    # Only the finding whose own text is pending says so.
+    assert sorted(len(_property(entry, "dtvp:pending_review")) for entry in by_ref.values()) == [0, 1]
+    assert _valid(document)
+
+
+def test_base_has_no_scope_properties_and_the_export_is_unchanged():
+    texts = [("NOT_AFFECTED", ASSESSED)]
+    document = _vdr([_finding(C1)], texts)
+    [entry] = document["vulnerabilities"]
+
+    assert _scope(entry) == {
+        "assessment_scope": [], "version_override": [],
+        "version_override_reason": [], "version_override_status": [],
+    }
+
+
+def test_two_labels_in_one_version_are_ambiguous():
+    other = "[Version Override: edge] [Override Reason: Patched]"
+    document = _vdr(
+        [_finding(C1), _finding(C2)],
+        [("NOT_AFFECTED", OVERRIDDEN), ("NOT_SET", other)],
+    )
+
+    for entry in document["vulnerabilities"]:
+        assert _scope(entry)["assessment_scope"] == ["ambiguous"]
+        assert _scope(entry)["version_override"] == []
+    assert _valid(document)
+
+
+def test_the_override_of_one_vulnerability_does_not_reach_another():
+    document = _vdr(
+        [_finding(C1), _finding(C1, vuln="CVE-2026-2", uuid="v2")],
+        [("NOT_AFFECTED", OVERRIDDEN), ("NOT_AFFECTED", ASSESSED)],
+    )
+
+    scopes = {entry["id"]: _scope(entry)["assessment_scope"] for entry in document["vulnerabilities"]}
+    assert scopes == {"CVE-2026-1": ["version_override"], "CVE-2026-2": []}

@@ -42,7 +42,9 @@ from .assessment_model import (
     ANALYSIS_RESPONSES,
     FORMER_TEAM_NOTE,
     SEE_GLOBAL_ASSESSMENT,
+    render_assessment,
 )
+from .assessment_scopes import AMBIGUOUS, BASE, assessment_scopes
 from .fixed_versions import derive_recommendation, display_name, installed_name
 
 VARIANT_INVENTORY = "inventory"
@@ -554,6 +556,47 @@ def _properties(
     return [{"name": f"{prefix}:{name}", "value": value} for name, value in properties]
 
 
+def _scope_properties(
+    fields_of_vulnerability: list[dict[str, Any]], prefix: str
+) -> list[dict[str, str]]:
+    """The version override of a vulnerability in this project version, from
+    the scope its findings put the version in (ADR 0010 section 11): none
+    for base; label, reason and status for an override, on every finding of
+    the version, inherited ones included."""
+    if not any(fields.get("version_override") for fields in fields_of_vulnerability):
+        return []
+    # The same scope rule as everywhere else: the findings of this version,
+    # as texts, through ``assessment_scopes``.
+    view = assessment_scopes(
+        {
+            "affected_versions": [
+                {
+                    "project_uuid": "version",
+                    "components": [
+                        {
+                            "analysis_state": fields["state"],
+                            "analysis_details": render_assessment(fields),
+                        }
+                        for fields in fields_of_vulnerability
+                    ],
+                }
+            ]
+        }
+    )
+    name = view.version_scopes.get("version", BASE)
+    if name == BASE:
+        return []
+    if name == AMBIGUOUS:
+        properties = [("assessment_scope", AMBIGUOUS)]
+    else:
+        scope = next(scope for scope in view.scopes if scope.name == name)
+        properties = [("assessment_scope", "version_override"), ("version_override", str(scope.label))]
+        if scope.reason:
+            properties.append(("version_override_reason", scope.reason))
+        properties.append(("version_override_status", "pending" if scope.pending else "approved"))
+    return [{"name": f"{prefix}:{name}", "value": value} for name, value in properties]
+
+
 def _historical(team: dict[str, Any]) -> str:
     """A team assessment of a former owner, as a JSON object.
 
@@ -952,12 +995,14 @@ def build_vdr(
 
     refs = _component_refs(document)
     groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+    fields_by_vulnerability: dict[str, list[dict[str, Any]]] = {}
     for finding, fields in zip(findings, assessments):
         vulnerability = finding.get("vulnerability") or {}
         component = finding.get("component") or {}
         vuln_id = str(vulnerability.get("vulnId") or vulnerability.get("uuid") or "")
         if not vuln_id:
             continue
+        fields_by_vulnerability.setdefault(vuln_id, []).append(fields)
         signature = (
             vuln_id,
             fields["state"], fields["suppressed"], fields["pending_review"],
@@ -980,6 +1025,7 @@ def build_vdr(
 
     recommendations = _Recommendations(fixed_versions, property_prefix)
     per_id: dict[str, int] = {}
+    scope_properties: dict[str, list[dict[str, str]]] = {}
     vulnerabilities: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = list(document.get("annotations") or [])
     # A stable order, so the same split gives each entry the same bom-ref in
@@ -1027,10 +1073,15 @@ def build_vdr(
             entry["analysis"] = analysis
         entry["affects"] = [{"ref": ref} for ref in group["refs"]]
         own_annotations, borrowed, undated = _annotations(read, bom_ref, moment)
+        if vuln_id not in scope_properties:
+            scope_properties[vuln_id] = _scope_properties(
+                fields_by_vulnerability[vuln_id], property_prefix
+            )
         if properties := [
             *_properties(
                 fields, read, property_prefix, borrowed=borrowed, undated=undated
             ),
+            *scope_properties[vuln_id],
             *provenance,
         ]:
             entry["properties"] = properties
