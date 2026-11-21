@@ -388,5 +388,536 @@
     ],
     "lifecycle": "INCONSISTENT",
     "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "override: an approved override beside base",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "ASSESSED"
+      }
+    ]
+  },
+  {
+    "name": "override: a pending override is never assessed",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it.\n\n[Status: Pending Review]"
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "NEEDS_APPROVAL",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "NEEDS_APPROVAL"
+      }
+    ]
+  },
+  {
+    "name": "override: two versions share a label",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.1",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "ASSESSED"
+      }
+    ]
+  },
+  {
+    "name": "override: one label with two reasons",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.1",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: customer fork]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "INCONSISTENT"
+      }
+    ]
+  },
+  {
+    "name": "override: an assessed finding without the marker in an overridden version",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-2",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [
+      "VERSION_OVERRIDE_PARTIAL"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "INCONSISTENT"
+      }
+    ]
+  },
+  {
+    "name": "override: an untouched finding in an overridden version is a gap",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-2",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "INCOMPLETE",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "INCOMPLETE",
+        "override_gaps": [
+          "project-2:component-2:vulnerability-1"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "override: a saved gap finding with the scope's marker completes the scope",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-2",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "ASSESSED"
+      }
+    ]
+  },
+  {
+    "name": "override: a new version maps to base",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "3.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "INCOMPLETE",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "INCOMPLETE"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "ASSESSED"
+      }
+    ]
+  },
+  {
+    "name": "override: two labels in one version",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-2",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: fork] [Override Reason: customer fork]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [
+      "VERSION_OVERRIDE_LABEL_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      }
+    ]
+  },
+  {
+    "name": "override: a team owning nothing in the overridden versions is not required there",
+    "tags": [
+      "TeamB",
+      "TeamC"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.",
+        "tags": [
+          "TeamB"
+        ]
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamC] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it.",
+        "tags": [
+          "TeamC"
+        ]
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "ASSESSED"
+      }
+    ]
+  },
+  {
+    "name": "override: every version overridden, the larger scope is primary",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "[Version Override: alpha]\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: beta] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.1",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: beta] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "EXPLOITABLE",
+    "scopes": [
+      {
+        "name": "alpha",
+        "lifecycle": "ASSESSED"
+      },
+      {
+        "name": "beta",
+        "lifecycle": "ASSESSED"
+      }
+    ]
+  },
+  {
+    "name": "override: base and override differing is not a conflict, a difference inside base is",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-4",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nRemoved in 1.1."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nThe old build ships it."
+      }
+    ],
+    "inconsistency_reasons": [
+      "TEAM_ASSESSMENT_MISMATCH",
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED",
+    "scopes": [
+      {
+        "name": "base",
+        "lifecycle": "INCONSISTENT"
+      },
+      {
+        "name": "legacy",
+        "lifecycle": "ASSESSED"
+      }
+    ]
   }
 ]

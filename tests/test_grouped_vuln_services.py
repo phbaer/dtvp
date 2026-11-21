@@ -517,6 +517,8 @@ def test_task_group_query_filters_inconsistency_reasons_with_or_semantics():
         "ANALYSIS_STATE_MISMATCH": 1,
         "TEAM_ASSESSMENT_MISMATCH": 1,
         "ASSESSMENT_DETAILS_MISMATCH": 1,
+        "VERSION_OVERRIDE_PARTIAL": 0,
+        "VERSION_OVERRIDE_LABEL_MISMATCH": 0,
     }
 
 

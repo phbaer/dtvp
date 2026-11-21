@@ -4,7 +4,7 @@
 
 | | |
 | :--- | :--- |
-| Status | Steps 0 to 4 of the [plan](#19-plan) implemented (step 4: the marker as a read-only field) |
+| Status | Steps 0 to 5 of the [plan](#19-plan) implemented (step 4: the marker as a read-only field; step 5: scopes and the lifecycle per scope, without per-scope SSVC summaries and `max_rescored_cvss`) |
 | Decision | [ADR 0010: Version overrides of an assessment](adr/0010-version-overrides.md), accepted 2026-11-20 |
 | Checked | Against the code at origin/main fc999882 on 2026-11-20, by reading it, not by running it. File and line references are those of that commit; the code wins where it has moved since |
 | Changes marked **(v2)** | Resolutions of the second design review |

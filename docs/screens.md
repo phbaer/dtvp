@@ -94,7 +94,7 @@ A banner above the tabs (at the top of the context pane in the [assessment works
 
 ![Differences between findings](screenshots/assessment-differences.png)
 
-When findings carry different assessments, each one has a letter in the matrix and "Show differences" compares them field by field. The card shows a warning ("Why this is inconsistent") only when the differences make the vulnerability inconsistent; differences that are expected, such as version-specific parts, get a neutral note ("Assessments differ between findings").
+When findings carry different assessments, each one has a letter in the matrix and "Show differences" compares them field by field. The card shows a warning ("Why this is inconsistent") only when the differences make the vulnerability inconsistent; differences that are expected, such as version-specific parts, get a neutral note ("Assessments differ between findings"). A version with its own assessment (a [version override](assessment-model.md#scopes-and-lifecycle)) carries "override: <label>" under its column header, and the card lists the overrides above the banner, with "pending approval" until a reviewer approves.
 
 ### Rescored CVSS
 

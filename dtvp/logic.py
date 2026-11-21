@@ -1245,6 +1245,17 @@ def populate_group_dependency_chains(
     return group
 
 
+def _display_state(instances: List[Dict[str, Any]]) -> str:
+    """The state one group (or scope) counts under in the statistics."""
+    states = set(i.get("analysis_state") or "NOT_SET" for i in instances)
+    non_missing_states = set(s for s in states if s != "NOT_SET")
+    if not non_missing_states:
+        return "NOT_SET"
+    if len(non_missing_states) == 1:
+        return "INCOMPLETE" if "NOT_SET" in states else next(iter(non_missing_states))
+    return "INCONSISTENT"
+
+
 def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Calculates statistics from grouped vulnerabilities.
@@ -1261,6 +1272,8 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
         "total_unique": len(grouped_vulns),
         "total_findings": 0,
         "affected_projects_count": 0,
+        # Groups with a version override (ADR 0010).
+        "groups_with_overrides": 0,
     }
 
     project_uuids = set()
@@ -1289,18 +1302,32 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
 
                 all_instances.append(comp)
 
-        states = set(i.get("analysis_state") or "NOT_SET" for i in all_instances)
-        non_missing_states = set(s for s in states if s != "NOT_SET")
+        from .assessment_scopes import assessment_scopes
 
-        if not non_missing_states:
-            display_state = "NOT_SET"
-        elif len(non_missing_states) == 1:
-            if "NOT_SET" in states:
+        view = assessment_scopes(group)
+        if view.has_overrides:
+            # Each scope decides on its own; an approved override is never
+            # INCONSISTENT only because it differs from base (ADR 0010).
+            stats["groups_with_overrides"] += 1
+            primary = view.primary
+            scope_states = {
+                scope.name: _display_state(scope.instances)
+                for scope in view.scopes
+                if scope.instances
+            }
+            values = set(scope_states.values())
+            if view.ambiguous or "INCONSISTENT" in values:
+                display_state = "INCONSISTENT"
+            elif "INCOMPLETE" in values or (
+                "NOT_SET" in values and len(values) > 1
+            ):
                 display_state = "INCOMPLETE"
             else:
-                display_state = list(non_missing_states)[0]
+                display_state = scope_states.get(
+                    primary.name if primary else "", "NOT_SET"
+                )
         else:
-            display_state = "INCONSISTENT"
+            display_state = _display_state(all_instances)
 
         stats["state_counts"][display_state] = (
             stats["state_counts"].get(display_state, 0) + 1

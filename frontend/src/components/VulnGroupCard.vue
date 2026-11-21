@@ -7,6 +7,7 @@ import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
 
 import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
+import { AMBIGUOUS_SCOPE, BASE_SCOPE, getAssessmentScopes } from '../lib/assessmentScopes'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
@@ -261,6 +262,21 @@ const actionButtonApprove = 'border-green-600 bg-green-600 text-white hover:bg-g
 const actionButtonSecondary = 'border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
 const findingMatrixRef = ref<{ openDifferences: () => void } | null>(null)
 const assessmentVariantCount = computed(() => groupedAssessments.value.length)
+// Version overrides (ADR 0010), read-only until scoped saves exist: which
+// versions have their own assessment, and whether it is approved.
+const versionOverrideScopes = computed(() => {
+    const view = getAssessmentScopes(props.group)
+    if (!view.hasOverrides) return []
+    const versionsOf = (scope: (typeof view.scopes)[number]) => scope.versions
+        .map(version => version.version || version.project_uuid)
+        .join(', ')
+    return [
+        ...view.scopes
+            .filter(scope => scope.name !== BASE_SCOPE && scope.instances.length > 0)
+            .map(scope => ({ key: scope.name, label: scope.label || scope.name, versions: versionsOf(scope), pending: scope.pending, ambiguous: false })),
+        ...(view.ambiguous.length ? [{ key: AMBIGUOUS_SCOPE, label: 'two overrides', versions: '', pending: false, ambiguous: true }] : []),
+    ]
+})
 const differingFindingCount = computed(() => visibleInstances.value.length - Math.max(
     0,
     ...groupedAssessments.value.map(assessment => assessment.instances.length),
@@ -3186,6 +3202,22 @@ const teamBlockStateColor = (state?: string): string => {
             :role="isWorkspace ? 'region' : undefined"
             :aria-label="isWorkspace ? 'Context' : undefined"
         >
+        <div
+            v-if="versionOverrideScopes.length > 0"
+            data-testid="card-version-scopes"
+            class="mb-3 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-300"
+        >
+            <span class="text-slate-500">Version overrides:</span>
+            <span
+                v-for="scope in versionOverrideScopes"
+                :key="scope.key"
+                data-testid="card-version-scope"
+                class="rounded border px-1.5 py-0.5"
+                :class="scope.ambiguous ? 'border-red-400/40 text-red-200' : 'border-sky-400/30 text-sky-200'"
+            >
+                {{ scope.label }}<template v-if="scope.versions"> · {{ scope.versions }}</template><template v-if="scope.pending"> · pending approval</template>
+            </span>
+        </div>
         <div
             v-if="inconsistencyIssues.length > 0 || assessmentVariantCount > 1"
             data-testid="card-differences-banner"

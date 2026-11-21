@@ -5,7 +5,9 @@ import {
     getGroupInconsistencyReasons,
     getGroupLifecycle,
     getGroupTechnicalState,
+    getScopedAssessment,
 } from '../assessment-helpers'
+import { getAssessmentScopes } from '../assessmentScopes'
 
 // fixtures/assessment_scope_cases.json is also read by the server's tests
 // (tests/test_assessment_comparison.py): both sides must compare the findings
@@ -14,10 +16,11 @@ import {
 interface ScopeCase {
     name: string
     tags: string[]
-    instances: Array<Record<string, string>>
+    instances: Array<Record<string, any>>
     inconsistency_reasons: string[]
     lifecycle: string
     technical_state: string
+    scopes?: Array<{ name: string; lifecycle: string; override_gaps?: string[] }>
 }
 const scopeCases = scopeCasesJson as ScopeCase[]
 
@@ -57,6 +60,26 @@ describe('what the findings of a vulnerability must agree on', () => {
                 .toEqual([...scopeCase.inconsistency_reasons].sort())
         })
     }
+
+    for (const scopeCase of scopeCases.filter(item => item.scopes)) {
+        it(`derives the scopes as the server does: ${scopeCase.name}`, () => {
+            const group = groupOf(scopeCase.instances, scopeCase.tags)
+            const scoped = getScopedAssessment(group, getAssessmentScopes(group), scopeCase.tags)
+
+            expect(scoped.scopes.map(scope => scope.name)).toEqual(scopeCase.scopes!.map(scope => scope.name))
+            for (const expected of scopeCase.scopes!) {
+                const scope = scoped.scopes.find(item => item.name === expected.name)!
+                expect(scope.lifecycle).toBe(expected.lifecycle)
+                expect(scope.gaps).toEqual(expected.override_gaps || [])
+            }
+        })
+    }
+
+    it('finds no overrides in the cases without scopes', () => {
+        for (const scopeCase of scopeCases.filter(item => !item.scopes)) {
+            expect(getAssessmentScopes(groupOf(scopeCase.instances, scopeCase.tags)).hasOverrides).toBe(false)
+        }
+    })
 
     it('orders states of equal priority by name', () => {
         const states = ['ZULU', 'ALPHA', 'MIKE']

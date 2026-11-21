@@ -68,6 +68,29 @@ def test_the_findings_compare_as_the_shared_cases_say(case):
     assert metadata["technical_state"] == case["technical_state"]
 
 
+SCOPE_CASES = [case for case in CASES if "scopes" in case]
+
+
+@pytest.mark.parametrize("case", SCOPE_CASES, ids=[case["name"] for case in SCOPE_CASES])
+def test_the_scopes_are_as_the_shared_cases_say(case):
+    metadata = _group(case["instances"], case["tags"])["list_metadata"]
+    scopes = {scope["name"]: scope for scope in metadata["assessment_scopes"]}
+
+    assert [scope["name"] for scope in metadata["assessment_scopes"]] == [
+        expected["name"] for expected in case["scopes"]
+    ]
+    for expected in case["scopes"]:
+        scope = scopes[expected["name"]]
+        assert scope["lifecycle"] == expected["lifecycle"]
+        assert scope["override_gaps"] == expected.get("override_gaps", [])
+
+
+def test_groups_without_overrides_carry_no_scopes():
+    plain = [case for case in CASES if "scopes" not in case]
+    for case in plain:
+        assert "assessment_scopes" not in _group(case["instances"], case["tags"])["list_metadata"]
+
+
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 def test_the_result_does_not_depend_on_the_order_of_the_findings(case):
     metadata = _group(list(reversed(case["instances"])), case["tags"])["list_metadata"]

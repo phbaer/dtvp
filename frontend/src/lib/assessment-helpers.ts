@@ -1,3 +1,4 @@
+import { combineLifecycles, getAssessmentScopes, scopedGroup, type AssessmentScopeView } from './assessmentScopes';
 import type { GroupedVuln, InconsistencyReason, Tags, TagValue } from '../types';
 import { normalizeInconsistencyReasons } from './inconsistency';
 import { maskSsvcDetails, ssvcDetailsPattern, stripSsvcDetails } from './ssvc';
@@ -274,6 +275,9 @@ export const comparableAssessmentText = (details: string | undefined | null): st
         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
         .replace(/\[Status: Pending Review\]/g, '')
         .replace(/\[Version Coverage:\s*[^\]]*\]/g, '')
+        // Findings are compared within their scope, the reason on its own.
+        .replace(/\[Version Override:\s*[^\]]*\]/g, '')
+        .replace(/\[Override Reason:\s*[^\]]*\]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 
@@ -1198,7 +1202,73 @@ export function getGroupInconsistencyReasons(group: GroupedVuln): InconsistencyR
     if (group.list_metadata && Array.isArray(group.list_metadata.inconsistency_reasons)) {
         return normalizeInconsistencyReasons(group.list_metadata.inconsistency_reasons);
     }
+    const view = getAssessmentScopes(group);
+    if (view.hasOverrides) return getScopedAssessment(group, view, undefined).reasons;
     return getGroupInconsistencyReasonsFromSummary(group, getGroupAssessmentSummary(group));
+}
+
+export interface ScopedAssessmentScope {
+    name: string;
+    label: string | null;
+    lifecycle: string;
+    reasons: InconsistencyReason[];
+    gaps: string[];
+    pending: boolean;
+    technicalState: string;
+}
+
+/**
+ * Lifecycle, reasons and technical state of a vulnerability with version
+ * overrides: the rules run inside each scope and are combined (ADR 0010
+ * section 5), as on the server (grouped_vuln_services._scoped_lifecycle).
+ */
+export function getScopedAssessment(
+    group: GroupedVuln,
+    view: AssessmentScopeView,
+    requiredTeamsOrTags: Tags | undefined,
+    teamMapping?: Record<string, string | string[]>,
+): { lifecycle: string; reasons: InconsistencyReason[]; technicalState: string; scopes: ScopedAssessmentScope[] } {
+    const reasons: InconsistencyReason[] = [];
+    const scopes: ScopedAssessmentScope[] = [];
+    let technicalState = 'NOT_SET';
+    for (const scope of view.scopes) {
+        if (scope.instances.length === 0) continue;
+        const part = scopedGroup(group, scope.instances);
+        const summary = buildGroupAssessmentSummary(part);
+        const scopeReasons = getGroupInconsistencyReasonsFromSummary(part, summary);
+        if (scope.partial.length > 0) scopeReasons.push('VERSION_OVERRIDE_PARTIAL');
+        if (scope.reasonMismatch && !scopeReasons.includes('ASSESSMENT_DETAILS_MISMATCH')) {
+            scopeReasons.push('ASSESSMENT_DETAILS_MISMATCH');
+        }
+        // The teams owning the scope's findings, else the given teams.
+        const owned = scope.instances.some(instance => Array.isArray(instance.tags));
+        const teams = owned
+            ? scope.instances.flatMap(instance => (instance.tags || []) as TagValue[])
+            : requiredTeamsOrTags;
+        const lifecycle = scopeReasons.length > 0
+            ? 'INCONSISTENT'
+            : getGroupLifecycleFromSummary(part, summary, teams, teamMapping);
+        for (const reason of scopeReasons) if (!reasons.includes(reason)) reasons.push(reason);
+        if (scope === view.primary) technicalState = summary.technicalState;
+        scopes.push({
+            name: scope.name,
+            label: scope.label,
+            lifecycle,
+            reasons: scopeReasons,
+            gaps: scope.gaps,
+            pending: scope.pending,
+            technicalState: summary.technicalState,
+        });
+    }
+    if (view.ambiguous.length > 0 && !reasons.includes('VERSION_OVERRIDE_LABEL_MISMATCH')) {
+        reasons.push('VERSION_OVERRIDE_LABEL_MISMATCH');
+    }
+    return {
+        lifecycle: combineLifecycles(scopes.map(scope => scope.lifecycle), view.ambiguous.length > 0),
+        reasons,
+        technicalState,
+        scopes,
+    };
 }
 
 const getGroupLifecycleFromSummary = (
@@ -1272,6 +1342,8 @@ const getGroupLifecycleFromSummary = (
 }
 
 export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags | undefined, teamMapping?: Record<string, string | string[]>): string {
+    const view = getAssessmentScopes(group);
+    if (view.hasOverrides) return getScopedAssessment(group, view, requiredTeamsOrTags, teamMapping).lifecycle;
     return getGroupLifecycleFromSummary(group, getGroupAssessmentSummary(group), requiredTeamsOrTags, teamMapping);
 }
 
@@ -1280,6 +1352,9 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
  * Logic: Global Assessment State -> Worst Team Assessment State fallback.
  */
 export function getGroupTechnicalState(group: GroupedVuln): string {
+    // With version overrides, the primary scope's state (base if it has findings).
+    const view = getAssessmentScopes(group);
+    if (view.hasOverrides) return getScopedAssessment(group, view, undefined).technicalState;
     return getGroupAssessmentSummary(group).technicalState;
 }
 
