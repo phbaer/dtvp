@@ -434,3 +434,41 @@ async def test_gone_findings_are_listed_per_version_and_by_name(client, queued):
         "project_uuid": "nothing", "last_read": None, "gone": {}, "findings": [],
     }
     assert missing_name.status_code == 422
+
+
+async def test_gone_findings_are_acknowledged_for_everyone(client, queued):
+    queued.get_vulnerabilities.return_value = [_finding(1)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    [gone] = client.get("/api/project/p1/gone-findings").json()["findings"]
+    assert gone["acknowledged_by"] is None and gone["needs_attention"] is False
+    ref = {"component_uuid": gone["component_uuid"], "vulnerability_uuid": gone["vulnerability_uuid"]}
+
+    done = client.post(
+        "/api/gone-findings/acknowledge", json={"project_uuid": "p1", "findings": [ref]}
+    )
+    again = client.post(
+        "/api/gone-findings/acknowledge", json={"project_uuid": "p1", "findings": [ref]}
+    )
+    [after] = client.get("/api/project/p1/gone-findings").json()["findings"]
+    undone = client.post(
+        "/api/gone-findings/acknowledge",
+        json={"project_uuid": "p1", "findings": [ref], "acknowledged": False},
+    )
+    [withdrawn] = client.get("/api/project/p1/gone-findings").json()["findings"]
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        analyst = client.post(
+            "/api/gone-findings/acknowledge", json={"project_uuid": "p1", "findings": [ref]}
+        )
+    assert analyst.status_code == 403
+    empty = client.post("/api/gone-findings/acknowledge", json={"project_uuid": "p1", "findings": []})
+    blank = client.post(
+        "/api/gone-findings/acknowledge",
+        json={"project_uuid": "p1", "findings": [{"component_uuid": "", "vulnerability_uuid": "v"}]},
+    )
+
+    assert (done.json(), again.json(), undone.json()) == (
+        {"changed": 1}, {"changed": 0}, {"changed": 1},
+    )
+    assert after["acknowledged_by"] and after["acknowledged_at"]
+    assert withdrawn["acknowledged_by"] is None
+    assert (empty.status_code, blank.status_code) == (422, 422)

@@ -472,12 +472,15 @@ class SqliteDumpTarget:
             "successor_component_uuid",
             "carry_over",
             "returned_at",
+            # Optional: dumps written before acknowledgements lack them.
+            "acknowledged_by",
+            "acknowledged_at",
         )
         self._db(FINDING_LIFECYCLE_MIGRATION_NAMESPACE).execute(
             "INSERT INTO finding_presence (project_uuid, component_uuid, "
             f"vulnerability_uuid, {', '.join(columns)}) "
             f"VALUES (?, ?, ?, {', '.join('?' for _ in columns)})",
-            (*_key(record), *(record[column] for column in columns)),
+            (*_key(record), *(record.get(column) for column in columns)),
         )
 
     def _write_finding_read(self, record: dict[str, Any]) -> None:

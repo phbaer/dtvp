@@ -579,6 +579,13 @@ class SqliteDumpSource:
                         "returned_at",
                     )
                 },
+                # Only when set: dumps written before acknowledgements, and
+                # findings nobody acknowledged, have no such fields.
+                **{
+                    column: row[column]
+                    for column in ("acknowledged_by", "acknowledged_at")
+                    if row[column] is not None
+                },
             }
 
     def _finding_read(self, connection: sqlite3.Connection) -> Iterator[dict[str, Any]]:
