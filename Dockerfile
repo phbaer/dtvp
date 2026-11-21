@@ -22,6 +22,8 @@ COPY frontend/ ./
 
 # vue-tsc type-checks frontend test sources, which import the canonical rules.
 COPY data/rescore_rules.json /app/data/rescore_rules.json
+# The logo the frontend bundles (src/lib/brand.ts).
+COPY data/dtvp-lucide-radar.svg /app/data/dtvp-lucide-radar.svg
 COPY dtvp/resources/ssvc /app/dtvp/resources/ssvc
 
 # Build the frontend for production

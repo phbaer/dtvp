@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { projectHeaderState } from './lib/projectHeaderStore'
 import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
+import { radarIconUrl } from './lib/brand'
 import { buildVersionStore, recordServerIdentity } from './lib/buildVersion'
 import { eventStream } from './lib/eventStream'
 import {
@@ -365,8 +366,10 @@ const reloadForUpdate = () => {
                 <div class="flex flex-wrap items-center gap-3">
                     <router-link
                         to="/"
-                        class="text-lg font-black uppercase tracking-[0.3em] text-slate-100 hover:text-white transition-colors"
+                        class="inline-flex items-center gap-2 text-lg font-black uppercase tracking-[0.3em] text-slate-100 hover:text-white transition-colors"
+                        data-testid="brand"
                     >
+                        <img :src="radarIconUrl" alt="" class="h-6 w-6" />
                         DTVP
                     </router-link>
 
@@ -479,7 +482,7 @@ const reloadForUpdate = () => {
                             Logout
                         </button>
                     </div>
-                    <div v-else>Dependency Track Vulnerability Processor</div>
+                    <div v-else>Does This Violate Policy?</div>
                 </div>
             </div>
         </header>
