@@ -1752,6 +1752,132 @@ async def test_the_import_needs_nothing_but_the_source_protocol(tmp_path):
     await manager.close()
 
 
+def _same_version_bom(*refs):
+    return {
+        "components": [
+            {"bom-ref": ref, "name": "lib-a", "purl": f"pkg:maven/org.example/lib-a@{version}"}
+            for ref, version in refs
+        ]
+    }
+
+
+def _lib3(component_uuid, version, state="NOT_SET", details=""):
+    finding = _lib(component_uuid, version, state, details, vuln="v3")
+    finding["vulnerability"]["vulnId"] = "CVE-2026-3"
+    return finding
+
+
+async def _carry_as_before_the_fix(manager, client, monkeypatch, findings, bom):
+    """A read that carries like builds before a756a396: a recreated
+    component's assessment gets the review marker too."""
+    import dtvp.finding_lifecycle_services as lifecycle
+
+    with monkeypatch.context() as patched:
+        patched.setattr(lifecycle, "same_component_version", lambda row, target: False)
+        client.get_vulnerabilities.return_value = findings
+        client.get_bom.return_value = bom
+        return await manager.import_findings(client, "p1")
+
+
+async def test_an_earlier_review_marker_on_a_recreated_component_is_taken_back(
+    tmp_path, monkeypatch
+):
+    """Sixth reading, item 1: carries of builds before the recreated rule
+    keep [Status: Pending Review]. The next read takes it back where the
+    component is the same, the old value was approved and nobody saved
+    since; once only."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [
+        _lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA),
+        _lib("c-old", "1.0", "NOT_AFFECTED", _BETA, vuln="v2"),
+        _lib3("c-up", "1.0", "NOT_AFFECTED", _ALPHA),
+    ]
+    await manager.import_findings(client, "p1")
+
+    findings = [
+        _lib("c-same", "1.0"),
+        _lib("c-same", "1.0", vuln="v2"),
+        _lib3("c-next", "1.1"),
+    ]
+    bom = _same_version_bom(("c-same", "1.0"), ("c-next", "1.1"))
+    carried = await _carry_as_before_the_fix(manager, client, monkeypatch, findings, bom)
+    assert len(carried.carried_over) == 3
+    for key in (("p1", "c-same", "v1"), ("p1", "c-same", "v2"), ("p1", "c-next", "v3")):
+        assert "[Status: Pending Review]" in manager.get_assessment_overlay(*key)["analysisDetails"]
+    # Someone saved v2 since: it stays as it is.
+    saved = {
+        "project_uuid": "p1", "component_uuid": "c-same", "vulnerability_uuid": "v2",
+        "state": "NOT_AFFECTED", "details": _BETA + "\n\n[Status: Pending Review]", "suppressed": False,
+    }
+    await manager.persist_assessment_updates([saved], author="kim")
+
+    client.get_vulnerabilities.return_value = findings
+    await manager.import_findings(client, "p1")
+
+    same = manager.get_assessment_overlay("p1", "c-same", "v1")
+    assert same["analysisDetails"] == _ALPHA
+    assert [entry["origin"] for entry in manager.get_assessment_history("p1", "c-same", "v1")][:2] == [
+        "carried-over-recreated", "carried-over",
+    ]
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay("p1", "c-same", "v2")["analysisDetails"]
+    # Another version: the review stays.
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay("p1", "c-next", "v3")["analysisDetails"]
+
+    revisions = len(manager.get_assessment_history("p1", "c-same", "v1"))
+    await manager.import_findings(client, "p1")
+    assert len(manager.get_assessment_history("p1", "c-same", "v1")) == revisions
+    await manager.close()
+
+
+async def test_an_earlier_carry_of_a_pending_value_keeps_its_review(tmp_path, monkeypatch):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [
+        _lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA + "\n\n[Status: Pending Review]"),
+    ]
+    await manager.import_findings(client, "p1")
+    findings = [_lib("c-same", "1.0")]
+    await _carry_as_before_the_fix(
+        manager, client, monkeypatch, findings, _same_version_bom(("c-same", "1.0"))
+    )
+
+    await manager.import_findings(client, "p1")
+
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay("p1", "c-same", "v1")["analysisDetails"]
+    await manager.close()
+
+
+@pytest.mark.parametrize("successor_text, superseded", [(_BETA, True), (_BETA + "\n\n[Status: Pending Review]", False)])
+async def test_a_gone_record_is_superseded_once_its_successor_has_an_approved_assessment(
+    tmp_path, successor_text, superseded
+):
+    """Sixth reading, item 8: the old record of a finding whose successor
+    has its own assessment is no carry candidate once that is approved."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA)]
+    await manager.import_findings(client, "p1")
+
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.1")]
+    client.get_bom.return_value = _bom("c-new")
+    # The successor is assessed in DTVP before the read that sees it.
+    await manager.persist_assessment_updates(
+        [{
+            "project_uuid": "p1", "component_uuid": "c-new", "vulnerability_uuid": "v1",
+            "state": "EXPLOITABLE", "details": successor_text, "suppressed": False,
+        }],
+        author="kim",
+    )
+    await manager.import_findings(client, "p1")
+
+    row = manager.finding_lifecycle.presence("p1")[("c-old", "v1")]
+    assert row["carry_over"] == "own_assessment"
+    status = manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))["sync_status"]
+    assert (status == "superseded") is superseded
+    await manager.close()
+
+
 async def test_a_recreated_component_keeps_its_assessment_without_review(tmp_path):
     """The source recreates the same component under a new ID (a BOM uploaded
     again): the assessment moves over as it was, an approved one stays
@@ -2032,7 +2158,9 @@ async def test_a_successor_with_its_own_assessment_takes_nothing_over(tmp_path):
     assert result.carried_over == []
     row = manager.finding_lifecycle.presence("p1")[("c-old", "v1")]
     assert (row["gone_reason"], row["carry_over"]) == ("replaced", "own_assessment")
-    assert manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))["sync_status"] == "inactive"
+    # The successor's own value is approved (no review marker): the old
+    # record is no carry candidate any more.
+    assert manager.assessment_outbox.get_overlay(("p1", "c-old", "v1"))["sync_status"] == "superseded"
     assert "Reachable." in manager.assessment_outbox.get_overlay(("p1", "c-new", "v1"))["analysisDetails"]
     await manager.close()
 

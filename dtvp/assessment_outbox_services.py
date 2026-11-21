@@ -1830,6 +1830,54 @@ class AssessmentOutboxStore:
             (SYNC_SUPERSEDED, now, *key),
         )
 
+    def keys_last_written_by(
+        self, project_uuid: str, origins: Iterable[str]
+    ) -> set[AssessmentKey]:
+        """Findings of a project whose latest revision has one of these
+        origins: nobody wrote them since."""
+        self._ensure_initialized()
+        wanted = sorted(set(origins))
+        if not wanted:
+            return set()
+        marks = ", ".join("?" for _ in wanted)
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT r.project_uuid, r.component_uuid, r.vulnerability_uuid
+                FROM assessment_revisions r
+                JOIN (
+                    SELECT project_uuid, component_uuid, vulnerability_uuid,
+                           MAX(revision_id) AS last_id
+                    FROM assessment_revisions
+                    WHERE project_uuid = ?
+                    GROUP BY project_uuid, component_uuid, vulnerability_uuid
+                ) latest ON latest.last_id = r.revision_id
+                WHERE r.origin IN ({marks})
+                """,
+                (project_uuid, *wanted),
+            ).fetchall()
+        return {(str(row[0]), str(row[1]), str(row[2])) for row in rows}
+
+    def supersede_many(self, keys: Iterable[AssessmentKey]) -> list[AssessmentKey]:
+        """Stop following these records: kept, no longer active, no longer
+        carry candidates. Records already superseded are skipped."""
+        self._ensure_initialized()
+        now = _utc_now_iso()
+        with self._lock:
+            targets = [
+                key for key in dict.fromkeys(keys)
+                if (state := self._states.get(key)) is not None
+                and state.get("sync_status") != SYNC_SUPERSEDED
+            ]
+            if not targets:
+                return []
+            with closing(self._connect()) as connection:
+                with connection:
+                    for key in targets:
+                        self._supersede(connection, key, now)
+                self._reload_keys(connection, targets)
+            return targets
+
     def project_states(self, project_uuid: str) -> dict[AssessmentKey, dict[str, Any]]:
         """The local records of one project's findings, by finding."""
         self._ensure_initialized()

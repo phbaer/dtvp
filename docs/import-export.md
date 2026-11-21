@@ -312,10 +312,26 @@ be read at all is not acted on.
    that agree apart from the pending-review marker, is saved as a new
    revision with origin `carried-over`, marked `[Status: Pending Review]`,
    and queued for export like any other change; the old records become
-   `superseded`. If the records disagree, nothing is carried over and the
-   gone findings say so ("assessments differ"). If the new finding already
-   has an assessment, nothing is carried over ("successor has its own
-   assessment").
+   `superseded`. When every old record's component had the new one's name,
+   version and package URL (Dependency-Track recreated the same component,
+   typically a BOM uploaded again), the value is carried unchanged, without
+   the marker, with origin `carried-over-recreated`. If the records
+   disagree, nothing is carried over and the gone findings say so
+   ("assessments differ"). If the new finding already has an assessment,
+   nothing is carried over ("successor has its own assessment"); once that
+   assessment is approved (a record without the pending-review marker), the
+   old record becomes `superseded`, so it is no candidate when the component
+   is recreated again.
+
+   Carries of builds before the recreated rule (2.0.0rc1 and earlier) put
+   the marker on a recreated component's assessment too. Every read takes
+   it back where the record still holds exactly the carried value (its
+   latest revision is the `carried-over` one: nobody saved since), every
+   old record's component had the same name, version and package URL, and
+   none of their values was pending review: a new revision with origin
+   `carried-over-recreated` restores the value without the marker and is
+   queued for export. It runs once per record; anything saved since is
+   left alone.
 
    The plan is made from the records as they were after the gone findings
    were retired, and saved in one transaction that checks them again. A
@@ -378,8 +394,9 @@ vulnerabilities with more than 30 findings only the first 30 are loaded.
 `mcp-assessment` (an agent), `bulk-workflow`, `assessment-deletion`,
 `export-discarded`, `import` (adopted from Dependency-Track), `import-review`
 (an adopted value with a version override marker, marked pending review),
-`carried-over`
-and `carried-over-by-vulnerability` (taken over from a replaced finding; see
+`carried-over`, `carried-over-recreated` (taken over unchanged from the same
+component recreated under a new ID, or such a carry's review marker taken
+back) and `carried-over-by-vulnerability` (taken over from a replaced finding; see
 [Findings that disappear](#findings-that-disappear)), and
 `conflict-resolution` (only in history written before conflicts were removed). A bulk
 workflow records the reviewer who applied it as author; imports record no author. `GET /api/assessments/history` with `project_uuid`,
