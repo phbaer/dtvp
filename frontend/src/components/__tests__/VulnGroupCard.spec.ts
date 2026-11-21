@@ -1854,6 +1854,35 @@ describe('VulnGroupCard', () => {
         expect(wrapper.find('[data-testid="approval-prefilled-note"]').exists()).toBe(false)
     })
 
+    it('notes findings with different assessments without warning when nothing is inconsistent', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        const first = group.affected_versions[0].components[0]
+        first.analysis_state = 'NOT_AFFECTED'
+        first.analysis_details = '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        group.affected_versions.push({
+            ...group.affected_versions[0],
+            project_version: '2.0',
+            project_uuid: 'p2',
+            components: [{
+                ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f2',
+                // Differs only in what comparisons ignore (Version Coverage).
+                analysis_details: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] [Version Coverage: 2.0] ---\nNot shipped.',
+            }],
+        })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }), teamMapping: ref({}) } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const banner = wrapper.get('[data-testid="card-differences-banner"]')
+        expect(banner.findAll('[data-testid="card-inconsistency-reason"]')).toHaveLength(0)
+        expect(banner.attributes('data-inconsistent')).toBe('false')
+        expect(banner.text()).toContain('Assessments differ between findings')
+        expect(banner.text()).not.toContain('Why this is inconsistent')
+    })
+
     it('shows which findings differ, in which fields, and lets a reviewer take one version for all', async () => {
         const group = JSON.parse(JSON.stringify(mockGroup))
         const first = group.affected_versions[0].components[0]
@@ -1897,6 +1926,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.findAll('[data-testid="card-differences-open"]')).toHaveLength(1)
         expect(banner.findAll('[data-testid="card-inconsistency-reason"]').map(reason => reason.text()).join(' '))
             .toContain('Analysis states differ')
+        expect(banner.attributes('data-inconsistent')).toBe('true')
         await wrapper.get('[data-testid="card-differences-open"]').trigger('click')
         await flushPromises()
         expect((wrapper.vm as any).activeDetailTab).toBe('overview')
