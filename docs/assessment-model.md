@@ -53,6 +53,20 @@ aggregate state follows these rules:
   differing analysis states, differing structured team blocks, and differing
   substantive details. Selected reasons use OR semantics; filter categories
   combine with AND semantics.
+- Findings are compared on what they must agree on: the current team blocks
+  and the text ahead of them. Left out are historical blocks, which are
+  records of single findings, and the tags for assessor, date, rescoring,
+  pending review and `[Version Coverage: ...]`. A vulnerability whose
+  findings differ only in these is not Conflicting. The server
+  (`comparable_assessment_text` in `dtvp/grouped_vuln_services.py`) and the
+  web client (`comparableAssessmentText`) compare the same way; both are
+  tested against
+  `frontend/src/lib/__tests__/fixtures/assessment_scope_cases.json`.
+- The technical state of a vulnerability is the General decision of the first
+  finding that has one, in the order of the findings' keys (project,
+  component, vulnerability); without one, the worst team state, then the
+  worst finding state. States of equal priority are ordered by name. The
+  value does not depend on the order in which versions are loaded.
 - Assessment details use structured blocks such as `[Team: ...]`,
   `[State: ...]`, `[Assessed By: ...]`, `[Reviewed By: ...]`,
   `[Rescored Vector: ...]`, and `[Assigned: ...]`.

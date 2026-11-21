@@ -1792,6 +1792,21 @@ def without_historical_blocks(details: str) -> str:
     return "".join(kept)
 
 
+def historical_blocks_of(details: str) -> List[str]:
+    """The historical team blocks of ``details``, each exactly as stored.
+
+    They are the records of this one finding. A writer that rebuilds the
+    current blocks of several findings puts each finding's own back with
+    ``insert_assessment_blocks``.
+    """
+    text = _PENDING_MARKER.sub("", str(details or ""))
+    return [
+        text[start:end].strip()
+        for start, end, _key, historical in _team_block_spans(text)
+        if historical
+    ]
+
+
 def parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
     """Split stored assessment text into unstructured text and team blocks."""
     return _parse_assessment_blocks(details)

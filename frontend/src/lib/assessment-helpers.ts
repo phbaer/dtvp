@@ -205,6 +205,25 @@ export const withoutHistoricalBlocks = (fullText: string): string => {
 };
 
 /**
+ * The part of an assessment text that the findings of a vulnerability must
+ * agree on. Historical blocks are records that belong to one finding; they
+ * are left out, as are the tags that say who assessed when, the rescoring,
+ * the pending status and the version coverage. As the server's
+ * ``comparable_assessment_text``; both are tested against
+ * fixtures/assessment_scope_cases.json.
+ */
+export const comparableAssessmentText = (details: string | undefined | null): string =>
+    withoutHistoricalBlocks(String(details || ''))
+        .replace(/\[Date:\s*[^\]]*\]/g, '')
+        .replace(/\[Assessed By:\s*[^\]]*\]/g, '')
+        .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
+        .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+        .replace(/\[Status: Pending Review\]/g, '')
+        .replace(/\[Version Coverage:\s*[^\]]*\]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+/**
  * One active block per team; a historical block is a record of its own and
  * only one with exactly the same team, decision, text, assessor, reviewer,
  * date, ticket and rescoring is the same record. As the server's
@@ -317,11 +336,15 @@ const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary
     const allInstances = (group.affected_versions || []).flatMap(v => v.components || []) as Array<Record<string, any>>;
     const componentStates = allInstances.map(getInstanceAssessmentState);
     const blocks: AssessmentBlock[] = [];
+    const instanceBlocks: AssessmentBlock[][] = [];
 
     for (const instance of allInstances) {
         const details = getInstanceAssessmentDetails(instance);
-        if (!details) continue;
-        blocks.push(...parseAssessmentBlocks(details).filter(block => !block.historical));
+        const active = details
+            ? parseAssessmentBlocks(details).filter(block => !block.historical)
+            : [];
+        instanceBlocks.push(active);
+        blocks.push(...active);
     }
 
     const assessedTeams = new Set<string>();
@@ -331,18 +354,36 @@ const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary
         }
     }
 
+    // The name breaks ties, so that the result does not depend on the order
+    // the states were collected in. As the server's _sort_states_by_priority.
+    const byPriority = (left: string, right: string) =>
+        (STATE_PRIORITY[left] ?? 10) - (STATE_PRIORITY[right] ?? 10)
+        || (left < right ? -1 : left > right ? 1 : 0);
     const teamStates = blocks
         .filter(block => block.team !== 'General' && block.state !== 'NOT_SET')
         .map(block => block.state)
-        .sort((left, right) => (STATE_PRIORITY[left] ?? 10) - (STATE_PRIORITY[right] ?? 10));
+        .sort(byPriority);
 
     const rawStates = Array.from(new Set(componentStates.filter(state => state !== 'NOT_SET')))
-        .sort((left, right) => (STATE_PRIORITY[left] ?? 10) - (STATE_PRIORITY[right] ?? 10));
+        .sort(byPriority);
 
-    const globalState = blocks.find(block => block.team === 'General')?.state;
-    const technicalState = globalState && globalState !== 'NOT_SET'
-        ? globalState
-        : teamStates[0] || rawStates[0] || 'NOT_SET';
+    // The first General decision in the order of the findings' keys, so that
+    // the value does not depend on the order the versions arrive in.
+    const findingOrderKey = (instance: Record<string, any>) =>
+        ['project_uuid', 'component_uuid', 'vulnerability_uuid'].map(name => String(instance[name] || ''));
+    const compareKeys = (left: string[], right: string[]) => {
+        for (let index = 0; index < left.length; index++) {
+            if (left[index]! < right[index]!) return -1;
+            if (left[index]! > right[index]!) return 1;
+        }
+        return 0;
+    };
+    const globalState = allInstances
+        .map((instance, index) => ({ key: findingOrderKey(instance), index }))
+        .sort((left, right) => compareKeys(left.key, right.key) || left.index - right.index)
+        .flatMap(entry => instanceBlocks[entry.index]!)
+        .find(block => block.team === 'General' && block.state !== 'NOT_SET')?.state;
+    const technicalState = globalState || teamStates[0] || rawStates[0] || 'NOT_SET';
 
     return {
         allInstances,
@@ -1084,17 +1125,9 @@ const getGroupInconsistencyReasonsFromSummary = (
         }
     }
 
-    const normalizeDetails = (details: string) => details
-        .replace(/\[Date:\s*[^\]]*\]/g, '')
-        .replace(/\[Assessed By:\s*[^\]]*\]/g, '')
-        .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
-        .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-        .replace(/\[Status: Pending Review\]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
     const assessedDetails = allInstances
         .filter(instance => getInstanceAssessmentState(instance) !== 'NOT_SET')
-        .map(instance => normalizeDetails(getInstanceAssessmentDetails(instance)))
+        .map(instance => comparableAssessmentText(getInstanceAssessmentDetails(instance)))
         .filter(Boolean);
     const detailsMismatch = assessedDetails.length > 1
         && assessedDetails.some(details => details !== assessedDetails[0]);
@@ -1176,22 +1209,8 @@ const getGroupLifecycleFromSummary = (
         return hasAnyAssessment ? 'INCOMPLETE' : 'OPEN';
     }
 
-    // Incomplete / Inconsistent logic based on VERSIONS
-    const versionStates = (group.affected_versions || []).map(v => {
-        const states = Array.from(new Set((v.components || []).map(c => getInstanceAssessmentState(c as Record<string, any>))));
-        if (states.length === 0) return 'NOT_SET';
-        if (states.length === 1) return states[0];
-        const nonMissing = states.filter(s => s !== 'NOT_SET');
-        if (nonMissing.length === 1) return nonMissing[0];
-        if (nonMissing.length > 1) return 'INCONSISTENT_VERSION';
-        return 'NOT_SET';
-    });
-
-    const nonEmptyStates = versionStates.filter(s => s !== 'NOT_SET' && s !== 'INCONSISTENT_VERSION');
-    const uniqueNonEmpty = new Set(nonEmptyStates);
-
-    if (uniqueNonEmpty.size > 1 || versionStates.includes('INCONSISTENT_VERSION')) return 'INCONSISTENT';
-
+    // Findings that disagree on the state were returned as INCONSISTENT
+    // above (ANALYSIS_STATE_MISMATCH), whichever version they belong to.
     // Complete, consistent team coverage does not require a General block.
     return hasAnyAssessment ? 'ASSESSED' : 'OPEN';
 }
