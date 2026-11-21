@@ -63,7 +63,15 @@ export interface AssessmentFields {
      * does for every save that is not a reviewer's.
      */
     response?: string | null;
+    /** The finding's version override (ADR 0010). Read only: saves keep it. */
+    version_override?: VersionOverride | null;
     teams: AssessmentTeamFields[];
+}
+
+/** A version override: the label shared by the versions in its scope. */
+export interface VersionOverride {
+    label: string;
+    reason: string | null;
 }
 
 /**
@@ -103,13 +111,59 @@ export const analysisResponseLabel = (value: string | undefined | null): string 
 export const stripAssessmentResponseTags = (text: string): string =>
     (text || '').replace(responseTagPattern(), '');
 
-const splitAtFirstTeamBlock = (fullText: string): [string, string] => {
+// Version override tags (ADR 0010). Only a tag with a valid value is the
+// field; anything else stays text, as on the server (assessment_model.py).
+const VERSION_OVERRIDE_TAG = /\[Version Override:\s*([A-Za-z0-9._+\- ]{1,40}?)\s*\]/gi;
+const OVERRIDE_REASON_TAG = /\[Override Reason:\s*((?:(?!---)[^[\]\r\n]){1,200}?)\s*\]/gi;
+const RESERVED_OVERRIDE_LABELS = ['base', 'ambiguous'];
+
+const validOverrideLabel = (value: string): string | null => {
+    const label = (value || '').trim();
+    if (!label || label.length > 40 || !/^[A-Za-z0-9._+\- ]+$/.test(label)) return null;
+    const normalized = label.split(/\s+/).join(' ').toLowerCase();
+    return RESERVED_OVERRIDE_LABELS.includes(normalized) ? null : label;
+};
+
+const validOverrideReason = (value: string): string | null => {
+    const reason = (value || '').trim();
+    if (!reason || reason.length > 200 || /[[\]\r\n]|---/.test(reason)) return null;
+    return reason;
+};
+
+/** Text without the valid version override tags. */
+export const stripVersionOverrideTags = (text: string): string =>
+    (text || '')
+        .replace(VERSION_OVERRIDE_TAG, (tag, label) => validOverrideLabel(label) ? '' : tag)
+        .replace(OVERRIDE_REASON_TAG, (tag, reason) => validOverrideReason(reason) ? '' : tag);
+
+/** The version override an assessment text carries beside its team blocks. */
+export const parseVersionOverride = (fullText: string | undefined | null): VersionOverride | null => {
+    const [shared] = splitAtFirstTeamBlock(fullText || '');
+    let label: string | null = null;
+    for (const match of shared.matchAll(VERSION_OVERRIDE_TAG)) {
+        label = validOverrideLabel(match[1]);
+        if (label) break;
+    }
+    if (!label) return null;
+    let reason: string | null = null;
+    for (const match of shared.matchAll(OVERRIDE_REASON_TAG)) {
+        reason = validOverrideReason(match[1]);
+        if (reason) break;
+    }
+    return { label, reason };
+};
+
+/** Text ahead of the blocks without the tags that are fields of their own. */
+const stripSharedFieldTags = (text: string): string =>
+    stripVersionOverrideTags(stripAssessmentResponseTags(text));
+
+function splitAtFirstTeamBlock(fullText: string): [string, string] {
     const source = fullText || '';
     const firstHeaderIndex = maskSsvcDetails(source).search(/---(?=\s*\[Team:)/);
     return firstHeaderIndex === -1
         ? [source, '']
         : [source.slice(0, firstHeaderIndex), source.slice(firstHeaderIndex)];
-};
+}
 
 /** The response an assessment text carries beside its team blocks. */
 export const parseAssessmentResponse = (fullText: string | undefined | null): string | null => {
@@ -439,7 +493,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         // There is something BEFORE the first header.
         // Check if it's just shared tags or real content
         const textBeforeHeader = fullText.slice(0, firstHeaderIndex);
-        const contentBeforeHeader = stripAssessmentResponseTags(textBeforeHeader)
+        const contentBeforeHeader = stripSharedFieldTags(textBeforeHeader)
             .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
             .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
@@ -456,7 +510,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         }
     } else if (firstHeaderIndex === -1) {
         // No headers at all. Check if there's real content (ignoring tags)
-        const content = stripAssessmentResponseTags(fullText)
+        const content = stripSharedFieldTags(fullText)
             .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
             .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
@@ -607,7 +661,7 @@ export function assessmentTextToFields(fullText: string): AssessmentFields {
     const shared = firstHeaderIndex === -1 ? masked : masked.slice(0, firstHeaderIndex);
     const rescored = SHARED_RESCORED.exec(shared)?.[1];
     const vector = SHARED_RESCORED_VECTOR.exec(shared)?.[1]?.trim();
-    const freeText = stripAssessmentResponseTags(shared)
+    const freeText = stripSharedFieldTags(shared)
         .replace(/\[Rescored:\s*[\d.]+\]/g, '')
         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
         .replace(/\[Status: Pending Review\]/gi, '')
@@ -631,6 +685,8 @@ export function assessmentTextToFields(fullText: string): AssessmentFields {
             : null,
         rescored_vector: vector || null,
         response: parseAssessmentResponse(source),
+        // Sent back only as the finding has it; the server keeps the stored one.
+        ...(parseVersionOverride(source) ? { version_override: parseVersionOverride(source) } : {}),
         teams: deduplicateAssessmentBlocks(blocks).map(blockToTeamFields),
     };
 }

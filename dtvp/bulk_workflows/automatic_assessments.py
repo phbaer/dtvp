@@ -5,7 +5,11 @@ import re
 from typing import Any
 
 from ..finding_keys import instance_finding_key
-from ..assessment_model import agreed_response, preserve_response
+from ..assessment_model import (
+    agreed_response,
+    preserve_response,
+    preserve_version_override,
+)
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..code_analysis_assessment_services import (
     record_application_eligible,
@@ -1517,13 +1521,16 @@ def build_automatic_assessment_payloads(
                         # record and response stay with the finding. A
                         # finding without a response takes the one the
                         # others agree on.
-                        "details": preserve_response(
-                            preserve_ssvc_record(
-                                item["target_details"],
+                        "details": preserve_version_override(
+                            preserve_response(
+                                preserve_ssvc_record(
+                                    item["target_details"],
+                                    instance.get("analysis_details") or instance.get("analysisDetails") or "",
+                                ),
                                 instance.get("analysis_details") or instance.get("analysisDetails") or "",
+                                response,
                             ),
                             instance.get("analysis_details") or instance.get("analysisDetails") or "",
-                            response,
                         ),
                         "justification": item["target_justification"],
                         "suppressed": False,

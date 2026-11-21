@@ -1726,6 +1726,10 @@ def test_blocks_parse_as_the_shared_cases_say():
             for b in blocks
         ]
         assert read == case["blocks"], case["name"]
+        if "version_override" in case:
+            from dtvp.assessment_model import version_override
+
+            assert version_override(case["text"]) == case["version_override"], case["name"]
 
 
 def test_a_takeover_retires_the_source_team_on_every_finding():

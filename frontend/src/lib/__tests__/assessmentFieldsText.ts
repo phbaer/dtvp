@@ -18,6 +18,10 @@ export const renderAssessmentFields = (fields: AssessmentFields | undefined | nu
         shared.push(`[Rescored Vector: ${fields.rescored_vector}]`)
     }
     if (fields.response) shared.push(`[Response: ${fields.response}]`)
+    if (fields.version_override) {
+        shared.push(`[Version Override: ${fields.version_override.label}]`)
+        if (fields.version_override.reason) shared.push(`[Override Reason: ${fields.version_override.reason}]`)
+    }
     if (shared.length) parts.push(shared.join(' '))
     if (fields.free_text) parts.push(fields.free_text)
     for (const team of fields.teams) {

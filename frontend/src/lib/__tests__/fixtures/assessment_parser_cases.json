@@ -146,5 +146,56 @@
         "details": "Second."
       }
     ]
+  },
+  {
+    "name": "version override tags are a field beside the blocks",
+    "text": "[Response: UPDATE] [Version Override: LTS 2.x] [Override Reason: Backported fix]\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] ---\nNot reachable.",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "NOT_AFFECTED",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "Not reachable."
+      }
+    ],
+    "version_override": {
+      "label": "LTS 2.x",
+      "reason": "Backported fix"
+    }
+  },
+  {
+    "name": "a version override without a valid reason",
+    "text": "[Version Override: lts] [Override Reason: a --- b]\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] ---\nNot reachable.",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "NOT_AFFECTED",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "Not reachable."
+      }
+    ],
+    "version_override": {
+      "label": "lts",
+      "reason": null
+    }
+  },
+  {
+    "name": "a reserved or invalid override label stays text",
+    "text": "[Version Override: Base] [Version Override: no/slash]\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: a] [Date: 1700000000000] [Justification: NOT_SET] ---\nNot reachable.",
+    "blocks": [
+      {
+        "team": "TeamA",
+        "state": "NOT_AFFECTED",
+        "justification": "NOT_SET",
+        "historical": false,
+        "ticket": "",
+        "details": "Not reachable."
+      }
+    ],
+    "version_override": null
   }
 ]

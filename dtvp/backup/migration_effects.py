@@ -41,4 +41,5 @@ MIGRATION_RECORD_EFFECTS: dict[tuple[str, int], Effect] = {
     ("assessment_outbox", 6): Baseline(),
     ("assessment_outbox", 7): Baseline(),
     ("assessment_outbox", 8): Baseline(),
+    ("assessment_outbox", 9): NoRecordEffect("derived fields tables only"),
 }

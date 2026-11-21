@@ -175,6 +175,7 @@ def test_every_field_is_stored_as_it_was_sent():
         "free_text": "Agreed with the supplier.", "pending_review": True,
         "rescored_score": 2.5, "rescored_vector": VECTOR, "teams": [team],
         "response": "WORKAROUND_AVAILABLE",
+        "version_override": {"label": "LTS 2.x", "reason": "Backported fix"},
     }
     stored = normalize_assessment_fields(sent)
     assert stored == {

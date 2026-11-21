@@ -187,6 +187,35 @@ Dependency-Track receives the response with every export; see
 [Export](import-export.md#export). The VDR carries it as `analysis.response`;
 see [CycloneDX](cyclonedx-export.md#what-the-vdr-contains).
 
+### Version override
+
+A finding can carry a version override marker
+([ADR 0010](adr/0010-version-overrides.md)): its version has its own
+assessment, shared by every version with the same label. Implemented so far
+(plan step 4) is the marker as a field that every writer keeps; scopes,
+the override operations and the export come with the later steps of the
+[design](version-overrides-design.md#19-plan).
+
+- **In the text** it is two tags ahead of the team blocks, after the
+  rescoring and response tags:
+  `[Response: UPDATE] [Version Override: LTS 2.x] [Override Reason: Backported fix]`.
+- **Label:** 1-40 characters from `A-Z a-z 0-9 space . _ + -`, compared
+  case-insensitively with white space collapsed. `base` and `ambiguous` are
+  reserved. **Reason:** 1-200 characters on one line, without `[`, `]` or
+  `---`. A tag with another value is free text.
+- **As a field** it is `version_override: {label, reason}` of the finding
+  (`null` without one), in `GET /api/assessments/fields`.
+- **Read only.** Every save, team or General, every bulk workflow
+  (Synchronize, Combine and repair, automatic assessments, restores), a
+  deletion (a whole delete keeps the tags only) and an MCP save keep each
+  finding's marker as stored. A save may repeat the finding's marker or send
+  none; any other marker is refused with 422. Agent text and copied text
+  cannot contain the tags.
+- **Adopted from Dependency-Track** with a marker, the value is stored
+  unchanged as revision 0 (origin `import`) and followed by revision 1
+  (origin `import-review`) that adds `[Status: Pending Review]` and is
+  exported; see [Import](import-export.md).
+
 ## SSVC And Original Severity
 
 SSVC is independent of CVSS and assessment state: it records deployment priority,

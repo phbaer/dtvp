@@ -21,6 +21,7 @@ from ..assessment_model import (
     SEE_GLOBAL_ASSESSMENT,
     agreed_response,
     preserve_response,
+    preserve_version_override,
 )
 from ..grouped_vuln_services import _normalize_group_tags
 from ..logic import STATE_PRIORITY, calculate_aggregated_state
@@ -592,7 +593,9 @@ def _with_rescoring(merged: str, instances: list[dict[str, Any]]) -> Callable[[s
     """
     response = agreed_response(_details(instance) for instance in instances)
     if _RESCORED_RE.search(merged) or _RESCORED_VECTOR_RE.search(merged):
-        return lambda old: preserve_response(merged, old, response)
+        return lambda old: preserve_version_override(
+            preserve_response(merged, old, response), old
+        )
 
     def rank(preamble: str) -> tuple[bool, float]:
         score = _RESCORED_RE.search(preamble)
@@ -604,7 +607,7 @@ def _with_rescoring(merged: str, instances: list[dict[str, Any]]) -> Callable[[s
     def apply(old: str) -> str:
         preamble = _rescoring_preamble(old) or shared
         rebuilt = f"{preamble}\n\n{merged}" if preamble and merged else merged or preamble
-        return preserve_response(rebuilt, old, response)
+        return preserve_version_override(preserve_response(rebuilt, old, response), old)
 
     return apply
 

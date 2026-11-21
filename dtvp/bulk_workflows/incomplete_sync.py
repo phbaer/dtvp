@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..assessment_model import agreed_response, preserve_response
+from ..assessment_model import (
+    agreed_response,
+    preserve_response,
+    preserve_version_override,
+)
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..logic import (
     STATE_PRIORITY,
@@ -177,8 +181,9 @@ def _keep_finding_values(details: str, existing: str, response: str | None) -> s
     record and the response. A finding without a response takes
     ``response``, the one the other findings agree on."""
     details = _with_own_rescoring(with_own_records(details, existing), existing)
-    return preserve_response(
-        preserve_ssvc_record(details, existing), existing, response
+    return preserve_version_override(
+        preserve_response(preserve_ssvc_record(details, existing), existing, response),
+        existing,
     )
 
 

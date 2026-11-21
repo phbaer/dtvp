@@ -780,6 +780,7 @@ def test_an_adopted_assessment_is_stored_as_atomic_fields(tmp_path):
         "rescored_score": 2.5,
         "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N",
         "response": None,
+        "version_override": None,
         "free_text": "",
         "form": "structured",
     }
