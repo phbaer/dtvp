@@ -801,3 +801,47 @@ def test_code_evidence_tools_work_over_http(client, project, mock_dt_client, mon
     ).json()["result"]
     assert listed["isError"] is False
     assert [item["evidence_id"] for item in listed["structuredContent"]["items"]] == [evidence_id]
+
+
+def test_read_preview_and_save_work_over_http_for_dependency_track_findings(
+    client, project, mock_dt_client, monkeypatch
+):
+    """The sequence an agent runs, over the real endpoint, with findings in
+    Dependency-Track's shape (no finding UUID). This is the reproduction of
+    the bug where every finding_uuid was null and every write was refused."""
+
+    async def shared_client(*_args):
+        return mock_dt_client
+
+    monkeypatch.setattr("dtvp.dt_client._shared_dt_client_provider.get", shared_client)
+    _record, plain = access_token_store.create(
+        username="alice", name="bot", scopes=["read", "write"]
+    )
+
+    def call(name, arguments):
+        response = _rpc(client, plain, "tools/call", {"name": name, "arguments": arguments})
+        assert response.status_code == 200
+        return response.json()["result"]
+
+    read = call("get_vulnerability", {"project": "TestApp", "vulnerability_id": "CVE-2026-0001"})
+    assert read["isError"] is False
+    findings = read["structuredContent"]["findings"]
+    keys = [finding["finding_uuid"] for finding in findings]
+    assert sorted(keys) == ["p1:component-1:vuln-1", "p2:component-2:vuln-1"]
+
+    preview = call("preview_assessment", ARGS)
+    assert preview["isError"] is False, preview["content"]
+    revisions = preview["structuredContent"]["expected_revisions"]
+    assert set(revisions) == set(keys)
+
+    saved = call("save_assessment", {**ARGS, "expected_revisions": revisions})
+    assert saved["isError"] is False, saved["content"]
+    for project_uuid, component in (("p1", "component-1"), ("p2", "component-2")):
+        stored = main.cache_manager.get_assessment_overlay(project_uuid, component, "vuln-1")
+        assert "[Team: Team A]" in stored["analysisDetails"]
+        # An agent never approves.
+        assert "[Status: Pending Review]" in stored["analysisDetails"]
+
+    # The same revisions again are stale now: refused, nothing written.
+    again = call("save_assessment", {**ARGS, "expected_revisions": revisions})
+    assert again["isError"] is True
