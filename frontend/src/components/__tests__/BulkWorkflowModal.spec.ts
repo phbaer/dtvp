@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     applyBulkWorkflow: vi.fn(),
     buildBulkWorkflowDocument: vi.fn(),
     uploadBulkWorkflowSource: vi.fn(),
+    readBulkWorkflowSourceHistory: vi.fn(),
 }))
 
 vi.mock('../../lib/api', async importOriginal => {
@@ -19,6 +20,7 @@ vi.mock('../../lib/api', async importOriginal => {
         applyBulkWorkflow: mocks.applyBulkWorkflow,
         buildBulkWorkflowDocument: mocks.buildBulkWorkflowDocument,
         uploadBulkWorkflowSource: mocks.uploadBulkWorkflowSource,
+        readBulkWorkflowSourceHistory: mocks.readBulkWorkflowSourceHistory,
     }
 })
 
@@ -693,6 +695,38 @@ describe('BulkWorkflowModal', () => {
             // No preview before a file is there.
             expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(1)
             expect(wrapper.find('[data-testid="bulk-workflow-apply"]').exists()).toBe(false)
+        })
+
+        it('reads Dependency-Track\'s history instead of a file and previews with it', async () => {
+            mocks.readBulkWorkflowSourceHistory.mockResolvedValueOnce({
+                source_id: 'history-1',
+                summary: {
+                    tool: 'Assessment history', tool_version: '', project_name: '', project_version: '',
+                    timestamp: '2030-01-03T00:00:00+00:00', sha256: 'c'.repeat(64),
+                    warnings: ['The history of 1 finding could not be read.'],
+                },
+                entries: 3,
+                team_blocks: 4,
+            })
+            const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+            await wrapper.get('[data-testid="bulk-workflow-team-assessment-restore"]').trigger('click')
+            await flushPromises()
+
+            await wrapper.get('[data-testid="bulk-workflow-source-history"]').trigger('click')
+            await flushPromises()
+
+            expect(mocks.readBulkWorkflowSourceHistory).toHaveBeenCalledWith('task-1', {}, expect.any(Function))
+            expect(mocks.uploadBulkWorkflowSource).not.toHaveBeenCalled()
+            const summary = wrapper.get('[data-testid="bulk-workflow-source-summary"]').text()
+            expect(summary).toContain('Dependency-Track history')
+            expect(summary).toContain('3 entries, 4 team assessments')
+            expect(summary).not.toContain('project')
+            expect(wrapper.get('[data-testid="bulk-workflow-source-warning"]').text()).toContain('could not be read')
+            expect(mocks.previewBulkWorkflow).toHaveBeenLastCalledWith(
+                'team-assessment-restore', 'task-1', {}, expect.any(Function), 'history-1',
+            )
         })
 
         it('uploads, previews and applies with the source id', async () => {

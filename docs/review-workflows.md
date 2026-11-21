@@ -415,7 +415,7 @@ The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time:
 | :--- | :--- |
 | Apply Automatic Assessments | Usable, unapplied analyzer assessments; writes one assessment per owning team plus a global assessment with the worst verdict and its CVSS rescore |
 | Repair Assessments | Every safe, rule-based repair in one operation; each vulnerability lists the repairs that apply |
-| Restore Team Assessments From Export | Team assessments that a Dependency-Track export has and DTVP has in no form; adds them as historical blocks and changes no state ([details](#restore-team-assessments-from-an-export)) |
+| Restore Team Assessments From Export | Team assessments that a Dependency-Track export, or Dependency-Track's audit trail of the findings in view, has and DTVP has in no form; adds them as historical blocks and changes no state ([details](#restore-team-assessments-from-an-export)) |
 
 **Repair Assessments** chains the following repairs. Each stage works on the
 result of the previous one, so a finding is written once. Preview rows carry a
@@ -565,6 +565,26 @@ only, per reviewer (up to four uploads, six hours each; nothing is written to
 disk or logged), so after a restart it is uploaded again. The limit is
 128 MiB.
 
+**Or Dependency-Track's history.** Without an export, **Read
+Dependency-Track history** reads the audit trail of every finding in the
+current view instead (a polled task, at most 20000 findings, six requests at
+a time). Dependency-Track records every changed analysis text as a comment
+`Details: <the new text>` (`AnalysisCommentUtil.makeDetailsCommentIfChanged`
+in 4.x) and returns the comments, oldest first, with the analysis
+(`GET /api/v1/analysis`). DTVP reads those texts and the current one through
+the source's optional `AssessmentHistorySource` (`dtvp/ports.py`); state,
+justification, response, suppression and free comments are not texts and
+are ignored. From all texts of a finding the team blocks are taken as from
+one text: per team the newest live block (by `Date`, then the longer text)
+and every distinct historical block. Each entry matches only its own
+finding, by project, component and vulnerability UUID; the rest of the
+workflow is the same as for an export. Limits: a finding whose component
+Dependency-Track deleted (a recreated component) has no trail left there;
+texts written before the comments existed, or by tools that bypass the
+analysis API, are not in it; a block's `Date` and assessor are taken from
+the block, not from the comment. A finding whose history cannot be read is
+counted in a warning.
+
 **Matching.** The export's project is matched by its UUID (the document's
 `metadata.component.bom-ref`), else by project name and version, for a
 project that was created again. Each entry (a vulnerability and one
@@ -675,6 +695,9 @@ Endpoints are:
 - `POST /api/bulk-workflows/summary`
 - `POST /api/bulk-workflows/sources` uploads the input of a workflow that
   reads one (`requires_source` in the workflow metadata)
+- `POST /api/bulk-workflows/sources/history-task` (`task_id`, `filters`)
+  reads the source's assessment history of the findings in view instead; its
+  task result is the same as an upload's (413 above 20000 findings)
 - `POST /api/bulk-workflows/{workflow_id}/{preview|apply|document}-task`,
   with `source_id` for such a workflow
 - `GET /api/bulk-workflows/tasks/{operation_id}` returns progress and the final result

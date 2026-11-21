@@ -33,6 +33,9 @@ from .logic import _deduplicate_assessment_blocks, parse_assessment_blocks
 
 TEAM_RESTORE_MAX_UPLOAD_BYTES = 128 * 1024 * 1024
 SOURCE_KIND_DEPENDENCY_TRACK_VDR = "dependency-track-vdr"
+# The texts each finding held over time, read from the source
+# (``ports.AssessmentHistorySource``); same workflow, another input.
+HISTORY_TOOL = "Assessment history"
 SUPPORTED_SPEC_VERSIONS = ("1.4", "1.5", "1.6")
 DTVP_EXPORT_MESSAGE = (
     "This is a DTVP export; restoring needs a Dependency-Track export."
@@ -78,6 +81,9 @@ class RestoreEntry:
     # Team fields (``team_from_block``): one live block per team name, and
     # every distinct historical block of the team.
     blocks: tuple[dict[str, Any], ...]
+    # Set for entries read per finding from a history: the finding's
+    # project UUID. Such an entry matches its exact finding only.
+    project_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -267,6 +273,87 @@ def read_dependency_track_vdr(content: bytes) -> RestoreSource:
     )
 
 
+# -- reading the source's history ---------------------------------------------
+
+
+def history_blocks(texts: list[str]) -> tuple[dict[str, Any], ...]:
+    """The team blocks of all texts a finding held, read as one text would
+    be: per team the newest live block (by ``Date``, then the longer text),
+    and every distinct historical block."""
+    blocks = []
+    for text in texts:
+        if isinstance(text, str) and text.strip():
+            blocks.extend(parse_assessment_blocks(text)[1])
+    return tuple(team_from_block(block) for block in _deduplicate_assessment_blocks(blocks))
+
+
+def read_assessment_history(
+    histories: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    *,
+    read_at: str,
+    failed: int = 0,
+) -> RestoreSource:
+    """A restore source from the history of each finding.
+
+    ``histories`` pairs a finding (its UUIDs, ids and component) with the
+    texts the source recorded for it (``AssessmentHistorySource``). Only
+    the team blocks of those texts count; a person decides on each one.
+    """
+    entries: list[RestoreEntry] = []
+    analyses = no_team_blocks = team_blocks = 0
+    digest = hashlib.sha256()
+    for instance, history in histories:
+        texts = [str(item.get("details") or "") for item in history if isinstance(item, dict)]
+        texts = [text for text in texts if text.strip()]
+        if not texts:
+            continue
+        analyses += 1
+        blocks = history_blocks(texts)
+        if not blocks:
+            no_team_blocks += 1
+        team_blocks += len(blocks)
+        key = (
+            str(instance.get("project_uuid") or ""),
+            str(instance.get("component_uuid") or ""),
+            str(instance.get("vulnerability_uuid") or ""),
+        )
+        digest.update(json.dumps([key, texts], ensure_ascii=False).encode("utf-8"))
+        entries.append(RestoreEntry(
+            vuln_id=str(instance.get("vuln_id") or ""),
+            vuln_ref=key[2],
+            component_ref=key[1],
+            component={
+                "purl": str(instance.get("component_purl") or ""),
+                "group": str(instance.get("component_group") or ""),
+                "name": str(instance.get("component_name") or ""),
+                "version": str(instance.get("component_version") or ""),
+            },
+            analysis_state="",
+            blocks=blocks,
+            project_ref=key[0],
+        ))
+    warnings = (
+        (f"The history of {failed} finding{'s' if failed != 1 else ''} could not be read.",)
+        if failed else ()
+    )
+    return RestoreSource(
+        spec_version="",
+        tool=HISTORY_TOOL,
+        tool_version="",
+        project_uuid="",
+        project_name="",
+        project_version="",
+        timestamp=read_at,
+        serial_number="",
+        sha256=digest.hexdigest(),
+        warnings=warnings,
+        entries=tuple(entries),
+        analyses=analyses,
+        no_team_blocks=no_team_blocks,
+        team_blocks=team_blocks,
+    )
+
+
 # -- matching entries to findings ---------------------------------------------
 
 
@@ -320,6 +407,8 @@ def match_entries(
     """
     del team_mapping  # matching does not depend on teams
     instances = list(_instances(groups))
+    if any(entry.project_ref for entry in source.entries):
+        return _match_exact(source, instances)
     project_match = MATCH_UUID
     in_project = [
         (group, instance) for group, instance in instances
@@ -421,6 +510,32 @@ def match_entries(
             # The other claims on a finding an exact match decided, or all
             # claims when none is exact.
             unmatched.append(RestoreUnmatched(item.entry, UNMATCHED_AMBIGUOUS, len(claims)))
+    return matches, unmatched
+
+
+def _match_exact(
+    source: RestoreSource,
+    instances: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> tuple[list[RestoreMatch], list[RestoreUnmatched]]:
+    """Entries read per finding: each matches its own finding, by UUIDs."""
+    by_key = {
+        (
+            str(instance.get("project_uuid") or ""),
+            str(instance.get("component_uuid") or ""),
+            str(instance.get("vulnerability_uuid") or ""),
+        ): (group, instance)
+        for group, instance in instances
+    }
+    matches: list[RestoreMatch] = []
+    unmatched: list[RestoreUnmatched] = []
+    for entry in source.entries:
+        if not entry.blocks:
+            continue
+        pair = by_key.get((entry.project_ref, entry.component_ref, entry.vuln_ref))
+        if pair is None:
+            unmatched.append(RestoreUnmatched(entry, UNMATCHED_NO_FINDING))
+        else:
+            matches.append(RestoreMatch(entry, pair[0], pair[1], MATCH_UUID))
     return matches, unmatched
 
 

@@ -67,6 +67,23 @@ class AffectedVersionSource(Protocol):
 
 
 @runtime_checkable
+class AssessmentHistorySource(Protocol):
+    """The texts a finding's assessment held over time, where the source
+    records them. Optional, like ``AffectedVersionSource``: used to restore
+    team assessments that DTVP no longer has (docs/review-workflows.md)."""
+
+    async def get_assessment_history(
+        self,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> list[dict[str, Any]]:
+        """``[{"at": epoch ms or None, "author": str or None, "details": str}]``,
+        oldest first, the current text last; empty when the source has no
+        assessment of the finding. Raises on other failures."""
+
+
+@runtime_checkable
 class AssessmentSink(Protocol):
     """Write access for assessments made in DTVP."""
 
