@@ -88,4 +88,31 @@ def test_dtvp_packaging_and_deployment_exclude_bundled_agentyzer():
     assert "agentyzer" not in compose.lower()
     assert "DTVP_CODE_ANALYSIS_URL: ${DTVP_CODE_ANALYSIS_URL:-}" in compose
     assert 'repository="$REGISTRY/$REGISTRY_USER/dtvp"' in workflow
-    assert 'tags+=("latest" "$VERSION")' in workflow
+    assert 'tags+=("$VERSION")' in workflow
+    assert 'tags+=("latest")' in workflow
+
+
+def test_pre_release_tags_do_not_move_latest():
+    """A PEP 440 pre-release (a, b, rc) gets its version tag and a Forgejo
+    pre-release; only a final version moves "latest"."""
+    import re
+    import subprocess
+
+    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
+        encoding="utf-8"
+    )
+    patterns = set(re.findall(r'"\$VERSION" =~ (\S+) \]\]', workflow))
+    assert patterns == {"(a|b|rc)[0-9]+$"}
+    assert '--argjson prerelease "${{ steps.version.outputs.PRERELEASE }}"' in workflow
+    [pattern] = patterns
+    for version, pre in [
+        ("v2.0.0rc1", True),
+        ("2.0.0b2", True),
+        ("2.1.0a1", True),
+        ("v2.0.0", False),
+        ("2.0.0.post1", False),
+    ]:
+        result = subprocess.run(
+            ["bash", "-c", f'[[ "$1" =~ {pattern} ]]', "_", version], check=False
+        )
+        assert (result.returncode == 0) is pre, version

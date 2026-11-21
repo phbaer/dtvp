@@ -348,7 +348,11 @@ jobs:
             tags+=("dev")
           fi
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            tags+=("latest" "$VERSION")
+            tags+=("$VERSION")
+            # A pre-release (2.0.0rc1, 2.0.0b2, ...) does not move "latest".
+            if [[ ! "$VERSION" =~ (a|b|rc)[0-9]+$ ]]; then
+              tags+=("latest")
+            fi
           fi
           if [[ ${#tags[@]} -eq 0 ]]; then
             echo "No image tag applies to $GITHUB_EVENT_NAME on $GITHUB_REF." >&2
@@ -414,6 +418,13 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          # PEP 440 pre-releases (2.0.0rc1, 2.0.0b2, 2.0.0a1) end in a, b or rc
+          # and a number; they are published as pre-releases.
+          if [[ "$VERSION" =~ (a|b|rc)[0-9]+$ ]]; then
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo "PRERELEASE=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Generate CHANGELOG.md with git-cliff
         run: |
@@ -446,7 +457,8 @@ jobs:
               --arg tag "${{ steps.version.outputs.TAG }}" \
               --arg name "Release ${{ steps.version.outputs.TAG }}" \
               --arg body "${{ steps.release_notes.outputs.NOTES }}" \
-              '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}'\
+              --argjson prerelease "${{ steps.version.outputs.PRERELEASE }}" \
+              '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: $prerelease}'\
             )"
 
   delete-pr-images:
