@@ -5,7 +5,7 @@
 | | |
 | :--- | :--- |
 | Decision status | Accepted (2026-11-20, repository owner; see [Decisions](#decisions)) |
-| Implementation status | In progress (2026-11-21): steps 0 to 4 of the [plan](../version-overrides-design.md#19-plan); the marker is a read-only field every writer keeps ([Version override](../assessment-model.md#version-override)) |
+| Implementation status | In progress (2026-11-21): steps 0 to 5 of the [plan](../version-overrides-design.md#19-plan); the marker is a read-only field every writer keeps, and the lifecycle runs per scope ([Version override](../assessment-model.md#version-override)). Not yet in step 5: per-scope SSVC summaries and `max_rescored_cvss` |
 | Related | [ADR 0003](0003-dtvp-is-the-record-for-assessments.md): **amends decisions 2 and 6** (see [Amendments to ADR 0003](#amendments-to-adr-0003)). [ADR 0009](0009-native-vulnerability-matcher.md): decision 7, override scopes are keyed by the DTVP project version id after M3; decision 2, medium-band findings (see decision 12). [ADR 0005](0005-logical-dump-format.md): no change to the dump format. [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md): agents propose and never approve. |
 
 ## Context

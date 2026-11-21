@@ -192,8 +192,9 @@ see [CycloneDX](cyclonedx-export.md#what-the-vdr-contains).
 A finding can carry a version override marker
 ([ADR 0010](adr/0010-version-overrides.md)): its version has its own
 assessment, shared by every version with the same label. Implemented so far
-(plan step 4) is the marker as a field that every writer keeps; scopes,
-the override operations and the export come with the later steps of the
+(plan steps 4 and 5) are the marker as a field that every writer keeps and
+the lifecycle per scope; scoped saves, the override operations and the
+export come with the later steps of the
 [design](version-overrides-design.md#19-plan).
 
 - **In the text** it is two tags ahead of the team blocks, after the
@@ -215,6 +216,44 @@ the override operations and the export come with the later steps of the
   unchanged as revision 0 (origin `import`) and followed by revision 1
   (origin `import-review`) that adds `[Status: Pending Review]` and is
   exported; see [Import](import-export.md).
+
+#### Scopes and lifecycle
+
+The markers divide a vulnerability's findings into **scopes**
+(`dtvp/assessment_scopes.py`, mirrored by `frontend/src/lib/assessmentScopes.ts`):
+
+- A project version whose findings carry no marker belongs to **base**. One
+  label makes it part of that label's scope, with every finding of the
+  version, including untouched (new) findings without the marker. Two labels
+  in one version make it **ambiguous**.
+- The lifecycle rules above run **inside each scope**, with the teams that
+  own the scope's findings as required teams. The results combine in this
+  order: any Conflicting (or an ambiguous version) is Conflicting; any
+  Incomplete, or open next to assessed scopes, is Incomplete; any pending
+  scope is Needs approval; all open is Open; then Assessed (legacy). An
+  override that differs from base is therefore not a conflict, and a pending
+  override is never Assessed.
+- Two new reasons make a scope Conflicting:
+  **Override not on every finding** (`VERSION_OVERRIDE_PARTIAL`, an assessed
+  finding without the marker in an overridden version) and
+  **Two overrides in one version** (`VERSION_OVERRIDE_LABEL_MISMATCH`).
+  Findings of one label with different reasons differ in their details
+  (`ASSESSMENT_DETAILS_MISMATCH`).
+- An untouched finding without the marker in an overridden version is a
+  **gap**: its scope is Incomplete, and `list_metadata.override_gaps` names
+  it.
+- The technical state (sorting, filters) is the **primary scope's**: base
+  when it has findings, else the scope with the most findings.
+- `list_metadata.assessment_scopes` lists the scopes of a vulnerability with
+  an override (name, label, reason, versions, finding keys, pending,
+  lifecycle, required teams, reasons, gaps); it is absent without one. The
+  statistics count such a vulnerability once by its combined state, and
+  `groups_with_overrides` counts them.
+- The card lists the overrides read-only ("Version overrides: legacy · 2.0 ·
+  pending approval"), and the finding matrix marks each overridden version
+  column. Saves are not scoped yet (step 7): until then, a save into an
+  overridden version keeps each finding's stored marker, so a gap it fills
+  shows as **Override not on every finding**.
 
 ## SSVC And Original Severity
 

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { ChevronDown, ChevronRight, AlertTriangle } from '@lucide/vue'
 import { buildFindingMatrix, compareVariants, type MatrixVariant } from '../lib/findingMatrix'
+import { parseVersionOverride } from '../lib/assessment-helpers'
 import VulnGroupCardDependencies from './VulnGroupCardDependencies.vue'
 
 const props = withDefaults(defineProps<{
@@ -71,6 +72,24 @@ const cellTitle = (rowName: string, version: string, cell: NonNullable<ReturnTyp
     cell.suppressed ? 'Suppressed' : '',
 ].filter(Boolean).join(' · ')
 
+// The version override a version's findings carry (ADR 0010), read-only:
+// one label is that override; more than one is ambiguous.
+const versionScopes = computed(() => {
+    const labels = new Map<string, Map<string, string>>()
+    for (const instance of props.instances) {
+        const version = String(instance.project_version || '(unknown)')
+        const marker = parseVersionOverride(instance.analysis_details || instance.analysisDetails || '')
+        if (!labels.has(version)) labels.set(version, new Map())
+        if (marker) labels.get(version)!.set(marker.label.toLowerCase(), marker.label)
+    }
+    const scopes: Record<string, { label: string; ambiguous: boolean } | undefined> = {}
+    for (const [version, found] of labels) {
+        if (found.size === 1) scopes[version] = { label: [...found.values()][0]!, ambiguous: false }
+        else if (found.size > 1) scopes[version] = { label: [...found.values()].join(', '), ambiguous: true }
+    }
+    return scopes
+})
+
 const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row.cells[version]
 </script>
 
@@ -120,6 +139,15 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                             data-testid="context-project-version"
                         >
                             {{ version }}
+                            <span
+                                v-if="versionScopes[version]"
+                                data-testid="matrix-version-scope"
+                                class="mt-0.5 block font-sans text-[9px] font-semibold"
+                                :class="versionScopes[version]!.ambiguous ? 'text-red-300' : 'text-sky-300'"
+                                :title="versionScopes[version]!.ambiguous
+                                    ? `Findings of this version carry different overrides: ${versionScopes[version]!.label}`
+                                    : `This version has its own assessment: override ${versionScopes[version]!.label}`"
+                            >{{ versionScopes[version]!.ambiguous ? 'two overrides' : `override: ${versionScopes[version]!.label}` }}</span>
                         </th>
                     </tr>
                 </thead>

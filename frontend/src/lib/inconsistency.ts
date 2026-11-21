@@ -25,6 +25,16 @@ export const INCONSISTENCY_REASON_OPTIONS: ReadonlyArray<{
         label: 'Assessment details differ',
         description: 'Assessed findings have different substantive assessment text.',
     },
+    {
+        value: 'VERSION_OVERRIDE_PARTIAL',
+        label: 'Override not on every finding',
+        description: 'A project version has a version override, but one of its assessed findings does not carry it.',
+    },
+    {
+        value: 'VERSION_OVERRIDE_LABEL_MISMATCH',
+        label: 'Two overrides in one version',
+        description: 'Findings of one project version carry different version override labels.',
+    },
 ]
 
 const inconsistencyReasonSet = new Set<string>(

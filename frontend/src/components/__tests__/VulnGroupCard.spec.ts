@@ -1883,6 +1883,33 @@ describe('VulnGroupCard', () => {
         expect(banner.text()).not.toContain('Why this is inconsistent')
     })
 
+    it('lists the version overrides read-only, with pending approval', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        const first = group.affected_versions[0].components[0]
+        first.analysis_state = 'NOT_AFFECTED'
+        first.analysis_details = '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        group.affected_versions.push({
+            ...group.affected_versions[0],
+            project_version: '2.0',
+            project_uuid: 'p2',
+            components: [{
+                ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f2',
+                analysis_state: 'EXPLOITABLE',
+                analysis_details: '[Version Override: legacy] [Override Reason: old build]\n\n--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] ---\nShips it.\n\n[Status: Pending Review]',
+            }],
+        })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }), teamMapping: ref({}) } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="card-version-scope"]').text()).toBe('legacy · 2.0 · pending approval')
+        // Differing from base is not a conflict: no inconsistency is reported.
+        expect(wrapper.findAll('[data-testid="card-inconsistency-reason"]')).toHaveLength(0)
+    })
+
     it('shows which findings differ, in which fields, and lets a reviewer take one version for all', async () => {
         const group = JSON.parse(JSON.stringify(mockGroup))
         const first = group.affected_versions[0].components[0]

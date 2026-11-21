@@ -124,11 +124,31 @@ export type InconsistencyReason =
     | 'MISSING_RESCORING_VECTOR'
     | 'ANALYSIS_STATE_MISMATCH'
     | 'TEAM_ASSESSMENT_MISMATCH'
-    | 'ASSESSMENT_DETAILS_MISMATCH';
+    | 'ASSESSMENT_DETAILS_MISMATCH'
+    | 'VERSION_OVERRIDE_PARTIAL'
+    | 'VERSION_OVERRIDE_LABEL_MISMATCH';
+
+/** One assessment scope of a vulnerability (ADR 0010), from the server. */
+export interface AssessmentScopeSummary {
+    name: string;
+    label: string | null;
+    reason: string | null;
+    versions: Array<{ project_uuid: string; version?: string | null }>;
+    finding_keys: string[];
+    pending: boolean;
+    lifecycle: string;
+    required_teams: string[];
+    inconsistency_reasons: InconsistencyReason[];
+    override_gaps: string[];
+    technical_state: string;
+}
 
 export interface GroupedVulnListMetadata {
     lifecycle?: string;
     inconsistency_reasons?: InconsistencyReason[];
+    /** Only for vulnerabilities with a version override. */
+    assessment_scopes?: AssessmentScopeSummary[];
+    override_gaps?: string[];
     is_pending?: boolean;
     is_approval_ready?: boolean;
     is_open?: boolean;

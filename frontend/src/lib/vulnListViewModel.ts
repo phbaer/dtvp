@@ -330,6 +330,8 @@ const createInconsistencyReasonCounts = (): Record<InconsistencyReason, number> 
     ANALYSIS_STATE_MISMATCH: 0,
     TEAM_ASSESSMENT_MISMATCH: 0,
     ASSESSMENT_DETAILS_MISMATCH: 0,
+    VERSION_OVERRIDE_PARTIAL: 0,
+    VERSION_OVERRIDE_LABEL_MISMATCH: 0,
 })
 
 const incrementRelationship = (counts: RelationshipCounts, relationship: DependencyRelationship) => {

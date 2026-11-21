@@ -7,6 +7,16 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from .assessment_restore_services import refresh_group_restore_metadata
+from .assessment_scopes import (
+    INCONSISTENCY_REASON_VERSION_OVERRIDE_LABEL_MISMATCH,
+    INCONSISTENCY_REASON_VERSION_OVERRIDE_PARTIAL,
+    ScopeView,
+    assessment_scopes,
+    combine_lifecycles,
+    finding_key as scope_finding_key,
+    is_untouched,
+    scoped_group,
+)
 from .assessment_snapshot_services import build_assessment_group_index
 from .dt_client import DTClient
 from .inconsistency import (
@@ -197,6 +207,10 @@ _COMPARISON_IGNORED_TAGS = [
     # Which versions a team looked at is a note on its review, not part of
     # the decision the findings must agree on.
     r"\[Version Coverage:\s*[^\]]*\]",
+    # The override marker says which scope a finding belongs to; findings
+    # are compared within their scope, and the reason on its own.
+    r"\[Version Override:\s*[^\]]*\]",
+    r"\[Override Reason:\s*[^\]]*\]",
 ]
 
 
@@ -489,12 +503,7 @@ def refresh_new_finding_flags(group: Dict[str, Any]) -> int:
         if _instance_state(component) != "NOT_SET"
     ]
     # Text without a state is work in progress: neither assessed nor new.
-    untouched_ids = {
-        id(component)
-        for component in components
-        if _instance_state(component) == "NOT_SET"
-        and not _instance_details(component).strip()
-    }
+    untouched_ids = {id(component) for component in components if is_untouched(component)}
 
     reference_ms: Optional[int] = None
     if assessed and len(assessed) < len(components):
@@ -556,18 +565,27 @@ def _build_group_list_metadata(
     normalized_tags = _normalize_group_tags(group.get("tags") or [], team_mapping)
     new_finding_count = refresh_new_finding_flags(group)
     summary = _build_assessment_summary(group)
-    inconsistency_reasons = _derive_group_inconsistency_reasons(group, summary)
     # The wildcard mapping uses Unassigned as an ownership fallback. It is a
     # reporting label, not a team that can provide an independent assessment.
     required_teams = [
         team for team in normalized_tags if team.casefold() != "unassigned"
     ]
-    lifecycle = _derive_group_lifecycle(
-        group,
-        summary,
-        required_teams,
-        inconsistency_reasons,
-    )
+    view = assessment_scopes(group)
+    scopes_metadata: Optional[List[Dict[str, Any]]] = None
+    if view.has_overrides:
+        lifecycle, inconsistency_reasons, scopes_metadata, primary = _scoped_lifecycle(
+            group, view, team_mapping, required_teams
+        )
+        if primary is not None:
+            summary = {**summary, "technical_state": primary["technical_state"]}
+    else:
+        inconsistency_reasons = _derive_group_inconsistency_reasons(group, summary)
+        lifecycle = _derive_group_lifecycle(
+            group,
+            summary,
+            required_teams,
+            inconsistency_reasons,
+        )
     # Pending review is not done, even when all currently visible team blocks
     # are populated. Lifecycle filters still keep NEEDS_APPROVAL separate from
     # OPEN; team counters use assessed_teams independently of this flag.
@@ -576,7 +594,7 @@ def _build_group_list_metadata(
         summary["is_pending_review"] and lifecycle == "NEEDS_APPROVAL"
     )
 
-    return {
+    metadata: Dict[str, Any] = {
         "lifecycle": lifecycle,
         "inconsistency_reasons": inconsistency_reasons,
         "is_pending": summary["is_pending_review"],
@@ -612,6 +630,85 @@ def _build_group_list_metadata(
         ),
         "assessment_restore_status": group.get("assessment_restore_status"),
     }
+    if scopes_metadata is not None:
+        metadata["assessment_scopes"] = scopes_metadata
+        metadata["override_gaps"] = [
+            key for scope in scopes_metadata for key in scope["override_gaps"]
+        ]
+    return metadata
+
+
+def _scope_required_teams(
+    instances: List[Dict[str, Any]],
+    team_mapping: Dict[str, Any],
+    fallback: List[str],
+) -> List[str]:
+    """The teams owning the scope's findings, else the group's teams."""
+    if not any("tags" in instance for instance in instances):
+        return fallback
+    tags = [tag for instance in instances for tag in instance.get("tags") or []]
+    return [
+        team for team in _normalize_group_tags(tags, team_mapping)
+        if team.casefold() != "unassigned"
+    ]
+
+
+def _scoped_lifecycle(
+    group: Dict[str, Any],
+    view: ScopeView,
+    team_mapping: Dict[str, Any],
+    required_teams: List[str],
+) -> tuple[str, List[str], List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Lifecycle and reasons with version overrides: the rules run inside
+    each scope, and the results are combined (ADR 0010 section 5)."""
+    reasons: List[str] = []
+    lifecycles: List[str] = []
+    scopes: List[Dict[str, Any]] = []
+    primary_scope = view.primary
+    primary: Optional[Dict[str, Any]] = None
+
+    def add(reason: str) -> None:
+        if reason not in reasons:
+            reasons.append(reason)
+
+    for scope in view.scopes:
+        if not scope.instances:
+            continue
+        part = scoped_group(group, scope.instances)
+        summary = _build_assessment_summary(part)
+        scope_reasons = _derive_group_inconsistency_reasons(part, summary)
+        if scope.partial:
+            scope_reasons.append(INCONSISTENCY_REASON_VERSION_OVERRIDE_PARTIAL)
+        if (
+            scope.reason_mismatch
+            and INCONSISTENCY_REASON_ASSESSMENT_DETAILS_MISMATCH not in scope_reasons
+        ):
+            scope_reasons.append(INCONSISTENCY_REASON_ASSESSMENT_DETAILS_MISMATCH)
+        teams = _scope_required_teams(scope.instances, team_mapping, required_teams)
+        lifecycle = _derive_group_lifecycle(part, summary, teams, scope_reasons)
+        lifecycles.append(lifecycle)
+        for reason in scope_reasons:
+            add(reason)
+        entry = {
+            "name": scope.name,
+            "label": scope.label,
+            "reason": scope.reason,
+            "versions": scope.versions,
+            "finding_keys": [scope_finding_key(i) for i in scope.instances],
+            "pending": scope.pending,
+            "lifecycle": lifecycle,
+            "required_teams": teams,
+            "inconsistency_reasons": scope_reasons,
+            "override_gaps": list(scope.gaps),
+            "technical_state": summary["technical_state"],
+        }
+        scopes.append(entry)
+        if scope is primary_scope:
+            primary = entry
+    if view.ambiguous:
+        add(INCONSISTENCY_REASON_VERSION_OVERRIDE_LABEL_MISMATCH)
+    lifecycle = combine_lifecycles(lifecycles, ambiguous=bool(view.ambiguous))
+    return lifecycle, reasons, scopes, primary
 
 
 def _summarize_component(component: Dict[str, Any]) -> Dict[str, Any]:
