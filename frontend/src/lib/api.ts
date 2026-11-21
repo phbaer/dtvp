@@ -670,12 +670,15 @@ export const applyBulkWorkflow = async (
     previewToken: string,
     onProgress?: BulkWorkflowProgressHandler,
     sourceId?: string,
+    /** Vulnerabilities whose new findings are to be synchronized as well. */
+    includeNewFindings: string[] = [],
 ): Promise<BulkWorkflowApplyResponse> => {
     const operationId = await startBulkWorkflowTask(workflowId, 'apply', withSource({
         task_id: taskId,
         filters,
         group_ids: groupIds,
         preview_token: previewToken,
+        ...(includeNewFindings.length ? { include_new_findings: includeNewFindings } : {}),
     }, sourceId));
     return waitForBulkWorkflowTask<BulkWorkflowApplyResponse>(operationId, onProgress);
 };

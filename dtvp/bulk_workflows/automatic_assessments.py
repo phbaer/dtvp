@@ -29,6 +29,7 @@ from ..rescore_rule_services import (
     calculate_cvss_score,
 )
 from .assessment_restore import selected_groups
+from .incomplete_sync import new_finding_ids
 from .base import BulkWorkflowContext, BulkWorkflowPlugin
 
 
@@ -1304,7 +1305,25 @@ def _build_group_item(
     already_applied_findings = 0
     preexisting_findings = 0
     missing_identity_findings = 0
+    # A verdict is evidence about the versions its analysis covered. For a
+    # finding a new project version added, a run that did not cover that
+    # version would only copy another version's assessment (ADR 0010
+    # decision 7): such a finding stays unassessed and new.
+    new = new_finding_ids(group)
+    covered_versions = {
+        version.casefold()
+        for entry in assessment_entries
+        if isinstance(entry["assessment"].get("version_analysis"), dict)
+        for version in _covered_product_versions(entry["assessment"]["version_analysis"])
+    }
+    new_findings_left = 0
     for instance in _instances(group):
+        if (
+            id(instance) in new
+            and _text(instance.get("project_version")).casefold() not in covered_versions
+        ):
+            new_findings_left += 1
+            continue
         finding_key = _application_finding_key(instance)
         if not finding_key:
             missing_identity_findings += 1
@@ -1358,6 +1377,7 @@ def _build_group_item(
         "already_applied_finding_count": already_applied_findings,
         "preexisting_finding_count": preexisting_findings,
         "missing_identity_finding_count": missing_identity_findings,
+        "new_finding_count": new_findings_left,
         "run_ids": run_ids,
         "assessment_fingerprint": hashlib.sha256(
             target_details.encode("utf-8")
@@ -1448,6 +1468,7 @@ def build_automatic_assessment_payloads(
         "already_applied": 0,
         "missing_identity": 0,
         "replaced_existing": 0,
+        "new_finding": 0,
     }
     for group, matched_records in group_records:
         item = _build_group_item(
@@ -1462,6 +1483,7 @@ def build_automatic_assessment_payloads(
         skipped["already_applied"] += item["already_applied_finding_count"]
         skipped["missing_identity"] += item["missing_identity_finding_count"]
         skipped["replaced_existing"] += item["preexisting_finding_count"]
+        skipped["new_finding"] += item["new_finding_count"]
         response = agreed_response(
             raw_instance.get("analysis_details") or raw_instance.get("analysisDetails") or ""
             for raw_instance in item["instances"]

@@ -38,6 +38,23 @@ def _instances(group: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def new_finding_ids(group: dict[str, Any]) -> set[int]:
+    """The findings of ``group`` that a new project version added after the
+    vulnerability was assessed, by ``id()``.
+
+    Nothing is copied onto them without a choice (ADR 0003 decision 6, ADR
+    0010 decision 7): Synchronize leaves them unassessed unless the reviewer
+    includes them for that vulnerability.
+    """
+    # Imported here: grouped_vuln_services imports the workflows' base.
+    from ..grouped_vuln_services import refresh_new_finding_flags
+
+    refresh_new_finding_flags(group)
+    return {
+        id(instance) for instance in _instances(group) if instance.get("is_new_finding")
+    }
+
+
 def _parse_blocks(details: str) -> list[dict[str, Any]]:
     matches = list(HEADER_RE.finditer(details or ""))
     blocks: list[dict[str, Any]] = []
@@ -148,12 +165,20 @@ def build_incomplete_sync_preview(groups: list[dict[str, Any]]) -> dict[str, Any
         if str((group.get("list_metadata") or {}).get("lifecycle") or "").upper()
         == "INCOMPLETE"
     ]
-    items = [_sync_group(group) for group in candidates]
+    items = []
+    for group in candidates:
+        item = _sync_group(group)
+        new = len(new_finding_ids(group))
+        # New findings are listed, not synchronized, unless included.
+        item["new_finding_count"] = new
+        item["finding_count"] -= new
+        items.append(item)
     return {
         "items": items,
         "summary": {
             "groups": len(items),
             "findings": sum(item["finding_count"] for item in items),
+            "new_findings": sum(item["new_finding_count"] for item in items),
         },
     }
 
@@ -161,14 +186,22 @@ def build_incomplete_sync_preview(groups: list[dict[str, Any]]) -> dict[str, Any
 def build_incomplete_sync_payloads(
     groups: list[dict[str, Any]],
     group_ids: list[str],
+    include_new_findings: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], dict[str, int]]:
+    """``include_new_findings`` are the ids of the groups whose new findings
+    the reviewer chose to synchronize as well."""
     payloads: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    skipped = {"not_incomplete": 0, "missing_identity": 0}
+    skipped = {"not_incomplete": 0, "missing_identity": 0, "new_finding": 0}
     for group in selected_groups(groups, group_ids):
         if str((group.get("list_metadata") or {}).get("lifecycle") or "").upper() != "INCOMPLETE":
             skipped["not_incomplete"] += 1
             continue
         change = _sync_group(group)
+        new = (
+            set()
+            if str(group.get("id") or "") in include_new_findings
+            else new_finding_ids(group)
+        )
         response = agreed_response(
             instance.get("analysis_details") or instance.get("analysisDetails") or ""
             for instance in change["instances"]
@@ -181,6 +214,9 @@ def build_incomplete_sync_payloads(
         ):
             target_details = f"{target_details}\n\n[Status: Pending Review]"
         for instance in change["instances"]:
+            if id(instance) in new:
+                skipped["new_finding"] += 1
+                continue
             if not all(instance.get(key) for key in ("project_uuid", "component_uuid", "vulnerability_uuid")):
                 skipped["missing_identity"] += 1
                 continue

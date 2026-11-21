@@ -53,8 +53,26 @@ others were assessed is not new, only incomplete.
   candidates.
 
 Nothing is copied automatically: the same component may be used differently in
-the new version. Assess the finding by hand, or apply the existing assessment
-with a bulk workflow. The mark disappears once the finding is assessed.
+the new version. Assess the finding by hand. The mark disappears once the
+finding is assessed.
+
+The bulk workflows follow the same rule (ADR 0010, decision 7):
+
+- **Repair Assessments** does not write onto a new finding. Its Synchronize
+  and Combine stages change the other findings of the vulnerability and leave
+  the new ones unassessed. The preview row states **N new findings of a new
+  version, not synchronized** with a checkbox, unchecked by default. Checking
+  it includes the new findings of that one vulnerability in the run; this is
+  the reviewer's statement that the existing assessment holds for the new
+  version too. A vulnerability whose only open work is its new findings is
+  listed but not preselected, and applying it without the checkbox writes
+  nothing.
+- **Automatic assessments** assess a new finding only when the analysis the
+  assessment comes from covered that finding's product version. Other new
+  findings are left and counted in the preview row.
+- The result of a run reports how many new findings it left unassessed. The
+  API returns the count as `new_finding` in the apply summary and accepts the
+  included vulnerabilities as `include_new_findings` in the apply request.
 
 A BOM uploaded again to the **same** version that recreates a component is
 different: the assessment of the replaced component is carried over, pending
@@ -365,7 +383,7 @@ label per applicable repair and count only the findings that change.
 | :--- | :--- | :--- |
 | Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
 | Restore tickets | Findings whose history shows that a workflow removed a ticket | See below |
-| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one. The [response](assessment-model.md#response) is kept as well; a finding without one takes the response the other findings agree on |
+| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks, except the [new findings](#new-findings) of a new version, which stay unassessed unless the reviewer includes them; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one. The [response](assessment-model.md#response) is kept as well; a finding without one takes the response the other findings agree on |
 | Keep former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
 | Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset. A team block without a decision that holds a text, ticket, assignees, evidence or coverage stays as it is, and that team is left to assess |
 | Remove references no team stands behind | A block under the name for components no team owns (the team mapping's `*`, or `Unassigned`) whose text is only `See global assessment.` | The block is removed. An assessment someone wrote under that name stays: it is the assessment of a component without a team, not a former team's |

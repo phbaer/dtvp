@@ -389,7 +389,7 @@ def test_incomplete_bulk_preview_keeps_lifecycle_when_hydrating_full_groups():
     )
     preview = build_incomplete_sync_preview(filtered)
 
-    assert preview["summary"] == {"groups": 1, "findings": 2}
+    assert preview["summary"] == {"groups": 1, "findings": 2, "new_findings": 0}
     assert preview["items"][0]["group_id"] == "CVE-INCOMPLETE"
     assert filtered[0]["list_metadata"]["lifecycle"] == "INCOMPLETE"
 
@@ -487,7 +487,7 @@ def test_incomplete_sync_builds_backend_preview_and_payloads():
     ]
 
     preview = build_incomplete_sync_preview([group])
-    assert preview["summary"] == {"groups": 1, "findings": 2}
+    assert preview["summary"] == {"groups": 1, "findings": 2, "new_findings": 0}
     assert preview["items"][0]["target_state"] == "NOT_AFFECTED"
     assert "[Evidence Reviewed: yes]" in preview["items"][0]["target_details"]
     assert "[Team: API] [State: NOT_AFFECTED]" in preview["items"][0]["target_details"]
@@ -498,7 +498,7 @@ def test_incomplete_sync_builds_backend_preview_and_payloads():
         [group], ["CVE-INCOMPLETE"]
     )
     assert len(payloads) == 2
-    assert skipped == {"not_incomplete": 0, "missing_identity": 0}
+    assert skipped == {"not_incomplete": 0, "missing_identity": 0, "new_finding": 0}
     assert {payload["state"] for _instance, payload in payloads} == {"NOT_AFFECTED"}
 
 
@@ -710,6 +710,7 @@ def test_automatic_assessment_workflow_aggregates_verdicts_and_builds_payloads()
         "already_applied": 0,
         "missing_identity": 0,
         "replaced_existing": 0,
+        "new_finding": 0,
     }
 
     document = build_automatic_assessment_document(context, ["CVE-2026-AUTO"])
@@ -1678,6 +1679,7 @@ def test_automatic_assessment_workflow_maps_overall_verdicts(
         "already_applied": 0,
         "missing_identity": 0,
         "replaced_existing": 0,
+        "new_finding": 0,
     }
 
 
@@ -2883,3 +2885,130 @@ def test_a_dropped_ticket_never_goes_to_an_unrelated_record():
     assert preview["items"][0]["review"] == [
         "A workflow dropped VP-101, SR-7; no assessment of its team or global one to return it to"
     ]
+
+
+# --- new findings are not filled by Synchronize unless chosen (ADR 0010) ------
+
+_ASSESSED_AT = 1794000000000  # the date of the team's block
+_DATED = (
+    f"--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: {_ASSESSED_AT}] "
+    "[Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+)
+
+
+def _group_with_new_version(*, skipped_too: bool = True):
+    """1.0 is assessed; 2.0 was reported before that and merely skipped;
+    3.0 is a new project version reported afterwards."""
+    findings = [("NOT_AFFECTED", _DATED)]
+    reported = [_ASSESSED_AT - 5_000]
+    if skipped_too:
+        findings.append(("NOT_SET", ""))
+        reported.append(_ASSESSED_AT - 1_000)
+    findings.append(("NOT_SET", ""))
+    reported.append(_ASSESSED_AT + 86_400_000)
+    group = _repair_group(findings, tags=["TeamB"])
+    for version, moment in zip(group["affected_versions"], reported):
+        version["components"][0]["attributed_on"] = moment
+    group["list_metadata"] = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    assert group["list_metadata"]["lifecycle"] == "INCOMPLETE"
+    return group
+
+
+def _repair_including(group, include=()):
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        include_new_findings=frozenset(include),
+    )
+    preview = build_assessment_repair_preview(context, lambda: {})
+    payloads, skipped = build_assessment_repair_payloads(context, [group["id"]], lambda: {})
+    return preview, payloads, skipped
+
+
+def test_synchronize_leaves_the_findings_of_a_new_version_unassessed():
+    group = _group_with_new_version()
+
+    preview, payloads, skipped = _repair_including(group)
+
+    [item] = preview["items"]
+    # The finding that was merely skipped is synchronized; the new one is listed.
+    assert [repair["label"] for repair in item["repairs"]] == [
+        "Synchronize assessment to 1 finding"
+    ]
+    assert (item["finding_count"], item["new_finding_count"]) == (1, 1)
+    assert item["requires_review"] is False
+    assert preview["summary"]["new_findings"] == 1
+    assert [instance["finding_uuid"] for instance, _payload in payloads] == ["finding-2"]
+    assert skipped["new_finding"] == 1
+    new = group["affected_versions"][2]["components"][0]
+    assert new["analysis_state"] == "NOT_SET" and new["is_new_finding"] is True
+
+
+def test_synchronize_fills_new_findings_when_the_reviewer_includes_them():
+    group = _group_with_new_version()
+
+    _preview, payloads, skipped = _repair_including(group, include=[group["id"]])
+
+    assert sorted(instance["finding_uuid"] for instance, _payload in payloads) == [
+        "finding-2", "finding-3",
+    ]
+    assert {payload["state"] for _instance, payload in payloads} == {"NOT_AFFECTED"}
+    assert skipped.get("new_finding", 0) == 0
+
+
+def test_a_vulnerability_with_new_findings_only_is_listed_but_never_preselected():
+    group = _group_with_new_version(skipped_too=False)
+
+    preview, payloads, skipped = _repair_including(group)
+
+    [item] = preview["items"]
+    assert item["repairs"] == []
+    assert (item["finding_count"], item["new_finding_count"]) == (0, 1)
+    assert item["repairable"] is True and item["requires_review"] is True
+    assert payloads == [] and skipped["new_finding"] == 1
+
+    _preview, payloads, _skipped = _repair_including(group, include=[group["id"]])
+    assert [instance["finding_uuid"] for instance, _payload in payloads] == ["finding-2"]
+
+
+def test_the_standalone_synchronize_follows_the_same_rule():
+    group = _group_with_new_version()
+
+    preview = build_incomplete_sync_preview([group])
+    assert preview["summary"] == {"groups": 1, "findings": 2, "new_findings": 1}
+
+    payloads, skipped = build_incomplete_sync_payloads([group], [group["id"]])
+    assert len(payloads) == 2 and skipped["new_finding"] == 1
+    payloads, skipped = build_incomplete_sync_payloads(
+        [group], [group["id"]], include_new_findings={group["id"]}
+    )
+    assert len(payloads) == 3 and skipped["new_finding"] == 0
+
+
+@pytest.mark.parametrize("covered", [True, False])
+def test_automatic_assessments_assess_a_new_finding_only_when_the_run_covered_its_version(covered):
+    group = _automatic_group()
+    group["tags"] = ["API"]
+    assessed, new = group["affected_versions"][0]["components"]
+    assessed.update({
+        "project_version": "1.0", "analysis_state": "NOT_AFFECTED",
+        "analysis_details": _DATED, "attributed_on": _ASSESSED_AT - 5_000,
+    })
+    new.update({"project_version": "2.0", "attributed_on": _ASSESSED_AT + 86_400_000})
+    record = _automatic_record("run-new", "owned-worker", "Not Affected", exposure="none")
+    record["result"]["assessment"]["version_analysis"] = {
+        "covered_product_versions": ["2.0"] if covered else ["1.0"],
+    }
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        result_store=_AutomaticResultStore([record]),
+    )
+
+    payloads, skipped = build_automatic_assessment_payloads(context, ["CVE-2026-AUTO"])
+
+    written = {instance["finding_uuid"] for instance, _payload in payloads}
+    if covered:
+        # The verdict is about 2.0 itself: evidence, not a copy.
+        assert "finding-worker" in written and skipped["new_finding"] == 0
+    else:
+        assert "finding-worker" not in written and skipped["new_finding"] == 1
+        assert new["analysis_state"] == "NOT_SET"
