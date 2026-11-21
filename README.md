@@ -246,6 +246,7 @@ cache-refresh, and Dependency-Track state changes
 | [Import and export](docs/import-export.md) | The local database as the record for assessments, adoption on import, automatic and manual export, failing exports, gone findings and carry-over to replacing components, and history |
 | [CycloneDX inventory and VDR](docs/cyclonedx-export.md) | Downloading the BOM and a VDR with assessments in standard fields per project version, the recommendation derived from the fixed versions Dependency-Track holds, the field mapping, and its limits |
 | [Native vulnerability matcher: investigation](docs/vulnerability-matcher-investigation.md) | How Dependency-Track matches today, vulnerability sources including European ones, matching beyond CPE, the chosen design and its plan ([ADR 0009](docs/adr/0009-native-vulnerability-matcher.md)); not built yet |
+| [Version overrides: design](docs/version-overrides-design.md) | Assessing a vulnerability differently per product version on purpose: one base assessment plus marked exceptions ([ADR 0010](docs/adr/0010-version-overrides.md)); design and plan, not built yet |
 | [AI and API access](docs/ai-access.md) | Access tokens, the MCP endpoint and its tools, write limits, agent code evidence, and the audit log |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
 | [Backup and restore](docs/backup-and-restore.md) | The instance dump `dtvp.dump/1`: export, verify, restore and recovery, encryption at rest, format, JSON Schemas, versioning, and validation rules |
