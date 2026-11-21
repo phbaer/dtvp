@@ -105,7 +105,8 @@ def test_an_assessment_is_written_in_standard_fields():
         "justification": "The parser is never called.",
     }
     assert entry["properties"] == [
-        {"name": "acme:assessed_by", "value": "alice"},
+        # Everyone who wrote a current block: General's assessor first.
+        {"name": "acme:assessed_by", "value": "alice, bob"},
         {"name": "acme:reviewed_by", "value": "rita"},
         {"name": "acme:spr", "value": "EXP-1001"},
         {"name": "acme:pending_review", "value": "true"},
@@ -1034,7 +1035,7 @@ def test_a_recommendation_is_derived_from_the_fixed_version():
     entry, document = _entry("", "NOT_SET", _finding(PA), fixed_versions=fixed)
 
     assert entry["recommendation"] == (
-        "Upgrade lib-a to 1.2.3 or later. Later versions are affected too: >=2.0.0 <2.0.1."
+        "Upgrade lib-a 1.0 to 1.2.3 or later. Later versions are affected too: >=2.0.0 <2.0.1."
     )
     assert _property(entry, "dtvp:recommendation_source") == ["fixed_version"]
     assert _property(entry, "dtvp:recommendation_fixed_by") == ["GITHUB", "OSV"]
@@ -1080,10 +1081,40 @@ def test_several_affected_components_have_one_sentence_each():
     assert entry["affects"] == [{"ref": "ref-b"}, {"ref": "c1"}]
     # Sorted by component name.
     assert entry["recommendation"] == (
-        "Upgrade lib-a to 1.1 or later. Upgrade lib-b to 2.1 or later."
+        "Upgrade lib-a 1.0 to 1.1 or later. Upgrade lib-b 2.0 to 2.1 or later."
     )
     assert _property(entry, "dtvp:recommendation_fixed_by") == ["GITHUB", "OSV"]
     assert _valid(document)
+
+
+def test_an_affected_package_without_a_fix_is_named_too():
+    """A text with a fix for one package says so for the others, so none is
+    silently left out (``@angular/http`` beside ``@angular/core``)."""
+    fixed = {("NVD", "CVE-2026-1"): _ranges(_excluding("lib-a", "1.1", "GITHUB"))}
+    document = _vdr([_finding(PB), _finding(PA)], [("NOT_SET", "")] * 2,
+                    fixed_versions=fixed)
+    [entry] = document["vulnerabilities"]
+    assert entry["recommendation"] == (
+        "Upgrade lib-a 1.0 to 1.1 or later. No fixed version is known for lib-b 2.0."
+    )
+    assert _valid(document)
+
+
+def test_split_entries_keep_their_bom_refs_whatever_the_finding_order():
+    """Entries of one vulnerability split by assessment get the plain bom-ref
+    and ``#2`` by a stable key, not by the order the source listed them."""
+    texts = [("NOT_AFFECTED", ""), ("EXPLOITABLE", "")]
+    forward = _vdr([_finding(PA), _finding(PB)], texts)
+    backward = _vdr([_finding(PB), _finding(PA)], list(reversed(texts)))
+
+    def refs(document):
+        return {
+            entry["bom-ref"]: [item["ref"] for item in entry["affects"]]
+            for entry in document["vulnerabilities"]
+        }
+
+    assert refs(forward) == refs(backward)
+    assert len(refs(forward)) == 2
 
 
 def test_the_document_counts_derived_and_unread_entries():
@@ -1142,9 +1173,9 @@ def test_a_whole_vdr_with_derived_recommendations_is_valid_and_keeps_the_invento
 
     assert _schema_errors(derived) is None
     assert [entry.get("recommendation") for entry in derived["vulnerabilities"]] == [
-        "Upgrade lib-a to 1.1 or later.",
-        "Upgrade lib-b to 2.1 or later.",
-        "Upgrade lib-a to 1.0.5 or later.",
+        "Upgrade lib-a 1.0 to 1.1 or later.",
+        "Upgrade lib-b 2.0 to 2.1 or later.",
+        "Upgrade lib-a 1.0 to 1.0.5 or later.",
     ]
     # The inventory does not change with the recommendation.
     assert _metadata(derived)["dtvp:export_inventory"] == _metadata(plain)["dtvp:export_inventory"]
@@ -1178,3 +1209,22 @@ def test_findings_the_source_no_longer_reports_are_counted_by_reason():
             item["name"].endswith(":export_findings_gone")
             for item in quiet["metadata"]["properties"]
         )
+
+
+def test_a_general_assessment_does_not_hide_the_teams_assessors():
+    """A save that writes the General block keeps every team's assessor in
+    assessed_by (it used to shrink to the General block's assessor)."""
+    text = (
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: 503309468] ---\nNot reachable.\n\n"
+        "--- [Team: S-Web] [State: NOT_AFFECTED] [Assessed By: 503309468] ---\nNot used.\n\n"
+        "--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: 550018796] ---\nNot shipped.\n\n"
+        "--- [Team: Edge] [State: NOT_AFFECTED] [Assessed By: 223057156] ---\nNot built."
+    )
+    document = build_vdr(
+        SCHEMA_BOM, [_finding(C1)], [parse_assessment("NOT_AFFECTED", text, False)],
+        generated_at=NOW, property_prefix="acme",
+    )
+    [entry] = document["vulnerabilities"]
+    assessed_by = [p["value"] for p in entry["properties"] if p["name"] == "acme:assessed_by"]
+    assert assessed_by == ["503309468, 550018796, 223057156"]
+    assert _schema_errors(document) is None

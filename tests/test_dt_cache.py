@@ -1597,7 +1597,7 @@ async def test_an_export_reads_the_stored_ranges_and_never_the_source(tmp_path):
     )
     client.get_vulnerability_affected.assert_not_called()
     first, second = document["vulnerabilities"]
-    assert first["recommendation"] == "Upgrade lib-a to 1.2.3 or later."
+    assert first["recommendation"] == "Upgrade lib-a 1.0 to 1.2.3 or later."
     assert "recommendation" not in second
     metadata = {item["name"]: item["value"] for item in document["metadata"]["properties"]}
     assert metadata["dtvp:export_derived_recommendations"] == "1"
@@ -2053,6 +2053,43 @@ async def test_a_pending_export_rejected_as_missing_records_the_reason(tmp_path)
     row = manager.finding_lifecycle.presence("p1")[("c1", "v1")]
     assert (row["status"], row["gone_reason"]) == ("gone", "missing_at_export")
     assert manager.assessment_outbox.get_overlay(("p1", "c1", "v1"))["sync_status"] == "inactive"
+    await manager.close()
+
+
+async def test_the_vdr_counts_recreated_components_apart_and_the_last_read(tmp_path):
+    """A component recreated under a new ID (same name and version) is not a
+    gone finding: it stands for an earlier generation. The last read's
+    findings are counted apart, with recreated ones labelled."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c-old", "1.0"), _lib("c-old", "1.0", vuln="v2")]
+    client.get_bom.return_value = _bom("c-old", version="1.0")
+    await manager.import_findings(client, "p1")
+    # Recreated twice (two BOM uploads), and v2 gone at the second one.
+    client.get_vulnerabilities.return_value = [_lib("c-mid", "1.0"), _lib("c-mid", "1.0", vuln="v2")]
+    client.get_bom.return_value = _bom("c-mid", version="1.0")
+    await manager.import_findings(client, "p1")
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.0")]
+    client.get_bom.return_value = _bom("c-new", version="1.0")
+    await manager.import_findings(client, "p1")
+    client.get_project_vulnerabilities.return_value = []
+
+    document = await manager.export_cyclonedx(
+        client, "p1", "vdr", assessment_source="DTVP", property_prefix="acme"
+    )
+    properties = document["metadata"]["properties"]
+
+    def values(name):
+        return [item["value"] for item in properties if item["name"] == f"acme:{name}"]
+
+    # Only v2 on the latest generation went for a reason that matters.
+    assert values("export_findings_gone") == ["no_longer_matched=1"]
+    # c-old's two and c-mid's v1 stand for earlier generations.
+    assert values("export_findings_recreated") == ["3"]
+    last_read = manager.finding_lifecycle.last_read("p1")["read_at"]
+    assert values("export_findings_gone_last_read_at") == [last_read]
+    assert values("export_findings_gone_last_read") == ["no_longer_matched=1", "recreated=1"]
+    assert len(values("export_findings_followed_since")) == 1
     await manager.close()
 
 

@@ -439,6 +439,48 @@ class FindingLifecycleStore:
                 counts[reason] = counts.get(reason, 0) + 1
         return dict(sorted(counts.items()))
 
+    def export_gone_summary(self, project_uuid: str) -> dict[str, Any]:
+        """What an export says about findings the source no longer reports.
+
+        - ``gone``: findings gone now, by reason; a finding on a component
+          the source recreated (same name and version under a new ID) is
+          not counted here, it stands for an earlier generation of a
+          component that is reported again;
+        - ``recreated``: how many such earlier generations there are;
+        - ``last_read``: the time of the last read and, by reason with
+          ``recreated`` apart, the findings that went at it;
+        - ``since``: when DTVP started following the version's findings.
+        """
+        rows = self.presence(project_uuid)
+        last = self.last_read(project_uuid)
+        components = _components_by_uuid(rows)
+        gone: dict[str, int] = {}
+        went: dict[str, int] = {}
+        recreated = 0
+        read_at = (last or {}).get("read_at")
+        for row in rows.values():
+            if row.get("status") != STATUS_GONE:
+                continue
+            is_recreated = _is_recreated(row, components)
+            reason = row.get("gone_reason") or REASON_UNDETERMINED
+            if is_recreated:
+                recreated += 1
+            else:
+                gone[reason] = gone.get(reason, 0) + 1
+            if read_at and row.get("gone_at") == read_at:
+                key = "recreated" if is_recreated else reason
+                went[key] = went.get(key, 0) + 1
+        since = min(
+            (str(row["first_seen_at"]) for row in rows.values() if row.get("first_seen_at")),
+            default=None,
+        )
+        return {
+            "gone": dict(sorted(gone.items())),
+            "recreated": recreated,
+            "last_read": {"at": read_at, "went": dict(sorted(went.items()))} if read_at else None,
+            "since": since,
+        }
+
     def has_data(self, project_uuid: str) -> bool:
         return bool(self.presence(project_uuid)) or self.last_read(project_uuid) is not None
 
@@ -1329,6 +1371,34 @@ def read_summary(plan: FollowPlan) -> dict[str, Any]:
     }
 
 
+def _components_by_uuid(
+    rows: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    """A finding row per component, a reported one where there is one."""
+    components: dict[str, Mapping[str, Any]] = {}
+    for row in rows.values():
+        if row.get("status") == STATUS_REPORTED or row["component_uuid"] not in components:
+            components[row["component_uuid"]] = row
+    return components
+
+
+def _is_recreated(
+    row: Mapping[str, Any], components: Mapping[str, Mapping[str, Any]]
+) -> bool:
+    """The gone finding's successor is the same component (name and version)
+    under a new ID: the source recreated it, nothing was replaced."""
+    successor_uuid = row.get("successor_component_uuid")
+    successor = components.get(successor_uuid) if successor_uuid else None
+    version = str(row.get("component_version") or "").strip()
+    return bool(
+        row.get("gone_reason") == REASON_REPLACED
+        and successor is not None
+        and _same_name(row.get("component_name"), successor.get("component_name"))
+        and version
+        and version == str(successor.get("component_version") or "").strip()
+    )
+
+
 def describe_gone_findings(
     lifecycle: FindingLifecycleStore,
     outbox: Any,
@@ -1340,10 +1410,7 @@ def describe_gone_findings(
     last = lifecycle.last_read(project_uuid)
     if not rows and last is None:
         return None
-    components: dict[str, dict[str, Any]] = {}
-    for row in rows.values():
-        if row.get("status") == STATUS_REPORTED or row["component_uuid"] not in components:
-            components[row["component_uuid"]] = row
+    components = _components_by_uuid(rows)
     findings = []
     for row in rows.values():
         if row.get("status") != STATUS_GONE:
@@ -1353,14 +1420,7 @@ def describe_gone_findings(
         record = outbox.get_overlay(
             (project_uuid, row["component_uuid"], row["vulnerability_uuid"])
         )
-        recreated = bool(
-            row.get("gone_reason") == REASON_REPLACED
-            and successor is not None
-            and _same_name(row.get("component_name"), successor.get("component_name"))
-            and str(row.get("component_version") or "").strip()
-            and str(row.get("component_version") or "").strip()
-            == str(successor.get("component_version") or "").strip()
-        )
+        recreated = _is_recreated(row, components)
         acknowledged = row.get("acknowledged_by")
         findings.append(
             {

@@ -110,7 +110,7 @@ def test_of_several_ranges_the_one_containing_the_version_is_chosen():
     assert fix.sources == ("OSV",)
     assert fix.later_ranges == (">=2.0.0 <2.0.5",)
     assert recommendation_text(NPM, fix) == (
-        "Upgrade lib-a to 1.4.2 or later. Later versions are affected too: >=2.0.0 <2.0.5."
+        "Upgrade lib-a 1.4.0 to 1.4.2 or later. Later versions are affected too: >=2.0.0 <2.0.5."
     )
 
 
@@ -189,7 +189,7 @@ def test_exact_versions_at_or_above_the_fix_are_affected_or_named():
     assert fix.version == "2.0"
     assert fix.later_ranges == ("2.2", ">=2.5 <2.6", "3.1")
     assert recommendation_text(lib, fix) == (
-        "Upgrade lib to 2.0 or later. Later versions are affected too: 2.2, >=2.5 <2.6, 3.1."
+        "Upgrade lib 1.2.0 to 2.0 or later. Later versions are affected too: 2.2, >=2.5 <2.6, 3.1."
     )
 
 
@@ -279,6 +279,10 @@ def test_display_names():
     # The group from the package URL when the component has none.
     assert display_name({"name": "name", "purl": "pkg:npm/%40scope/name@1.0"}) == "@scope/name"
     assert display_name(NPM) == "lib-a"
+    # The package URL names the installed package; the component's name may
+    # be a product name.
+    assert display_name({"name": "sqlite", "purl": "pkg:pypi/sqlite3@3.50.4"}) == "sqlite3"
+    assert display_name({"name": "sqlite"}) == "sqlite"
 
 
 def test_patched_versions_are_not_a_recommendation():
@@ -293,7 +297,7 @@ def test_patched_versions_are_not_a_recommendation():
         openssl, [_range("pkg:deb/debian/openssl", versionStartIncluding="0")]
     ) is None
     derived = derive_recommendation(NPM, [_range(versionEndExcluding="1.5")])
-    assert derived.text == "Upgrade lib-a to 1.5 or later."
+    assert derived.text == "Upgrade lib-a 1.4.0 to 1.5 or later."
 
 
 def test_slimming_keeps_the_ranges_and_the_mirrors_only():

@@ -2393,10 +2393,10 @@ class CacheManager:
         findings_read_at = self.store.snapshot_updated_at(
             DocumentRef(KIND_FINDINGS, project_uuid=project_uuid)
         )
-        # Every finding of the version gone now, not only those of the last
-        # read, so two exports in a row agree.
+        # Findings of the version gone now (two exports in a row agree), and
+        # those that went at the last read.
         findings_gone = await asyncio.to_thread(
-            self.finding_lifecycle.gone_counts, project_uuid
+            self.finding_lifecycle.export_gone_summary, project_uuid
         )
 
         def assemble() -> Dict[str, Any]:

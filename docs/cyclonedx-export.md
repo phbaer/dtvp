@@ -93,7 +93,9 @@ Every finding of the project version is listed, also those in triage and
 those without an assessment. Findings of one vulnerability that share the same
 assessment are one `vulnerabilities` entry with several `affects`; findings
 with differing assessments are separate entries (the second has the
-`bom-ref` `<uuid>#2`). Findings that differ only in the response are
+`bom-ref` `<uuid>#2`; which one is second follows the affected components'
+references, so an unchanged split keeps its `bom-ref`s from export to
+export). Findings that differ only in the response are
 separate entries as well.
 
 | DTVP | CycloneDX |
@@ -134,7 +136,10 @@ the property prefix, and the DTVP version (`<prefix>:export`,
 | `<prefix>:export_ticket_prefixes` | The ticket prefixes the texts were searched for. Absent: no text was searched |
 | `<prefix>:export_text_only_tickets` | Number of entries with a ticket key that only a text mentions; their records lack the ticket field |
 | `<prefix>:export_historical_assessments` | Number of historical team assessments in the document. Absent: none |
-| `<prefix>:export_findings_gone` | Findings of this project version Dependency-Track no longer reports, one property per reason with `<reason>=<count>`, sorted by reason: `replaced`, `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export`. Counts every finding gone now, not only at the last read, so two exports in a row agree. Those findings are not listed. Absent: none. See [Findings that disappear](import-export.md#findings-that-disappear) |
+| `<prefix>:export_findings_gone` | Findings of this project version Dependency-Track no longer reports and DTVP still follows, one property per reason with `<reason>=<count>`, sorted by reason: `replaced` (another version of the component has the vulnerability), `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export`. Counts every such finding gone now, not only at the last read, so two exports in a row agree. A finding on a component Dependency-Track recreated (same name and version under a new ID, typically a BOM uploaded again) is not counted: it stands for an earlier generation of a component that is reported again, see the next row. Those findings are not listed. Absent: none. See [Findings that disappear](import-export.md#findings-that-disappear). Until 2.0.0rc2 this counted recreated components as `replaced` |
+| `<prefix>:export_findings_recreated` | Number of findings that only stand for an earlier generation of a recreated component; their assessments followed the component. Not counted in `export_findings_gone`. Absent: none |
+| `<prefix>:export_findings_gone_last_read_at`, `<prefix>:export_findings_gone_last_read` | The last read of the findings from Dependency-Track, as a date-time in UTC, and the findings that went at it, one property per reason with `<reason>=<count>`, `recreated` apart from `replaced`. The time is there whenever a finding is gone; the counts are absent when nothing went at the last read. Absent altogether: nothing gone, or no read recorded |
+| `<prefix>:export_findings_followed_since` | When DTVP started following this version's findings, as a date-time in UTC: counts start there. Absent: nothing gone |
 | `<prefix>:export_advisory_records` | `unavailable`: the vulnerability records could not be read, see [Limits](#limits) |
 | `<prefix>:export_incomplete_findings` | Number of assessed findings whose text could not be read, see [Limits](#limits) |
 | `<prefix>:export_derived_recommendations`, `<prefix>:export_fixed_versions_unread`, `<prefix>:export_fixed_versions_read_at` | Derived recommendations, see [Recommendation](#recommendation) |
@@ -303,9 +308,10 @@ not part of a project archive.
 
 | Case | `recommendation` |
 | :--- | :--- |
-| A fixed version | `Upgrade <name> to <version> or later.` |
+| A fixed version | `Upgrade <name> <installed version> to <version> or later.` |
 | Another range or an exact version of the package starts at or above the fixed version | `… Later versions are affected too: >=3.0.0 <3.0.2, 3.1.4.` (each range or version, in version order, comma-separated) |
-| No fix | No `recommendation` |
+| No fix for one package, a fix for another of the same entry | `No fixed version is known for <name> <installed version>.`, so every affected package is named |
+| No fix for any package | No `recommendation` |
 
 The record's `patchedVersions` is never the recommendation. Trivy sets it
 once, from the package and distribution of whichever project created the
@@ -314,7 +320,9 @@ another component. It is exported as the property
 `<prefix>:patched_versions`, unchecked.
 
 `<name>` is `group:name` for Maven, `group/name` for other packages with a
-group or namespace (`@scope/name`), else the name. An entry that affects
+group or namespace (`@scope/name`), else the name; the package URL's name
+and namespace come first, as they name the installed package (`sqlite3`
+where the component is called `sqlite`). Sentences are sorted by name. An entry that affects
 several components has one sentence per component, distinct, sorted by name
 and joined with a space. Dependency-Track's own recommendation is always
 kept as it is.
