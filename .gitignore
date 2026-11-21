@@ -27,3 +27,7 @@ frontend/coverage
 data/tmrescore_proposals.json
 test_setup/mock_dt_analysis.runtime.json
 .gstack/
+
+# Local agent worktrees and lock files of local tools
+.claude/worktrees/
+data/artifacts/
