@@ -60,6 +60,55 @@ def new_finding_ids(group: dict[str, Any]) -> set[int]:
     }
 
 
+def new_finding_places(
+    group: dict[str, Any], instances: list[dict[str, Any]]
+) -> list[str]:
+    """Where new findings are, for the preview: "version (component@version)",
+    each once, in order."""
+    versions = {
+        id(component): version.get("project_version")
+        for version in (group.get("affected_versions") or [])
+        for component in (version.get("components") or [])
+        if isinstance(component, dict)
+    }
+    places: list[str] = []
+    for instance in instances:
+        version = (
+            str(versions.get(id(instance)) or instance.get("project_version") or "").strip()
+            or "(no version)"
+        )
+        name = str(instance.get("component_name") or "").strip()
+        component_version = str(instance.get("component_version") or "").strip()
+        component = f"{name}@{component_version}" if name and component_version else name
+        place = f"{version} ({component})" if component else version
+        if place not in places:
+            places.append(place)
+    return places
+
+
+def _sync_target_details(change: dict[str, Any]) -> str:
+    """The text Synchronize writes; a pending assessment stays pending."""
+    target_details = change["target_details"]
+    if target_details and any(
+        re.search(r"\[Status: Pending Review\]", str(instance.get("analysis_details") or ""), re.I)
+        for instance in change["instances"]
+    ):
+        target_details = f"{target_details}\n\n[Status: Pending Review]"
+    return target_details
+
+
+def _sync_changes(change: dict[str, Any], instance: dict[str, Any]) -> bool:
+    """Whether synchronizing would change this finding."""
+    old = instance.get("analysis_details") or instance.get("analysisDetails") or ""
+    state = str(instance.get("analysis_state") or instance.get("analysisState") or "NOT_SET")
+    response = agreed_response(
+        other.get("analysis_details") or other.get("analysisDetails") or ""
+        for other in change["instances"]
+    )
+    new = _keep_finding_values(_sync_target_details(change), old, response)
+    return new.strip() != str(old).strip() or state != change["target_state"]
+
+
 def _parse_blocks(details: str) -> list[dict[str, Any]]:
     matches = list(HEADER_RE.finditer(details or ""))
     blocks: list[dict[str, Any]] = []
@@ -210,10 +259,16 @@ def build_incomplete_sync_preview(groups: list[dict[str, Any]]) -> dict[str, Any
     items = []
     for group in candidates:
         item = _sync_group(group)
-        new = len(new_finding_ids(group))
-        # New findings are listed, not synchronized, unless included.
-        item["new_finding_count"] = new
-        item["finding_count"] -= new
+        new_ids = new_finding_ids(group)
+        # New findings are listed, not synchronized, unless included; only
+        # those that synchronizing would change.
+        changing = [
+            instance for instance in item["instances"]
+            if id(instance) in new_ids and _sync_changes(item, instance)
+        ]
+        item["new_finding_count"] = len(changing)
+        item["new_finding_places"] = new_finding_places(group, changing)
+        item["finding_count"] -= len(new_ids)
         items.append(item)
     return {
         "items": items,
@@ -249,12 +304,7 @@ def build_incomplete_sync_payloads(
             for instance in change["instances"]
         )
         # Synchronizing is not approving: a pending assessment stays pending.
-        target_details = change["target_details"]
-        if target_details and any(
-            re.search(r"\[Status: Pending Review\]", str(instance.get("analysis_details") or ""), re.I)
-            for instance in change["instances"]
-        ):
-            target_details = f"{target_details}\n\n[Status: Pending Review]"
+        target_details = _sync_target_details(change)
         for instance in change["instances"]:
             if id(instance) in new:
                 skipped["new_finding"] += 1

@@ -503,6 +503,20 @@ describe('BulkWorkflowModal', () => {
             expect(call[7]).toEqual(['CVE-2026-1'])
         })
 
+        it('names where the new findings are, and says when they are all there is', async () => {
+            const onlyNew = {
+                ...item, title: 'CVE-2026-1', finding_count: 0, new_finding_count: 1, repairs: [],
+                requires_review: true, new_finding_places: ['2.1 (lib-a@1.0)'],
+            }
+            const wrapper = await openRepair([onlyNew], ['CVE-2026-1'])
+            const row = wrapper.get('[data-testid="bulk-workflow-item-CVE-2026-1"]').text()
+
+            expect(wrapper.get('[data-testid="new-findings-CVE-2026-1"]').text())
+                .toContain('1 new finding in version 2.1 (lib-a@1.0), not synchronized. Synchronize it as well')
+            expect(row).toContain('Only findings of a new version are not synchronized')
+            expect(row).not.toContain('0 findings will be updated')
+        })
+
         it('drops the opt-in of a vulnerability that is no longer selected', async () => {
             const other = { ...item, group_id: 'CVE-2026-2', new_finding_count: 0 }
             const wrapper = await openRepair([item, other], ['CVE-2026-1', 'CVE-2026-2'])
