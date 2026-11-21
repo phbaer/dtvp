@@ -173,6 +173,13 @@ def build_incomplete_sync_payloads(
             instance.get("analysis_details") or instance.get("analysisDetails") or ""
             for instance in change["instances"]
         )
+        # Synchronizing is not approving: a pending assessment stays pending.
+        target_details = change["target_details"]
+        if target_details and any(
+            re.search(r"\[Status: Pending Review\]", str(instance.get("analysis_details") or ""), re.I)
+            for instance in change["instances"]
+        ):
+            target_details = f"{target_details}\n\n[Status: Pending Review]"
         for instance in change["instances"]:
             if not all(instance.get(key) for key in ("project_uuid", "component_uuid", "vulnerability_uuid")):
                 skipped["missing_identity"] += 1
@@ -186,7 +193,7 @@ def build_incomplete_sync_payloads(
                         "vulnerability_uuid": instance["vulnerability_uuid"],
                         "state": change["target_state"],
                         "details": _keep_finding_values(
-                            change["target_details"],
+                            target_details,
                             instance.get("analysis_details") or instance.get("analysisDetails") or "",
                             response,
                         ),

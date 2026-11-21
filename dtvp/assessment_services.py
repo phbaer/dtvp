@@ -97,6 +97,9 @@ def _retryable_assessment_write_error(exc: Exception) -> bool:
     return isinstance(exc, httpx.TransportError)
 
 
+_PENDING_MARKER_RE = re.compile(r"\s*\[Status: Pending Review\]", re.IGNORECASE)
+
+
 def _normalize_analysis_details(details: Optional[str]) -> str:
     if not details:
         return ""
@@ -293,13 +296,24 @@ def build_assessment_payloads(
             final_details_str = kept_details
             aggregated_state = deps.calculate_aggregated_state(final_details_str)
 
-        # Only a reviewer approves. Whatever an analyst's client sends (fields
-        # with pending_review false, a whole text without the marker), the
-        # saved assessment waits for review, as a text save always did.
-        if (
-            str(role or "").upper() != "REVIEWER"
-            and final_details_str.strip()
-            and PENDING_REVIEW_MARKER.casefold() not in final_details_str.casefold()
+        # Only a reviewer approves, and only by saying so. Whatever an
+        # analyst's client sends (fields with pending_review false, a whole
+        # text without the marker), the saved assessment waits for review, as
+        # a text save always did. A reviewer's save that is not an approval
+        # keeps the pending status the stored assessment has.
+        is_reviewer = str(role or "").upper() == "REVIEWER"
+        marked = PENDING_REVIEW_MARKER.casefold() in final_details_str.casefold()
+        if is_reviewer and req.approve:
+            if marked:
+                final_details_str = _PENDING_MARKER_RE.sub("", final_details_str).rstrip()
+                aggregated_state = deps.calculate_aggregated_state(final_details_str)
+        elif (
+            final_details_str.strip()
+            and not marked
+            and (
+                not is_reviewer
+                or PENDING_REVIEW_MARKER.casefold() in str(base or "").casefold()
+            )
         ):
             final_details_str = f"{final_details_str.rstrip()}\n\n{PENDING_REVIEW_MARKER}"
             aggregated_state = deps.calculate_aggregated_state(final_details_str)

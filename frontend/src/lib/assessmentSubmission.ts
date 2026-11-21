@@ -385,6 +385,9 @@ export const prepareAssessmentSubmission = (
             team: input.selectedTeam || undefined,
             original_analysis: input.force ? {} : seenAnalysis(input.allInstances, input.originalAnalysis),
             force: input.force,
+            // Said in so many words: the server removes the pending status
+            // for nothing less, whatever the fields say.
+            ...(input.isApprove && input.isReviewer ? { approve: true } : {}),
         },
     }
 }

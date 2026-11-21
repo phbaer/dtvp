@@ -42,7 +42,9 @@ aggregate state follows these rules:
   Ready for approval; old Assessed Legacy selections migrate to Assessed.
   Smart-search aliases retain the API categories.
 - Pending review remains internal metadata; it does not add an overlapping UI
-  category. Incomplete tooltips identify missing teams and finding instances.
+  category. The server sets it on every save that is not a reviewer's, and
+  removes it only for a reviewer's explicit approval
+  ([Review workflows](review-workflows.md)). Incomplete tooltips identify missing teams and finding instances.
   A missing General block alone is not an incomplete-coverage issue.
 - API lifecycle codes remain compatible: `INCONSISTENT` is displayed as
   Conflicting, and complete `NEEDS_APPROVAL` groups as Ready for approval.

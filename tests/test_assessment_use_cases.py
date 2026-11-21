@@ -940,3 +940,170 @@ async def test_a_merge_save_that_only_assigns_keeps_assessor_and_date(deps):
     team_a = _teams()["TeamA"]
     assert team_a["assigned"] == ["dave"]
     assert (team_a["assessed_by"], team_a["assessed_at_ms"]) == ("alice", 1794561289100)
+
+
+# --- Only an explicit approval removes pending review ----------------------
+
+from dtvp.assessment_use_cases import delete_assessment  # noqa: E402
+
+_PENDING = "[Status: Pending Review]"
+
+
+async def _reviewer_save(deps, **request):
+    await save_assessment(
+        deps, _request(**request), user="rita", role="REVIEWER", client=None
+    )
+
+
+@pytest.mark.parametrize("how", ["fields", "replace", "merge"])
+async def test_a_reviewers_plain_save_keeps_pending_review(deps, how):
+    """Editing a pending assessment is not approving it, whatever the
+    reviewer's client sends."""
+    await _store(deps, _TEAM_A_STORED)
+    assert _PENDING in _stored()["analysisDetails"]
+
+    edited = {**_TEAM_A_STORED, "details": "Reworded by the reviewer."}
+    if how == "fields":
+        await _reviewer_save(deps, team="TeamA", state="NOT_AFFECTED",
+                             fields={"pending_review": False, "teams": [edited]})
+    elif how == "replace":
+        await _reviewer_save(
+            deps, team="TeamA", state="NOT_AFFECTED", comparison_mode="REPLACE",
+            details=render_assessment({"teams": [edited], "pending_review": False}),
+        )
+    else:
+        await _reviewer_save(deps, team="TeamA", state="NOT_AFFECTED",
+                             details="Reworded by the reviewer.",
+                             justification="CODE_NOT_REACHABLE")
+
+    assert _teams()["TeamA"]["details"] == "Reworded by the reviewer."
+    assert _stored()["analysisDetails"].endswith(_PENDING)
+
+
+@pytest.mark.parametrize("client_says_pending", [False, True])
+async def test_an_explicit_approval_removes_pending_review(deps, client_says_pending):
+    await _store(deps, _TEAM_A_STORED)
+
+    await _reviewer_save(
+        deps, team="TeamA", state="NOT_AFFECTED", approve=True,
+        fields={"pending_review": client_says_pending, "teams": [_TEAM_A_STORED]},
+    )
+
+    stored = _stored()
+    assert _PENDING not in stored["analysisDetails"]
+    assert parse_assessment(
+        stored["analysisState"], stored["analysisDetails"], False
+    )["pending_review"] is False
+    assert stored["analysisState"] == "NOT_AFFECTED"
+
+
+async def test_only_a_reviewer_can_approve(deps):
+    await _store(deps, _TEAM_A_STORED)
+    revision = _stored()["dtvpRevision"]
+
+    with pytest.raises(AssessmentPermissionError):
+        await save_assessment(
+            deps,
+            _request(team="TeamA", state="NOT_AFFECTED", approve=True,
+                     fields={"pending_review": False, "teams": [_TEAM_A_STORED]}),
+            user="alice", role="ANALYST", client=None,
+        )
+
+    assert _stored()["dtvpRevision"] == revision
+    assert _PENDING in _stored()["analysisDetails"]
+
+
+async def test_a_reviewers_own_assessment_of_something_not_pending_is_not_pending(deps):
+    """There is no pending status to keep: the reviewer's decision stands."""
+    await _store(deps, _TEAM_A_STORED, pending=False)
+    assert _PENDING not in _stored()["analysisDetails"]
+
+    await _reviewer_save(deps, team="TeamA", state="NOT_AFFECTED",
+                         fields={"pending_review": False,
+                                 "teams": [{**_TEAM_A_STORED, "details": "Checked."}]})
+
+    assert _PENDING not in _stored()["analysisDetails"]
+
+
+@pytest.mark.parametrize("was_pending", [True, False])
+async def test_a_reviewers_deletion_of_a_team_assessment_keeps_pending_review(
+    deps, was_pending
+):
+    await _store(deps, _TEAM_A_STORED, _TEAM_B_STORED, pending=was_pending)
+
+    await delete_assessment(
+        deps, [dict(INSTANCE)], team="TeamB", user="rita", role="REVIEWER"
+    )
+
+    assert list(_teams()) == ["TeamA"]
+    assert (_PENDING in _stored()["analysisDetails"]) is was_pending
+
+
+# --- A forced save is still guarded against a concurrent write --------------
+
+
+class _RacingCache:
+    """The cache manager, with another author's save landing between the use
+    case's read and its persist."""
+
+    def __init__(self, real, racing_payload):
+        self._real = real
+        self._racing_payload = racing_payload
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    async def persist_assessment_updates(self, payloads, **options):
+        if self._racing_payload is not None:
+            racing, self._racing_payload = self._racing_payload, None
+            await self._real.persist_assessment_updates(
+                [racing], replace=True, author="bob", origin="user"
+            )
+        return await self._real.persist_assessment_updates(payloads, **options)
+
+
+_RACING = {
+    "project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1",
+    "state": "EXPLOITABLE", "suppressed": False,
+    "details": "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] "
+               "[Justification: NOT_SET] ---\nSaved meanwhile.",
+}
+
+
+@pytest.mark.parametrize("request_options", [
+    {"force": True, "original_analysis": {}},
+    {"force": True, "original_analysis": {"f1": {"dtvpRevision": 0}}},
+    {"force": False},
+], ids=["forced", "forced-with-a-stale-view", "no-view-given"])
+async def test_a_save_without_a_view_fails_when_another_save_lands_first(
+    deps, request_options
+):
+    await _store(deps, _TEAM_A_STORED)
+    deps.cache_manager = _RacingCache(dt_cache.cache_manager, dict(_RACING))
+
+    with pytest.raises(AssessmentConflictError) as excinfo:
+        await _reviewer_save(
+            deps, team="TeamA", state="NOT_AFFECTED",
+            fields={"pending_review": True,
+                    "teams": [{**_TEAM_A_STORED, "details": "Overwrites."}]},
+            **request_options,
+        )
+
+    assert excinfo.value.conflicts[0]["finding_uuid"] == "f1"
+    # The save that landed first is what is stored.
+    assert "Saved meanwhile." in _stored()["analysisDetails"]
+    assert "Overwrites." not in _stored()["analysisDetails"]
+
+
+async def test_a_forced_save_without_a_race_overwrites_a_stale_view(deps):
+    await _store(deps, _TEAM_A_STORED)
+    deps.cache_manager = _RacingCache(dt_cache.cache_manager, None)
+
+    await _reviewer_save(
+        deps, team="TeamA", state="NOT_AFFECTED", force=True,
+        original_analysis={"f1": {"dtvpRevision": 0}},
+        fields={"pending_review": True,
+                "teams": [{**_TEAM_A_STORED, "details": "Overwrites."}]},
+    )
+
+    assert _teams()["TeamA"]["details"] == "Overwrites."
