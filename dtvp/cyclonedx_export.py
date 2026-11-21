@@ -43,7 +43,7 @@ from .assessment_model import (
     FORMER_TEAM_NOTE,
     SEE_GLOBAL_ASSESSMENT,
 )
-from .fixed_versions import derive_recommendation, display_name
+from .fixed_versions import derive_recommendation, display_name, installed_name
 
 VARIANT_INVENTORY = "inventory"
 VARIANT_VDR = "vdr"
@@ -436,9 +436,15 @@ def _read(
         # General assessment, else the latest date of the live teams. A
         # reviewer's approval keeps it, so it is not when it was first made.
         "assessment_date": _date_time(general.get("assessed_at_ms") or latest_team_date),
+        # Everyone who wrote a current block: the General assessment's
+        # assessor first, then the teams'. Taking the General one alone made
+        # the list shrink to one name when a save wrote the General block.
         "assessors": _distinct(
-            [general["assessed_by"]] if general.get("assessed_by")
-            else text_assessors or [team["assessed_by"] for team in live]
+            [
+                *([general["assessed_by"]] if general.get("assessed_by") else []),
+                *(team["assessed_by"] for team in live),
+                *text_assessors,
+            ]
         ),
         "reviewers": _distinct([*(team["reviewed_by"] for team in live), *text_reviewers]),
         "tickets": [*recorded, *text_only],
@@ -698,12 +704,22 @@ class _Recommendations:
             if patched else []
         )
         sentences: dict[str, tuple[str, tuple[str, ...]]] = {}
+        without_fix: list[dict[str, Any]] = []
         for component in components:
             derived = derive_recommendation(component, entries)
             if derived is not None:
                 sentences.setdefault(derived.text, (display_name(component), derived.sources))
+            else:
+                without_fix.append(component)
         if not sentences:
             return "", hint
+        # Every affected package is named: one the ranges give no fix for
+        # says so, instead of being left out of the text.
+        for component in without_fix:
+            sentences.setdefault(
+                f"No fixed version is known for {installed_name(component)}.",
+                (display_name(component), ()),
+            )
         self.derived += 1
         ordered = sorted(sentences.items(), key=lambda item: (item[1][0].casefold(), item[0]))
         sources = sorted({source for _name, found in sentences.values() for source in found})
@@ -806,6 +822,41 @@ def build_inventory(
     return document
 
 
+def _gone_properties(
+    summary: Mapping[str, Any] | None, prefix: str
+) -> list[dict[str, str]]:
+    if not summary:
+        return []
+    if all(isinstance(value, int) for value in summary.values()):
+        summary = {"gone": summary}
+
+    def counts(name: str, values: Mapping[str, Any] | None) -> list[dict[str, str]]:
+        return [
+            {"name": f"{prefix}:{name}", "value": f"{reason}={count}"}
+            for reason, count in sorted((values or {}).items())
+            if int(count) > 0
+        ]
+
+    properties = counts("export_findings_gone", summary.get("gone"))
+    if int(summary.get("recreated") or 0) > 0:
+        properties.append(
+            {"name": f"{prefix}:export_findings_recreated", "value": str(summary["recreated"])}
+        )
+    if not properties:
+        return []  # nothing went: an export says nothing about it
+    last_read = summary.get("last_read") or {}
+    if last_read.get("at"):
+        properties.append(
+            {"name": f"{prefix}:export_findings_gone_last_read_at", "value": str(last_read["at"])}
+        )
+        properties += counts("export_findings_gone_last_read", last_read.get("went"))
+    if summary.get("since"):
+        properties.append(
+            {"name": f"{prefix}:export_findings_followed_since", "value": str(summary["since"])}
+        )
+    return properties
+
+
 def build_vdr(
     bom: dict[str, Any],
     findings: list[dict[str, Any]],
@@ -819,7 +870,7 @@ def build_vdr(
     ticket_prefixes: Iterable[str] = (),
     findings_read_at: str = "",
     fixed_versions: Mapping[tuple[str, str], dict[str, Any]] | None = None,
-    findings_gone: Mapping[str, int] | None = None,
+    findings_gone: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The BOM with its findings and their assessments.
 
@@ -835,8 +886,10 @@ def build_vdr(
     ``fixed_versions`` are the stored version ranges per (source, vuln ID),
     as ``LocalStore.fixed_version_entries`` returns them; ``None`` when they
     were not looked up, so that no entry counts as unread.
-    ``findings_gone`` counts, by reason, the findings of the project version
-    the source no longer reports; they are not listed.
+    ``findings_gone`` says what became of findings of the project version
+    the source no longer reports (they are not listed), as
+    ``FindingLifecycleStore.export_gone_summary`` returns it; a plain
+    mapping of reason to count stands for its ``gone`` part.
     """
     moment = (generated_at or datetime.now(UTC)).astimezone(UTC).isoformat()
     document = build_inventory(bom, findings, property_prefix=property_prefix)
@@ -929,7 +982,16 @@ def build_vdr(
     per_id: dict[str, int] = {}
     vulnerabilities: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = list(document.get("annotations") or [])
-    for signature, group in groups.items():
+    # A stable order, so the same split gives each entry the same bom-ref in
+    # every export: by vulnerability, then by the components it affects, then
+    # by the assessment; never by the order the source listed the findings.
+    ordered = sorted(
+        groups.items(),
+        key=lambda item: (
+            item[0][0], sorted(str(ref) for ref in item[1]["refs"]), repr(item[0])
+        ),
+    )
+    for signature, group in ordered:
         vuln_id = signature[0]
         vulnerability, fields = group["vulnerability"], group["fields"]
         index = per_id.get(vuln_id, 0)
@@ -1002,11 +1064,7 @@ def build_vdr(
 
     # Findings the source stopped reporting are not listed; say how many
     # went and why, so a reader need not compare exports to notice.
-    metadata["properties"] += [
-        {"name": f"{property_prefix}:export_findings_gone", "value": f"{reason}={count}"}
-        for reason, count in sorted((findings_gone or {}).items())
-        if int(count) > 0
-    ]
+    metadata["properties"] += _gone_properties(findings_gone, property_prefix)
 
     document["vulnerabilities"] = vulnerabilities
     if annotations:

@@ -346,17 +346,25 @@ def fix_for(
 
 def display_name(component: Mapping[str, Any]) -> str:
     """``group:name`` for maven, ``group/name`` for other types with a group,
-    else the name."""
+    else the name. The package URL's name and namespace come first: they
+    name the installed package (``sqlite3``), where the component's name
+    may be a product name (``sqlite``)."""
     purl = parse_purl(component.get("purl")) or {}
-    name = str(component.get("name") or purl.get("name") or "")
-    group = str(component.get("group") or purl.get("namespace") or "")
+    name = str(purl.get("name") or component.get("name") or "")
+    group = str(purl.get("namespace") or component.get("group") or "")
     if not group:
         return name
     return f"{group}:{name}" if purl.get("type") == "maven" else f"{group}/{name}"
 
 
+def installed_name(component: Mapping[str, Any]) -> str:
+    """The package with its installed version, as a sentence names it."""
+    version = str(component.get("version") or "").strip()
+    return f"{display_name(component)} {version}".strip()
+
+
 def recommendation_text(component: Mapping[str, Any], fix: Fix) -> str:
-    text = f"Upgrade {display_name(component)} to {fix.version} or later."
+    text = f"Upgrade {installed_name(component)} to {fix.version} or later."
     if fix.later_ranges:
         text += f" Later versions are affected too: {', '.join(fix.later_ranges)}."
     return text
