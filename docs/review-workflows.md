@@ -264,7 +264,9 @@ A carried-over assessment appears on the replacing finding marked
 recreated the same component under a new ID (same name, version and package
 URL, typically a BOM uploaded again), the panel says **Recreated by
 Dependency-Track** and **Carried over to the recreated component**, and the
-assessment moves over unchanged: an approved one stays approved. Where the old assessments
+assessment moves over unchanged: an approved one stays approved (origin
+`carried-over-recreated`; carries of 2.0.0rc1 and earlier that still carry
+the marker get it taken back at the next read, unless someone saved since). Where the old assessments
 differ, or the component of an old record is unknown, assess the new finding
 by hand. The panel loads with the project; `GET /api/gone-findings?name=<project
 name>` returns the same, and `POST /api/gone-findings/acknowledge` with

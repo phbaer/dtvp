@@ -55,6 +55,10 @@ CARRY_OWN_ASSESSMENT = "own_assessment"
 CARRY_UNDETERMINED = "undetermined"
 
 ORIGIN_CARRIED_OVER = "carried-over"
+# Carried onto the same component recreated under a new ID: unchanged, no
+# review. Also the origin of the revision that takes back a review marker an
+# earlier build put on such a carry (``plan_recreated_reviews``).
+ORIGIN_CARRIED_OVER_RECREATED = "carried-over-recreated"
 ORIGIN_CARRIED_OVER_BY_VULNERABILITY = "carried-over-by-vulnerability"
 
 PRESENCE_COLUMNS = (
@@ -918,6 +922,9 @@ def plan_carry_over(
             value = choose_carry_over(
                 [_record_value(records[key]) for key in candidates]
             )
+            recreated = all(
+                same_component_version(row_of(key), target) for key in candidates
+            )
             if value is None:
                 plan.conflicts.append((target_key, candidates))
             else:
@@ -926,11 +933,8 @@ def plan_carry_over(
                         target_key,
                         value,
                         candidates,
-                        ORIGIN_CARRIED_OVER,
-                        recreated=all(
-                            same_component_version(row_of(key), target)
-                            for key in candidates
-                        ),
+                        ORIGIN_CARRIED_OVER_RECREATED if recreated else ORIGIN_CARRIED_OVER,
+                        recreated=recreated,
                     )
                 )
             continue
@@ -1219,6 +1223,100 @@ def record_carry_over(
             for item in successors
         ):
             plan.presence.update(finding, carry_over=CARRY_OWN_ASSESSMENT)
+
+
+_REVIEW_MARKER_SUFFIX = "\n\n[Status: Pending Review]"
+
+
+def plan_recreated_reviews(
+    project_uuid: str,
+    rows: Mapping[tuple[str, str], Mapping[str, Any]],
+    records: Mapping[AssessmentKey, Mapping[str, Any]],
+    reported: "ReportedIndex",
+    carried_last: set[AssessmentKey],
+) -> list[tuple[AssessmentKey, dict[str, Any], int]]:
+    """Carries onto a recreated component that an earlier build marked for
+    review: the value to take back without the marker, and the revision it
+    is written on top of.
+
+    ``carried_last`` are the records whose latest revision is a carry-over
+    (nobody saved since). One counts when every gone finding it was carried
+    from had the target's name, version and package URL, none of their
+    values was pending review, and the record still holds exactly that value
+    with the marker the carry added.
+    """
+    by_target: dict[AssessmentKey, list[AssessmentKey]] = {}
+    for finding, row in rows.items():
+        if row.get("status") != STATUS_GONE or row.get("carry_over") != CARRY_CARRIED:
+            continue
+        successor = row.get("successor_component_uuid")
+        if successor:
+            by_target.setdefault(
+                (project_uuid, str(successor), finding[1]), []
+            ).append((project_uuid, *finding))
+    result = []
+    for key in sorted(carried_last):
+        record = records.get(key)
+        candidates = by_target.get(key)
+        if record is None or not candidates:
+            continue
+        if record.get("sync_status") not in CARRY_FROM_STATUSES:
+            continue
+        target = next(
+            (item for item in reported.of_vulnerability(key[2], None)
+             if item.component_uuid == key[1]),
+            None,
+        )
+        current = _record_value(record)
+        if target is None or not current["details"].endswith(_REVIEW_MARKER_SUFFIX):
+            continue
+        olds = [records.get(candidate) for candidate in candidates]
+        if any(old is None for old in olds):
+            continue
+        values = [_record_value(old) for old in olds]
+        before = {
+            **current,
+            "details": current["details"][: -len(_REVIEW_MARKER_SUFFIX)],
+        }
+        if all(
+            same_component_version(rows[(candidate[1], candidate[2])], target)
+            and "[Status: Pending Review]" not in value["details"]
+            and value == before
+            for candidate, value in zip(candidates, values)
+        ):
+            result.append((key, before, int(record.get("revision") or 0)))
+    return result
+
+
+def own_assessments_to_supersede(
+    project_uuid: str,
+    rows: Mapping[tuple[str, str], Mapping[str, Any]],
+    records: Mapping[AssessmentKey, Mapping[str, Any]],
+) -> list[AssessmentKey]:
+    """Records of gone findings whose successor has an approved assessment
+    of its own. They stop being carry candidates (``superseded``); left
+    ``inactive``, the next recreation would carry them again or report a
+    conflict with the successor's value."""
+    result = []
+    for finding, row in rows.items():
+        if (
+            row.get("status") != STATUS_GONE
+            or row.get("carry_over") != CARRY_OWN_ASSESSMENT
+            or not row.get("successor_component_uuid")
+        ):
+            continue
+        old_key = (project_uuid, *finding)
+        old = records.get(old_key)
+        if old is None or old.get("sync_status") not in CARRY_FROM_STATUSES:
+            continue
+        own = records.get((project_uuid, str(row["successor_component_uuid"]), finding[1]))
+        if own is None or own.get("sync_status") not in ("synced", "pending", "error"):
+            continue
+        value = _record_value(own)
+        if is_blank_value(value) or "[Status: Pending Review]" in value["details"]:
+            continue
+        result.append(old_key)
+    return result
 
 
 def read_summary(plan: FollowPlan) -> dict[str, Any]:

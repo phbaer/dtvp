@@ -37,6 +37,7 @@ from .fixed_versions import slim_affected_components
 from .finding_lifecycle_services import (
     ORIGIN_CARRIED_OVER,
     ORIGIN_CARRIED_OVER_BY_VULNERABILITY,
+    ORIGIN_CARRIED_OVER_RECREATED,
     REASON_MISSING_AT_EXPORT,
     BomIndex,
     FindingLifecycleStore,
@@ -44,6 +45,8 @@ from .finding_lifecycle_services import (
     component_identity as _component_cache_identity,
     follow_findings_plan,
     index_bom,
+    own_assessments_to_supersede,
+    plan_recreated_reviews,
     read_summary,
     record_carry_over,
 )
@@ -2049,7 +2052,11 @@ class CacheManager:
             )
         )
         carried = []
-        for origin in (ORIGIN_CARRIED_OVER, ORIGIN_CARRIED_OVER_BY_VULNERABILITY):
+        for origin in (
+            ORIGIN_CARRIED_OVER,
+            ORIGIN_CARRIED_OVER_RECREATED,
+            ORIGIN_CARRIED_OVER_BY_VULNERABILITY,
+        ):
             group = [carry for carry in plan.carry.carries if carry.origin == origin]
             if not group:
                 continue
@@ -2118,7 +2125,67 @@ class CacheManager:
                 sum(1 for carry in carried if carry.recreated),
             )
         record_carry_over(plan, carried, has_source_value=has_source_value)
+        await self._settle_earlier_carries(plan)
         return plan
+
+    async def _settle_earlier_carries(self, plan: Any) -> None:
+        """Bring carries of earlier reads in line with today's rules; every
+        read, idempotent.
+
+        - A carry onto a recreated component that an earlier build marked
+          for review, untouched since, gets its value back without the
+          marker (origin ``carried-over-recreated``).
+        - The record of a gone finding whose successor has an approved
+          assessment of its own is superseded, so it is no carry candidate
+          at the next recreation.
+        """
+        project_uuid = plan.project_uuid
+        carried_last = await asyncio.to_thread(
+            self.assessment_outbox.keys_last_written_by,
+            project_uuid,
+            [ORIGIN_CARRIED_OVER],
+        )
+        reviews = plan_recreated_reviews(
+            project_uuid, plan.presence.rows, plan.records, plan.reported, carried_last
+        )
+        if reviews:
+            entries = await self.persist_assessment_updates(
+                [
+                    {
+                        "project_uuid": key[0],
+                        "component_uuid": key[1],
+                        "vulnerability_uuid": key[2],
+                        "state": value["state"],
+                        "details": value["details"],
+                        "suppressed": value["suppressed"],
+                    }
+                    for key, value, _revision in reviews
+                ],
+                origin=ORIGIN_CARRIED_OVER_RECREATED,
+                author=None,
+                replace=True,
+                expected_records={key: revision for key, _value, revision in reviews},
+                skip_changed=True,
+            )
+            if entries:
+                logger.info(
+                    "Took back the review marker of %d assessment(s) of %s "
+                    "carried onto recreated components",
+                    len(entries), project_uuid,
+                )
+        stale = own_assessments_to_supersede(
+            project_uuid, plan.presence.rows, plan.records
+        )
+        if stale:
+            superseded = await asyncio.to_thread(
+                self.assessment_outbox.supersede_many, stale
+            )
+            if superseded:
+                logger.info(
+                    "Superseded %d record(s) of gone findings of %s whose "
+                    "successor has an approved assessment of its own",
+                    len(superseded), project_uuid,
+                )
 
     async def get_project_vulnerabilities(
         self,
