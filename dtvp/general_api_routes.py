@@ -76,8 +76,10 @@ from .bulk_workflows.team_assessment_restore import (
 from .team_assessment_restore_services import (
     RestoreSourceError,
     RestoreSourceStore,
+    read_assessment_history,
     read_dependency_track_vdr,
 )
+from .ports import AssessmentHistorySource
 from . import team_assessment_restore_services
 from .code_analysis_assessment_services import (
     assessment_status_for_group,
@@ -251,6 +253,10 @@ class GeneralApiRouteDeps:
 
 
 _TASK_SNAPSHOT_REFRESH_LOCK = threading.RLock()
+# Reading findings' assessment history for a restore: one source request per
+# finding, a few at a time.
+HISTORY_SOURCE_MAX_FINDINGS = 20000
+HISTORY_SOURCE_CONCURRENCY = 6
 TASK_EVENT_LOG_TAIL = 20
 
 
@@ -2518,6 +2524,107 @@ def _register_bulk_workflow_routes(
             "entries": len(source.entries),
             "team_blocks": source.team_blocks,
         }
+
+    @router.post("/bulk-workflows/sources/history-task")
+    async def start_history_source(
+        req: BulkWorkflowRequest,
+        request: Request,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Read the assessment history of every finding in view from the
+        source, as the input of a restore; a polled task. The result is the
+        same as an upload's."""
+        require_reviewer(user)
+        groups = _filter_bulk_workflow_task_groups(deps, req.task_id, req.filters, user)
+        findings = [
+            {**instance, "vuln_id": group.get("id")}
+            for group in groups
+            for version in group.get("affected_versions") or []
+            for instance in version.get("components") or []
+            if isinstance(instance, dict)
+            and all(instance.get(key) for key in ("project_uuid", "component_uuid", "vulnerability_uuid"))
+        ]
+        if len(findings) > HISTORY_SOURCE_MAX_FINDINGS:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"{len(findings)} findings are in view; read the history of at most "
+                    f"{HISTORY_SOURCE_MAX_FINDINGS} at a time (filter first)."
+                ),
+            )
+        settings = deps.dt_settings_cls()
+        token = forwardable_bearer(request.headers.get("Authorization"))
+        cookies = dict(request.cookies)
+        operation = _create_bulk_workflow_task(
+            deps, kind="source", source_task_id=req.task_id, workflow_id="", user=user,
+        )
+
+        async def run() -> None:
+            _update_bulk_workflow_task(
+                operation, status="running",
+                message=f"Reading the history of {len(findings)} findings...", progress=5,
+            )
+            try:
+                client_cls = deps.get_dt_client_cls()
+                async with client_cls(
+                    settings.api_url, api_key=settings.api_key, token=token or "", cookies=cookies,
+                ) as client:
+                    if not isinstance(client, AssessmentHistorySource):
+                        raise HTTPException(
+                            status_code=422, detail="The source keeps no assessment history."
+                        )
+                    limit = asyncio.Semaphore(HISTORY_SOURCE_CONCURRENCY)
+                    done = 0
+                    failed = 0
+
+                    async def read(instance: dict[str, Any]):
+                        nonlocal done, failed
+                        async with limit:
+                            try:
+                                history = await client.get_assessment_history(
+                                    instance["project_uuid"],
+                                    instance["component_uuid"],
+                                    instance["vulnerability_uuid"],
+                                )
+                            except Exception:
+                                failed += 1
+                                history = []
+                        done += 1
+                        if done % 50 == 0 or done == len(findings):
+                            _update_bulk_workflow_task(
+                                operation,
+                                message=f"Read the history of {done} of {len(findings)} findings.",
+                                progress=5 + int(90 * done / max(1, len(findings))),
+                                append_log=done == len(findings),
+                            )
+                        return instance, history
+
+                    histories = await asyncio.gather(*(read(item) for item in findings))
+                source = read_assessment_history(
+                    list(histories),
+                    read_at=datetime.now(timezone.utc).isoformat(),
+                    failed=failed,
+                )
+                source_id = source_store.put(user, source)
+                _update_bulk_workflow_task(
+                    operation, status="completed", message="The history is read.", progress=100,
+                    result={
+                        "source_id": source_id,
+                        "summary": source.summary(),
+                        "entries": len(source.entries),
+                        "team_blocks": source.team_blocks,
+                    },
+                )
+            except Exception as exc:
+                deps.logger.exception("Reading the assessment history failed")
+                _update_bulk_workflow_task(
+                    operation, status="failed", message="Reading the history failed.",
+                    progress=100, error=_bulk_workflow_task_error(exc),
+                )
+
+        deps.create_tracked_task(run())
+        return {"task_id": operation["id"]}
 
     @router.post("/bulk-workflows/summary")
     async def bulk_workflow_summary(

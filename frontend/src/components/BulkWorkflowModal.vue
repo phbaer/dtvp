@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { AlertTriangle, CheckCircle, Copy, Download, ExternalLink, Layers, Loader2, Upload, X } from '@lucide/vue'
+import { AlertTriangle, CheckCircle, Copy, Download, ExternalLink, History, Layers, Loader2, Upload, X } from '@lucide/vue'
 import {
     applyBulkWorkflow,
     buildBulkWorkflowDocument,
@@ -8,6 +8,7 @@ import {
     getBulkWorkflowSummary,
     previewBulkWorkflow,
     uploadBulkWorkflowSource,
+    readBulkWorkflowSourceHistory,
     type BulkWorkflowApplyResponse,
     type BulkWorkflowFilters,
     type BulkWorkflowPreviewItem,
@@ -413,6 +414,34 @@ const loadWorkflows = async () => {
     }
 }
 
+// The other input of the restore: the history the source kept of each
+// finding in view, instead of an export file.
+const readSourceHistory = async () => {
+    const workflowId = selectedWorkflowId.value
+    if (!props.taskId || !workflowId) return
+    previewRequestId += 1
+    preview.value = null
+    selectedIds.value = new Set()
+    includeNewIds.value = new Set()
+    appliedResult.value = null
+    sourceUpload.value = null
+    sourceFileName.value = 'Dependency-Track history'
+    error.value = ''
+    sourceUploading.value = true
+    try {
+        sourceUpload.value = await readBulkWorkflowSourceHistory(props.taskId, activeFilters.value, status => {
+            operationMessage.value = status.message || ''
+            operationProgress.value = status.progress || 0
+        })
+    } catch (err: any) {
+        error.value = err?.response?.data?.detail || err?.message || 'Unable to read the history.'
+        return
+    } finally {
+        sourceUploading.value = false
+    }
+    await loadPreview(workflowId)
+}
+
 const chooseSourceFile = async (event: Event) => {
     const input = event.target as HTMLInputElement
     const file = input.files?.[0]
@@ -649,8 +678,20 @@ watch(() => props.show, show => {
                                     @change="chooseSourceFile"
                                 >
                             </label>
+                            <button
+                                type="button"
+                                class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-blue-400/20 bg-blue-500/5 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-blue-200 disabled:opacity-50"
+                                data-testid="bulk-workflow-source-history"
+                                :disabled="processing || sourceUploading"
+                                title="Read the texts each finding in view held over time from Dependency-Track's audit trail"
+                                @click="readSourceHistory"
+                            >
+                                <Loader2 v-if="sourceUploading && sourceFileName === 'Dependency-Track history'" :size="12" class="animate-spin" />
+                                <History v-else :size="12" />
+                                Read Dependency-Track history
+                            </button>
                             <p v-if="!sourceUpload" class="min-w-0 flex-1 text-[11px] text-slate-400">
-                                A CycloneDX VDR that Dependency-Track exported for this project; DTVP's own export does not work. The file stays in server memory only.
+                                A CycloneDX VDR that Dependency-Track exported for this project (DTVP's own export does not work), or Dependency-Track's history of each finding in view. Either stays in server memory only.
                             </p>
                             <p
                                 v-else
@@ -659,8 +700,8 @@ watch(() => props.show, show => {
                             >
                                 <span class="font-bold text-white">{{ sourceFileName }}</span>
                                 · {{ sourceUpload.summary.tool || 'unknown tool' }} {{ sourceUpload.summary.tool_version }}
-                                · project {{ sourceUpload.summary.project_name || 'unknown' }} {{ sourceUpload.summary.project_version }}
-                                · exported {{ formatSourceTime(sourceUpload.summary.timestamp) }}
+                                <template v-if="sourceUpload.summary.project_name || sourceUpload.summary.project_version">· project {{ sourceUpload.summary.project_name || 'unknown' }} {{ sourceUpload.summary.project_version }}</template>
+                                · {{ sourceUpload.summary.project_name ? 'exported' : 'read' }} {{ formatSourceTime(sourceUpload.summary.timestamp) }}
                                 · SHA-256 <span class="font-mono">{{ sourceUpload.summary.sha256.slice(0, 12) }}</span>
                                 · {{ sourceUpload.entries }} entries, {{ sourceUpload.team_blocks }} team assessments
                             </p>

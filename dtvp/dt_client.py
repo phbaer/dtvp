@@ -488,6 +488,39 @@ class DTClient:
         response.raise_for_status()
         return response.json()
 
+    # Dependency-Track records a changed analysis text as a comment
+    # "Details: <new text>" (AnalysisCommentUtil.makeDetailsCommentIfChanged,
+    # 4.x); the comments come with the analysis, oldest first.
+    _DETAILS_COMMENT_PREFIX = "Details: "
+
+    async def get_assessment_history(
+        self,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> list[Dict[str, Any]]:
+        """The texts the finding's analysis held, from its audit trail."""
+        analysis = await self.get_analysis(project_uuid, component_uuid, vulnerability_uuid)
+        if not isinstance(analysis, dict):
+            return []
+        history: list[Dict[str, Any]] = []
+        for comment in analysis.get("analysisComments") or []:
+            if not isinstance(comment, dict):
+                continue
+            text = comment.get("comment")
+            if not isinstance(text, str) or not text.startswith(self._DETAILS_COMMENT_PREFIX):
+                continue
+            timestamp = comment.get("timestamp")
+            history.append({
+                "at": int(timestamp) if isinstance(timestamp, (int, float)) else None,
+                "author": comment.get("commenter") or None,
+                "details": text[len(self._DETAILS_COMMENT_PREFIX):],
+            })
+        current = analysis.get("analysisDetails")
+        if isinstance(current, str) and current.strip():
+            history.append({"at": None, "author": None, "details": current})
+        return history
+
     async def update_analysis(
         self,
         project_uuid: str,

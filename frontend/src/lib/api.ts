@@ -658,6 +658,20 @@ export const uploadBulkWorkflowSource = async (
     return res.data;
 };
 
+/**
+ * Read the assessment history of every finding in view from the source
+ * (Dependency-Track: its audit trail) as the input of a restore; a polled
+ * task with the same result as an upload.
+ */
+export const readBulkWorkflowSourceHistory = async (
+    taskId: string,
+    filters: BulkWorkflowFilters = {},
+    onProgress?: BulkWorkflowProgressHandler,
+): Promise<BulkWorkflowSourceUpload> => {
+    const res = await api.post('/bulk-workflows/sources/history-task', { task_id: taskId, filters });
+    return waitForBulkWorkflowTask<BulkWorkflowSourceUpload>(res.data.task_id, onProgress);
+};
+
 // Only workflows that read an upload send one; other payloads stay as they were.
 const withSource = (payload: Record<string, unknown>, sourceId?: string) =>
     sourceId ? { ...payload, source_id: sourceId } : payload;
