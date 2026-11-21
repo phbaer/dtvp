@@ -84,7 +84,12 @@ def test_gone_findings_and_session_versions_are_records(instance):
     assert presence["c-old"]["gone_reason"] == "replaced"
     assert presence["c-old"]["successor_component_uuid"] == "c-new"
     assert presence["c-old"]["carry_over"] == "carried"
+    assert (presence["c-old"]["acknowledged_by"], presence["c-old"]["acknowledged_at"]) == (
+        "rita", "2026-11-19T09:00:00+00:00",
+    )
     assert presence["c-new"]["status"] == "reported"
+    # Fields of an acknowledgement only where there is one.
+    assert "acknowledged_by" not in presence["c-new"]
     [read] = _records(members, "finding_read")
     assert (read["project_uuid"], read["went"], read["carried_over"]) == (
         "p-lifecycle", {"replaced": 1}, 1,

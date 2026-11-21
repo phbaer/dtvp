@@ -461,7 +461,15 @@ class FindingLifecycleStore:
                         DO UPDATE SET {", ".join(
                             f"{name} = excluded.{name}"
                             for name in PRESENCE_COLUMNS[3:]
-                        )}
+                        )},
+                            -- Reported again: an acknowledgement of its
+                            -- going no longer applies.
+                            acknowledged_by = CASE
+                                WHEN excluded.status = '{STATUS_GONE}'
+                                THEN finding_presence.acknowledged_by END,
+                            acknowledged_at = CASE
+                                WHEN excluded.status = '{STATUS_GONE}'
+                                THEN finding_presence.acknowledged_at END
                         """,
                         _presence_values({**row, "project_uuid": project_uuid}),
                     )
@@ -490,6 +498,75 @@ class FindingLifecycleStore:
                         ),
                     )
             self._presence.pop(project_uuid, None)
+
+    def acknowledge(
+        self,
+        project_uuid: str,
+        findings: Iterable[tuple[str, str]],
+        *,
+        by: Optional[str],
+        at: str,
+    ) -> int:
+        """Acknowledge gone findings of a project for everyone (``by`` set),
+        or withdraw the acknowledgement (``by`` None). Findings that are not
+        gone are left alone. Returns how many changed."""
+        self._ensure_initialized()
+        findings = list(dict.fromkeys(findings))
+        changed = 0
+        with self._lock, closing(self._connect()) as connection:
+            with connection:
+                for component_uuid, vulnerability_uuid in findings:
+                    changed += connection.execute(
+                        """
+                        UPDATE finding_presence
+                        SET acknowledged_by = ?, acknowledged_at = ?
+                        WHERE project_uuid = ? AND component_uuid = ?
+                          AND vulnerability_uuid = ? AND status = ?
+                          AND acknowledged_by IS NOT ?
+                        """,
+                        (
+                            by, at if by else None,
+                            project_uuid, component_uuid, vulnerability_uuid,
+                            STATUS_GONE, by,
+                        ),
+                    ).rowcount
+            self._presence.pop(project_uuid, None)
+        return changed
+
+    def fill_components(
+        self,
+        project_uuid: str,
+        components: Mapping[str, Mapping[str, Optional[str]]],
+    ) -> int:
+        """Record what became known of components a project's rows lack:
+        name, version, package URL and identity. Only rows without a name
+        are filled. Returns how many rows changed."""
+        self._ensure_initialized()
+        changed = 0
+        with self._lock, closing(self._connect()) as connection:
+            with connection:
+                for component_uuid, fields in components.items():
+                    if not fields.get("component_name"):
+                        continue
+                    changed += connection.execute(
+                        """
+                        UPDATE finding_presence
+                        SET component_name = ?, component_version = ?,
+                            component_purl = ?, component_identity = ?
+                        WHERE project_uuid = ? AND component_uuid = ?
+                          AND component_name IS NULL
+                        """,
+                        (
+                            fields.get("component_name"),
+                            fields.get("component_version"),
+                            fields.get("component_purl"),
+                            fields.get("component_identity"),
+                            project_uuid,
+                            component_uuid,
+                        ),
+                    ).rowcount
+            self._presence.pop(project_uuid, None)
+        return changed
 
     def mark_gone(self, key: AssessmentKey, *, reason: str, at: str) -> bool:
         """Record that a reported finding is gone, found out other than by a
@@ -1178,6 +1255,15 @@ def describe_gone_findings(
         record = outbox.get_overlay(
             (project_uuid, row["component_uuid"], row["vulnerability_uuid"])
         )
+        recreated = bool(
+            row.get("gone_reason") == REASON_REPLACED
+            and successor is not None
+            and _same_name(row.get("component_name"), successor.get("component_name"))
+            and str(row.get("component_version") or "").strip()
+            and str(row.get("component_version") or "").strip()
+            == str(successor.get("component_version") or "").strip()
+        )
+        acknowledged = row.get("acknowledged_by")
         findings.append(
             {
                 "component_uuid": row["component_uuid"],
@@ -1187,6 +1273,7 @@ def describe_gone_findings(
                 "vulnerability_uuid": row["vulnerability_uuid"],
                 "vuln_id": row.get("vuln_id"),
                 "reason": row.get("gone_reason") or REASON_UNDETERMINED,
+                "recreated": recreated,
                 "gone_at": row.get("gone_at"),
                 "last_seen_at": row.get("last_seen_at"),
                 "carry_over": row.get("carry_over"),
@@ -1208,6 +1295,10 @@ def describe_gone_findings(
                     if record is not None
                     else None
                 ),
+                "acknowledged_by": acknowledged,
+                "acknowledged_at": row.get("acknowledged_at") if acknowledged else None,
+                "needs_attention": not acknowledged
+                and needs_attention(row, record),
             }
         )
     findings.sort(
@@ -1232,5 +1323,67 @@ def describe_gone_findings(
             else None
         ),
         "gone": lifecycle.gone_counts(project_uuid),
+        "summary": summarize_gone(findings),
+        "trend": gone_trend(rows.values()),
         "findings": findings,
     }
+
+
+# Carry-over outcomes that leave an assessment behind with nobody to apply
+# it: a person has to decide.
+ATTENTION_CARRY_OVER = (CARRY_CONFLICT, CARRY_UNDETERMINED)
+
+
+def needs_attention(
+    row: Mapping[str, Any], record: Optional[Mapping[str, Any]]
+) -> bool:
+    """A gone finding whose assessment did not carry over and still holds a
+    value: nobody else will apply it."""
+    if row.get("status") != STATUS_GONE or row.get("carry_over") not in ATTENTION_CARRY_OVER:
+        return False
+    if record is None or record.get("sync_status") in ("superseded", "cancelled"):
+        return False
+    return not is_blank_value(_record_value(record))
+
+
+def summarize_gone(findings: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Counts of the described gone findings: by reason (with components the
+    source recreated apart from real replacements), by carry-over outcome,
+    and what needs attention or was acknowledged."""
+    by_reason: dict[str, int] = {}
+    by_carry_over: dict[str, int] = {}
+    attention = acknowledged = 0
+    for finding in findings:
+        reason = "recreated" if finding.get("recreated") else str(finding.get("reason"))
+        by_reason[reason] = by_reason.get(reason, 0) + 1
+        carry = finding.get("carry_over") or (
+            "no_assessment" if finding.get("assessment") is None else "kept"
+        )
+        by_carry_over[carry] = by_carry_over.get(carry, 0) + 1
+        attention += bool(finding.get("needs_attention"))
+        acknowledged += bool(finding.get("acknowledged_by"))
+    return {
+        "by_reason": dict(sorted(by_reason.items())),
+        "by_carry_over": dict(sorted(by_carry_over.items())),
+        "needs_attention": attention,
+        "acknowledged": acknowledged,
+    }
+
+
+def gone_trend(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """How many findings went per day, by reason, from the time each went.
+    A finding that came back since still counts on the day it went; one that
+    went twice counts on its latest day only (the time it went is kept per
+    finding, not per occurrence)."""
+    days: dict[str, dict[str, int]] = {}
+    for row in rows:
+        gone_at = str(row.get("gone_at") or "")
+        if len(gone_at) < 10:
+            continue
+        reason = row.get("gone_reason") or REASON_UNDETERMINED
+        counts = days.setdefault(gone_at[:10], {})
+        counts[reason] = counts.get(reason, 0) + 1
+    return [
+        {"day": day, "went": dict(sorted(counts.items()))}
+        for day, counts in sorted(days.items())
+    ]

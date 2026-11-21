@@ -228,7 +228,7 @@ def test_the_store_migrates_and_backfills_once(tmp_path):
         versions = connection.execute(
             "SELECT version FROM schema_migrations WHERE namespace = 'finding_lifecycle'"
         ).fetchall()
-    assert versions == [(1,)]
+    assert versions == [(1,), (2,)]
 
 
 def test_a_finding_gone_at_export_is_marked_once(tmp_path):
@@ -240,3 +240,119 @@ def test_a_finding_gone_at_export_is_marked_once(tmp_path):
     assert not store.mark_gone(("p1", "c9", "v1"), reason="missing_at_export", at="t2")
     assert store.gone_counts("p1") == {"missing_at_export": 1}
     assert store.gone_row(("p1", "c1", "v1"))["gone_at"] == "t1"
+
+
+# -- acknowledgements, attention, statistics --------------------------------
+
+
+def _store_with_gone(tmp_path):
+    from dtvp.finding_lifecycle_services import FindingLifecycleStore
+
+    store = FindingLifecycleStore(str(tmp_path / "dtvp.sqlite3"))
+    base = {
+        "vuln_id": "CVE-2026-1", "component_name": "lib-a", "component_version": "1.0",
+        "component_purl": "pkg:npm/lib-a@1.0", "component_identity": "pkg:npm/lib-a",
+        "first_seen_at": "2026-11-01T00:00:00+00:00", "last_seen_at": None,
+        "gone_reason": None, "successor_component_uuid": None, "carry_over": None,
+        "returned_at": None,
+    }
+    gone = {**base, "component_uuid": "c1", "vulnerability_uuid": "v1", "status": "gone",
+            "gone_at": "2026-11-02T00:00:00+00:00", "gone_reason": "component_removed",
+            "carry_over": "undetermined"}
+    reported = {**base, "component_uuid": "c2", "vulnerability_uuid": "v1",
+                "status": "reported", "gone_at": None}
+    store.record_read("p1", [gone, reported])
+    return store, gone
+
+
+def test_an_acknowledgement_is_shared_and_kept_while_the_finding_stays_gone(tmp_path):
+    store, gone = _store_with_gone(tmp_path)
+
+    # Only gone findings; unknown and reported ones are skipped.
+    assert store.acknowledge(
+        "p1", [("c1", "v1"), ("c2", "v1"), ("c9", "v1")], by="rita", at="t1"
+    ) == 1
+    assert store.acknowledge("p1", [("c1", "v1")], by="rita", at="t2") == 0
+    row = store.presence("p1")[("c1", "v1")]
+    assert (row["acknowledged_by"], row["acknowledged_at"]) == ("rita", "t1")
+
+    # A later read that still has it gone keeps the acknowledgement.
+    store.record_read("p1", [{**gone, "gone_reason": "no_longer_matched"}])
+    assert store.presence("p1")[("c1", "v1")]["acknowledged_by"] == "rita"
+
+    # Withdrawn.
+    assert store.acknowledge("p1", [("c1", "v1")], by=None, at="t3") == 1
+    row = store.presence("p1")[("c1", "v1")]
+    assert (row["acknowledged_by"], row["acknowledged_at"]) == (None, None)
+
+
+def test_a_finding_reported_again_loses_its_acknowledgement(tmp_path):
+    store, gone = _store_with_gone(tmp_path)
+    store.acknowledge("p1", [("c1", "v1")], by="rita", at="t1")
+
+    store.record_read("p1", [{**gone, "status": "reported", "returned_at": "t2"}])
+    assert store.presence("p1")[("c1", "v1")]["acknowledged_by"] is None
+    # Gone again: it asks again.
+    store.record_read("p1", [{**gone, "gone_at": "2026-11-05T00:00:00+00:00"}])
+    assert store.presence("p1")[("c1", "v1")]["acknowledged_by"] is None
+
+
+class _Outbox:
+    def __init__(self, records):
+        self.records = records
+
+    def get_overlay(self, key):
+        return self.records.get(key)
+
+
+def test_only_an_uncarried_assessment_with_a_value_needs_attention(tmp_path):
+    from dtvp.finding_lifecycle_services import describe_gone_findings
+
+    store, gone = _store_with_gone(tmp_path)
+    more = [
+        # Assessments differ: needs attention.
+        {**gone, "component_uuid": "c3", "carry_over": "conflict"},
+        # Carried: nothing to do.
+        {**gone, "component_uuid": "c4", "carry_over": "carried",
+         "gone_reason": "replaced", "successor_component_uuid": "c2"},
+        # Undetermined, but the record is blank.
+        {**gone, "component_uuid": "c5"},
+        # Undetermined, no record at all.
+        {**gone, "component_uuid": "c6"},
+        # A real replacement by another version.
+        {**gone, "component_uuid": "c7", "carry_over": "own_assessment",
+         "gone_reason": "replaced", "successor_component_uuid": "c8",
+         "gone_at": "2026-11-03T00:00:00+00:00"},
+        {**gone, "component_uuid": "c8", "component_version": "1.1",
+         "status": "reported", "gone_at": None, "gone_reason": None,
+         "carry_over": None},
+    ]
+    store.record_read("p1", more)
+    value = {"analysisState": "NOT_AFFECTED", "analysisDetails": "x",
+             "isSuppressed": False, "sync_status": "inactive", "revision": 1}
+    outbox = _Outbox({
+        ("p1", "c1", "v1"): value,
+        ("p1", "c3", "v1"): value,
+        ("p1", "c4", "v1"): {**value, "sync_status": "superseded"},
+        ("p1", "c5", "v1"): {**value, "analysisState": "NOT_SET", "analysisDetails": ""},
+        ("p1", "c7", "v1"): value,
+    })
+    store.acknowledge("p1", [("c3", "v1")], by="rita", at="t1")
+
+    described = describe_gone_findings(store, outbox, "p1")
+    flags = {f["component_uuid"]: f["needs_attention"] for f in described["findings"]}
+    assert flags == {"c1": True, "c3": False, "c4": False, "c5": False, "c6": False, "c7": False}
+    by_uuid = {f["component_uuid"]: f for f in described["findings"]}
+    assert by_uuid["c4"]["recreated"] is True  # lib-a@1.0 again
+    assert by_uuid["c7"]["recreated"] is False  # lib-a@1.1
+    assert by_uuid["c3"]["acknowledged_by"] == "rita"
+    assert described["summary"] == {
+        "by_reason": {"component_removed": 4, "recreated": 1, "replaced": 1},
+        "by_carry_over": {"carried": 1, "conflict": 1, "own_assessment": 1, "undetermined": 3},
+        "needs_attention": 1,
+        "acknowledged": 1,
+    }
+    assert described["trend"] == [
+        {"day": "2026-11-02", "went": {"component_removed": 4, "replaced": 1}},
+        {"day": "2026-11-03", "went": {"replaced": 1}},
+    ]

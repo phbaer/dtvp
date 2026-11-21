@@ -354,6 +354,8 @@ COLUMN_MAP: dict[str, dict[str, str]] = {
                 "successor_component_uuid",
                 "carry_over",
                 "returned_at",
+                "acknowledged_by",
+                "acknowledged_at",
             )
         },
     },

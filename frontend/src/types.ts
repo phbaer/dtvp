@@ -497,6 +497,20 @@ export interface GoneFinding {
         component_version: string | null;
     } | null;
     assessment: { sync_status: string; state: string; revision: number } | null;
+    /** The source recreated the same component (name and version) under a new ID. */
+    recreated?: boolean;
+    /** Acknowledged for everyone: who and when. */
+    acknowledged_by?: string | null;
+    acknowledged_at?: string | null;
+    /** An assessment with a value that did not carry over, not acknowledged. */
+    needs_attention?: boolean;
+}
+
+export interface GoneFindingsSummary {
+    by_reason: Record<string, number>;
+    by_carry_over: Record<string, number>;
+    needs_attention: number;
+    acknowledged: number;
 }
 
 export interface FindingsReadSummary {
@@ -512,6 +526,9 @@ export interface GoneFindingsOfVersion {
     project_uuid: string;
     last_read: FindingsReadSummary | null;
     gone: Record<string, number>;
+    summary?: GoneFindingsSummary;
+    /** How many findings went per day, by reason. */
+    trend?: { day: string; went: Record<string, number> }[];
     findings: GoneFinding[];
 }
 

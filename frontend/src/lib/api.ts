@@ -175,6 +175,20 @@ export const getGoneFindings = async (name: string): Promise<GoneFindingsOfProje
     return res.data;
 };
 
+/** Acknowledge gone findings of a project version for everyone, or withdraw it. */
+export const acknowledgeGoneFindings = async (
+    projectUuid: string,
+    findings: { component_uuid: string; vulnerability_uuid: string }[],
+    acknowledged = true,
+): Promise<{ changed: number }> => {
+    const res = await api.post('/gone-findings/acknowledge', {
+        project_uuid: projectUuid,
+        findings,
+        acknowledged,
+    });
+    return res.data;
+};
+
 export type CycloneDxVariant = 'inventory' | 'vdr';
 
 /** Download address of a project version's CycloneDX inventory or VDR. */

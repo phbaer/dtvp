@@ -30,6 +30,8 @@ from .cyclonedx_export import (
     valid_ticket_prefix,
 )
 from .finding_lifecycle_services import describe_gone_findings
+from .gone_component_names import resolve_gone_component_names
+from .project_archive_services import get_project_archive_path
 from .team_mapping import normalize_team_values
 from .version import get_app_version
 from .assessment_outbox_services import AssessmentRevisionConflictError, assessment_key
@@ -117,6 +119,19 @@ from .team_group_services import (
 
 class AssessmentDetailsRequest(BaseModel):
     instances: list[dict]
+
+
+class GoneFindingRef(BaseModel):
+    component_uuid: str = Field(min_length=1, max_length=200)
+    vulnerability_uuid: str = Field(min_length=1, max_length=200)
+
+
+class GoneFindingsAcknowledgeRequest(BaseModel):
+    project_uuid: str = Field(min_length=1, max_length=200)
+    # One finding, or a whole group as the view shows it.
+    findings: list[GoneFindingRef] = Field(min_length=1, max_length=20000)
+    # False withdraws the acknowledgement.
+    acknowledged: bool = True
 
 
 class ExportDiscardRequest(BaseModel):
@@ -3435,6 +3450,21 @@ def _register_gone_findings_routes(
 ) -> None:
     def describe(project_uuid: str) -> dict[str, Any] | None:
         manager = deps.cache_manager
+        # Components known only by UUID get their names from local sources
+        # once (stored BOM, project archives); see gone_component_names.
+        try:
+            resolve_gone_component_names(
+                manager.finding_lifecycle,
+                project_uuid,
+                stored_bom=lambda: manager._load_project_cache(
+                    manager._bom_path(project_uuid), None
+                ),
+                archive_dir=get_project_archive_path(),
+            )
+        except Exception:
+            logger = getattr(deps, "logger", None)
+            if logger is not None:
+                logger.exception("Could not look up gone components of %s", project_uuid)
         return describe_gone_findings(
             manager.finding_lifecycle, manager.assessment_outbox, project_uuid
         )
@@ -3454,6 +3484,26 @@ def _register_gone_findings_routes(
             "gone": {},
             "findings": [],
         }
+
+    @router.post("/gone-findings/acknowledge")
+    async def acknowledge_gone_findings(
+        request: GoneFindingsAcknowledgeRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Acknowledge gone findings for everyone, with who and when; or
+        withdraw it. Reviewers only. Findings that are not gone (any more)
+        are skipped."""
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+        changed = await asyncio.to_thread(
+            deps.cache_manager.finding_lifecycle.acknowledge,
+            request.project_uuid,
+            [(item.component_uuid, item.vulnerability_uuid) for item in request.findings],
+            by=user if request.acknowledged else None,
+            at=datetime.now(timezone.utc).isoformat(),
+        )
+        return {"changed": changed}
 
     @router.get("/gone-findings")
     async def get_named_gone_findings(

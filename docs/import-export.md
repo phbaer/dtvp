@@ -349,8 +349,15 @@ be read at all is not acted on.
 `GET /api/gone-findings?name=<project name>` for every version of a project:
 the last read (time, how many went by reason, returned,
 carried over, not carried), the current counts by reason, and per finding the
-component, vulnerability, reason, dates, carry-over, successor, and the
-assessment record's status. The VDR states the counts in
+component, vulnerability, reason, dates, carry-over, successor, the
+assessment record's status, whether the component was recreated (same name
+and version), whether it needs attention, and who acknowledged it when. Each
+version also has `summary` (counts by reason and carry-over outcome, needing
+attention, acknowledged) and `trend` (how many went per day, by reason).
+`POST /api/gone-findings/acknowledge` acknowledges gone findings for every
+user, or withdraws it. Acknowledgements are part of the instance dump
+(optional `acknowledged_by` and `acknowledged_at` of `finding_presence`).
+The VDR states the counts in
 `<prefix>:export_findings_gone`; see
 [CycloneDX inventory and VDR](cyclonedx-export.md).
 

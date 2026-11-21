@@ -74,6 +74,7 @@ import StatsSidebar from '../components/StatsSidebar.vue'
 import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from '@lucide/vue'
 import CycloneDxExportMenu from '../components/CycloneDxExportMenu.vue'
 import GoneFindingsPanel from '../components/GoneFindingsPanel.vue'
+import GoneFindingsStatistics from '../components/GoneFindingsStatistics.vue'
 
 const TASK_LIST_WINDOW_LIMIT = 250
 
@@ -1543,7 +1544,10 @@ watch(currentUserRole, (role) => {
                         </button>
                     </div>
                 </div>
-                <GoneFindingsPanel :project-name="($route.params.name as string)" />
+                <GoneFindingsPanel
+                    :project-name="($route.params.name as string)"
+                    :can-acknowledge="projectHeaderState.isReviewer.value"
+                />
                 <CycloneDxExportMenu :project-name="($route.params.name as string)" />
                 <button
                     v-if="currentUserRole === 'REVIEWER'"
@@ -1872,6 +1876,7 @@ watch(currentUserRole, (role) => {
                         </div>
                         <div v-else-if="statsError" class="text-red-500 text-center py-16">{{ statsError }}</div>
                         <ProjectStatistics v-else-if="stats" :stats="stats" :projectName="($route.params.name as string)" :distribution-counts="visibleResultCounts" :distributions-updating="resultCountsUpdating" />
+                        <GoneFindingsStatistics v-if="stats && !statsLoading && !statsError" :project-name="($route.params.name as string)" />
                     </div>
                 </div>
             </div>

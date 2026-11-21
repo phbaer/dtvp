@@ -273,6 +273,9 @@ def populate(instance: Instance) -> dict:
         {"read_at": "2026-11-19T08:00:00+00:00", "went": {"replaced": 1},
          "returned": 0, "carried_over": 1, "not_carried": 0},
     )
+    lifecycle.acknowledge(
+        "p-lifecycle", [("c-old", "v-l")], by="rita", at="2026-11-19T09:00:00+00:00"
+    )
 
     results = instance.code_analysis()
     with results._lock:

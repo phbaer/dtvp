@@ -215,18 +215,48 @@ matches the vulnerability. DTVP keeps such a finding as **gone**, with the
 reason and dates. Right after a BOM upload a finding can be gone for one read
 and come back, or be replaced, at the next; see [Findings that disappear](import-export.md#findings-that-disappear).
 
-**Gone findings** in the project view's toolbar, beside **CycloneDX**, shows
-how many findings of all versions are gone; it is disabled when there are
-none. Opened, it lists per version:
+**Gone findings** in the project view's toolbar, beside **CycloneDX**, counts
+the gone findings of all versions that **need attention**: their assessment
+has a value and did not carry over (**Assessments differ, not carried** or
+**Component unknown, not carried**), and nobody acknowledged them. The
+tooltip gives the total; the button is disabled when nothing is gone.
 
-- the last read: "Last read *time*: N went (2 replaced, 1 component removed)";
-- each gone finding: vulnerability, component and version, reason
-  (**Replaced by** *component@version*, **Component removed**, **No longer
+Opened, it shows a dialog above the page:
+
+- **Needs attention** (the default) or **All**; **Show acknowledged**; a
+  version choice; a search over vulnerability and component; and chips with
+  the count per reason, each a filter.
+- Per version, the last read ("Last read *time*: N went (2 replaced,
+  1 component removed)"), then the findings grouped by reason and by
+  component, with counts. Small lists are open; long ones open per group.
+- Each finding: vulnerability, reason (**Replaced by** *component@version*,
+  **Recreated by Dependency-Track**, **Component removed**, **No longer
   matched**, **Not yet determined**, **Missing at export**), gone since, last
   seen, what became of its assessment (**Carried over, pending review**,
   **Assessments differ, not carried**, **Successor has its own assessment**,
-  **Component unknown, not carried**),
-  and the record's status (`inactive`, or `superseded` once carried over).
+  **Component unknown, not carried**), and the record's status (`inactive`,
+  or `superseded` once carried over).
+- Components of findings recorded before DTVP tracked findings are known only
+  by their Dependency-Track UUID. When gone findings are shown, DTVP looks
+  their name, version and package URL up once in local sources (the stored
+  BOM of the version, then project archives, newest first; never
+  Dependency-Track) and stores them. Components no source names show as
+  **Unknown component (*first 8 characters of the UUID*)**. A name found this
+  way also lets the next read recognise a replacement of that component.
+- **Acknowledge** on a finding, a component group or a whole reason group
+  (reviewers only; analysts see the acknowledgements):
+  the findings were looked at and need nothing more. This is recorded with
+  who and when, and hides them for every user; **Withdraw** undoes it. A
+  finding that Dependency-Track reports again loses its acknowledgement, so
+  if it goes again it asks again.
+
+The full picture is in the project's **Statistics** tab, under **Gone
+findings**: the total, how many need attention or were acknowledged, the
+counts by reason (recreated components apart from replacements) and by
+what became of the assessments, and a bar per day of the last 30 days with
+findings gone, by reason. The day is when each finding went, as recorded per
+finding: one that came back still counts on that day, and one that went
+twice counts on the latest.
 
 A carried-over assessment appears on the replacing finding marked
 `[Status: Pending Review]` and in **Settings → Export** with origin
@@ -236,8 +266,10 @@ URL, typically a BOM uploaded again), the panel says **Recreated by
 Dependency-Track** and **Carried over to the recreated component**, and the
 assessment moves over unchanged: an approved one stays approved. Where the old assessments
 differ, or the component of an old record is unknown, assess the new finding
-by hand. The panel is read-only and loads with
-the project; `GET /api/gone-findings?name=<project name>` returns the same.
+by hand. The panel loads with the project; `GET /api/gone-findings?name=<project
+name>` returns the same, and `POST /api/gone-findings/acknowledge` with
+`{project_uuid, findings: [{component_uuid, vulnerability_uuid}], acknowledged}`
+acknowledges (or, with `acknowledged: false`, withdraws).
 
 ### Inconsistencies and differences
 
