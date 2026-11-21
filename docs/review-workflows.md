@@ -60,8 +60,12 @@ The bulk workflows follow the same rule (ADR 0010, decision 7):
 
 - **Repair Assessments** does not write onto a new finding. Its Synchronize
   and Combine stages change the other findings of the vulnerability and leave
-  the new ones unassessed. The preview row states **N new findings of a new
-  version, not synchronized** with a checkbox, unchecked by default. Checking
+  the new ones unassessed. The preview row states **N new findings in
+  version V (component@version), not synchronized** with a checkbox,
+  unchecked by default. Only new findings the run would change count: one
+  that already holds the assessment is neither listed nor a reason to list
+  the vulnerability. When they are all a vulnerability has, the row says
+  **Only findings of a new version are not synchronized**. Checking
   it includes the new findings of that one vulnerability in the run; this is
   the reviewer's statement that the existing assessment holds for the new
   version too. A vulnerability whose only open work is its new findings is

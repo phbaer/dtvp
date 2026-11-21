@@ -116,6 +116,13 @@ const itemSelectable = (item: BulkWorkflowPreviewItem) =>
 // includes them, per vulnerability.
 const includeNewIds = ref<Set<string>>(new Set())
 const newFindingCount = (item: BulkWorkflowPreviewItem) => Number(item.new_finding_count || 0)
+// "1 new finding in version 2.1 (lib-a@1.0)": where the new findings are.
+const newFindingsWhere = (item: BulkWorkflowPreviewItem) => {
+    const places: string[] = Array.isArray(item.new_finding_places) ? item.new_finding_places : []
+    const count = plural(newFindingCount(item), 'new finding')
+    if (!places.length) return `${count} of a new version`
+    return `${count} in ${places.length === 1 ? 'version' : 'versions'} ${places.join(', ')}`
+}
 const offersNewFindings = (item: BulkWorkflowPreviewItem) =>
     selectedWorkflowId.value === 'assessment-repair' && newFindingCount(item) > 0 && itemSelectable(item)
 const toggleIncludeNew = (item: BulkWorkflowPreviewItem) => {
@@ -305,6 +312,7 @@ const itemDetail = (item: BulkWorkflowPreviewItem) => {
         if (!item.repairable) return 'No automatic repair available'
         const updated = Number(item.finding_count || 0)
         const added = includeNewIds.value.has(item.group_id) ? newFindingCount(item) : 0
+        if (!updated && !added && newFindingCount(item)) return 'Only findings of a new version are not synchronized'
         return `${plural(updated + added, 'finding')} will be updated`
     }
     if (selectedWorkflowId.value === RESTORE_WORKFLOW_ID) {
@@ -874,13 +882,16 @@ watch(() => props.show, show => {
                                 </span>
                                 <span class="min-w-0">
                                     <span class="block truncate text-sm font-bold text-white">{{ item.group_id }}</span>
-                                    <span class="block truncate text-[11px] italic text-slate-500">{{ item.title || itemDetail(item) }}</span>
+                                    <span
+                                        v-if="item.title && item.title !== item.group_id"
+                                        class="block truncate text-[11px] italic text-slate-500"
+                                    >{{ item.title }}</span>
                                     <span class="mt-1 block text-[10px] text-slate-400">{{ itemDetail(item) }}</span>
                                     <span
                                         v-if="newFindingCount(item) && !offersNewFindings(item)"
                                         class="mt-1 block text-[10px] text-sky-200"
                                         :data-testid="`new-findings-${item.group_id}`"
-                                    >{{ plural(newFindingCount(item), 'new finding') }} of a new version, not assessed by this workflow</span>
+                                    >{{ newFindingsWhere(item) }}, not assessed by this workflow</span>
                                     <label
                                         v-if="offersNewFindings(item)"
                                         class="mt-1 flex w-fit cursor-pointer items-center gap-2 text-[10px] text-sky-200"
@@ -896,7 +907,7 @@ watch(() => props.show, show => {
                                             :data-testid="`include-new-findings-${item.group_id}`"
                                             @change="toggleIncludeNew(item)"
                                         />
-                                        <span>{{ plural(newFindingCount(item), 'new finding') }} of a new version, not synchronized. Synchronize {{ newFindingCount(item) === 1 ? 'it' : 'them' }} as well</span>
+                                        <span>{{ newFindingsWhere(item) }}, not synchronized. Synchronize {{ newFindingCount(item) === 1 ? 'it' : 'them' }} as well</span>
                                     </label>
                                     <span
                                         v-if="selectedWorkflowId === 'assessment-repair'"

@@ -2970,6 +2970,35 @@ def test_a_vulnerability_with_new_findings_only_is_listed_but_never_preselected(
     assert [instance["finding_uuid"] for instance, _payload in payloads] == ["finding-2"]
 
 
+def test_a_new_finding_that_already_holds_the_assessment_is_not_counted():
+    """Listing it would ask the reviewer to synchronize what is in sync."""
+    group = _group_with_new_version()
+    new = group["affected_versions"][2]["components"][0]
+    new.update(analysis_state="NOT_AFFECTED", analysis_details=_DATED)
+
+    preview, payloads, skipped = _repair_including(group)
+    sync_preview = build_incomplete_sync_preview([group])
+
+    [item] = preview["items"]
+    assert (item["finding_count"], item["new_finding_count"]) == (1, 0)
+    assert item["new_finding_places"] == []
+    assert [instance["finding_uuid"] for instance, _payload in payloads] == ["finding-2"]
+    assert sync_preview["items"][0]["new_finding_count"] == 0
+
+
+def test_the_preview_names_where_the_new_findings_are():
+    group = _group_with_new_version(skipped_too=False)
+    new = group["affected_versions"][1]["components"][0]
+    new["component_version"] = "1.4.2"
+
+    preview, _payloads, _skipped = _repair_including(group)
+    sync_preview = build_incomplete_sync_preview([group])
+
+    place = f"2.0 ({new['component_name']}@1.4.2)"
+    assert preview["items"][0]["new_finding_places"] == [place]
+    assert sync_preview["items"][0]["new_finding_places"] == [place]
+
+
 def test_the_standalone_synchronize_follows_the_same_rule():
     group = _group_with_new_version()
 

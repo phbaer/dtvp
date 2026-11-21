@@ -29,7 +29,7 @@ from ..rescore_rule_services import (
     calculate_cvss_score,
 )
 from .assessment_restore import selected_groups
-from .incomplete_sync import new_finding_ids
+from .incomplete_sync import new_finding_ids, new_finding_places
 from .base import BulkWorkflowContext, BulkWorkflowPlugin
 
 
@@ -1316,18 +1316,9 @@ def _build_group_item(
         if isinstance(entry["assessment"].get("version_analysis"), dict)
         for version in _covered_product_versions(entry["assessment"]["version_analysis"])
     }
-    new_findings_left = 0
+    new_left: list[dict[str, Any]] = []
     for instance in _instances(group):
-        if (
-            id(instance) in new
-            and _text(instance.get("project_version")).casefold() not in covered_versions
-        ):
-            new_findings_left += 1
-            continue
         finding_key = _application_finding_key(instance)
-        if not finding_key:
-            missing_identity_findings += 1
-            continue
         details = _text(
             instance.get("analysis_details") or instance.get("analysisDetails")
         )
@@ -1337,11 +1328,20 @@ def _build_group_item(
             for value in match.split(",")
             if _text(value)
         }
-        if run_ids and all(
+        if finding_key and run_ids and all(
             (run_id, finding_key) in applied_keys or run_id in recorded_run_ids
             for run_id in run_ids
         ):
             already_applied_findings += 1
+            continue
+        if (
+            id(instance) in new
+            and _text(instance.get("project_version")).casefold() not in covered_versions
+        ):
+            new_left.append(instance)
+            continue
+        if not finding_key:
+            missing_identity_findings += 1
             continue
         state = _text(
             instance.get("analysis_state")
@@ -1377,7 +1377,8 @@ def _build_group_item(
         "already_applied_finding_count": already_applied_findings,
         "preexisting_finding_count": preexisting_findings,
         "missing_identity_finding_count": missing_identity_findings,
-        "new_finding_count": new_findings_left,
+        "new_finding_count": len(new_left),
+        "new_finding_places": new_finding_places(group, new_left),
         "run_ids": run_ids,
         "assessment_fingerprint": hashlib.sha256(
             target_details.encode("utf-8")

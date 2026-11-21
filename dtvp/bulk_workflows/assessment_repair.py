@@ -47,6 +47,7 @@ from .incomplete_sync import (
     _sync_group,
     _team_key,
     new_finding_ids,
+    new_finding_places,
 )
 
 
@@ -780,6 +781,9 @@ def _team_stage(
         )
         include_new = group_id in context.include_new_findings
         left_new = 0
+        # The new findings this repair would change; one it would leave as
+        # it is does not count.
+        new_changing: list[dict[str, Any]] = []
 
         if lifecycle == "INCONSISTENT":
             # A conflict between current teams needs a human decision. One
@@ -793,12 +797,16 @@ def _team_stage(
             merged, conflict = combined
             rescored = _with_rescoring(merged, instances)
             for instance in instances:
-                if id(instance) in new and not include_new:
-                    left_new += 1
-                    continue
                 old = _details(instance)
                 details = preserve_ssvc_record(rescored(old), old)
-                if _differs(details, old) or calculate_aggregated_state(details) != _state(instance):
+                changes = _differs(details, old) or calculate_aggregated_state(details) != _state(instance)
+                if id(instance) in new:
+                    if changes:
+                        new_changing.append(instance)
+                    if not include_new:
+                        left_new += int(changes)
+                        continue
+                if changes:
                     targets.append((instance, details))
             if not targets and not left_new:
                 continue
@@ -829,12 +837,16 @@ def _team_stage(
             rescored = _with_rescoring(_render(blocks, pending=pending), instances)
             rescored_sync = _with_rescoring(sync_only, instances)
             for instance in instances:
-                if id(instance) in new and not include_new:
-                    left_new += 1
-                    continue
                 old = _details(instance)
                 details = preserve_ssvc_record(with_own_records(rescored(old), old), old)
-                if _differs(details, old) or calculate_aggregated_state(details) != _state(instance):
+                changes = _differs(details, old) or calculate_aggregated_state(details) != _state(instance)
+                if id(instance) in new:
+                    if changes:
+                        new_changing.append(instance)
+                    if not include_new:
+                        left_new += int(changes)
+                        continue
+                if changes:
                     targets.append((instance, details))
                 synced = preserve_ssvc_record(with_own_records(rescored_sync(old), old), old)
                 if _differs(synced, old) or calculate_aggregated_state(synced) != _state(instance):
@@ -872,11 +884,14 @@ def _team_stage(
                 missing_identity += 1
                 continue
             payloads.append((instance, _payload(instance, calculate_aggregated_state(details), details)))
-        if synchronized or former or conflict or new:
+        if synchronized or former or conflict or new_changing:
             info[group_id] = {
                 "synchronized": synchronized, "former": former, "conflict": conflict,
-                # All new findings of the group, and how many this run left.
-                "new_findings": len(new), "new_findings_left": left_new,
+                # The new findings the repair would change, where they are,
+                # and how many this run left.
+                "new_findings": len(new_changing),
+                "new_finding_places": new_finding_places(group, new_changing),
+                "new_findings_left": left_new,
             }
     return payloads, info, missing_identity, sum(
         entry["new_findings_left"] for entry in info.values()
@@ -1107,6 +1122,7 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
         "review": review,
         "finding_count": finding_count,
         "new_finding_count": new_findings,
+        "new_finding_places": list(team.get("new_finding_places") or []),
         "repairable": finding_count > 0 or new_findings > 0,
         # Not selected by default: the repair makes a decision, part of the
         # vulnerability cannot be repaired automatically, or all it could
