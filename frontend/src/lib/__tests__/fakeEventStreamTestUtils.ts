@@ -24,6 +24,7 @@ export function createFakeEventStreamModule() {
         status,
         start: () => undefined,
         stop: () => undefined,
+        setInterest: () => undefined,
         on,
         cursor: null,
     }

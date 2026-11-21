@@ -35,8 +35,10 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from .event_hub import AUDIENCE_REVIEWER, EventHub, ServerEvent, format_frame
+from .product_interest import ProductInterest
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,15 @@ class EventRouteDeps:
     # bool, sync or async. None accepts every session; server-side session
     # versioning plugs in here.
     session_valid: Callable[[Request, str], Any] | None = None
+    # Product interest leases (ADR 0004 step 4a); None turns the route off.
+    interest: ProductInterest | None = None
+
+
+class InterestRequest(BaseModel):
+    """The union of the products the tabs of one browser show."""
+
+    client_id: str = Field(min_length=1, max_length=64)
+    products: list[str] = Field(default_factory=list, max_length=200)
 
 
 def _is_reviewer(role: Any) -> bool:
@@ -278,6 +289,23 @@ def create_event_router(deps: EventRouteDeps) -> APIRouter:
             "events": returned,
             "resync": resync_reason,
             "more": more,
+        }
+
+    @router.put("/events/interest")
+    async def put_interest(
+        request: InterestRequest,
+        user: str = Depends(deps.authenticate),
+    ):
+        """Renew this browser's lease on the products its tabs show, for the
+        watch TTL; an empty list ends it."""
+        if deps.interest is None:
+            raise HTTPException(status_code=404, detail="Product interest is off")
+        if any(len(str(product)) > 500 for product in request.products):
+            raise HTTPException(status_code=422, detail="A product name is too long")
+        lease = deps.interest.put(user, request.client_id, request.products)
+        return {
+            "products": list(lease.products) if lease else [],
+            "ttl_seconds": deps.interest.ttl_seconds if lease else 0,
         }
 
     return router

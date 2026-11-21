@@ -51,6 +51,8 @@ export interface EventStreamDeps {
     now: () => number
     apiBase: string
     onAuthExpired: () => void
+    /** Calls ``fn`` when the page is going away (``pagehide``). */
+    onPageHide?: ((fn: () => void) => void) | null
 }
 
 export type StopReason = 'logout' | 'auth' | 'manual'
@@ -60,6 +62,9 @@ export interface EventStream {
     start(): void
     stop(reason?: StopReason): void
     on(types: string | string[], handler: (event: ServerEvent) => void): () => void
+    /** The products this tab shows; the browser's leader announces the
+     *  union of all its tabs to the server (ADR 0004 step 4a). */
+    setInterest(products: string[]): void
     readonly cursor: string | null
 }
 
@@ -82,6 +87,10 @@ export const POLL_TIMEOUT_MS = 20_000
 export const FAILURES_BEFORE_POLLING = 3
 const DEFAULT_RETRY_AFTER_MS = 30_000
 export const ROTATION_JITTER_MS = 5_000
+/** Each tab reports its products this often; the leader renews the lease. */
+export const INTEREST_REPORT_MS = 60_000
+/** The leader forgets a tab that has not reported for this long. */
+export const INTEREST_STALE_MS = 120_000
 
 type ChannelMessage =
     | { v: 1; kind: 'sync?' }
@@ -89,6 +98,8 @@ type ChannelMessage =
     | { v: 1; kind: 'status'; status: EventStreamStatus; cursor: string | null }
     | { v: 1; kind: 'auth-expired' }
     | { v: 1; kind: 'logout' }
+    | { v: 1; kind: 'interest'; tab: string; products: string[] }
+    | { v: 1; kind: 'interest-bye'; tab: string }
 
 interface SseFrame {
     id?: string
@@ -148,7 +159,11 @@ function parseRetryAfter(value: string | null): number {
     return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS
 }
 
+let streamInstances = 0
+
 export function createEventStream(deps: EventStreamDeps): EventStream {
+    streamInstances += 1
+    const instance = streamInstances
     const status = ref<EventStreamStatus>('idle')
     const handlers = new Map<string, Set<(event: ServerEvent) => void>>()
     let cursor: string | null = null
@@ -163,6 +178,19 @@ export function createEventStream(deps: EventStreamDeps): EventStream {
     let pollTimer: TimerId | null = null
     let polling = false
     let failures = 0
+    // Product interest: what this tab shows, and (as leader) what every tab
+    // of the browser reported, sent as one lease per leader term.
+    let ids = 0
+    const randomId = () => {
+        ids += 1
+        return `${Math.floor(deps.random() * 1e12).toString(36)}${deps.now().toString(36)}.${instance}.${ids}`
+    }
+    const tabId = randomId()
+    let ownProducts: string[] = []
+    const tabInterest = new Map<string, { products: string[]; at: number }>()
+    let clientId: string | null = null
+    let sentKey = ''
+    let interestTimer: TimerId | null = null
 
     const post = (message: ChannelMessage) => {
         try {
@@ -391,10 +419,87 @@ export function createEventStream(deps: EventStreamDeps): EventStream {
     const runLeader = (): Promise<void> => {
         if (!started) return Promise.resolve()
         isLeader = true
+        // A new term: a new lease, built from what the tabs report again.
+        clientId = randomId()
+        sentKey = ''
+        tabInterest.clear()
+        post({ v: 1, kind: 'sync?' })
+        announceInterest()
         return new Promise<void>(resolve => {
             releaseLeader = resolve
             void connect()
         })
+    }
+
+    // -- product interest -----------------------------------------------------
+
+    const interestUnion = (): string[] => {
+        const now = deps.now()
+        tabInterest.set(tabId, { products: ownProducts, at: now })
+        const products = new Set<string>()
+        for (const [tab, entry] of tabInterest) {
+            if (now - entry.at > INTEREST_STALE_MS) {
+                tabInterest.delete(tab)
+                continue
+            }
+            entry.products.forEach(product => products.add(product))
+        }
+        return [...products].sort()
+    }
+
+    const putInterest = (products: string[], keepalive = false) => {
+        if (!clientId) return
+        void deps.fetch(`${deps.apiBase}/events/interest`, {
+            method: 'PUT',
+            credentials: 'include',
+            keepalive,
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ client_id: clientId, products }),
+        }).then(response => {
+            if (response.status === 401) expire()
+        }).catch(() => undefined)
+    }
+
+    /** As leader: send the union when it changed, or (``renew``) whenever
+     *  it is not empty. */
+    const announceInterest = (renew = false) => {
+        if (!isLeader || !started) return
+        const products = interestUnion()
+        const key = products.join('\n')
+        if (key === sentKey && !(renew && products.length)) return
+        if (!products.length && !sentKey) return
+        sentKey = key
+        putInterest(products)
+    }
+
+    const reportInterest = () => {
+        if (isLeader) announceInterest()
+        else post({ v: 1, kind: 'interest', tab: tabId, products: ownProducts })
+    }
+
+    const scheduleInterest = () => {
+        if (interestTimer !== null) deps.clearTimeout(interestTimer)
+        interestTimer = deps.setTimeout(() => {
+            interestTimer = null
+            if (!started) return
+            if (isLeader) announceInterest(true)
+            else reportInterest()
+            scheduleInterest()
+        }, INTEREST_REPORT_MS)
+    }
+
+    /** The leader's term ends: end its lease, so it does not outlive the
+     *  browser by the watch TTL. */
+    const endInterest = () => {
+        if (isLeader && sentKey) putInterest([], true)
+        sentKey = ''
+        clientId = null
+    }
+
+    const sayGoodbye = () => {
+        if (!started) return
+        if (isLeader) endInterest()
+        else post({ v: 1, kind: 'interest-bye', tab: tabId })
     }
 
     // -- the channel -------------------------------------------------------
@@ -404,6 +509,19 @@ export function createEventStream(deps: EventStreamDeps): EventStream {
         switch (message.kind) {
             case 'sync?':
                 if (isLeader) post({ v: 1, kind: 'status', status: status.value, cursor })
+                else post({ v: 1, kind: 'interest', tab: tabId, products: ownProducts })
+                break
+            case 'interest':
+                if (isLeader) {
+                    tabInterest.set(message.tab, { products: message.products || [], at: deps.now() })
+                    announceInterest()
+                }
+                break
+            case 'interest-bye':
+                if (isLeader) {
+                    tabInterest.delete(message.tab)
+                    announceInterest()
+                }
                 break
             case 'event':
                 if (!isLeader) {
@@ -448,11 +566,22 @@ export function createEventStream(deps: EventStreamDeps): EventStream {
         } else {
             void runLeader()
         }
+        reportInterest()
+        scheduleInterest()
     }
 
     function stop(reason: StopReason = 'manual') {
         if (!started) return
         if (reason === 'logout') post({ v: 1, kind: 'logout' })
+        // After a logout or an expired sign-in the lease cannot be ended
+        // (no session); it expires with the watch TTL.
+        if (reason === 'manual') sayGoodbye()
+        else {
+            sentKey = ''
+            clientId = null
+        }
+        if (interestTimer !== null) deps.clearTimeout(interestTimer)
+        interestTimer = null
         started = false
         generation += 1
         isLeader = false
@@ -483,11 +612,21 @@ export function createEventStream(deps: EventStreamDeps): EventStream {
         }
     }
 
+    function setInterest(products: string[]) {
+        const next = [...new Set(products.map(product => String(product).trim()).filter(Boolean))].sort()
+        if (next.join('\n') === ownProducts.join('\n')) return
+        ownProducts = next
+        if (started) reportInterest()
+    }
+
+    deps.onPageHide?.(sayGoodbye)
+
     return {
         status,
         start,
         stop,
         on,
+        setInterest,
         get cursor() {
             return cursor
         },
@@ -509,6 +648,9 @@ export const eventStream: EventStream = createEventStream({
     now: () => Date.now(),
     apiBase: API_BASE,
     onAuthExpired: () => notifyAuthExpired(),
+    onPageHide: typeof window !== 'undefined'
+        ? (fn: () => void) => window.addEventListener('pagehide', fn)
+        : null,
 })
 
 /** Subscribe a component while it is mounted and active. */

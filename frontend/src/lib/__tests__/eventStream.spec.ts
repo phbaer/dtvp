@@ -94,7 +94,14 @@ class Server {
     next: Array<() => Response> = []
     pollBody: any = { boot_id: 'b', cursor: 'b:0', events: [], resync: null, more: false }
 
+    /** Bodies of ``PUT /events/interest``, in order. */
+    interest: Array<{ client_id: string; products: string[] }> = []
+
     fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/events/interest')) {
+            this.interest.push(JSON.parse(String(init?.body)))
+            return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+        }
         if (url.includes('/events/poll')) {
             this.polls.push(url)
             return new Response(JSON.stringify(this.pollBody), {
@@ -565,5 +572,97 @@ describe('eventStream', () => {
         server.last().push(frame(3, 'projects.changed', {}))
         await settle()
         expect(seen).toEqual(['b:2'])
+    })
+    describe('product interest', () => {
+        const lastInterest = () => server.interest[server.interest.length - 1]
+
+        it('sends the union of the tabs as one lease, renewed while not empty', async () => {
+            const locks = new FakeLockManager()
+            const bus = new FakeBus()
+            const leader = tab({ locks, bus })
+            const other = tab({ locks, bus })
+            leader.stream.setInterest(['App'])
+            other.stream.setInterest(['Lib', ' Lib ', ''])
+            leader.stream.start()
+            other.stream.start()
+            await settle()
+
+            expect(lastInterest()).toMatchObject({ products: ['App', 'Lib'] })
+            expect(new Set(server.interest.map(body => body.client_id)).size).toBe(1)
+            const sent = server.interest.length
+
+            // Nothing changed: renewed once a minute, not more.
+            await vi.advanceTimersByTimeAsync(30_000)
+            expect(server.interest.length).toBe(sent)
+            await vi.advanceTimersByTimeAsync(31_000)
+            expect(server.interest.length).toBe(sent + 1)
+            expect(lastInterest().products).toEqual(['App', 'Lib'])
+        })
+
+        it('follows tabs that change, leave or go silent', async () => {
+            const locks = new FakeLockManager()
+            const bus = new FakeBus()
+            const leader = tab({ locks, bus })
+            const leaving = tab({ locks, bus })
+            const silent = tab({ locks, bus })
+            leader.stream.setInterest(['App'])
+            leaving.stream.setInterest(['Lib'])
+            silent.stream.setInterest(['Tool'])
+            leader.stream.start()
+            leaving.stream.start()
+            let silentChannel: { postMessage: (message: unknown) => void } | null = null
+            const open = bus.channel.bind(bus)
+            bus.channel = (name: string) => {
+                const channel = open(name)
+                silentChannel = channel as any
+                return channel
+            }
+            silent.stream.start()
+            bus.channel = open
+            await settle()
+            expect(lastInterest().products).toEqual(['App', 'Lib', 'Tool'])
+
+            leaving.stream.setInterest(['Other'])
+            await settle()
+            expect(lastInterest().products).toEqual(['App', 'Other', 'Tool'])
+
+            leaving.stream.stop()  // says goodbye
+            await settle()
+            expect(lastInterest().products).toEqual(['App', 'Tool'])
+
+            // The silent tab stops reporting (its page froze): no goodbye,
+            // its messages no longer arrive; the leader drops it after 2 minutes.
+            silentChannel!.postMessage = () => undefined
+            await vi.advanceTimersByTimeAsync(181_000)
+            expect(lastInterest().products).toEqual(['App'])
+        })
+
+        it('starts a new lease with a new leader and ends the old one', async () => {
+            const locks = new FakeLockManager()
+            const bus = new FakeBus()
+            const first = tab({ locks, bus })
+            const second = tab({ locks, bus })
+            first.stream.setInterest(['App'])
+            second.stream.setInterest(['Lib'])
+            first.stream.start()
+            second.stream.start()
+            await settle()
+            const firstTerm = lastInterest().client_id
+
+            first.stream.stop()
+            await settle()
+            const ended = server.interest.find(body => body.client_id === firstTerm && body.products.length === 0)
+            expect(ended).toBeDefined()
+            expect(lastInterest().client_id).not.toBe(firstTerm)
+            expect(lastInterest().products).toEqual(['Lib'])
+        })
+
+        it('sends nothing while no tab shows a product', async () => {
+            const single = tab()
+            single.stream.start()
+            await settle()
+            await vi.advanceTimersByTimeAsync(130_000)
+            expect(server.interest).toEqual([])
+        })
     })
 })
