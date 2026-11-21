@@ -182,6 +182,32 @@ Important frontend components:
   so a background refresh or activity in another project does not invalidate
   an otherwise reusable result. Summaries created during a cold fill are saved
   against the scoped revision after that fill.
+  A project version has two counters. The project revision counts every
+  stored change and keys the grouped summaries. The source revision counts
+  every change except a local assessment write (a save, a deletion, a bulk
+  apply, an MCP save, a discarded export, and the export of a local value),
+  and keys the grouped snapshot: those writes are patched into the live
+  snapshots instead. A patch reads the recorded value under the snapshot
+  lock and shows that, so patches landing in any order leave the newest
+  value. Until a patch has shown the recorded value of a written finding in
+  the snapshots, the write is unapplied, and a snapshot whose build started
+  before it is built again instead of reused; so is one that was still
+  building when the patch came, and one that finished knowing project
+  versions it did not know when it started, if anything was written in
+  between. A request does not join a build in progress, or a finished build
+  not yet finalized, that is already known to lack a write. A request
+  between the write and its patch therefore builds a new snapshot and is
+  never served the old one as current. An export changes only the sync
+  status of a value already shown: it is not an unapplied write and does
+  not mark a running build; the snapshots get the new sync status when the
+  export batch ends. Imports, carry-overs, lifecycle changes, merges with the
+  source and restored archives count in the source revision and always lead
+  to a new build. The unapplied writes are kept in memory, like the
+  snapshots. Each request for a grouped snapshot logs one INFO line: the
+  task it reused, or that it builds a new one and why (`no snapshot yet`,
+  `the stored source data changed`, `an assessment was saved that the
+  snapshot does not show yet`, `an assessment change could not be patched
+  into the snapshot`); a finished build logs its duration.
   Pending assessment writes and their local overlays live in a transactional
   SQLite outbox. Newer changes to the same finding replace older pending
   values, and one application-wide bounded dispatcher retries Dependency-Track

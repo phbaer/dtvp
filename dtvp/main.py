@@ -108,6 +108,7 @@ from .settings_files import write_settings_file
 from .general_api_routes import (
     create_general_api_router,
     refresh_task_snapshots_for_assessments,
+    configure_assessment_write_tracker,
 )
 from .grouped_vuln_services import (
     collect_version_snapshots as collect_grouped_vuln_version_snapshots,
@@ -758,16 +759,24 @@ general_api_route_deps = build_general_api_route_deps(
     default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
     service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
     not_found_response=NOT_FOUND_RESPONSE,
-    get_grouped_vuln_cache_revision=cache_manager.get_grouped_cache_revision,
+    # Without the local assessment writes: live snapshots are patched with
+    # those, see configure_assessment_write_tracker below.
+    get_grouped_vuln_cache_revision=cache_manager.get_grouped_source_revision,
     group_query_executor=group_query_executor,
     detail_executor=detail_executor,
     task_event_hub=task_event_hub,
 )
 
+# A save patches the live snapshots and confirms it here; a snapshot that
+# lacks a save is built again instead of reused.
+configure_assessment_write_tracker(cache_manager)
+
 # A merge with the source can change assessments without a save; keep the
 # snapshots users are looking at in step.
 cache_manager.add_assessment_change_listener(
-    lambda keys: refresh_task_snapshots_for_assessments(general_api_route_deps, keys)
+    lambda keys, value_changed=True: refresh_task_snapshots_for_assessments(
+        general_api_route_deps, keys, value_changed=value_changed
+    )
 )
 # Runs after the snapshot refresh above (listeners run in order), so a client
 # that refetches on the event sees the refreshed snapshot.

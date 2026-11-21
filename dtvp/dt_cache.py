@@ -9,7 +9,7 @@ import logging
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import httpx
 
@@ -481,6 +481,7 @@ class CacheManager:
             "projects_refreshed_at": None,
             "revision": 0,
             "project_revisions": {},
+            "source_revisions": {},
         }
         self._memory_cache: OrderedDict[str, Any] = OrderedDict()
         self._memory_cache_lock = threading.RLock()
@@ -499,8 +500,13 @@ class CacheManager:
         self._assessment_sync_lock = asyncio.Lock()
         self._assessment_sync_wakeup = asyncio.Event()
         self._assessment_change_listeners: List[
-            Callable[[List[AssessmentKey]], None]
+            Callable[..., None]
         ] = []
+        # Local assessment writes not yet confirmed in the live snapshots;
+        # see ``_note_assessment_writes_locked``. In memory, like the snapshots.
+        self._assessment_write_seq = 0
+        self._unapplied_writes_floor = 0
+        self._unapplied_assessment_writes: Dict[str, Dict[AssessmentKey, int]] = {}
         self._project_list_listeners: List[
             Callable[[List[Dict[str, Any]], List[Dict[str, Any]]], None]
         ] = []
@@ -608,6 +614,7 @@ class CacheManager:
                 "projects_refreshed_at": None,
                 "revision": 0,
                 "project_revisions": {},
+                "source_revisions": {},
             },
         ) or {
             "fully_cached": False,
@@ -615,6 +622,7 @@ class CacheManager:
             "projects_refreshed_at": None,
             "revision": 0,
             "project_revisions": {},
+            "source_revisions": {},
         }
 
     def _read_startup_cache_state(
@@ -626,6 +634,7 @@ class CacheManager:
             "projects_refreshed_at": None,
             "revision": 0,
             "project_revisions": {},
+            "source_revisions": {},
         }
         pending = self._load_pending_updates()
         active = self._normalize_active_projects(
@@ -773,7 +782,18 @@ class CacheManager:
         self,
         *,
         project_uuids: Set[str] | None = None,
+        assessment_keys: Iterable[AssessmentKey] | None = None,
     ) -> None:
+        """Note that stored data changed.
+
+        ``assessment_keys`` says the change is a local assessment write of
+        these findings, which the caller also patches into the live grouped
+        snapshots. It then counts in ``project_revisions`` only. An empty
+        ``assessment_keys`` is a change no snapshot shows a difference for
+        (an export of a value already shown). Every other change also counts
+        in ``source_revisions``, which decides whether a grouped snapshot has
+        to be built again.
+        """
         self._invalidate_cache_status()
         with self._cache_meta_lock:
             self.cache_meta["last_refreshed_at"] = datetime.now(
@@ -782,17 +802,101 @@ class CacheManager:
             self.cache_meta["revision"] = int(
                 self.cache_meta.get("revision") or 0
             ) + 1
-            project_revisions = self.cache_meta.setdefault("project_revisions", {})
-            if not isinstance(project_revisions, dict):
-                project_revisions = {}
-                self.cache_meta["project_revisions"] = project_revisions
-            for project_uuid in project_uuids or set():
-                normalized_uuid = str(project_uuid or "").strip()
-                if normalized_uuid:
-                    project_revisions[normalized_uuid] = (
-                        int(project_revisions.get(normalized_uuid) or 0) + 1
-                    )
+            names = ["project_revisions"]
+            if assessment_keys is None:
+                names.append("source_revisions")
+            for name in names:
+                revisions = self.cache_meta.setdefault(name, {})
+                if not isinstance(revisions, dict):
+                    revisions = {}
+                    self.cache_meta[name] = revisions
+                for project_uuid in project_uuids or set():
+                    normalized_uuid = str(project_uuid or "").strip()
+                    if normalized_uuid:
+                        revisions[normalized_uuid] = (
+                            int(revisions.get(normalized_uuid) or 0) + 1
+                        )
+            keys = list(assessment_keys or ())
+            if keys:
+                self._note_assessment_writes_locked(keys)
             self._save_projects_meta(self.cache_meta)
+
+    # -- assessment writes that live snapshots still have to show ------------
+    #
+    # A local assessment write does not make a grouped snapshot outdated when
+    # the snapshot is patched with it. Until that patch is confirmed, the
+    # write is "unapplied": a snapshot built before it may not be reused.
+
+    _UNAPPLIED_WRITES_LIMIT = 20000
+
+    def _note_assessment_writes_locked(self, keys: Iterable[AssessmentKey]) -> None:
+        self._assessment_write_seq += 1
+        seq = self._assessment_write_seq
+        for key in keys:
+            if not (isinstance(key, tuple) and len(key) == 3 and all(key)):
+                continue
+            self._unapplied_assessment_writes.setdefault(str(key[0]), {})[
+                (str(key[0]), str(key[1]), str(key[2]))
+            ] = seq
+        total = sum(len(v) for v in self._unapplied_assessment_writes.values())
+        if total > self._UNAPPLIED_WRITES_LIMIT:
+            # Forget them, and with them every snapshot built before now.
+            self._unapplied_assessment_writes.clear()
+            self._unapplied_writes_floor = seq
+
+    def assessment_write_seq(self) -> int:
+        """A number that grows with every local assessment write. A snapshot
+        whose build started at this number contains every write up to it."""
+        with self._cache_meta_lock:
+            return self._assessment_write_seq
+
+    def has_unapplied_assessment_writes(
+        self, project_uuids: Iterable[str], *, after_seq: int
+    ) -> bool:
+        """Whether a snapshot of these project versions whose build started at
+        ``after_seq`` lacks a local assessment write."""
+        with self._cache_meta_lock:
+            if after_seq < self._unapplied_writes_floor:
+                return True
+            for project_uuid in project_uuids:
+                pending = self._unapplied_assessment_writes.get(str(project_uuid))
+                if pending and max(pending.values()) > after_seq:
+                    return True
+        return False
+
+    def confirm_assessment_writes_applied(
+        self, applied: Iterable[tuple[AssessmentKey, Dict[str, Any]]]
+    ) -> None:
+        """The live snapshots now show these values (state, details,
+        suppressed per finding). A write counts as applied only when the
+        value shown is the one on record: an older value patched late does
+        not hide a newer write."""
+        for key, shown in applied:
+            if not (isinstance(key, tuple) and len(key) == 3):
+                continue
+            key = (str(key[0]), str(key[1]), str(key[2]))
+            with self._cache_meta_lock:
+                seq = self._unapplied_assessment_writes.get(key[0], {}).get(key)
+            if seq is None:
+                continue
+            overlay = self.assessment_outbox.get_overlay(key)
+            if overlay is None:
+                continue
+            recorded = self.assessment_outbox._local_value(overlay)
+            if (
+                str(shown.get("state") or "NOT_SET") != str(recorded.get("state") or "NOT_SET")
+                or str(shown.get("details") or "").strip()
+                != str(recorded.get("details") or "").strip()
+                or bool(shown.get("suppressed")) != bool(recorded.get("suppressed"))
+            ):
+                continue
+            with self._cache_meta_lock:
+                pending = self._unapplied_assessment_writes.get(key[0])
+                # Written again meanwhile: that write is still unapplied.
+                if pending is not None and pending.get(key) == seq:
+                    del pending[key]
+                    if not pending:
+                        del self._unapplied_assessment_writes[key[0]]
 
     def get_cache_revision(self) -> int:
         with self._cache_meta_lock:
@@ -844,6 +948,25 @@ class CacheManager:
             "versions": version_fingerprint,
             "project_revisions": revisions,
         }
+
+    def get_grouped_source_revision(
+        self,
+        *,
+        name: str = "",
+        versions: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Like ``get_grouped_cache_revision``, without the local assessment
+        writes that live snapshots are patched with. A change here means a
+        grouped snapshot has to be built again."""
+        revision = self.get_grouped_cache_revision(name=name, versions=versions)
+        with self._cache_meta_lock:
+            raw = self.cache_meta.get("source_revisions") or {}
+            source = raw if isinstance(raw, dict) else {}
+            revision["project_revisions"] = [
+                (project_uuid, int(source.get(project_uuid) or 0))
+                for project_uuid, _count in revision["project_revisions"]
+            ]
+        return revision
 
     def _project_list_is_fresh(self) -> bool:
         if (
@@ -1031,7 +1154,11 @@ class CacheManager:
             "projects_refreshed_at": None,
             "revision": 0,
             "project_revisions": {},
+            "source_revisions": {},
         }
+        self._assessment_write_seq = 0
+        self._unapplied_writes_floor = 0
+        self._unapplied_assessment_writes = {}
         self._memory_cache = OrderedDict()
         self._memory_cache_lock = threading.RLock()
         self._dirty_memory_paths = {}
@@ -1223,6 +1350,7 @@ class CacheManager:
         data: Any,
         *,
         project_uuid: str | None = None,
+        assessment_keys: Iterable[AssessmentKey] | None = None,
     ) -> bool:
         changed = self._save_cache_file(path, data, touch_meta=False)
         if changed:
@@ -1232,7 +1360,8 @@ class CacheManager:
             self._touch_cache_meta(
                 project_uuids={inferred_project_uuid}
                 if inferred_project_uuid
-                else None
+                else None,
+                assessment_keys=assessment_keys,
             )
         elif os.path.abspath(path) == os.path.abspath(self._projects_path()):
             # A successful no-op project-list refresh still updates its TTL.
@@ -2262,16 +2391,22 @@ class CacheManager:
 
     def add_assessment_change_listener(
         self,
-        listener: Callable[[List[AssessmentKey]], None],
+        listener: Callable[..., None],
     ) -> None:
         """Be told when a merge changed local assessments outside a save, so
-        views built from them can follow. Called on a worker thread."""
+        views built from them can follow. Called on a worker thread as
+        ``listener(keys, value_changed=...)``; ``value_changed`` is False
+        when only the sync status changed (an export)."""
         self._assessment_change_listeners.append(listener)
 
-    async def _notify_assessments_changed(self, keys: List[AssessmentKey]) -> None:
+    async def _notify_assessments_changed(
+        self, keys: List[AssessmentKey], *, value_changed: bool = True
+    ) -> None:
         for listener in list(self._assessment_change_listeners):
             try:
-                await asyncio.to_thread(listener, keys)
+                await asyncio.to_thread(
+                    listener, keys, value_changed=value_changed
+                )
             except Exception:
                 logger.exception("Assessment change listener failed")
 
@@ -2673,12 +2808,19 @@ class CacheManager:
         async with self.lock:
             self.pending_updates = self._load_pending_updates()
             self._invalidate_cache_status()
+            # A local write: the caller patches the live snapshots with it
+            # (``confirm_assessment_writes_applied``); until then a snapshot
+            # built before it is not reused.
             self._touch_cache_meta(
                 project_uuids={
                     str(payload.get("project_uuid") or "").strip()
                     for payload in payloads
                     if str(payload.get("project_uuid") or "").strip()
-                }
+                },
+                assessment_keys=[
+                    key for payload in payloads
+                    if (key := assessment_key(payload)) is not None
+                ],
             )
         self._assessment_sync_wakeup.set()
         return entries
@@ -2740,7 +2882,10 @@ class CacheManager:
             async with self.lock:
                 self.pending_updates = self._load_pending_updates()
                 self._invalidate_cache_status()
-                self._touch_cache_meta(project_uuids={key[0] for key in keys})
+                # The listeners bring the live snapshots in step.
+                self._touch_cache_meta(
+                    project_uuids={key[0] for key in keys}, assessment_keys=keys
+                )
             await self._notify_assessments_changed(keys)
         return keys
 
@@ -2771,6 +2916,7 @@ class CacheManager:
 
             next_index = 0
             saved_local = False
+            exported_keys: List[AssessmentKey] = []
             state_lock = asyncio.Lock()
 
             async def worker() -> None:
@@ -2801,8 +2947,9 @@ class CacheManager:
                         )
                         if marked:
                             async with self.lock:
-                                self._save_local_analysis(payload)
+                                self._save_local_analysis(payload, exported=True)
                                 saved_local = True
+                                exported_keys.append(key)
                         else:
                             # Saved again while the write was in flight. The
                             # source now holds this older value of ours.
@@ -2882,8 +3029,21 @@ class CacheManager:
             self._invalidate_cache_status()
             if saved_local:
                 await self.flush_cache_writes()
+            if exported_keys:
+                # The assessments are the same; their sync status changed.
+                await self._notify_assessments_changed(
+                    exported_keys, value_changed=False
+                )
 
-    def _save_local_analysis(self, payload: Dict[str, Any]) -> None:
+    def _save_local_analysis(
+        self, payload: Dict[str, Any], *, exported: bool = False
+    ) -> None:
+        """Store what the source holds for a finding. ``exported`` says it is
+        DTVP's own value that just went out: the assessment shown does not
+        change, only its sync status, which the caller reports to the
+        assessment change listeners. It is not an unapplied write either: a
+        snapshot that shows the value stays reusable; its sync status is
+        patched when the export batch ends."""
         project_uuid = payload.get("project_uuid")
         component_uuid = payload.get("component_uuid")
         vulnerability_uuid = payload.get("vulnerability_uuid")
@@ -2899,6 +3059,8 @@ class CacheManager:
             self._analysis_path(project_uuid, component_uuid, vulnerability_uuid),
             analysis_data,
             project_uuid=project_uuid,
+            # Not a source change: the value is the one already shown.
+            assessment_keys=() if exported else None,
         )
 
     def _save_local_analyses(self, payloads: List[Dict[str, Any]]) -> None:
