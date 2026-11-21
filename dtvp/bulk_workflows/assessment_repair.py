@@ -38,6 +38,7 @@ from .assessment_restore import (
     selected_groups,
 )
 from .base import BulkWorkflowContext, BulkWorkflowPlugin
+from .incomplete_sync import with_own_records
 from .incomplete_sync import (
     HEADER_RE,
     _instances,
@@ -803,16 +804,28 @@ def _team_stage(
                 continue
         elif lifecycle == "INCOMPLETE":
             pending = any(_PENDING_RE.search(_details(instance)) for instance in instances)
+            # The current blocks, merged. Historical blocks are records of
+            # single findings: each finding keeps its own, none is copied to
+            # another finding and none becomes a team's current block.
             sync_blocks = _parse_blocks(_sync_group(group)["target_details"])
             sync_only = _render(sync_blocks, pending=pending)
+            records: dict[str, dict[str, Any]] = {}
+            for instance in instances:
+                for block in _parse_blocks(_details(instance)):
+                    if _is_historical(block):
+                        records.setdefault(_render_block(block), block)
+            record_ids = {id(block) for block in records.values()}
+            # The records are shown to the former-team repair, which leaves a
+            # team that has one to assess for itself, and taken out again.
             blocks, former = _repair_former_teams(
-                sync_blocks,
+                [*sync_blocks, *records.values()],
                 current,
                 context.team_mapping,
                 user=context.user,
                 pending=pending,
                 now_ms=now_ms,
             )
+            blocks = [block for block in blocks if id(block) not in record_ids]
             rescored = _with_rescoring(_render(blocks, pending=pending), instances)
             rescored_sync = _with_rescoring(sync_only, instances)
             for instance in instances:
@@ -820,10 +833,10 @@ def _team_stage(
                     left_new += 1
                     continue
                 old = _details(instance)
-                details = preserve_ssvc_record(rescored(old), old)
+                details = preserve_ssvc_record(with_own_records(rescored(old), old), old)
                 if _differs(details, old) or calculate_aggregated_state(details) != _state(instance):
                     targets.append((instance, details))
-                synced = preserve_ssvc_record(rescored_sync(old), old)
+                synced = preserve_ssvc_record(with_own_records(rescored_sync(old), old), old)
                 if _differs(synced, old) or calculate_aggregated_state(synced) != _state(instance):
                     synchronized += 1
         else:

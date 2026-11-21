@@ -1,0 +1,392 @@
+[
+  {
+    "name": "the same assessment on every finding",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "only who assessed and when differs",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: carol] [Date: 1795000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "one finding also holds a former team's record",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1780000000000] [Justification: NOT_SET] [Ticket: EXP-1] [Historical: yes] ---\nReachable in the old layout."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "the record stands ahead of the current block",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1780000000000] [Justification: NOT_SET] [Ticket: EXP-1] [Historical: yes] ---\nReachable in the old layout.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "each finding holds a different record",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1780000000000] [Justification: NOT_SET] [Ticket: EXP-1] [Historical: yes] ---\nReachable in the old layout."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1770000000000] [Justification: NOT_SET] [Historical: yes] ---\nEarlier view."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "only the version coverage of a team differs",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] [Version Coverage: yes] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "only the version coverage of the General assessment differs",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] [Version Coverage: yes] ---\nDecided.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nDecided.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "a record and the version coverage differ, pending review",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] [Version Coverage: yes] ---\nNot shipped.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1780000000000] [Justification: NOT_SET] [Ticket: EXP-1] [Historical: yes] ---\nReachable in the old layout.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n[Status: Pending Review]"
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "NEEDS_APPROVAL",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "the text of a team differs",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nRemoved by the build."
+      }
+    ],
+    "inconsistency_reasons": [
+      "TEAM_ASSESSMENT_MISMATCH",
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "the state differs",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: bob] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable."
+      }
+    ],
+    "inconsistency_reasons": [
+      "ANALYSIS_STATE_MISMATCH",
+      "TEAM_ASSESSMENT_MISMATCH",
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "EXPLOITABLE"
+  },
+  {
+    "name": "the text under an approved General assessment differs",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nDecided.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nDecided.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nRemoved by the build."
+      }
+    ],
+    "inconsistency_reasons": [
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "a finding with a record only is not assessed",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1780000000000] [Justification: NOT_SET] [Ticket: EXP-1] [Historical: yes] ---\nReachable in the old layout."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "INCOMPLETE",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "a record does not decide the state",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1780000000000] [Justification: NOT_SET] [Ticket: EXP-1] [Historical: yes] ---\nReachable in the old layout."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1780000000000] [Justification: NOT_SET] [Ticket: EXP-1] [Historical: yes] ---\nReachable in the old layout."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "the General state of the first finding by key, listed last",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable."
+      },
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nDecided."
+      }
+    ],
+    "inconsistency_reasons": [
+      "ANALYSIS_STATE_MISMATCH",
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED"
+  }
+]

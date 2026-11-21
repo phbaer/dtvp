@@ -22,6 +22,7 @@ from .logic import (
     STATE_PRIORITY,
     _parse_assessment_blocks,
     populate_group_dependency_chains,
+    without_historical_blocks,
 )
 from .task_group_query_services import build_task_group_query_index
 
@@ -175,7 +176,45 @@ def _dependency_relationship(components: List[Dict[str, Any]]) -> str:
 
 
 def _sort_states_by_priority(states: List[str]) -> List[str]:
-    return sorted(states, key=lambda state: STATE_PRIORITY.get(state, 10))
+    # The name breaks ties, so that the result does not depend on the order
+    # the states were collected in.
+    return sorted(states, key=lambda state: (STATE_PRIORITY.get(state, 10), str(state)))
+
+
+def _finding_order_key(instance: Dict[str, Any]) -> tuple[str, str, str]:
+    return tuple(  # type: ignore[return-value]
+        str(instance.get(name) or "")
+        for name in ("project_uuid", "component_uuid", "vulnerability_uuid")
+    )
+
+
+_COMPARISON_IGNORED_TAGS = [
+    r"\[Date:\s*[^\]]*\]",
+    r"\[Assessed By:\s*[^\]]*\]",
+    r"\[Rescored:\s*[\d\.]+\]",
+    r"\[Rescored Vector:\s*[^\]]+\]",
+    r"\[Status: Pending Review\]",
+    # Which versions a team looked at is a note on its review, not part of
+    # the decision the findings must agree on.
+    r"\[Version Coverage:\s*[^\]]*\]",
+]
+
+
+def comparable_assessment_text(details: str) -> str:
+    """The part of an assessment text that the findings of a vulnerability
+    must agree on.
+
+    Historical blocks are records that belong to one finding (a former
+    team's assessment, a team assessment restored from an export): they are
+    left out, as are the tags that say who assessed when, the rescoring, the
+    pending status and the version coverage. The web client compares the
+    same way (``comparableAssessmentText`` in assessment-helpers.ts); both
+    are tested against ``assessment_scope_cases.json``.
+    """
+    cleaned = without_historical_blocks(details)
+    for pattern in _COMPARISON_IGNORED_TAGS:
+        cleaned = re.sub(pattern, "", cleaned)
+    return " ".join(cleaned.split()).strip()
 
 
 def _normalize_block_signature(block: Dict[str, Any]) -> str:
@@ -241,10 +280,22 @@ def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
     raw_states = _sort_states_by_priority(
         list({state for state in component_states if state != "NOT_SET"})
     )
+    # The first General decision in the order of the findings' keys, so that
+    # the value does not depend on the order the versions were collected in.
+    ordered_instance_blocks = [
+        active_blocks
+        for _key, _index, active_blocks in sorted(
+            (_finding_order_key(instance), index, active_blocks)
+            for index, (instance, active_blocks) in enumerate(
+                zip(instances, instance_blocks)
+            )
+        )
+    ]
     global_state = next(
         (
             block.get("state")
-            for block in blocks
+            for active_blocks in ordered_instance_blocks
+            for block in active_blocks
             if block.get("team") == "General" and block.get("state") != "NOT_SET"
         ),
         None,
@@ -324,20 +375,8 @@ def _derive_group_inconsistency_reasons(
         ):
             reasons.append(INCONSISTENCY_REASON_TEAM_ASSESSMENT_MISMATCH)
 
-    def normalize_details(details: str) -> str:
-        cleaned = details
-        for pattern in [
-            r"\[Date:\s*[^\]]*\]",
-            r"\[Assessed By:\s*[^\]]*\]",
-            r"\[Rescored:\s*[\d\.]+\]",
-            r"\[Rescored Vector:\s*[^\]]+\]",
-            r"\[Status: Pending Review\]",
-        ]:
-            cleaned = re.sub(pattern, "", cleaned)
-        return " ".join(cleaned.split()).strip()
-
     assessed_details = [
-        normalize_details(_instance_details(instance))
+        comparable_assessment_text(_instance_details(instance))
         for instance in instances
         if _instance_state(instance) != "NOT_SET"
     ]
@@ -361,7 +400,6 @@ def _derive_group_lifecycle(
     inconsistency_reasons: Optional[List[str]] = None,
 ) -> str:
     instances = summary["instances"]
-    component_states = summary["component_states"]
     blocks = summary["blocks"]
     has_any = summary["has_any_assessment"]
     has_missing = summary["has_missing_component"]
@@ -419,33 +457,8 @@ def _derive_group_lifecycle(
     if missing_teams:
         return "INCOMPLETE" if has_any else "OPEN"
 
-    version_states = []
-    for affected_version in group.get("affected_versions", []):
-        states = {
-            _instance_state(component)
-            for component in affected_version.get("components", [])
-        }
-        if not states:
-            version_states.append("NOT_SET")
-        elif len(states) == 1:
-            version_states.append(next(iter(states)))
-        else:
-            non_missing = [state for state in states if state != "NOT_SET"]
-            if len(non_missing) == 1:
-                version_states.append(non_missing[0])
-            elif len(non_missing) > 1:
-                version_states.append("INCONSISTENT_VERSION")
-            else:
-                version_states.append("NOT_SET")
-
-    non_empty_states = [
-        state
-        for state in version_states
-        if state not in {"NOT_SET", "INCONSISTENT_VERSION"}
-    ]
-    if len(set(non_empty_states)) > 1 or "INCONSISTENT_VERSION" in version_states:
-        return "INCONSISTENT"
-
+    # Findings that disagree on the state were returned as INCONSISTENT
+    # above (ANALYSIS_STATE_MISMATCH), whichever version they belong to.
     # Complete, consistent team coverage does not require a General block.
     return "ASSESSED" if has_any else "OPEN"
 

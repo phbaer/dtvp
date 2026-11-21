@@ -390,6 +390,17 @@ label per applicable repair and count only the findings that change.
 | Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |
 | Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
 
+Synchronize merges the current blocks only. A historical block is the record
+of one finding, for example a former team's assessment or a team assessment
+[restored from an export](#restore-team-assessments-from-an-export) into one
+version. Each finding keeps its own historical blocks exactly as stored, none
+is copied to another finding, and none is taken for a team's current
+assessment. A team that has a historical block on any finding receives no
+`See global assessment.` reference and is left to assess. Historical blocks
+do not make the findings of a vulnerability differ
+([Assessment model](assessment-model.md)), so a restore into one version
+leaves the vulnerability's status as it was.
+
 A former team's assessment is never discarded. Its block stays as
 `[Historical: yes]` with every field: decision, justification, assessor,
 reviewer, date, ticket, and rationale. It no longer counts toward the state or

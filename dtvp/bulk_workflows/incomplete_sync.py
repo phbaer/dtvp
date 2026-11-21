@@ -7,7 +7,12 @@ from typing import Any
 
 from ..assessment_model import agreed_response, preserve_response
 from ..ssvc_services import preserve_record as preserve_ssvc_record
-from ..logic import STATE_PRIORITY, calculate_aggregated_state
+from ..logic import (
+    STATE_PRIORITY,
+    calculate_aggregated_state,
+    historical_blocks_of,
+    insert_assessment_blocks,
+)
 from .assessment_restore import selected_groups
 
 
@@ -86,10 +91,43 @@ def _render_block(block: dict[str, Any]) -> str:
     return f"--- {' '.join(header_tags)} ---" + (f"\n{details}" if details else "")
 
 
+def _is_historical_block(block: dict[str, Any]) -> bool:
+    return str(block["tags"].get("Historical") or "").strip().casefold() == "yes"
+
+
+_RESCORING_TAG_RE = re.compile(r"\[Rescored(?: Vector)?:\s*[^\]]+\]", re.I)
+
+
+def with_own_records(merged: str, existing: str) -> str:
+    """``merged``, the current blocks every finding of a vulnerability
+    receives, with the historical blocks of this one finding added.
+
+    A historical block is the record of one finding: a former team's
+    assessment, or one restored from an export into one version. It stays on
+    that finding and goes to no other.
+    """
+    return insert_assessment_blocks(merged, historical_blocks_of(existing))
+
+
+def _with_own_rescoring(details: str, existing: str) -> str:
+    """``details`` with the rescoring this finding stores ahead of its
+    blocks, unless the synchronized text has one there already."""
+    def lead(text: str) -> str:
+        header = HEADER_RE.search(text or "")
+        return (text or "")[: header.start()] if header else (text or "")
+
+    own = " ".join(match.group(0) for match in _RESCORING_TAG_RE.finditer(lead(existing)))
+    if not own or _RESCORING_TAG_RE.search(lead(details)):
+        return details
+    return f"{own}\n\n{details}" if details else own
+
+
 def _keep_finding_values(details: str, existing: str, response: str | None) -> str:
-    """The synchronized text with what each finding keeps of its own: the
-    SSVC record and the response. A finding without a response takes
+    """The synchronized text with what each finding keeps of its own: its
+    historical blocks, the rescoring stored ahead of its blocks, the SSVC
+    record and the response. A finding without a response takes
     ``response``, the one the other findings agree on."""
+    details = _with_own_rescoring(with_own_records(details, existing), existing)
     return preserve_response(
         preserve_ssvc_record(details, existing), existing, response
     )
@@ -100,6 +138,10 @@ def _sync_group(group: dict[str, Any]) -> dict[str, Any]:
     blocks_by_team: dict[str, dict[str, Any]] = {}
     for instance in instances:
         for block in _parse_blocks(str(instance.get("analysis_details") or "")):
+            if _is_historical_block(block):
+                # A record of that one finding: it is neither a team's
+                # current assessment nor copied to the other findings.
+                continue
             team_key = _team_key(block["team"])
             existing = blocks_by_team.get(team_key)
             if existing is None or (
