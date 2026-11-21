@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [vue()],
   base: '/',
   server: {
+    // The logo lives in data/ at the repository root (src/lib/brand.ts).
+    fs: { allow: ['..'] },
     proxy: {
       '/api': 'http://localhost:8000',
       '/auth': 'http://localhost:8000',

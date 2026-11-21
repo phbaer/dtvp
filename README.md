@@ -1,4 +1,6 @@
-# Dependency Track Vulnerability Processor (DTVP)
+<p align="center"><img src="data/dtvp-wordmark.svg" alt="DTVP: Does This Violate Policy?" width="388"></p>
+
+# DTVP: Does This Violate Policy?
 
 DTVP is a FastAPI and Vue application for reviewing Dependency-Track findings
 across project versions. It groups vulnerabilities, tracks team assessments,
