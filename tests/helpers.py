@@ -25,3 +25,21 @@ def wait_for_grouped_task(test_client, task_id: str, *, timeout: float = 30.0) -
                 return status
         time.sleep(0.02)
     raise AssertionError(f"Grouped task did not finish in {timeout}s: {status}")
+
+
+def wait_for_bulk_workflow_task(test_client, task_id: str, *, timeout: float = 30.0) -> dict:
+    """Wait until a bulk workflow task (preview or apply) has finished.
+
+    It runs in the background; a fixed number of polls is not enough on a
+    slow machine, so this waits with a deadline.
+    """
+    deadline = time.monotonic() + timeout
+    status: dict = {}
+    while time.monotonic() < deadline:
+        response = test_client.get(f"/api/bulk-workflows/tasks/{task_id}")
+        assert response.status_code == 200
+        status = response.json()
+        if status.get("status") in {"completed", "failed"}:
+            return status
+        time.sleep(0.02)
+    raise AssertionError(f"Bulk workflow task did not finish in {timeout}s: {status}")

@@ -12,6 +12,7 @@ import pytest
 
 from dtvp import main
 from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
+from tests.helpers import wait_for_bulk_workflow_task
 
 
 @pytest.fixture(autouse=True)
@@ -330,14 +331,7 @@ def test_bulk_workflow_preview_runs_as_polled_background_task(client):
             operation_id = response.json()["task_id"]
             assert operation_id != task_id
 
-            for _attempt in range(20):
-                status_response = client.get(
-                    f"/api/bulk-workflows/tasks/{operation_id}"
-                )
-                assert status_response.status_code == 200
-                status = status_response.json()
-                if status["status"] in {"completed", "failed"}:
-                    break
+            status = wait_for_bulk_workflow_task(client, operation_id)
 
         assert status["status"] == "completed"
         assert status["kind"] == "bulk_workflow_preview"
@@ -471,14 +465,7 @@ def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_clie
             assert response.status_code == 200
             operation_id = response.json()["task_id"]
 
-            for _attempt in range(20):
-                status_response = client.get(
-                    f"/api/bulk-workflows/tasks/{operation_id}"
-                )
-                assert status_response.status_code == 200
-                status = status_response.json()
-                if status["status"] in {"completed", "failed"}:
-                    break
+            status = wait_for_bulk_workflow_task(client, operation_id)
 
         assert status["status"] == "completed"
         assert status["kind"] == "bulk_workflow_apply"
