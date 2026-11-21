@@ -226,7 +226,11 @@ none. Opened, it lists per version:
 
 A carried-over assessment appears on the replacing finding marked
 `[Status: Pending Review]` and in **Settings → Export** with origin
-`carried-over`; review and approve it as any other. Where the old assessments
+`carried-over`; review and approve it as any other. When Dependency-Track
+recreated the same component under a new ID (same name, version and package
+URL, typically a BOM uploaded again), the panel says **Recreated by
+Dependency-Track** and **Carried over to the recreated component**, and the
+assessment moves over unchanged: an approved one stays approved. Where the old assessments
 differ, or the component of an old record is unknown, assess the new finding
 by hand. The panel is read-only and loads with
 the project; `GET /api/gone-findings?name=<project name>` returns the same.
