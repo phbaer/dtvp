@@ -31,6 +31,38 @@ def test_aliases_match_sources_without_saved_ssvc(cache):
     assert evidence_sources(group, service.filter_snapshot()) == ["KEV", "CISA_SSVC"]
 
 
+def test_a_write_is_seen_even_when_the_file_looks_unchanged(cache, monkeypatch):
+    """A coarse filesystem clock can leave mtime and size unchanged across a
+    write; the snapshot must still see it."""
+    import os
+
+    service, now = cache
+    service._cache("kev", {"checked": now[0], "data": {}})
+    path = service.path
+    before = os.stat(path)
+    service.filter_snapshot()
+    service._cache("CVE-2026-1234", {"checked": now[0], "data": None})
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    if os.stat(path).st_size != before.st_size:
+        real_stat = os.stat
+
+        class Same:
+            def __init__(self, result):
+                self._result = result
+
+            def __getattr__(self, name):
+                if name == "st_size":
+                    return before.st_size
+                return getattr(self._result, name)
+
+        monkeypatch.setattr(
+            "pathlib.Path.stat",
+            lambda self, **kw: Same(real_stat(self, **kw)),
+        )
+    group = {"id": "CVE-2026-1234"}
+    assert evidence_sources(group, service.filter_snapshot()) == ["NO_DATA"]
+
+
 def test_no_data_requires_complete_fresh_negative_coverage(cache):
     service, now = cache
     group = {"id": "CVE-2026-1234", "aliases": ["CVE-2026-5678"]}
