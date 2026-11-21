@@ -230,7 +230,10 @@ progress) moves every Dependency-Track read into a background scheduler and
 announces changes to clients on one event stream. The stream exists:
 `GET /api/events` tells clients about project-list, assessment, export,
 cache-refresh, and Dependency-Track state changes
-([Event channel](docs/runtime.md#event-channel)).
+([Event channel](docs/runtime.md#event-channel)). Every read of a project
+version is recorded in its sync state, with content digests:
+`GET /api/sync/versions?product=&changed_since=` and `GET /api/sync/status`
+([Sync state](docs/runtime.md#sync-state)).
 
 ## Documentation
 

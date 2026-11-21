@@ -114,6 +114,10 @@ TABLE_MAP: dict[str, str] = {
     # recommendation; an empty table is read again after a restore.
     "source_vulnerability_ranges": "excluded: version ranges re-read from Dependency-Track in the background",
     "sqlite_sequence": "marker: kept as manifest.cut_point.sequences",
+    # ADR 0004: the state of the reads from Dependency-Track. Derived from
+    # those reads; after a restore every version is read again, which
+    # rebuilds it (unknown digests are stored without counting a change).
+    "sync_versions": "excluded: per-version sync state, rebuilt by the next reads from Dependency-Track",
     "finding_lifecycle_metadata": "marker: the one-time presence backfill; a restore writes it as done",
 }
 

@@ -443,9 +443,9 @@ tab, and a 401 or an `auth` event signs every tab out.
 | :--- | :--- |
 | 1 Background owner | Not implemented |
 | 2 Store-only readers | Not implemented |
-| 3 Persisted sync state | Not implemented |
+| 3 Persisted sync state | Recording implemented 2026-11-21 (step 4): `sync_versions` with status, attempt/success/change times, failures, list signals, digests, generation and request columns, recorded during today's refresh; `GET /api/sync/versions`, `GET /api/sync/status`; see [Sync state](../runtime.md#sync-state). Staged generations, the request columns' use, and recovery come with the scheduler (step 5) |
 | 4 Scheduling by interest | Not implemented |
-| 5 Content digests | Not implemented |
+| 5 Content digests | Implemented 2026-11-21 (step 4): findings, analyses, vulnerability and BOM digests over the raw responses, echo classification against the record, `lastRiskScore` out of the grouped fingerprint. Revisions and events do not follow the digests yet (step 5) |
 | 6 Event stream | Implemented 2026-11-20: hub, `/api/events`, `/api/events/poll`, nginx, producers `hello`, `projects.changed`, `assessments.changed{origin:local}`, `export.state`, `source.state`, `cache.refreshed`; per-user connection limit, cursor on heartbeats, streams end on the stop signal; the browser client with one stream per browser, the cache status and the export warning follow events; see [Event channel](../runtime.md#event-channel). The producers of later steps and the ProjectView and Dashboard updates are open |
 | 7 Clients keep their place | Not implemented |
 | 8 Other integrations | Not implemented |
