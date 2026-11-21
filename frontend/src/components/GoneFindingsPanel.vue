@@ -59,10 +59,32 @@ const when = (value: string | null | undefined) => {
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
+// Same name and version under a new ID: Dependency-Track recreated the
+// component (a BOM uploaded again), nothing was replaced.
+const recreated = (finding: GoneFinding) => {
+    const successor = finding.successor
+    return Boolean(
+        finding.reason === 'replaced'
+        && successor?.component_version
+        && successor.component_version === finding.component_version
+        && successor.component_name === finding.component_name,
+    )
+}
+
+// The assessment moves to the recreated component as it was.
+const carryOverLabel = (finding: GoneFinding) => {
+    const carryOver = finding.carry_over || ''
+    if (carryOver === 'carried' && recreated(finding)) return 'Carried over to the recreated component'
+    return CARRY_OVER[carryOver] || carryOver
+}
+
 const reasonLabel = (finding: GoneFinding) => {
     if (finding.reason === 'replaced' && finding.successor) {
         const name = finding.successor.component_name || finding.successor.component_uuid
         const version = finding.successor.component_version
+        if (recreated(finding)) {
+            return 'Recreated by Dependency-Track (same version, new component ID)'
+        }
         return `Replaced by ${name}${version ? `@${version}` : ''}`
     }
     return REASONS[finding.reason] || finding.reason
@@ -181,7 +203,7 @@ onBeforeUnmount(() => {
                             </div>
                             <div class="mt-0.5 flex flex-wrap gap-x-2 text-gray-400">
                                 <span v-if="finding.carry_over" data-testid="gone-finding-carry-over">
-                                    {{ CARRY_OVER[finding.carry_over] || finding.carry_over }}
+                                    {{ carryOverLabel(finding) }}
                                 </span>
                                 <span>Assessment: {{ assessmentLabel(finding) }}</span>
                             </div>

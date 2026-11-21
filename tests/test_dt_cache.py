@@ -984,7 +984,8 @@ async def test_recreated_findings_of_a_component_listed_twice_keep_a_shared_asse
         if carried:
             assert item["analysis"]["analysisState"] == "NOT_AFFECTED"
             assert "[Team: Alpha]" in details and "Same." in details
-            assert "[Status: Pending Review]" in details
+            # The same name and version: recreated, not changed. No review.
+            assert "[Status: Pending Review]" not in details
         else:
             # Two different assessments: which one applies is not ours to say.
             assert not details
@@ -1748,6 +1749,41 @@ async def test_the_import_needs_nothing_but_the_source_protocol(tmp_path):
 
     assert result.carried_over == [("p1", "c-new", "v1")]
     assert manager.finding_lifecycle.presence("p1")[("c-old", "v1")]["gone_reason"] == "replaced"
+    await manager.close()
+
+
+async def test_a_recreated_component_keeps_its_assessment_without_review(tmp_path):
+    """The source recreates the same component under a new ID (a BOM uploaded
+    again): the assessment moves over as it was, an approved one stays
+    approved. Another version still needs review."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [
+        _lib("c-old", "1.0", "NOT_AFFECTED", _ALPHA),
+        _lib("c-old", "1.0", "NOT_AFFECTED", _BETA, vuln="v2"),
+    ]
+    await manager.import_findings(client, "p1")
+
+    # v1 on the same version under a new ID; v2 moved to another version.
+    client.get_vulnerabilities.return_value = [
+        _lib("c-same", "1.0"),
+        _lib("c-next", "1.1", vuln="v2"),
+    ]
+    client.get_bom.return_value = {
+        "components": [
+            {"bom-ref": "c-same", "name": "lib-a", "purl": "pkg:maven/org.example/lib-a@1.0"},
+            {"bom-ref": "c-next", "name": "lib-a", "purl": "pkg:maven/org.example/lib-a@1.1"},
+        ]
+    }
+    result = await manager.import_findings(client, "p1")
+
+    assert sorted(result.carried_over) == [("p1", "c-next", "v2"), ("p1", "c-same", "v1")]
+    same = manager.get_assessment_overlay("p1", "c-same", "v1")
+    assert same["analysisState"] == "NOT_AFFECTED"
+    assert same["analysisDetails"] == _ALPHA
+    assert "[Status: Pending Review]" not in same["analysisDetails"]
+    upgraded = manager.get_assessment_overlay("p1", "c-next", "v2")
+    assert "[Status: Pending Review]" in upgraded["analysisDetails"]
     await manager.close()
 
 

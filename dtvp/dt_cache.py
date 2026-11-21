@@ -1990,7 +1990,11 @@ class CacheManager:
                     "component_uuid": carry.target[1],
                     "vulnerability_uuid": carry.target[2],
                     "state": carry.value["state"],
-                    "details": _mark_assessment_for_review(
+                    # A recreated component is the same one: its assessment
+                    # stays as it was (approved stays approved).
+                    "details": carry.value["details"]
+                    if carry.recreated
+                    else _mark_assessment_for_review(
                         {
                             "analysisState": carry.value["state"],
                             "analysisDetails": carry.value["details"],
@@ -2039,8 +2043,10 @@ class CacheManager:
         if carried:
             logger.info(
                 "Carried %d assessment(s) of %s over to the findings that "
-                "replaced theirs, pending review",
+                "replaced theirs (%d onto a recreated component, unchanged; "
+                "the others pending review)",
                 len(carried), project_uuid,
+                sum(1 for carry in carried if carry.recreated),
             )
         record_carry_over(plan, carried, has_source_value=has_source_value)
         return plan

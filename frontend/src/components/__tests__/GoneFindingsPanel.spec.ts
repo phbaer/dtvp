@@ -94,6 +94,29 @@ describe('GoneFindingsPanel', () => {
         wrapper.unmount()
     })
 
+    it('says a component recreated with the same version was not replaced', async () => {
+        vi.mocked(getGoneFindings).mockResolvedValue({
+            name: 'App',
+            versions: [{
+                version: '1.0', project_uuid: 'p1',
+                last_read: { ...READ, went: { replaced: 1 } },
+                gone: { replaced: 1 },
+                findings: [finding({
+                    carry_over: 'carried',
+                    successor: { component_uuid: 'c-new', component_name: 'lib-a', component_version: '1.0' },
+                })],
+            }],
+        } as any)
+        const wrapper = await mountPanel()
+
+        await wrapper.get('[data-testid="gone-findings-button"]').trigger('click')
+        expect(wrapper.get('[data-testid="gone-finding-reason"]').text())
+            .toBe('Recreated by Dependency-Track (same version, new component ID)')
+        expect(wrapper.get('[data-testid="gone-finding-carry-over"]').text())
+            .toBe('Carried over to the recreated component')
+        wrapper.unmount()
+    })
+
     it('says when the component of an old record is unknown', async () => {
         vi.mocked(getGoneFindings).mockResolvedValue({
             name: 'App',

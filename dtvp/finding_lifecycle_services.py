@@ -722,6 +722,10 @@ class CarryOver:
     components: dict[AssessmentKey, dict[str, Optional[str]]] = field(
         default_factory=dict
     )
+    # Every candidate had the target's component name, version and package
+    # URL: the source recreated the same component under a new ID (a BOM
+    # uploaded again). The assessment carries over unchanged, without review.
+    recreated: bool = False
 
 
 @dataclass
@@ -754,6 +758,21 @@ def _record_value(state: Mapping[str, Any]) -> dict[str, Any]:
 
 def _same_name(left: Optional[str], right: Optional[str]) -> bool:
     return bool(left and right) and left.strip().lower() == right.strip().lower()
+
+
+def same_component_version(
+    row: Mapping[str, Any], target: "ReportedFinding"
+) -> bool:
+    """The gone finding's component is the target's: same name and version,
+    and the same package URL where both have one."""
+    if not _same_name(row.get("component_name"), target.component_name):
+        return False
+    version = str(row.get("component_version") or "").strip()
+    if not version or version != str(target.component_version or "").strip():
+        return False
+    purl = str(row.get("component_purl") or "").strip().lower()
+    target_purl = str(target.component_purl or "").strip().lower()
+    return not (purl and target_purl and purl != target_purl)
 
 
 def plan_carry_over(
@@ -826,7 +845,16 @@ def plan_carry_over(
                 plan.conflicts.append((target_key, candidates))
             else:
                 plan.carries.append(
-                    CarryOver(target_key, value, candidates, ORIGIN_CARRIED_OVER)
+                    CarryOver(
+                        target_key,
+                        value,
+                        candidates,
+                        ORIGIN_CARRIED_OVER,
+                        recreated=all(
+                            same_component_version(row_of(key), target)
+                            for key in candidates
+                        ),
+                    )
                 )
             continue
 
