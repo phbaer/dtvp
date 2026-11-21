@@ -2324,6 +2324,24 @@ describe('VulnGroupCard', () => {
             const payload = vi.mocked(updateAssessment).mock.calls[0]![0] as any
             expect(payload.state).toBe('NOT_AFFECTED')
             expect(payload.fields.pending_review).toBeFalsy()
+            // The approval is said in so many words; the server asks for it.
+            expect(payload.approve).toBe(true)
+        })
+
+        it('saves a reviewer\'s change to a pending assessment without approving it', async () => {
+            const wrapper = await mountCard({ group: pendingGroup(), role: 'REVIEWER' })
+
+            const save = wrapper.get('[data-vuln-card-sticky-nav] [data-testid="assessment-submit-button"]')
+            expect(save.attributes('title')).toContain('stays pending review until you approve')
+            const saving = (wrapper.vm as any).handleUpdate(false)
+            await flushPromises()
+            ;(wrapper.vm as any).handleReviewConfirm()
+            await saving
+
+            expect(updateAssessment).toHaveBeenCalledTimes(1)
+            const payload = vi.mocked(updateAssessment).mock.calls[0]![0] as any
+            expect(payload.approve).toBeUndefined()
+            expect(payload.fields.pending_review).toBe(true)
         })
 
         it('activates the SSVC evidence while the form is visible', async () => {

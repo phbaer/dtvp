@@ -206,6 +206,8 @@ export interface AssessmentPayload {
     assigned?: string[];
     original_analysis?: Record<string, any>;
     force?: boolean;
+    /** The reviewer's explicit approval; nothing else removes pending review. */
+    approve?: boolean;
     comparison_mode?: 'MERGE' | 'REPLACE';
     analysis_run_ids?: string[];
     /** Agent code evidence referenced in this draft; recorded on save. */

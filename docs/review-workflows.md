@@ -243,6 +243,20 @@ in the header opens this view; it does not approve by itself. In the assessment
 workspace the form is always visible, so on the Global form the button reads
 Approve directly.
 
+Only this approval removes the pending status. The server asks for it in so
+many words: `POST /api/assessment` accepts `approve: true` from reviewers, and
+refuses it from anyone else (403). Everything else keeps a pending assessment
+pending, whoever does it:
+
+- a reviewer's **Save** of a pending assessment, in the form or as whole text;
+- a reviewer's deletion of a team's or the General assessment, as long as a
+  decision remains;
+- **Repair Assessments**, including its Synchronize stage, which carries the
+  pending status to every finding it writes.
+
+A reviewer's assessment of something that was not pending is stored as the
+client sends it.
+
 ### Response
 
 The form of the Global assessment has a **Response** select below the
@@ -321,6 +335,10 @@ local save succeeds, the card reports that it is saved locally while
 Dependency-Track synchronization continues in the background; retry failures
 remain visible without blocking another edit. Per-finding local revisions are
 retained across list updates so subsequent edits keep conflict protection.
+A save that names no revisions (the overwrite offered after a conflict, an
+approval, a save from an agent) is guarded as well: it is checked against the
+revision DTVP read when it began handling that save, and fails with 409 when
+another save was stored in between.
 Each vulnerability card can reload its current assessment directly from
 Dependency-Track; the refreshed task snapshot updates the card, lifecycle
 filters, and counts together.

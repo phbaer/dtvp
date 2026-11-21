@@ -65,6 +65,8 @@ describe('assessmentSubmission', () => {
             force: false,
         })
 
+        // A reviewer's approval is sent as such.
+        expect(prepared.payload.approve).toBe(true)
         const teams = Object.fromEntries(prepared.payload.fields!.teams.map(team => [team.team, team]))
         expect(Object.keys(teams).sort()).toEqual(['General', 'Phoenix', 'R-Web'])
         expect(teams.General).toMatchObject({ state: 'NOT_AFFECTED', assessed_by: 'reviewer' })
@@ -253,6 +255,8 @@ describe('assessmentSubmission', () => {
         expect(prepared.finalText).toContain('[Copied From: TeamA]')
         expect(prepared.finalState).toBe('RESOLVED')
         expect(prepared.finalText).toContain('[Status: Pending Review]')
+        // A save is not an approval.
+        expect(prepared.payload).not.toHaveProperty('approve')
     })
 
     it('uses sanitized raw text and clears original analysis on force overwrite', () => {

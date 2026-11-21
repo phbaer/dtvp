@@ -2198,6 +2198,38 @@ def test_repair_combines_keeping_blocks_that_were_historical_as_they_are():
     assert _team(details, "General")["historical"] is False
 
 
+# --- Synchronizing is not approving ----------------------------------------
+
+
+def _pending_incomplete_group():
+    return _repair_group(
+        [("NOT_AFFECTED", f"{_CURRENT}\n\n[Status: Pending Review]"), ("NOT_SET", "")],
+        tags=["TeamB"], lifecycle="INCOMPLETE",
+    )
+
+
+def test_repair_synchronization_keeps_pending_review():
+    _preview, payloads, _skipped = _repair(_pending_incomplete_group())
+
+    assert payloads
+    assert all(
+        payload["details"].endswith("[Status: Pending Review]")
+        for _instance, payload in payloads
+    )
+
+
+def test_the_standalone_synchronize_keeps_pending_review():
+    group = _pending_incomplete_group()
+
+    payloads, _skipped = build_incomplete_sync_payloads([group], [group["id"]])
+
+    assert len(payloads) == 2
+    assert all(
+        payload["details"].endswith("[Status: Pending Review]")
+        for _instance, payload in payloads
+    )
+
+
 _GLOBAL = "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: CODE_NOT_PRESENT] ---\nApproved globally."
 
 

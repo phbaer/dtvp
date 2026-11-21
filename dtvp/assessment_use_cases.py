@@ -129,6 +129,12 @@ class AssessmentRequest(BaseModel):
     assigned: Optional[list[str]] = None
     original_analysis: Optional[dict[str, dict[str, Any]]] = None
     force: bool = False
+    # The reviewer's explicit approval: the only thing that removes pending
+    # review from a stored assessment. Reviewers only.
+    approve: bool = False
+    # The revision each finding had when the use case read it, keyed by
+    # (project, component, vulnerability); never client input.
+    _stored_revisions: dict[tuple[str, str, str], int] = PrivateAttr(default_factory=dict)
     comparison_mode: Optional[str] = "MERGE"
     analysis_run_ids: list[str] = Field(default_factory=list)
     # Agent code evidence a person referenced in this assessment; recorded
@@ -189,7 +195,9 @@ def expected_assessment_revisions(
     req: AssessmentRequest,
 ) -> dict[tuple[str, str, str], int]:
     if req.force or not req.original_analysis:
-        return {}
+        # No client view to compare with: the save is still guarded against
+        # a write that lands between the use case's own read and its persist.
+        return dict(req._stored_revisions)
     expected: dict[tuple[str, str, str], int] = {}
     for instance in req.instances:
         finding_uuid = instance.get("finding_uuid")
@@ -571,6 +579,8 @@ async def save_assessment(
     """
     if role is None:
         role = deps.get_user_role(user)
+    if req.approve and str(role or "").upper() != "REVIEWER":
+        raise AssessmentPermissionError("Only reviewers can approve an assessment")
     if req.fields is not None:
         # The assessment arrives as fields. Its text, which the checks and
         # the store work with, is rendered here and nowhere in the client.
@@ -582,9 +592,15 @@ async def save_assessment(
         req.model_fields_set.add("details")
     # The stored text, never a client's view of it, is what a save may not
     # lose and where the SSVC record and the response are kept from.
-    stored_details = await asyncio.to_thread(
-        deps.cache_manager.get_cached_assessment_details, req.instances
+    stored = await asyncio.to_thread(
+        deps.cache_manager.get_cached_assessments, req.instances
     )
+    stored_details = [current["details"] for current in stored]
+    req._stored_revisions = {
+        key: int(current["revision"])
+        for instance, current in zip(req.instances, stored)
+        if (key := assessment_key(instance)) is not None
+    }
     if req.fields is not None and req.fields.free_text is None:
         # The client did not touch the free text: keep each finding's.
         req._stored_free_text = {
@@ -719,8 +735,16 @@ async def delete_assessment(
     for instance, current in zip(keyed, stored):
         details = remove_assessment_blocks(current["details"], team)
         suppressed = False if team is None else bool(current["suppressed"])
-        if details and not reviewer and calculate_aggregated_state(details) != "NOT_SET":
-            # What remains was not reviewed in this form.
+        was_pending = bool(
+            re.search(r"\[Status: Pending Review\]", current["details"], re.IGNORECASE)
+        )
+        if (
+            details
+            and calculate_aggregated_state(details) != "NOT_SET"
+            # What remains was not reviewed in this form; a reviewer's
+            # deletion is not an approval of what was pending.
+            and (not reviewer or was_pending)
+        ):
             details += "\n\n[Status: Pending Review]"
         state = calculate_aggregated_state(details) if details else "NOT_SET"
         # Compare without the review marker, which is re-derived above.

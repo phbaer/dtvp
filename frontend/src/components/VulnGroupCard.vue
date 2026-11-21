@@ -3100,6 +3100,7 @@ const teamBlockStateColor = (state?: string): string => {
                         type="button"
                         @click="() => handleUpdate(false)"
                         :disabled="!canApplyAssessment"
+                        :title="canApprove ? 'Saves your changes. The assessment stays pending review until you approve it.' : undefined"
                         data-testid="assessment-submit-button"
                         :class="[actionButton, canApprove ? actionButtonSecondary : actionButtonPrimary]"
                     >
