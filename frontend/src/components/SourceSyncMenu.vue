@@ -2,12 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Loader2, RefreshCw } from '@lucide/vue'
 import {
+    cancelSync,
     exportAssessments,
     getProjects,
+    getSyncProgress,
     getSyncSource,
     getSyncVersions,
     requestSourceAnalysis,
     requestSyncRead,
+    type SyncProgress,
     type SyncRequestTarget,
     type SyncSourceInfo,
 } from '../lib/api'
@@ -19,7 +22,7 @@ import { useServerEvents } from '../lib/eventStream'
 const props = defineProps<{ projectName: string }>()
 
 interface Version { uuid: string; version: string }
-type State = 'requested' | 'queued' | 'syncing' | 'analysing' | 'done' | 'failed'
+type State = 'requested' | 'queued' | 'syncing' | 'analysing' | 'done' | 'failed' | 'cancelled'
 
 const open = ref(false)
 const loading = ref(false)
@@ -32,10 +35,53 @@ const exporting = ref(false)
 const requestErrors = ref<Record<string, string>>({})
 const readAt = ref<Record<string, string>>({})
 const root = ref<HTMLElement | null>(null)
+// What the background sync does now, from ``source.sync_progress`` (and the
+// last portfolio pass's outcome from ``source.portfolio_pass``).
+const progress = ref<SyncProgress | null>(null)
+const lastPass = ref<{ unchanged: number; changed: number } | null>(null)
+const cancelling = ref(false)
 
 const sourceName = computed(() => source.value?.name || 'the source')
 const canAnalyse = computed(() => Boolean(source.value?.can_request_analysis))
-const busy = computed(() => Object.values(states.value).some(s => s !== 'done' && s !== 'failed'))
+const ACTIVE: State[] = ['requested', 'queued', 'syncing', 'analysing']
+const running = computed(() => Boolean(
+    progress.value?.pass || progress.value?.running?.length || progress.value?.requested,
+))
+const busy = computed(() => running.value || Object.values(states.value).some(s => ACTIVE.includes(s)))
+
+const PHASES: Record<string, string> = {
+    preparing: 'preparing',
+    findings: 'findings',
+    vulns: 'vulnerability records',
+    bom: 'BOM',
+    commit: 'saving',
+    events: 'saving',
+}
+
+// One line for the toolbar and the panel: what runs now.
+const summary = computed(() => {
+    const now = progress.value
+    if (!now) return ''
+    const parts: string[] = []
+    if (now.pass) {
+        const pages = now.pass.pages_total
+            ? `page ${now.pass.pages_read}/${now.pass.pages_total}`
+            : 'starting'
+        parts.push(`Reading the portfolio (${now.pass.versions} versions): ${pages}`)
+    }
+    if (now.running.length) parts.push(`reading ${now.running.length} version(s)`)
+    if (now.queued) parts.push(`${now.queued} waiting`)
+    if (!parts.length && now.ranges) parts.push(`version ranges: ${now.ranges.checked}/${now.ranges.versions}`)
+    return parts.join(' · ')
+})
+
+const shortSummary = computed(() => {
+    const now = progress.value
+    if (!now) return ''
+    if (now.pass) return now.pass.pages_total ? `${now.pass.pages_read}/${now.pass.pages_total}` : '…'
+    const pending = now.running.length + now.queued
+    return pending ? String(pending) : ''
+})
 
 const STATE_LABELS: Record<State, string> = {
     requested: 'requested',
@@ -44,6 +90,7 @@ const STATE_LABELS: Record<State, string> = {
     analysing: 'analysing',
     done: 'read',
     failed: 'failed',
+    cancelled: 'cancelled',
 }
 
 const byVersionDescending = (left: Version, right: Version) =>
@@ -68,6 +115,7 @@ const load = async () => {
             fromServer[version.project_uuid] = request.state === 'running' ? 'syncing'
                 : request.state === 'done' ? 'done'
                 : request.state === 'failed' ? 'failed'
+                : request.state === 'cancelled' ? 'cancelled'
                 : 'requested'
             if (request.state === 'failed' && request.error) errors[version.project_uuid] = request.error
             if (request.state === 'done' && request.read_at) readAt.value[version.project_uuid] = request.read_at
@@ -136,6 +184,33 @@ const exportNow = async () => {
     }
 }
 
+const cancel = async () => {
+    message.value = ''
+    cancelling.value = true
+    try {
+        const result = await cancelSync()
+        mark([...result.requests, ...result.running].filter(known), 'cancelled')
+        const parts = [
+            result.pass ? 'the portfolio pass' : '',
+            result.requests.length ? `${result.requests.length} request(s)` : '',
+            result.running.length ? `${result.running.length} running read(s)` : '',
+        ].filter(Boolean)
+        message.value = parts.length ? `Cancelled ${parts.join(', ')}.` : 'Nothing was running.'
+    } catch (err) {
+        message.value = failure(err, 'cancel')
+    } finally {
+        cancelling.value = false
+    }
+}
+
+const loadProgress = async () => {
+    try {
+        progress.value = await getSyncProgress()
+    } catch {
+        // The indicator stays empty; events fill it in.
+    }
+}
+
 const known = (uuid: unknown): uuid is string =>
     typeof uuid === 'string' && versions.value.some(version => version.uuid === uuid)
 
@@ -149,6 +224,18 @@ useServerEvents('version.synced', event => {
 })
 useServerEvents('version.sync_failed', event => {
     if (known(event.data?.uuid) && states.value[event.data.uuid]) mark([event.data.uuid], 'failed')
+})
+useServerEvents('source.sync_progress', event => {
+    if (event.data) progress.value = event.data as SyncProgress
+})
+useServerEvents('source.portfolio_pass', event => {
+    if (event.data?.phase === 'done') {
+        lastPass.value = { unchanged: Number(event.data.unchanged || 0), changed: Number(event.data.changed || 0) }
+    }
+})
+useServerEvents('version.sync_state', event => {
+    const { uuid, status } = event.data || {}
+    if (known(uuid) && status === 'cancelled') mark([uuid], 'cancelled')
 })
 
 const toggle = () => {
@@ -164,6 +251,7 @@ const closeOnEscape = (event: KeyboardEvent) => {
 }
 
 onMounted(() => {
+    void loadProgress()
     document.addEventListener('mousedown', closeOnOutsideClick)
     document.addEventListener('keydown', closeOnEscape)
 })
@@ -187,6 +275,12 @@ onBeforeUnmount(() => {
             <Loader2 v-if="busy" :size="14" class="animate-spin" />
             <RefreshCw v-else :size="14" />
             <span class="hidden sm:inline">Sync</span>
+            <span
+                v-if="shortSummary"
+                data-testid="source-sync-indicator"
+                class="rounded-full bg-white/10 px-1.5 py-0.5 font-mono text-[10px] normal-case tracking-normal"
+                :title="summary"
+            >{{ shortSummary }}</span>
         </button>
         <div
             v-if="open"
@@ -198,6 +292,27 @@ onBeforeUnmount(() => {
                 DTVP reads every version in the background. Read again now, ask
                 {{ sourceName }} to analyse again, or export the queued assessments now.
             </p>
+            <div v-if="summary || lastPass" data-testid="source-sync-progress" class="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5" role="status" aria-live="polite">
+                <div v-if="summary" class="flex items-center gap-2">
+                    <span class="text-gray-200">{{ summary }}</span>
+                    <button
+                        v-if="running"
+                        type="button"
+                        data-testid="sync-cancel"
+                        :disabled="cancelling"
+                        class="ml-auto rounded-md border border-red-400/30 px-2 py-0.5 text-[10px] text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+                        @click="cancel"
+                    >Cancel</button>
+                </div>
+                <ul v-if="progress?.running?.length" class="mt-1 space-y-0.5 text-[10px] text-gray-400" data-testid="source-sync-running">
+                    <li v-for="item in progress.running" :key="item.uuid">
+                        {{ item.product || item.uuid }} {{ item.version || '' }}: {{ PHASES[item.phase || ''] || item.phase || 'starting' }}<template v-if="item.seconds !== null"> · {{ Math.round(item.seconds) }} s</template>
+                    </li>
+                </ul>
+                <div v-if="lastPass && !progress?.pass" class="mt-1 text-[10px] text-gray-400" data-testid="source-sync-last-pass">
+                    Last portfolio check: {{ lastPass.unchanged + lastPass.changed }} versions, {{ lastPass.changed }} changed
+                </div>
+            </div>
             <div v-if="loading" class="mt-3 text-gray-400">Loading…</div>
             <div v-else-if="error" class="mt-3 text-red-300" role="alert">{{ error }}</div>
             <template v-else>

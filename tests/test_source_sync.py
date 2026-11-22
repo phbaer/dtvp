@@ -894,6 +894,7 @@ async def test_a_finished_sync_is_planned_after_at_once(tmp_path):
     """Without the timer: a sync's end marks the plan as due."""
     scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=1)
     scheduler.PLAN_INTERVAL_SECONDS = 3600
+    scheduler._next_enrich = float("inf")  # the version ranges read the rows too
     source = Source()
     await scheduler.run_cycle(source)  # plans both, syncs one
     await scheduler.run_cycle(source)  # syncs the other
@@ -1117,4 +1118,56 @@ async def test_idle_gates_are_dropped(tmp_path):
         pass
     await asyncio.sleep(0.01)
     assert manager.__dict__.get("_exchange_gates") == {}
+    await manager.close()
+
+
+async def test_the_version_ranges_are_read_through_the_budget(tmp_path):
+    """The scheduler's budgeted wrapper hides the source's methods from a
+    protocol check; the ranges of the recommendation must still be read."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path)
+    reads = []
+
+    class Ranges(Source):
+        async def get_project_vulnerabilities(self, project_uuid):
+            return [{"uuid": "v1", "vulnId": "CVE-v1", "source": "NVD"}]
+
+        async def get_vulnerability_affected(self, source, vuln_id):
+            reads.append(vuln_id)
+            return {"affectedComponents": []}
+
+    source = Ranges()
+    await scheduler.run_cycle(source)
+    await scheduler.drain()
+
+    assert await manager.refresh_fixed_versions(scheduler.limited(source), "a1") == 1
+    assert reads == ["CVE-v1"]
+    await manager.close()
+
+
+async def test_the_version_ranges_wait_until_no_version_is_read(tmp_path):
+    """They run between syncs, at low priority, never inside a sync."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path)
+    order = []
+
+    class Ranges(Source):
+        async def get_vulnerabilities(self, project_uuid, cve=None):
+            order.append(("findings", project_uuid))
+            return await super().get_vulnerabilities(project_uuid, cve)
+
+        async def get_project_vulnerabilities(self, project_uuid):
+            return [{"uuid": "v1", "vulnId": f"CVE-{project_uuid}", "source": "NVD"}]
+
+        async def get_vulnerability_affected(self, source, vuln_id):
+            order.append(("ranges", vuln_id))
+            return {"affectedComponents": []}
+
+    source = Ranges()
+    for _ in range(4):
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+
+    kinds = [kind for kind, _ in order]
+    assert kinds.count("findings") == 2 and kinds.count("ranges") == 2
+    # Every range read comes after both versions' findings reads.
+    assert kinds.index("ranges") > max(i for i, k in enumerate(kinds) if k == "findings")
     await manager.close()

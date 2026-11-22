@@ -24,6 +24,7 @@ staged come with step 6.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import inspect
 import logging
@@ -97,9 +98,29 @@ class Schedule:
 # -- limits --------------------------------------------------------------------
 
 
+# What the requests of the current sync or pass cost: set by ``SourceSync``
+# around a version sync or a portfolio pass, filled by ``TokenBucket`` and
+# ``LimitedSource`` (one dict per task, so concurrent syncs keep apart).
+_METRICS: contextvars.ContextVar[Optional[dict[str, float]]] = contextvars.ContextVar(
+    "source_sync_metrics", default=None
+)
+# Work that only uses the budget nobody else wants (the version ranges of
+# the recommendation): it waits while any other request waits.
+_LOW_PRIORITY: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "source_sync_low_priority", default=False
+)
+
+
+def _count(name: str, amount: float = 1.0) -> None:
+    metrics = _METRICS.get()
+    if metrics is not None:
+        metrics[name] = metrics.get(name, 0.0) + amount
+
+
 class TokenBucket:
     """One budget for every Dependency-Track request: ``rate`` per second,
-    ``burst`` at once."""
+    ``burst`` at once. Low-priority work (``_LOW_PRIORITY``) takes a token
+    only while no other request waits for one."""
 
     def __init__(
         self,
@@ -116,6 +137,7 @@ class TokenBucket:
         self._sleep = sleep
         self._updated = clock()
         self._lock = asyncio.Lock()
+        self._waiting = 0
 
     def _refill(self) -> None:
         now = self._clock()
@@ -123,13 +145,29 @@ class TokenBucket:
         self._updated = now
 
     async def acquire(self) -> None:
-        async with self._lock:
+        started = self._clock()
+        if _LOW_PRIORITY.get():
             while True:
-                self._refill()
-                if self._tokens >= 1:
-                    self._tokens -= 1
-                    return
-                await self._sleep((1 - self._tokens) / self.rate)
+                async with self._lock:
+                    self._refill()
+                    if self._waiting == 0 and self._tokens >= 1:
+                        self._tokens -= 1
+                        break
+                await self._sleep(max(1.0 / self.rate, 0.01))
+        else:
+            self._waiting += 1
+            try:
+                async with self._lock:
+                    while True:
+                        self._refill()
+                        if self._tokens >= 1:
+                            self._tokens -= 1
+                            break
+                        await self._sleep((1 - self._tokens) / self.rate)
+            finally:
+                self._waiting -= 1
+        _count("requests")
+        _count("budget_wait", self._clock() - started)
 
 
 BREAKER_OK, BREAKER_DOWN, BREAKER_MISCONFIGURED = "ok", "down", "misconfigured"
@@ -257,11 +295,16 @@ class LimitedSource:
                 raise SourceUnavailable(f"Dependency-Track is {self._breaker.state}")
             if not self._per_request:
                 await self._bucket.acquire()
+            started = time.perf_counter()
             try:
                 result = await target(*args, **kwargs)
             except Exception as exc:
                 self._breaker.failure(exc)
                 raise
+            finally:
+                # Time in the source's calls, budget waits of per-request
+                # sources included.
+                _count("source_seconds", time.perf_counter() - started)
             self._breaker.success()
             return result
 
@@ -452,6 +495,18 @@ class SourceSync:
         self._pass_ended = float("-inf")
         self._pass_pages: Optional[int] = None
         self.pass_progress: Optional[dict[str, Any]] = None
+        # What runs now, per version: its task, phase and timings (status,
+        # progress events, cancel); the last pass's and syncs' timings.
+        self._items: dict[str, dict[str, Any]] = {}
+        self.last_pass: Optional[dict[str, Any]] = None
+        self.recent: list[dict[str, Any]] = []
+        # The version ranges of the recommendation, read in the budget
+        # nobody else wants, between syncs (``_maybe_enrich``).
+        self._enrich: Optional[asyncio.Task] = None
+        self._next_enrich = 0.0
+        self.enrich_progress: Optional[dict[str, Any]] = None
+        self._progress_sent = float("-inf")
+        self._progress_pending: Optional[asyncio.TimerHandle] = None
 
     def limited(self, client: Any) -> LimitedSource:
         """The budgeted view of ``client``, built once per client (its
@@ -663,63 +718,123 @@ class SourceSync:
                 ids[f"{key[0]}:{key[1]}"] = str(vulnerability.get("vulnId") or key[1])
         return ids
 
+    def _phase(self, uuid: str, name: str) -> None:
+        """A version sync moved on to ``name``; closes the previous phase."""
+        entry = self._items.get(uuid)
+        if entry is None:
+            return
+        now = time.perf_counter()
+        previous = entry.get("phase")
+        if previous:
+            timings = entry.setdefault("timings", {})
+            timings[previous] = timings.get(previous, 0.0) + now - entry["phase_started"]
+        entry["phase"] = name
+        entry["phase_started"] = now
+        self._progress()
+
     async def sync_version(self, client: Any, item: SyncItem, budget: Any = None) -> bool:
+        """Read the due kinds of one version, staged, and commit once.
+        ``budget`` is no longer used here: the version ranges of the
+        recommendation are read between syncs (``_maybe_enrich``)."""
         uuid = item.project_uuid
         store = self.cache.sync_state
-        before = self._finding_ids(uuid)
-        store.stage(uuid, at=self._now().isoformat())
-        row = store.row(uuid) or {"project_uuid": uuid}
-        failures_before = int(row.get("consecutive_failures") or 0)
-        self._publish_state(row, "syncing", force=True)
+        entry = self._items.setdefault(uuid, {})
+        entry.update(started=time.perf_counter(), timings={}, phase=None)
+        metrics: dict[str, float] = {}
+        token = _METRICS.set(metrics)
         try:
-            if KIND_FINDINGS in item.kinds:
-                await self.cache.get_vulnerabilities(client, uuid, refresh=True)
-            if KIND_VULNS in item.kinds:
-                await self.cache.get_project_vulnerabilities(client, uuid, refresh=True)
-            if KIND_BOM in item.kinds:
-                await self.cache.get_bom(client, uuid, refresh=True)
-        except Exception as exc:
-            self._failed(uuid, exc, failures_before)
-            return False
-        try:
-            await self.cache.refresh_fixed_versions(client, uuid, budget=budget)
-        except Exception as exc:  # the recommendation's ranges never fail a sync
-            logger.warning("Failed to read the fixed versions of %s: %s", uuid, exc)
-        kinds, first, generation = store.commit(
-            uuid, at=self._now().isoformat(), kinds_read=item.kinds
-        )
-        if not self.hinted and KIND_FINDINGS in kinds and KIND_BOM not in item.kinds:
-            # Without change hints, changed findings are the sign that the
-            # components may have changed: read the BOM next.
-            store.forget_read(uuid, KIND_BOM)
-            self.mark_dirty()
-        row = store.row(uuid) or row
-        self._publish_state(row, row.get("status") or "synced", force=True)
-        if kinds or first:
-            after = self._finding_ids(uuid)
-            added = sorted(set(after) - set(before))
-            new_ids = sorted({after[key] for key in added})
-            self._publish(
-                "version.synced",
-                {
-                    "uuid": uuid,
-                    "product": row.get("product_name"),
-                    "version": row.get("version"),
-                    "synced_at": row.get("last_success_at"),
-                    "generation": generation,
-                    "first_import": first,
-                    "kinds_changed": kinds,
-                    "findings_added": len(added),
-                    "findings_removed": len(set(before) - set(after)),
-                    "new_vuln_ids": new_ids[:20],
-                    "truncated": len(new_ids) > 20,
-                    "vulns_changed": KIND_VULNS in kinds,
-                    "analyses_changed_in_dt": int(row.get("analyses_changed_in_dt") or 0),
-                    "bom_changed": KIND_BOM in kinds,
-                },
-                product=row.get("product_name"),
+            self._phase(uuid, "preparing")
+            before = self._finding_ids(uuid)
+            store.stage(uuid, at=self._now().isoformat())
+            row = store.row(uuid) or {"project_uuid": uuid}
+            entry.update(product=row.get("product_name"), version=row.get("version"))
+            failures_before = int(row.get("consecutive_failures") or 0)
+            self._publish_state(row, "syncing", force=True)
+            try:
+                if KIND_FINDINGS in item.kinds:
+                    self._phase(uuid, KIND_FINDINGS)
+                    await self.cache.get_vulnerabilities(client, uuid, refresh=True)
+                if KIND_VULNS in item.kinds:
+                    self._phase(uuid, KIND_VULNS)
+                    await self.cache.get_project_vulnerabilities(client, uuid, refresh=True)
+                if KIND_BOM in item.kinds:
+                    self._phase(uuid, KIND_BOM)
+                    await self.cache.get_bom(client, uuid, refresh=True)
+            except Exception as exc:
+                self._phase(uuid, "failed")
+                self._failed(uuid, exc, failures_before)
+                return False
+            self._phase(uuid, "commit")
+            kinds, first, generation = store.commit(
+                uuid, at=self._now().isoformat(), kinds_read=item.kinds
             )
-        return True
+            if not self.hinted and KIND_FINDINGS in kinds and KIND_BOM not in item.kinds:
+                # Without change hints, changed findings are the sign that the
+                # components may have changed: read the BOM next.
+                store.forget_read(uuid, KIND_BOM)
+                self.mark_dirty()
+            row = store.row(uuid) or row
+            self._phase(uuid, "events")
+            self._publish_state(row, row.get("status") or "synced", force=True)
+            if kinds or first:
+                after = self._finding_ids(uuid)
+                added = sorted(set(after) - set(before))
+                new_ids = sorted({after[key] for key in added})
+                self._publish(
+                    "version.synced",
+                    {
+                        "uuid": uuid,
+                        "product": row.get("product_name"),
+                        "version": row.get("version"),
+                        "synced_at": row.get("last_success_at"),
+                        "generation": generation,
+                        "first_import": first,
+                        "kinds_changed": kinds,
+                        "findings_added": len(added),
+                        "findings_removed": len(set(before) - set(after)),
+                        "new_vuln_ids": new_ids[:20],
+                        "truncated": len(new_ids) > 20,
+                        "vulns_changed": KIND_VULNS in kinds,
+                        "analyses_changed_in_dt": int(row.get("analyses_changed_in_dt") or 0),
+                        "bom_changed": KIND_BOM in kinds,
+                    },
+                    product=row.get("product_name"),
+                )
+            return True
+        finally:
+            _METRICS.reset(token)
+            self._phase(uuid, None)
+            self._record_sync(uuid, item, metrics)
+            if "task" not in entry:
+                self._items.pop(uuid, None)  # called directly, not by the loop
+
+    RECENT_LIMIT = 20
+
+    def _record_sync(self, uuid: str, item: SyncItem, metrics: dict[str, float]) -> None:
+        """One INFO line per sync with where its time went, and the last
+        ones in ``status()``."""
+        entry = self._items.get(uuid) or {}
+        timings = {name: round(seconds, 3) for name, seconds in (entry.get("timings") or {}).items()}
+        total = time.perf_counter() - entry.get("started", time.perf_counter())
+        summary = {
+            "uuid": uuid,
+            "product": entry.get("product"),
+            "version": entry.get("version"),
+            "kinds": list(item.kinds),
+            "seconds": round(total, 3),
+            "phases": timings,
+            "requests": int(metrics.get("requests", 0)),
+            "budget_wait_seconds": round(metrics.get("budget_wait", 0.0), 3),
+            "source_seconds": round(metrics.get("source_seconds", 0.0), 3),
+        }
+        self.recent = (self.recent + [summary])[-self.RECENT_LIMIT:]
+        logger.info(
+            "Synced %s %s in %.1f s (%s); %d request(s), %.1f s waiting for the budget, "
+            "%.1f s in the source",
+            entry.get("product") or uuid, entry.get("version") or "", total,
+            ", ".join(f"{name} {seconds:.1f} s" for name, seconds in timings.items()) or "nothing",
+            summary["requests"], summary["budget_wait_seconds"], summary["source_seconds"],
+        )
 
     def _failed(self, uuid: str, exc: BaseException, failures_before: int = 0) -> None:
         store = self.cache.sync_state
@@ -786,14 +901,14 @@ class SourceSync:
         slots = self.schedule.concurrency - len(self.running)
         items = self.next_items(slots)
         if items:
-            budget_type = getattr(self.cache, "read_budget", None)
-            budget = budget_type() if callable(budget_type) else None
             for item in items:
                 self.running.add(item.project_uuid)
-                task = asyncio.create_task(self._run_item(limited, item, budget))
+                task = asyncio.create_task(self._run_item(limited, item, None))
+                self._items[item.project_uuid] = {"task": task}
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
             self._update_backlog()
+        self._maybe_enrich(limited)
         if wait:
             await self.drain()
 
@@ -820,15 +935,34 @@ class SourceSync:
             and (rows.get(uuid) or {}).get("last_success_at")
         ]
 
+    # Requests a version read takes one by one (findings, vulnerability
+    # records, BOM): a pass is worth it once it costs fewer pages than that.
+    REQUESTS_PER_VERSION = 3
+
     def _maybe_start_pass(self, client: Any) -> None:
         if not isinstance(getattr(client, "_source", client), BulkFindings):
             return
-        if self._pass is not None and not self._pass.done():
-            return
-        if self._monotonic() - self._pass_ended < self.PASS_MIN_INTERVAL_SECONDS:
-            return
         candidates = self._pass_candidates()
-        if len(candidates) < max(self.PASS_MIN_VERSIONS, self._pass_pages or 0):
+        if self._pass is not None and not self._pass.done():
+            # Versions that come due while a pass runs wait for the next
+            # pass rather than being read one by one beside it.
+            if len(candidates) >= self.PASS_MIN_VERSIONS:
+                self._pass_holds |= set(candidates)
+            return
+        requested = any(
+            self.queue[uuid].priority == P0_REQUEST for uuid in candidates
+        )
+        # A person's request does not wait for the interval between passes,
+        # unless the last pass failed (no retry every second).
+        last_failed = (self.last_pass or {}).get("outcome") == "failed"
+        if (
+            (not requested or last_failed)
+            and self._monotonic() - self._pass_ended < self.PASS_MIN_INTERVAL_SECONDS
+        ):
+            return
+        if len(candidates) < self.PASS_MIN_VERSIONS:
+            return
+        if (self._pass_pages or 0) > len(candidates) * self.REQUESTS_PER_VERSION:
             return
         self._pass_holds = set(candidates)
         self._pass = asyncio.create_task(self._portfolio_pass(client, candidates))
@@ -848,18 +982,39 @@ class SourceSync:
             if row["project_uuid"] in set(candidates)
         }
         unchanged: list[str] = []
+        metrics: dict[str, float] = {}
+        token = _METRICS.set(metrics)
+        started = time.perf_counter()
+        last_page = [started]
+        page_seconds: list[float] = []
+        timings: dict[str, float] = {}
+        reasons: dict[str, int] = {}
 
         def on_page(read: int, total: int) -> None:
-            self.pass_progress = {"pages_read": read, "pages_total": total}
+            now = time.perf_counter()
+            page_seconds.append(now - last_page[0])
+            last_page[0] = now
+            self.pass_progress = {
+                "phase": "reading", "versions": len(candidates),
+                "pages_read": read, "pages_total": total,
+            }
             self._publish(
                 "source.portfolio_pass",
                 {"phase": "reading", "pages_read": read, "pages_total": total},
             )
+            self._progress()
 
+        outcome = "failed"
         try:
-            self.pass_progress = {"pages_read": 0, "pages_total": None}
+            self.pass_progress = {
+                "phase": "reading", "versions": len(candidates),
+                "pages_read": 0, "pages_total": None,
+            }
             self._publish("source.portfolio_pass", {"phase": "started", "versions": len(candidates)})
+            self._progress(force=True)
             by_version = await client.portfolio_findings(page_size=size, on_page=on_page)
+            timings["list"] = time.perf_counter() - started
+            compare_started = time.perf_counter()
             known = self.cache.sync_state.portfolio_digests()
             # Versions read before the pass existed have no digest yet: seed
             # it from their stored findings, so the first pass after the
@@ -883,12 +1038,22 @@ class SourceSync:
                 known.update(seeded)
             for uuid in candidates:
                 recorded = known.get(uuid)
-                if recorded and recorded == portfolio_digest(by_version.get(uuid, [])):
+                if not recorded:
+                    reasons["no_digest"] = reasons.get("no_digest", 0) + 1
+                elif uuid not in by_version:
+                    reasons["not_in_list"] = reasons.get("not_in_list", 0) + 1
+                elif recorded == portfolio_digest(by_version[uuid]):
                     unchanged.append(uuid)
+                else:
+                    reasons["changed"] = reasons.get("changed", 0) + 1
+            reasons["unchanged"] = len(unchanged)
+            timings["compare"] = time.perf_counter() - compare_started
+            mark_started = time.perf_counter()
             answered = self.cache.sync_state.mark_checked(
                 unchanged, at=self._now().isoformat(), started_at=started_at,
                 analysis_hints=hints,
             )
+            timings["mark_checked"] = time.perf_counter() - mark_started
             for uuid in unchanged:
                 item = self.queue.get(uuid)
                 if item is None:
@@ -900,11 +1065,16 @@ class SourceSync:
                 else:
                     item.kinds = remaining
             self._pass_pages = (self.pass_progress or {}).get("pages_total")
+            outcome = "done"
             logger.info(
-                "Portfolio pass: %d version(s) unchanged, %d to read one by one "
-                "(%s page(s); %d request(s) answered)",
-                len(unchanged), len(candidates) - len(unchanged),
-                self._pass_pages, len(answered),
+                "Portfolio pass in %.1f s: %d version(s) unchanged, %d to read one by one "
+                "(%s); %s page(s) in %.1f s (slowest %.1f s), %.1f s waiting for the "
+                "budget, compare %.2f s, marking %.2f s; %d request(s) answered",
+                time.perf_counter() - started, len(unchanged), len(candidates) - len(unchanged),
+                ", ".join(f"{k} {v}" for k, v in sorted(reasons.items()) if k != "unchanged") or "none",
+                self._pass_pages, timings.get("list", 0.0), max(page_seconds, default=0.0),
+                metrics.get("budget_wait", 0.0), timings.get("compare", 0.0),
+                timings.get("mark_checked", 0.0), len(answered),
             )
             self._publish(
                 "source.portfolio_pass",
@@ -913,18 +1083,37 @@ class SourceSync:
                     "unchanged": len(unchanged),
                     "changed": len(candidates) - len(unchanged),
                     "pages": self._pass_pages,
+                    "reasons": reasons,
                 },
             )
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            logger.info("Portfolio pass cancelled")
+            self._publish("source.portfolio_pass", {"phase": "cancelled"})
+            raise
         except Exception as exc:
             # The versions are read one by one, as without a pass.
             logger.warning("Portfolio pass failed, reading versions one by one: %s", exc)
             self._publish("source.portfolio_pass", {"phase": "failed", "error_class": type(exc).__name__})
         finally:
+            _METRICS.reset(token)
+            self.last_pass = {
+                "outcome": outcome,
+                "versions": len(candidates),
+                "reasons": reasons,
+                "pages": len(page_seconds),
+                "seconds": round(time.perf_counter() - started, 3),
+                "timings": {name: round(value, 3) for name, value in timings.items()},
+                "page_seconds_max": round(max(page_seconds, default=0.0), 3),
+                "requests": int(metrics.get("requests", 0)),
+                "budget_wait_seconds": round(metrics.get("budget_wait", 0.0), 3),
+            }
             self._pass_holds = set()
             self._pass_ended = self._monotonic()
             self.pass_progress = None
             self.mark_dirty()
             self._update_backlog()
+            self._progress(force=True)
             wake = getattr(self.cache, "wake_sync", None)
             if callable(wake):
                 wake()
@@ -946,20 +1135,204 @@ class SourceSync:
         self._tasks.add(self._export)
         self._export.add_done_callback(self._tasks.discard)
 
+    # -- the version ranges of the recommendation ------------------------------
+
+    # How often the ranges are looked at when nothing else is to do.
+    ENRICH_INTERVAL_SECONDS = 60.0
+
+    def _maybe_enrich(self, client: Any) -> None:
+        """Read the version ranges (``refresh_fixed_versions``) only when no
+        version waits or runs and no pass runs, at low priority in the
+        budget: they enrich the recommendation and must never slow a read
+        down. (They used to run inside every version sync, with a fresh
+        allowance of reads each time.)"""
+        if self._enrich is not None and not self._enrich.done():
+            return
+        if self.queue or self.running or (self._pass is not None and not self._pass.done()):
+            return
+        if self._monotonic() < self._next_enrich:
+            return
+        refresh = getattr(self.cache, "refresh_fixed_versions", None)
+        if not callable(refresh):
+            return
+        self._next_enrich = self._monotonic() + self.ENRICH_INTERVAL_SECONDS
+        self._enrich = asyncio.create_task(self._enrich_ranges(client))
+        self._tasks.add(self._enrich)
+        self._enrich.add_done_callback(self._tasks.discard)
+
+    async def _enrich_ranges(self, client: Any) -> None:
+        token = _LOW_PRIORITY.set(True)
+        reads = checked = 0
+        try:
+            budget_type = getattr(self.cache, "read_budget", None)
+            budget = budget_type() if callable(budget_type) else None
+            products = self.watched_products()
+            rows = sorted(
+                (
+                    row for row in self.cache.sync_state.rows()
+                    if row.get("last_success_at") and row.get("status") != STATUS_GONE
+                ),
+                key=lambda row: str(row.get("product_name") or "").lower() not in products,
+            )
+            self.enrich_progress = {"versions": len(rows), "checked": 0, "reads": 0}
+            for row in rows:
+                if self.queue or self.running or (self._pass is not None and not self._pass.done()):
+                    break  # reads come first; the rest follows next time
+                if budget is not None and getattr(budget, "remaining", 1) <= 0:
+                    break
+                reads += await self.cache.refresh_fixed_versions(
+                    client, row["project_uuid"], budget=budget
+                ) or 0
+                checked += 1
+                self.enrich_progress = {"versions": len(rows), "checked": checked, "reads": reads}
+                self._progress()
+            if reads:
+                logger.info(
+                    "Read the version ranges of %d vulnerabilit%s for %d version(s)",
+                    reads, "y" if reads == 1 else "ies", checked,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Reading the version ranges failed: %s", exc)
+        finally:
+            _LOW_PRIORITY.reset(token)
+            self.enrich_progress = None
+            self._progress(force=True)
+
+    # -- cancel ------------------------------------------------------------------
+
+    CANCEL_SCOPES = ("pass", "requests", "running")
+
+    def cancel(self, scope: Optional[list[str]] = None, *, by: Optional[str] = None) -> dict[str, Any]:
+        """Stop what runs on a person's word: the portfolio pass, the waiting
+        requests, the running version syncs (their staged reads are dropped,
+        each version keeps what it had). Nothing of it counts as a failure:
+        no backoff, no breaker. Returns what was cancelled."""
+        wanted = set(scope or self.CANCEL_SCOPES)
+        result: dict[str, Any] = {"pass": False, "requests": [], "running": []}
+        if "pass" in wanted and self._pass is not None and not self._pass.done():
+            self._pass.cancel()
+            result["pass"] = True
+        if "requests" in wanted:
+            withdrawn = self.cache.sync_state.cancel_requests(
+                at=self._now().isoformat(), by=by
+            )
+            for uuid in withdrawn:
+                item = self.queue.get(uuid)
+                if item is not None and item.priority == P0_REQUEST:
+                    del self.queue[uuid]
+            result["requests"] = withdrawn
+        if "running" in wanted:
+            for uuid, entry in list(self._items.items()):
+                task = entry.get("task")
+                if task is not None and not task.done():
+                    task.cancel()
+                    result["running"].append(uuid)
+            # Their reads run in the cache's shared, shielded fetches.
+            cancel_fetches = getattr(self.cache, "cancel_inflight_fetches", None)
+            if result["running"] and callable(cancel_fetches):
+                cancel_fetches(result["running"])
+            if self._enrich is not None and not self._enrich.done():
+                self._enrich.cancel()
+        if result["pass"] or result["requests"] or result["running"]:
+            logger.info(
+                "%s cancelled: %s",
+                by or "someone",
+                ", ".join(
+                    part for part in (
+                        "the portfolio pass" if result["pass"] else "",
+                        f"{len(result['requests'])} request(s)" if result["requests"] else "",
+                        f"{len(result['running'])} running sync(s)" if result["running"] else "",
+                    ) if part
+                ),
+            )
+        self.mark_dirty()
+        self._update_backlog()
+        self._publish("source.sync_cancelled", {**result, "by": by})
+        self._progress(force=True)
+        return result
+
+    # -- progress ----------------------------------------------------------------
+
+    # At most this many progress events per second.
+    PROGRESS_INTERVAL_SECONDS = 0.5
+
+    def progress(self) -> dict[str, Any]:
+        """What runs now: the pass, the running syncs with their phase, the
+        version ranges, and how many wait."""
+        now = time.perf_counter()
+        running = []
+        for uuid in sorted(self.running):
+            entry = self._items.get(uuid) or {}
+            running.append(
+                {
+                    "uuid": uuid,
+                    "product": entry.get("product"),
+                    "version": entry.get("version"),
+                    "phase": entry.get("phase"),
+                    "seconds": round(now - entry["started"], 1) if "started" in entry else None,
+                }
+            )
+        return {
+            "pass": self.pass_progress,
+            "running": running,
+            "queued": len(self.queue),
+            "requested": sum(1 for item in self.queue.values() if item.priority == P0_REQUEST),
+            "ranges": self.enrich_progress,
+        }
+
+    def _progress(self, *, force: bool = False) -> None:
+        """Publish ``source.sync_progress``, at most every
+        ``PROGRESS_INTERVAL_SECONDS``; a throttled update is sent once the
+        interval has passed, so the last state always arrives."""
+        if self.hub is None:
+            return
+        now = time.monotonic()
+        wait = self._progress_sent + self.PROGRESS_INTERVAL_SECONDS - now
+        if not force and wait > 0:
+            if self._progress_pending is None:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    return
+                self._progress_pending = loop.call_later(wait, self._send_progress)
+            return
+        self._send_progress()
+
+    def _send_progress(self) -> None:
+        if self._progress_pending is not None:
+            self._progress_pending.cancel()
+            self._progress_pending = None
+        self._progress_sent = time.monotonic()
+        self._publish("source.sync_progress", self.progress())
+
     async def drain(self) -> None:
         """Wait for the running syncs and the export (tests, shutdown)."""
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
     async def _run_item(self, client: Any, item: SyncItem, budget: Any) -> None:
+        uuid = item.project_uuid
         try:
             await self.sync_version(client, item, budget)
+        except asyncio.CancelledError:
+            # Cancelled by a person (``cancel``) or at shutdown: the staged
+            # read is dropped, the version keeps what it had; no failure,
+            # no backoff.
+            store = self.cache.sync_state
+            store.drop_stage(uuid)
+            row = store.row(uuid) or {"project_uuid": uuid}
+            self._publish_state(row, "cancelled", force=True)
+            logger.info("Sync of %s cancelled", uuid)
         except Exception:
-            logger.exception("Sync of %s failed unexpectedly", item.project_uuid)
+            logger.exception("Sync of %s failed unexpectedly", uuid)
         finally:
-            self.running.discard(item.project_uuid)
+            self.running.discard(uuid)
+            self._items.pop(uuid, None)
             self.mark_dirty()
             self._update_backlog()
+            self._progress(force=not self.running)
 
     async def _probe(self, client: Any) -> None:
         try:
@@ -1055,6 +1428,9 @@ class SourceSync:
             },
             "analysing": sorted(self._analyses),
             "portfolio_pass": self.pass_progress,
+            "last_portfolio_pass": self.last_pass,
+            "progress": self.progress(),
+            "recent_syncs": list(self.recent),
             "breaker": self.breaker.state,
             "queued": len(self.queue),
             "running": sorted(self.running),

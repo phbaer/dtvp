@@ -157,6 +157,19 @@ version between 75 % and 100 % of the interval so they do not fall due at
 once; content digests find what changed. Watched products keep their
 intervals either way. The schedule below describes a source with hints.
 
+**Progress, cancelling and range reads** (amendment, 2026-11-22). A person
+sees what the sync does (`source.sync_progress`: the pass's pages, each
+running version's phase, what waits) and can cancel it
+(`POST /api/sync/cancel`: the pass, the waiting requests, the running
+syncs with their in-flight reads; staged reads are dropped, no failure is
+recorded). Each version sync and pass logs where its time went. The version
+ranges of the recommendation no longer run inside a version sync: they use
+only budget nobody else waits for, between syncs. A pass also starts for a
+request without waiting for the interval between passes, versions coming
+due while a pass runs wait for the next pass instead of being read one by
+one beside it, and a pass is chosen when it costs fewer pages than three
+requests per held version. Details in [Sync scheduler](../runtime.md#sync-scheduler).
+
 **Portfolio pass** (amendment, 2026-11-22). Reading many versions one by one
 is slow: a version costs a findings read, a vulnerability-records read and
 often a BOM read, each paced by the budget. A source that can list every

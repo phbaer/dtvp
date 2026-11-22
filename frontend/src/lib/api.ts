@@ -2481,11 +2481,35 @@ export const getSyncSource = async (): Promise<SyncSourceInfo | null> => {
     return res.data?.scheduler_state?.source ?? null
 }
 
+/** What the background sync does right now (``source.sync_progress``). */
+export interface SyncProgress {
+    pass: { phase: string; versions: number; pages_read: number; pages_total: number | null } | null
+    running: Array<{ uuid: string; product: string | null; version: string | null; phase: string | null; seconds: number | null }>
+    queued: number
+    requested: number
+    ranges: { versions: number; checked: number; reads: number } | null
+}
+
+export const getSyncProgress = async (): Promise<SyncProgress | null> => {
+    const res = await api.get('/sync/status')
+    return res.data?.scheduler_state?.progress ?? null
+}
+
+export type SyncCancelScope = 'pass' | 'requests' | 'running'
+
+/** Stop the portfolio pass, withdraw waiting requests, cancel running syncs. */
+export const cancelSync = async (
+    scope?: SyncCancelScope[],
+): Promise<{ pass: boolean; requests: string[]; running: string[] }> => {
+    const res = await api.post('/sync/cancel', scope ? { scope } : {})
+    return res.data
+}
+
 export interface SyncRequestProgress {
     id: string
     by: string | null
     at: string
-    state: 'requested' | 'running' | 'done' | 'failed'
+    state: 'requested' | 'running' | 'done' | 'failed' | 'cancelled'
     read_at?: string
     error?: string | null
 }

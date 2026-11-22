@@ -418,10 +418,41 @@ project version (`project_uuid`) or every active version of a product
   source's name and `can_request_analysis`; the menu hides the analysis then.
 - **Export now** in the menu calls `POST /api/export` (all queued
   assessments), as **Settings → Export** does.
+- `POST /api/sync/cancel` (reviewers only; body `{"scope": [...]}` with
+  `pass`, `requests`, `running`, all three when left out) stops the running
+  portfolio pass, withdraws the waiting requests (their last request shows
+  `cancelled`) and cancels the running version syncs together with their
+  in-flight reads; their staged reads are dropped and each version keeps
+  what it had. Nothing of it counts as a failure: no backoff, no breaker.
+  **Cancel** in the menu calls it while something runs.
+
+**Progress and timings.** `source.sync_progress` (at most two a second,
+the last state always sent) and `scheduler_state.progress` in
+`GET /api/sync/status` carry what runs now: the portfolio pass with its
+pages, each running version with its phase (`preparing`, `findings`,
+`vulns`, `bom`, `commit`, `events`) and seconds, how many wait and how many
+of them are requests, and the version-range reads. The Sync button shows
+the pass's pages or the number of versions waiting; the menu shows the
+detail and the last pass's outcome. Every version sync logs one INFO line
+with its time per phase, its requests, the time spent waiting for the
+budget and in the source; the last 20 are under `recent_syncs`. A
+portfolio pass logs its pages and their slowest, the budget wait, the time
+to compare and to mark, and why versions are read one by one (`changed`,
+`no_digest`, `not_in_list`); the last one is under `last_portfolio_pass`.
+These lines show where a slow sync spends its time.
+
+**Version ranges.** The version ranges of the recommendation
+(`refresh_fixed_versions`) are read between syncs, when no version waits or
+runs and no pass runs, at most every minute, and at low priority in the
+budget: a range read takes a token only while no other request waits. They
+used to run inside every version sync, each with a fresh allowance of
+`DTVP_FIXED_VERSIONS_READS_PER_CYCLE` reads.
 
 **Portfolio pass.** "Read all versions again", and any moment when more
-versions are due for a findings re-read than the last portfolio list took
-pages (at least five, at most one pass a minute), use one portfolio-wide
+versions are due for a findings re-read than a third of the last portfolio
+list's pages (a version read one by one costs three requests; at least five
+versions, at most one pass a minute, a request not waiting for that minute
+unless the last pass failed), use one portfolio-wide
 findings list instead of a read per version, for a source that offers it
 (`ports.BulkFindings`; Dependency-Track: `GET /api/v1/finding`, paged).
 A version whose findings, analysis states, details and suppression are as

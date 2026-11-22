@@ -331,3 +331,20 @@ async def test_after_a_restore_every_active_version_is_read_once(tmp_path):
     await scheduler.run_cycle(source)
     assert source.synced() == []
     await manager.close()
+
+
+async def test_the_cancel_route(tmp_path):
+    scheduler, manager, hub, clock = _scheduler(tmp_path)
+    await _settled(scheduler, manager, Source())
+    client = _client(scheduler, manager)
+    client.post("/api/sync/requests", json={"product": "alpha"})
+
+    cancelled = client.post("/api/sync/cancel", json={}).json()
+    assert cancelled["requests"] == ["a1"] and cancelled["pass"] is False
+    assert client.post("/api/sync/cancel", json={"scope": ["everything"]}).status_code == 422
+    assert _client(scheduler, manager, role="ANALYST").post(
+        "/api/sync/cancel", json={}
+    ).status_code == 403
+    status = client.get("/api/sync/status").json()["scheduler_state"]
+    assert {"progress", "recent_syncs", "last_portfolio_pass"} <= set(status)
+    await manager.close()

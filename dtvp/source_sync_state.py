@@ -543,6 +543,37 @@ class SyncStateStore:
                 result.append({"project_uuid": uuid, "request_id": request_id, "new": True})
         return result
 
+    def cancel_requests(
+        self, project_uuids: Optional[Iterable[str]] = None, *, at: Optional[str] = None,
+        by: Optional[str] = None,
+    ) -> list[str]:
+        """Withdraw the waiting requests (of these versions, or all): each is
+        kept as the last request with state ``cancelled``. Returns the
+        versions whose request was withdrawn."""
+        at = at or _now()
+        connection = self._connection()
+        cancelled: list[str] = []
+        with connection:
+            rows = connection.execute(
+                "SELECT project_uuid, request_id, requested_by, requested_at "
+                "FROM sync_versions WHERE requested_at IS NOT NULL"
+            ).fetchall()
+            wanted = None if project_uuids is None else {str(uuid) for uuid in project_uuids}
+            for uuid, request_id, requested_by, requested_at in rows:
+                if wanted is not None and uuid not in wanted:
+                    continue
+                connection.execute(
+                    "UPDATE sync_versions SET requested_at = NULL, requested_by = NULL, "
+                    "request_id = NULL, last_request_id = ?, last_request_by = ?, "
+                    "last_request_at = ?, last_request_state = 'cancelled', "
+                    "last_request_finished_at = ?, last_request_error = ? "
+                    "WHERE project_uuid = ?",
+                    (request_id, requested_by, requested_at, at,
+                     f"Cancelled by {by}" if by else "Cancelled", uuid),
+                )
+                cancelled.append(uuid)
+        return cancelled
+
     def forget_read(self, project_uuid: str, kind: str) -> None:
         """Make one kind due again: its last read time is forgotten."""
         column = _READ_AT[kind]
@@ -799,8 +830,9 @@ def _signal(value: Any) -> Optional[str]:
 
 def request_progress(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     """What became of the version's manual request: ``requested``,
-    ``running``, ``done`` (with the read time) or ``failed`` (with why; a
-    failed request waits for the backoff and is tried again)."""
+    ``running``, ``done`` (with the read time), ``failed`` (with why; a
+    failed request waits for the backoff and is tried again) or
+    ``cancelled``."""
     if row.get("requested_at"):
         failed = (
             row.get("last_request_state") == "failed"

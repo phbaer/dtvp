@@ -1217,11 +1217,21 @@ class CacheManager:
                 await self._remove_inflight_fetch(key, task)
         return copy.deepcopy(result)
 
-    def cancel_inflight_fetches(self) -> list[asyncio.Task[Any]]:
-        """At shutdown: the shared upstream reads are shielded from their
-        callers' cancellation, so the background loop cancels them itself
-        before its client closes. Returns them, to be awaited."""
-        tasks = [task for task in self._inflight_fetches.values() if not task.done()]
+    def cancel_inflight_fetches(
+        self, project_uuids: Optional[Iterable[str]] = None
+    ) -> list[asyncio.Task[Any]]:
+        """The shared upstream reads are shielded from their callers'
+        cancellation: at shutdown the background loop cancels them itself
+        before its client closes, and a person's cancel of a version sync
+        cancels that version's reads (``project_uuids``; keys whose second
+        part is the project). Returns them, to be awaited."""
+        wanted = None if project_uuids is None else {str(uuid) for uuid in project_uuids}
+        tasks = [
+            task
+            for key, task in self._inflight_fetches.items()
+            if not task.done()
+            and (wanted is None or (len(key) > 1 and str(key[1]) in wanted))
+        ]
         for task in tasks:
             task.cancel()
         return tasks
@@ -1558,7 +1568,9 @@ class CacheManager:
         the source. The rows are shared by all projects, and one read per
         vulnerability is in flight at a time. Returns the number of reads.
         """
-        if not isinstance(client, AffectedVersionSource):
+        # The scheduler passes its budgeted wrapper (source_sync.LimitedSource),
+        # whose methods a protocol check cannot see: check what it wraps.
+        if not isinstance(getattr(client, "_source", client), AffectedVersionSource):
             return 0
         async with self.lock:
             records = self._load_project_cache(

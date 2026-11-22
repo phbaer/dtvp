@@ -11,6 +11,8 @@ vi.mock('../../lib/api', () => ({
     requestSyncRead: vi.fn(),
     requestSourceAnalysis: vi.fn(),
     exportAssessments: vi.fn(),
+    getSyncProgress: vi.fn(),
+    cancelSync: vi.fn(),
 }))
 vi.mock('../../lib/eventStream', async () => {
     const { createFakeEventStreamModule } = await import('../../lib/__tests__/fakeEventStreamTestUtils')
@@ -36,6 +38,57 @@ describe('SourceSyncMenu', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         fakeStream.reset()
+        vi.mocked(api.getSyncProgress).mockResolvedValue(null)
+    })
+
+    it('shows the portfolio pass and the running reads live, in the toolbar and the panel', async () => {
+        const wrapper = await open()
+        expect(wrapper.find('[data-testid="source-sync-indicator"]').exists()).toBe(false)
+
+        fakeStream.emit('source.sync_progress', {
+            pass: { phase: 'reading', versions: 300, pages_read: 3, pages_total: 12 },
+            running: [{ uuid: 'p1', product: 'App', version: '1.0', phase: 'bom', seconds: 4.2 }],
+            queued: 5, requested: 5, ranges: null,
+        })
+        await flushPromises()
+        expect(wrapper.get('[data-testid="source-sync-indicator"]').text()).toBe('3/12')
+        const progress = wrapper.get('[data-testid="source-sync-progress"]').text()
+        expect(progress).toContain('Reading the portfolio (300 versions): page 3/12')
+        expect(progress).toContain('reading 1 version(s)')
+        expect(progress).toContain('5 waiting')
+        expect(wrapper.get('[data-testid="source-sync-running"]').text()).toContain('App 1.0: BOM · 4 s')
+
+        fakeStream.emit('source.portfolio_pass', { phase: 'done', unchanged: 288, changed: 12 })
+        fakeStream.emit('source.sync_progress', { pass: null, running: [], queued: 0, requested: 0, ranges: null })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="source-sync-indicator"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="source-sync-last-pass"]').text()).toContain('300 versions, 12 changed')
+        expect(wrapper.find('[data-testid="sync-cancel"]').exists()).toBe(false)
+        wrapper.unmount()
+    })
+
+    it('cancels what runs and marks the cancelled versions', async () => {
+        vi.mocked(api.cancelSync).mockResolvedValue({ pass: true, requests: ['p2'], running: ['p1'] })
+        const wrapper = await open()
+        fakeStream.emit('source.sync_progress', {
+            pass: { phase: 'reading', versions: 2, pages_read: 0, pages_total: null },
+            running: [], queued: 1, requested: 1, ranges: null,
+        })
+        await flushPromises()
+
+        await wrapper.get('[data-testid="sync-cancel"]').trigger('click')
+        await flushPromises()
+        expect(api.cancelSync).toHaveBeenCalledWith()
+        expect(wrapper.get('[data-testid="sync-message"]').text())
+            .toBe('Cancelled the portfolio pass, 1 request(s), 1 running read(s).')
+        expect(wrapper.get('[data-testid="sync-state-p1"]').text()).toBe('cancelled')
+        expect(wrapper.get('[data-testid="sync-state-p2"]').text()).toBe('cancelled')
+
+        vi.mocked(api.cancelSync).mockRejectedValue({ response: { status: 403 } })
+        await wrapper.get('[data-testid="sync-cancel"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.get('[data-testid="sync-message"]').text()).toBe('Only reviewers can cancel.')
+        wrapper.unmount()
     })
 
     it('reads one version again and follows its progress from the events', async () => {

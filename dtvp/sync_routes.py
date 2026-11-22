@@ -1,4 +1,4 @@
-"""Read-only routes for the per-version sync state (ADR 0004)."""
+"""Routes for the per-version sync state, requests and cancelling (ADR 0004)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,14 @@ class SyncRequest(BaseModel):
 
     project_uuid: Optional[str] = Field(default=None, min_length=1, max_length=200)
     product: Optional[str] = Field(default=None, min_length=1, max_length=512)
+
+
+class SyncCancel(BaseModel):
+    """What to stop: ``pass`` (the portfolio pass), ``requests`` (the waiting
+    requests), ``running`` (the running version syncs); all three when left
+    out."""
+
+    scope: Optional[list[str]] = Field(default=None, max_length=3)
 
 
 def create_sync_router(
@@ -103,6 +111,23 @@ def create_sync_router(
             "requested": accepted,
             "already_running": [uuid for uuid in uuids if uuid not in accepted],
         }
+
+    @router.post("/sync/cancel")
+    def cancel(req: SyncCancel, user: str = Depends(current_user_dependency)) -> dict[str, Any]:
+        """Stop the running portfolio pass, withdraw the waiting requests and
+        cancel the running version syncs (reviewers only). Staged reads are
+        dropped; nothing counts as a failure."""
+        require_reviewer(user)
+        if scheduler is None:
+            raise HTTPException(status_code=503, detail="The sync scheduler is not running")
+        scope = req.scope or None
+        if scope is not None:
+            unknown = sorted(set(scope) - set(scheduler.CANCEL_SCOPES))
+            if unknown:
+                raise HTTPException(
+                    status_code=422, detail=f"Unknown scope: {', '.join(unknown)}"
+                )
+        return scheduler.cancel(scope, by=user)
 
     @router.get("/sync/versions")
     def get_sync_versions(
