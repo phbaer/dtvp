@@ -93,14 +93,16 @@ Every finding of the project version is listed, also those in triage and
 those without an assessment. Findings of one vulnerability that share the same
 assessment are one `vulnerabilities` entry with several `affects`; findings
 with differing assessments are separate entries (the second has the
-`bom-ref` `<uuid>#2`; which one is second follows the affected components'
-references, so an unchanged split keeps its `bom-ref`s from export to
-export). Findings that differ only in the response are
+`bom-ref` `<uuid>#2`; which one is second follows the identity of the
+affected components (package URL, else name and version) and then the
+assessment without its review state, so a split keeps its `bom-ref`s from
+export to export, also when Dependency-Track recreates a component under a
+new ID or one of the entries is approved). Findings that differ only in the response are
 separate entries as well.
 
 | DTVP | CycloneDX |
 | :--- | :--- |
-| Vulnerability ID, source, aliases, description, CWEs | `id`, `source.name`, `references`, `description`, `cwes` |
+| Vulnerability ID, source, aliases, description, CWEs | `id`, `source.name`, `references`, `description`, `cwes`. `references` lists every alias DTVP knows: those the vulnerability's own record names and those of the other findings' records (a CVE whose record names no GitHub advisory still lists the advisory whose record names the CVE). Each reference has `id` and `source.name` (`NVD` for CVE ids, `GITHUB` for GHSA ids, else the alias's source in Dependency-Track) |
 | Recommendation: Dependency-Track's, else derived from the fixed version of the range that contains the component's version | `recommendation`, see [Recommendation](#recommendation) |
 | Publication and last change of the advisory | `published`, `updated`, as date-times in UTC (`2026-04-24T19:17:14+00:00`) |
 | Advisory scores and vectors | One `ratings` entry per CVSS version the advisory has (4.0, 3.x, 2.0, in this order), with the advisory's `source.name`, `method`, `vector`, `score`, and the `severity` of that score. A version with a vector and no score gets the score its vector states. An advisory without CVSS data has one rating with its severity only |
@@ -139,7 +141,7 @@ the property prefix, and the DTVP version (`<prefix>:export`,
 | `<prefix>:export_historical_assessments` | Number of historical team assessments in the document. Absent: none |
 | `<prefix>:export_findings_gone` | Findings of this project version Dependency-Track no longer reports and DTVP still follows, one property per reason with `<reason>=<count>`, sorted by reason: `replaced` (another version of the component has the vulnerability), `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export`. Counts every such finding gone now, not only at the last read, so two exports in a row agree. A finding on a component Dependency-Track recreated (same name and version under a new ID, typically a BOM uploaded again) is not counted: it stands for an earlier generation of a component that is reported again, see the next row. Those findings are not listed. Absent: none. See [Findings that disappear](import-export.md#findings-that-disappear). Until 2.0.0rc2 this counted recreated components as `replaced` |
 | `<prefix>:export_findings_recreated` | Number of findings that only stand for an earlier generation of a recreated component; their assessments followed the component. Not counted in `export_findings_gone`. Absent: none |
-| `<prefix>:export_findings_gone_last_read_at`, `<prefix>:export_findings_gone_last_read` | The last read of the findings from Dependency-Track, as a date-time in UTC, and the findings that went at it, one property per reason with `<reason>=<count>`, `recreated` apart from `replaced`. The time is there whenever a finding is gone; the counts are absent when nothing went at the last read. Absent altogether: nothing gone, or no read recorded |
+| `<prefix>:export_findings_gone_last_read_at`, `<prefix>:export_findings_gone_last_read` | The last read of the findings from Dependency-Track, as a date-time in UTC: when DTVP asked Dependency-Track for them. `export_findings_read_at` is when the same read was stored, after its response arrived, so on a large project it is seconds later; the two differ only by how long the read took, and the findings that went at it, one property per reason with `<reason>=<count>`, `recreated` apart from `replaced`. The time is there whenever a finding is gone; the counts are absent when nothing went at the last read. Absent altogether: nothing gone, or no read recorded |
 | `<prefix>:export_findings_followed_since` | When DTVP started following this version's findings, as a date-time in UTC: counts start there. Absent: nothing gone |
 | `<prefix>:export_advisory_records` | `unavailable`: the vulnerability records could not be read, see [Limits](#limits) |
 | `<prefix>:export_incomplete_findings` | Number of assessed findings whose text could not be read, see [Limits](#limits) |
@@ -309,9 +311,9 @@ not part of a project archive.
 
 | Case | `recommendation` |
 | :--- | :--- |
-| A fixed version | `Upgrade <name> <installed version> to <version> or later.` |
+| A fixed version | `Upgrade <name> <installed versions> to <version> or later.` One sentence per fixed version: every package with that fix is named, with its installed versions in version order (`Upgrade @angular/animations 20.1.3, 20.1.4; @angular/common 20.3.1 to 20.3.15 or later.`). Sentences in order of the fixed version |
 | Another range or an exact version of the package starts at or above the fixed version | `… Later versions are affected too: >=3.0.0 <3.0.2, 3.1.4.` (each range or version, in version order, comma-separated) |
-| No fix for one package, a fix for another of the same entry | `No fixed version is known for <name> <installed version>.`, so every affected package is named |
+| No fix for one package, a fix for another of the same entry | `No fixed version is known for <name> <installed versions>.`, one sentence for all such packages, so every affected package is named |
 | No fix for any package | No `recommendation` |
 
 The record's `patchedVersions` is never the recommendation. Trivy sets it
