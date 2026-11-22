@@ -193,6 +193,70 @@ describe('GoneFindingsPanel', () => {
         wrapper.unmount()
     })
 
+    it('asks before a group acknowledge covers risky findings, naming them', async () => {
+        const group = Array.from({ length: 8 }, (_, index) => finding({
+            component_uuid: 'c-r', component_name: 'dompurify', component_version: '3.2.7',
+            vulnerability_uuid: `v-${index}`, vuln_id: `CVE-2026-${200 + index}`,
+            // All need attention (shown by default); the plain two did not carry over.
+            reason: 'no_longer_matched', needs_attention: true, carry_over: index < 6 ? null : 'conflict',
+            // Six risky: exploitable or ticketed; two plain.
+            risky: index < 6,
+            assessment: { sync_status: 'inactive', state: index < 3 ? 'EXPLOITABLE' : 'NOT_AFFECTED', revision: 1 },
+            tickets: index >= 3 && index < 6 ? [`VP-${index}`] : [],
+        }))
+        vi.mocked(getGoneFindings).mockResolvedValue({
+            name: 'App',
+            versions: [{ version: '1.0', project_uuid: 'p1', last_read: READ, gone: { no_longer_matched: 8 }, findings: group }],
+        } as any)
+        const wrapper = await mountPanel()
+        await wrapper.get('[data-testid="gone-findings-button"]').trigger('click')
+        await flushPromises()
+
+        expect(texts('[data-testid="gone-findings-reason-risky"]')).toEqual(['· 6 risky'])
+
+        // Cancel acknowledges nothing.
+        await click(document.body.querySelector('[data-testid="gone-findings-acknowledge-reason"]'))
+        const confirm = document.body.querySelector('[data-testid="gone-findings-risky-confirm"]') as HTMLElement
+        expect(confirm).not.toBeNull()
+        expect(confirm.textContent).toContain('6 of the 8 finding(s)')
+        expect(texts('[data-testid="gone-findings-risky-list"] li')).toHaveLength(6)
+        expect(texts('[data-testid="gone-findings-risky-list"] li')[0]).toContain('CVE-2026-200 · dompurify@3.2.7 · EXPLOITABLE')
+        expect(texts('[data-testid="gone-findings-risky-list"] li')[5]).toContain('and 1 more')
+        // Focus moves to the confirm.
+        expect(document.activeElement?.getAttribute('data-testid')).toBe('gone-findings-risky-confirm-yes')
+        await click(document.body.querySelector('[data-testid="gone-findings-risky-confirm-cancel"]'))
+        expect(document.body.querySelector('[data-testid="gone-findings-risky-confirm"]')).toBeNull()
+        expect(acknowledgeGoneFindings).not.toHaveBeenCalled()
+
+        // Escape cancels the confirm and keeps the dialog open.
+        await click(document.body.querySelector('[data-testid="gone-findings-acknowledge-reason"]'))
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+        await flushPromises()
+        expect(document.body.querySelector('[data-testid="gone-findings-risky-confirm"]')).toBeNull()
+        expect(dialog()).not.toBeNull()
+        expect(acknowledgeGoneFindings).not.toHaveBeenCalled()
+
+        // Confirm sends the whole group, the plain findings included.
+        await click(document.body.querySelector('[data-testid="gone-findings-acknowledge-reason"]'))
+        expect(texts('[data-testid="gone-findings-risky-confirm-yes"]')).toEqual(['Acknowledge 8, including 6 risky'])
+        await click(document.body.querySelector('[data-testid="gone-findings-risky-confirm-yes"]'))
+        expect(acknowledgeGoneFindings).toHaveBeenCalledTimes(1)
+        expect(vi.mocked(acknowledgeGoneFindings).mock.calls[0]![1]).toHaveLength(8)
+        wrapper.unmount()
+    })
+
+    it('acknowledges a group without risky findings at once, and single findings without asking', async () => {
+        const wrapper = await mountPanel()
+        await wrapper.get('[data-testid="gone-findings-button"]').trigger('click')
+        await flushPromises()
+
+        expect(all('[data-testid="gone-findings-reason-risky"]')).toHaveLength(0)
+        await click(document.body.querySelector('[data-testid="gone-findings-acknowledge-reason"]'))
+        expect(document.body.querySelector('[data-testid="gone-findings-risky-confirm"]')).toBeNull()
+        expect(acknowledgeGoneFindings).toHaveBeenCalledTimes(1)
+        wrapper.unmount()
+    })
+
     it('acknowledges and withdraws single findings, and reports failures', async () => {
         const wrapper = await mountPanel()
         await wrapper.get('[data-testid="gone-findings-button"]').trigger('click')

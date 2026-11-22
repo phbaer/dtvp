@@ -305,7 +305,12 @@ Opened, it shows a dialog above the page:
   the findings were looked at and need nothing more. This is recorded with
   who and when, and hides them for every user; **Withdraw** undoes it. A
   finding that Dependency-Track reports again loses its acknowledgement, so
-  if it goes again it asks again.
+  if it goes again it asks again. A group's header counts its **risky**
+  findings (exploitable, in triage or ticketed, not acknowledged); a group
+  acknowledge that covers any asks first, lists up to five of them, and
+  acknowledges the whole group only on **Acknowledge N, including M risky**
+  (**Cancel** or Escape acknowledges nothing). A single finding is
+  acknowledged without asking. Each gone finding carries `risky` in the API.
 
 The full picture is in the project's **Statistics** tab, under **Gone
 findings**: the total, how many need attention or were acknowledged, each

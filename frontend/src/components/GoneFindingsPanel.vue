@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, ChevronDown, ChevronRight, CircleSlash, Loader2, Undo2, X } from '@lucide/vue'
 import { acknowledgeGoneFindings, applyGoneFindingToAlias, confirmGoneFindingSameIssue, getGoneFindings } from '../lib/api'
 import {
@@ -192,6 +192,45 @@ const acknowledge = async (projectUuid: string, findings: GoneFinding[], acknowl
 }
 
 const unacknowledged = (findings: GoneFinding[]) => findings.filter(finding => !finding.acknowledged_by)
+const riskyOpen = (findings: GoneFinding[]) => unacknowledged(findings).filter(finding => finding.risky)
+
+// A group acknowledge that would cover exploitable, in-triage or ticketed
+// findings asks first, naming them; one finding at a time needs no question.
+type PendingGroup = { key: string; projectUuid: string; findings: GoneFinding[]; risky: GoneFinding[] }
+const pendingGroup = ref<PendingGroup | null>(null)
+// Inside v-for the template ref is an array; only one confirm is ever open.
+const confirmButton = ref<HTMLButtonElement | HTMLButtonElement[] | null>(null)
+const RISKY_LISTED = 5
+
+const acknowledgeGroup = async (key: string, projectUuid: string, findings: GoneFinding[]) => {
+    const risky = riskyOpen(findings)
+    if (risky.length === 0) {
+        await acknowledge(projectUuid, findings)
+        return
+    }
+    pendingGroup.value = { key, projectUuid, findings: unacknowledged(findings), risky }
+    await nextTick()
+    const button = Array.isArray(confirmButton.value) ? confirmButton.value[0] : confirmButton.value
+    button?.focus()
+}
+
+const confirmGroup = async () => {
+    const pending = pendingGroup.value
+    if (!pending) return
+    pendingGroup.value = null
+    await acknowledge(pending.projectUuid, pending.findings)
+}
+
+const cancelGroup = () => {
+    pendingGroup.value = null
+}
+
+const riskyLine = (finding: GoneFinding) => [
+    finding.vuln_id || finding.vulnerability_uuid,
+    componentLabel(finding),
+    finding.assessment?.state,
+    (finding.tickets || []).join(', '),
+].filter(Boolean).join(' · ')
 
 const applied = ref<Set<string>>(new Set())
 const applyToAlias = async (projectUuid: string, finding: GoneFinding) => {
@@ -257,7 +296,13 @@ const toggle = () => {
 }
 
 const closeOnEscape = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') open.value = false
+    if (event.key !== 'Escape') return
+    // Escape first cancels an open confirmation, then closes the dialog.
+    if (pendingGroup.value) {
+        pendingGroup.value = null
+        return
+    }
+    open.value = false
 }
 
 watch(() => props.projectName, () => {
@@ -466,6 +511,11 @@ onBeforeUnmount(() => {
                                             <ChevronRight v-else :size="12" />
                                             {{ group.label }}
                                             <span class="font-normal text-gray-400">· {{ group.count }} finding(s), {{ group.components.length }} component(s)</span>
+                                            <span
+                                                v-if="riskyOpen(group.components.flatMap(c => c.findings)).length"
+                                                class="font-normal text-red-300"
+                                                data-testid="gone-findings-reason-risky"
+                                            >· {{ riskyOpen(group.components.flatMap(c => c.findings)).length }} risky</span>
                                         </button>
                                         <button
                                             v-if="props.canAcknowledge && unacknowledged(group.components.flatMap(c => c.findings)).length"
@@ -473,8 +523,44 @@ onBeforeUnmount(() => {
                                             :disabled="busy"
                                             data-testid="gone-findings-acknowledge-reason"
                                             class="inline-flex items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-white/10 disabled:opacity-50"
-                                            @click="acknowledge(item.version.project_uuid, group.components.flatMap(c => c.findings))"
+                                            @click="acknowledgeGroup(`${item.version.project_uuid}|${group.key}`, item.version.project_uuid, group.components.flatMap(c => c.findings))"
                                         ><Check :size="11" /> Acknowledge all</button>
+                                    </div>
+                                    <div
+                                        v-if="pendingGroup && pendingGroup.key === `${item.version.project_uuid}|${group.key}`"
+                                        role="alertdialog"
+                                        aria-label="Acknowledge risky findings"
+                                        data-testid="gone-findings-risky-confirm"
+                                        class="mx-2 mb-2 rounded-md border border-amber-400/40 bg-amber-950/40 p-2 text-[11px] text-amber-100"
+                                    >
+                                        <p>
+                                            {{ pendingGroup.risky.length }} of the {{ pendingGroup.findings.length }} finding(s) were exploitable,
+                                            in triage or ticketed. Acknowledging hides them for everyone.
+                                        </p>
+                                        <ul class="mt-1 list-disc pl-4 font-mono text-[10px]" data-testid="gone-findings-risky-list">
+                                            <li v-for="finding in pendingGroup.risky.slice(0, RISKY_LISTED)" :key="`${finding.component_uuid}/${finding.vulnerability_uuid}`">
+                                                {{ riskyLine(finding) }}
+                                            </li>
+                                            <li v-if="pendingGroup.risky.length > RISKY_LISTED" class="list-none font-sans text-amber-200/80">
+                                                and {{ pendingGroup.risky.length - RISKY_LISTED }} more
+                                            </li>
+                                        </ul>
+                                        <div class="mt-2 flex gap-2">
+                                            <button
+                                                ref="confirmButton"
+                                                type="button"
+                                                :disabled="busy"
+                                                data-testid="gone-findings-risky-confirm-yes"
+                                                class="rounded-md border border-amber-300/50 px-2 py-0.5 text-[10px] font-semibold hover:bg-amber-400/20"
+                                                @click="confirmGroup"
+                                            >Acknowledge {{ pendingGroup.findings.length }}, including {{ pendingGroup.risky.length }} risky</button>
+                                            <button
+                                                type="button"
+                                                data-testid="gone-findings-risky-confirm-cancel"
+                                                class="rounded-md border border-white/10 px-2 py-0.5 text-[10px] hover:bg-white/10"
+                                                @click="cancelGroup"
+                                            >Cancel</button>
+                                        </div>
                                     </div>
                                     <div v-if="isOpen(`${item.version.project_uuid}|${group.key}`)" class="space-y-1 px-2 pb-2">
                                         <div
@@ -495,6 +581,11 @@ onBeforeUnmount(() => {
                                                     <ChevronRight v-else :size="12" />
                                                     {{ component.label }}
                                                     <span class="font-sans text-gray-500">· {{ component.findings.length }}</span>
+                                                    <span
+                                                        v-if="riskyOpen(component.findings).length"
+                                                        class="font-sans text-red-300"
+                                                        data-testid="gone-findings-component-risky"
+                                                    >· {{ riskyOpen(component.findings).length }} risky</span>
                                                 </button>
                                                 <button
                                                     v-if="props.canAcknowledge && unacknowledged(component.findings).length"
@@ -502,9 +593,45 @@ onBeforeUnmount(() => {
                                                     :disabled="busy"
                                                     data-testid="gone-findings-acknowledge-component"
                                                     class="inline-flex items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-white/10 disabled:opacity-50"
-                                                    @click="acknowledge(item.version.project_uuid, component.findings)"
+                                                    @click="acknowledgeGroup(`${item.version.project_uuid}|${group.key}|${component.key}`, item.version.project_uuid, component.findings)"
                                                 ><Check :size="11" /> Acknowledge</button>
                                             </div>
+                                            <div
+                                        v-if="pendingGroup && pendingGroup.key === `${item.version.project_uuid}|${group.key}|${component.key}`"
+                                        role="alertdialog"
+                                        aria-label="Acknowledge risky findings"
+                                        data-testid="gone-findings-risky-confirm"
+                                        class="mx-2 mb-2 rounded-md border border-amber-400/40 bg-amber-950/40 p-2 text-[11px] text-amber-100"
+                                    >
+                                        <p>
+                                            {{ pendingGroup.risky.length }} of the {{ pendingGroup.findings.length }} finding(s) were exploitable,
+                                            in triage or ticketed. Acknowledging hides them for everyone.
+                                        </p>
+                                        <ul class="mt-1 list-disc pl-4 font-mono text-[10px]" data-testid="gone-findings-risky-list">
+                                            <li v-for="finding in pendingGroup.risky.slice(0, RISKY_LISTED)" :key="`${finding.component_uuid}/${finding.vulnerability_uuid}`">
+                                                {{ riskyLine(finding) }}
+                                            </li>
+                                            <li v-if="pendingGroup.risky.length > RISKY_LISTED" class="list-none font-sans text-amber-200/80">
+                                                and {{ pendingGroup.risky.length - RISKY_LISTED }} more
+                                            </li>
+                                        </ul>
+                                        <div class="mt-2 flex gap-2">
+                                            <button
+                                                ref="confirmButton"
+                                                type="button"
+                                                :disabled="busy"
+                                                data-testid="gone-findings-risky-confirm-yes"
+                                                class="rounded-md border border-amber-300/50 px-2 py-0.5 text-[10px] font-semibold hover:bg-amber-400/20"
+                                                @click="confirmGroup"
+                                            >Acknowledge {{ pendingGroup.findings.length }}, including {{ pendingGroup.risky.length }} risky</button>
+                                            <button
+                                                type="button"
+                                                data-testid="gone-findings-risky-confirm-cancel"
+                                                class="rounded-md border border-white/10 px-2 py-0.5 text-[10px] hover:bg-white/10"
+                                                @click="cancelGroup"
+                                            >Cancel</button>
+                                        </div>
+                                    </div>
                                             <ul v-if="isOpen(`${item.version.project_uuid}|${group.key}|${component.key}`)" class="space-y-1 px-2 pb-1.5">
                                                 <li
                                                     v-for="finding in component.findings"
