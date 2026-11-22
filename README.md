@@ -239,7 +239,10 @@ products its tabs show with `PUT /api/events/interest`
 reads Dependency-Track in the background: watched products every two
 minutes, every other active version once and then on change signals, within
 one request budget shared with the export
-([Sync scheduler](docs/runtime.md#sync-scheduler)).
+([Sync scheduler](docs/runtime.md#sync-scheduler)). Reviewers can request a
+read now (`POST /api/sync/requests`), ask the source to analyse again
+(`POST /api/sync/analysis-requests`) and export now, from the project view's
+Sync menu ([Manual requests](docs/runtime.md#manual-requests)).
 
 ## Documentation
 

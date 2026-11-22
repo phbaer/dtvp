@@ -434,6 +434,15 @@ class LocalStore:
         ).fetchone()
         return str(row[0]) if row and row[0] else None
 
+    def snapshot_times(self, kind: str) -> dict[str, str]:
+        """When each project's list of this kind was last stored: one query
+        for every project (the scheduler's plan)."""
+        rows = self._connection().execute(
+            "SELECT project_uuid, updated_at FROM source_snapshots WHERE kind = ?",
+            (kind,),
+        ).fetchall()
+        return {str(row[0]): str(row[1]) for row in rows if row[0] and row[1]}
+
     def counts(self) -> dict[str, int]:
         connection = self._connection()
 

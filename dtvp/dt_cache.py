@@ -2624,6 +2624,10 @@ class CacheManager:
         self._assessment_sync_wakeup.set()
         await self._notify_assessments_changed(sorted(changed), origin="dt")
 
+    def wake_sync(self) -> None:
+        """Let the background sync loop run its next pass now (a request)."""
+        self._assessment_sync_wakeup.set()
+
     def add_assessment_change_listener(
         self,
         listener: Callable[..., None],

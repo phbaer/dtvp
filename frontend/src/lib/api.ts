@@ -2470,3 +2470,46 @@ export const exportAssessments = async (updateIds?: string[]): Promise<ExportRes
     const res = await api.post('/export', updateIds ? { update_ids: updateIds } : {});
     return res.data;
 };
+
+// -- manual sync requests (ADR 0004 step 8) -----------------------------------
+
+export interface SyncRequestTarget { project_uuid?: string; product?: string }
+export interface SyncSourceInfo { name: string; can_request_analysis: boolean }
+
+export const getSyncSource = async (): Promise<SyncSourceInfo | null> => {
+    const res = await api.get('/sync/status')
+    return res.data?.scheduler_state?.source ?? null
+}
+
+export interface SyncRequestProgress {
+    id: string
+    by: string | null
+    at: string
+    state: 'requested' | 'running' | 'done' | 'failed'
+    read_at?: string
+    error?: string | null
+}
+
+/** The sync state of a product's versions, with each one's last request. */
+export const getSyncVersions = async (
+    product: string,
+): Promise<Array<{ project_uuid: string; request: SyncRequestProgress | null }>> => {
+    const res = await api.get('/sync/versions', { params: { product } })
+    return res.data?.versions ?? []
+}
+
+/** Read a version, or every version of a product, from the source now. */
+export const requestSyncRead = async (
+    target: SyncRequestTarget,
+): Promise<{ requested: string[]; already_requested: string[] }> => {
+    const res = await api.post('/sync/requests', target)
+    return res.data
+}
+
+/** Ask the source to analyse a version, or a product, again. */
+export const requestSourceAnalysis = async (
+    target: SyncRequestTarget,
+): Promise<{ requested: string[]; already_running: string[] }> => {
+    const res = await api.post('/sync/analysis-requests', target)
+    return res.data
+}

@@ -17,6 +17,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Mapping, Optional
+from uuid import uuid4
 
 KIND_FINDINGS = "findings"
 KIND_VULNS = "vulns"
@@ -192,6 +193,8 @@ _COLUMNS = (
     "staged_generation", "requested_at", "requested_by", "request_id",
     "findings_read_at", "vulns_read_at", "bom_read_at", "read_bom_signal",
     "read_analysis_signal", "staged_kinds", "staged_digests_json",
+    "last_request_id", "last_request_by", "last_request_at", "last_request_state",
+    "last_request_finished_at", "last_request_error",
 )
 _READ_AT = {KIND_FINDINGS: "findings_read_at", KIND_VULNS: "vulns_read_at", KIND_BOM: "bom_read_at"}
 _DIGEST_COLUMNS = {
@@ -406,6 +409,19 @@ class SyncStateStore:
                     next_due_at, project_uuid,
                 ),
             )
+            if row["requested_at"]:
+                # The request stays (it is tried again after the backoff);
+                # its outcome so far is a failure, with why.
+                connection.execute(
+                    """
+                    UPDATE sync_versions SET last_request_id = request_id,
+                        last_request_by = requested_by, last_request_at = requested_at,
+                        last_request_state = 'failed', last_request_finished_at = ?,
+                        last_request_error = ?
+                    WHERE project_uuid = ?
+                    """,
+                    (at, f"{type(error).__name__}: {str(error)[:400]}", project_uuid),
+                )
             return int(row["consecutive_failures"] or 0) + 1
 
     # -- the scheduler's transitions (ADR 0004, "Generations", "Recovery") ----
@@ -451,6 +467,43 @@ class SyncStateStore:
                 "WHERE project_uuid = ? AND staged_generation IS NULL",
                 [(uuid,) for uuid in uuids],
             )
+
+    def request(
+        self, project_uuids: Iterable[str], *, by: Optional[str], at: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """Ask for a read of these versions before anything else (P0),
+        persisted with ``requested_at``, ``requested_by`` and ``request_id``.
+        A version whose request still waits keeps it: repeated clicks are one
+        request, and its ``request_id`` is returned (``new`` False). A
+        request made while a version syncs is kept for the next read
+        (``commit`` clears only requests older than the sync). Versions not
+        active or gone are left out."""
+        at = at or _now()
+        uuids = list(dict.fromkeys(str(uuid) for uuid in project_uuids if uuid))
+        if not uuids:
+            return []
+        connection = self._connection()
+        result: list[dict[str, Any]] = []
+        with connection:
+            for uuid in uuids:
+                row = connection.execute(
+                    "SELECT request_id, requested_at FROM sync_versions "
+                    "WHERE project_uuid = ? AND active_in_dt = 1 AND status != ?",
+                    (uuid, STATUS_GONE),
+                ).fetchone()
+                if row is None:
+                    continue
+                if row[1]:
+                    result.append({"project_uuid": uuid, "request_id": row[0], "new": False})
+                    continue
+                request_id = uuid4().hex
+                connection.execute(
+                    "UPDATE sync_versions SET requested_at = ?, requested_by = ?, "
+                    "request_id = ? WHERE project_uuid = ?",
+                    (at, by, request_id, uuid),
+                )
+                result.append({"project_uuid": uuid, "request_id": request_id, "new": True})
+        return result
 
     def forget_read(self, project_uuid: str, kind: str) -> None:
         """Make one kind due again: its last read time is forgotten."""
@@ -558,7 +611,13 @@ class SyncStateStore:
             if KIND_FINDINGS in kinds_read:
                 assignments["read_analysis_signal"] = signals.get("analysis")
             if row["requested_at"] and started_at and row["requested_at"] <= started_at:
-                assignments.update(requested_at=None, requested_by=None, request_id=None)
+                # Answered: the request is cleared, its outcome kept.
+                assignments.update(
+                    requested_at=None, requested_by=None, request_id=None,
+                    last_request_id=row["request_id"], last_request_by=row["requested_by"],
+                    last_request_at=row["requested_at"], last_request_state="done",
+                    last_request_finished_at=at, last_request_error=None,
+                )
             connection.execute(
                 f"UPDATE sync_versions SET {', '.join(f'{name} = ?' for name in assignments)} "
                 "WHERE project_uuid = ?",
@@ -638,7 +697,47 @@ def _signal(value: Any) -> Optional[str]:
     return None if value in (None, "") else str(value)
 
 
+def request_progress(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """What became of the version's manual request: ``requested``,
+    ``running``, ``done`` (with the read time) or ``failed`` (with why; a
+    failed request waits for the backoff and is tried again)."""
+    if row.get("requested_at"):
+        failed = (
+            row.get("last_request_state") == "failed"
+            and row.get("last_request_id") == row.get("request_id")
+        )
+        state = (
+            "running" if row.get("status") == STATUS_SYNCING
+            else "failed" if failed
+            else "requested"
+        )
+        progress = {
+            "id": row.get("request_id"),
+            "by": row.get("requested_by"),
+            "at": row.get("requested_at"),
+            "state": state,
+        }
+        if failed:
+            progress["error"] = row.get("last_request_error")
+        return progress
+    if row.get("last_request_id"):
+        progress = {
+            "id": row.get("last_request_id"),
+            "by": row.get("last_request_by"),
+            "at": row.get("last_request_at"),
+            "state": row.get("last_request_state"),
+            "finished_at": row.get("last_request_finished_at"),
+        }
+        if row.get("last_request_state") == "done":
+            progress["read_at"] = row.get("last_request_finished_at")
+        else:
+            progress["error"] = row.get("last_request_error")
+        return progress
+    return None
+
+
 def _public(row: dict[str, Any]) -> dict[str, Any]:
     row.pop("staged_digests_json", None)
     row["active_in_dt"] = bool(row["active_in_dt"])
+    row["request"] = request_progress(row)
     return row
