@@ -1795,6 +1795,60 @@ async def test_an_earlier_review_marker_on_a_recreated_component_is_taken_back(
     await manager.close()
 
 
+async def test_a_review_marker_carried_through_several_recreations_is_taken_back(
+    tmp_path, monkeypatch
+):
+    """Seventh reading, item 1: components were recreated every night. Builds
+    before a756a396 carried the marker from one generation to the next, and
+    later builds carry it on unchanged; the newest record's predecessor then
+    already holds the marker. Followed back to an approved value through
+    recreations only, it is taken back."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c-gen1", "1.0", "NOT_AFFECTED", _ALPHA)]
+    await manager.import_findings(client, "p1")
+
+    # Two nights with the old rule, one with the current one.
+    for gen in ("c-gen2", "c-gen3"):
+        await _carry_as_before_the_fix(
+            manager, client, monkeypatch, [_lib(gen, "1.0")], _same_version_bom((gen, "1.0"))
+        )
+    client.get_vulnerabilities.return_value = [_lib("c-gen4", "1.0")]
+    client.get_bom.return_value = _same_version_bom(("c-gen4", "1.0"))
+    await manager.import_findings(client, "p1")
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay("p1", "c-gen4", "v1")["analysisDetails"]
+
+    await manager.import_findings(client, "p1")
+
+    assert manager.get_assessment_overlay("p1", "c-gen4", "v1")["analysisDetails"] == _ALPHA
+    await manager.close()
+
+
+@pytest.mark.parametrize("break_at", ["pending_at_start", "upgrade_in_between"])
+async def test_a_review_marker_carried_through_recreations_stays_when_it_was_real(
+    tmp_path, monkeypatch, break_at
+):
+    """The chain only takes the marker back when it began on an approved
+    value and every step was a recreation."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    first = _ALPHA + ("\n\n[Status: Pending Review]" if break_at == "pending_at_start" else "")
+    client.get_vulnerabilities.return_value = [_lib("c-gen1", "1.0", "NOT_AFFECTED", first)]
+    await manager.import_findings(client, "p1")
+    second = "1.1" if break_at == "upgrade_in_between" else "1.0"
+    await _carry_as_before_the_fix(
+        manager, client, monkeypatch, [_lib("c-gen2", second)], _same_version_bom(("c-gen2", second))
+    )
+    await _carry_as_before_the_fix(
+        manager, client, monkeypatch, [_lib("c-gen3", second)], _same_version_bom(("c-gen3", second))
+    )
+
+    await manager.import_findings(client, "p1")
+
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay("p1", "c-gen3", "v1")["analysisDetails"]
+    await manager.close()
+
+
 async def test_an_earlier_carry_of_a_pending_value_keeps_its_review(tmp_path, monkeypatch):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
