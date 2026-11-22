@@ -324,14 +324,19 @@ be read at all is not acted on.
    is recreated again.
 
    Carries of builds before the recreated rule (2.0.0rc1 and earlier) put
-   the marker on a recreated component's assessment too. Every read takes
-   it back where the record still holds exactly the carried value (its
-   latest revision is the `carried-over` one: nobody saved since), every
-   old record's component had the same name, version and package URL, and
-   none of their values was pending review: a new revision with origin
-   `carried-over-recreated` restores the value without the marker and is
-   queued for export. It runs once per record; anything saved since is
-   left alone.
+   the marker on a recreated component's assessment too, and components
+   recreated every night carried that marker on to the next generation,
+   with the old rule and unchanged with the new one. Every read takes it
+   back where the record still holds the carried value (its latest revision
+   is a carry-over, `carried-over` or `carried-over-recreated`: nobody saved
+   since), and, followed back through the records it was carried from, the
+   value leads to the same value without the marker, every step a recreation
+   (same name, version and package URL) and every record in between a carry
+   nobody saved since. A value that was pending review where the chain
+   starts, or a step to another version, keeps the marker. A new revision
+   with origin `carried-over-recreated` restores the value without the
+   marker and is queued for export. It runs once per record; anything saved
+   since is left alone.
 
    The plan is made from the records as they were after the gone findings
    were retired, and saved in one transaction that checks them again. A

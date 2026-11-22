@@ -1282,10 +1282,13 @@ def plan_recreated_reviews(
     is written on top of.
 
     ``carried_last`` are the records whose latest revision is a carry-over
-    (nobody saved since). One counts when every gone finding it was carried
-    from had the target's name, version and package URL, none of their
-    values was pending review, and the record still holds exactly that value
-    with the marker the carry added.
+    of either kind (nobody saved since). A reported finding's marker is taken
+    back when its value, followed back through the records it was carried
+    from, leads to the same value without the marker, and every step was a
+    recreation: the same name, version and package URL, each record in
+    between carried too, untouched since. Components were recreated every
+    night, so a marker an earlier build added can have been carried on
+    several times before the rule changed, and unchanged after.
     """
     by_target: dict[AssessmentKey, list[AssessmentKey]] = {}
     for finding, row in rows.items():
@@ -1296,11 +1299,38 @@ def plan_recreated_reviews(
             by_target.setdefault(
                 (project_uuid, str(successor), finding[1]), []
             ).append((project_uuid, *finding))
+
+    def approved_origin(key: AssessmentKey, component: Any, marked: dict, seen: set) -> bool:
+        """``key``, whose value is ``marked``, was carried from records of
+        the same component holding that value without the marker, directly
+        or through earlier recreations."""
+        candidates = by_target.get(key)
+        if not candidates or key in seen:
+            return False
+        seen = seen | {key}
+        before = {**marked, "details": marked["details"][: -len(_REVIEW_MARKER_SUFFIX)]}
+        for candidate in candidates:
+            old = records.get(candidate)
+            row = rows.get((candidate[1], candidate[2]))
+            if old is None or row is None or not same_component_version(row, component):
+                return False
+            value = _record_value(old)
+            if value == before and "[Status: Pending Review]" not in value["details"]:
+                continue
+            # Carried on with the marker: follow it back, if a carry put it
+            # there and nobody saved since.
+            if not (
+                value == marked
+                and candidate in carried_last
+                and approved_origin(candidate, _RowComponent(row), marked, seen)
+            ):
+                return False
+        return True
+
     result = []
     for key in sorted(carried_last):
         record = records.get(key)
-        candidates = by_target.get(key)
-        if record is None or not candidates:
+        if record is None or not by_target.get(key):
             continue
         if record.get("sync_status") not in CARRY_FROM_STATUSES:
             continue
@@ -1312,22 +1342,32 @@ def plan_recreated_reviews(
         current = _record_value(record)
         if target is None or not current["details"].endswith(_REVIEW_MARKER_SUFFIX):
             continue
-        olds = [records.get(candidate) for candidate in candidates]
-        if any(old is None for old in olds):
-            continue
-        values = [_record_value(old) for old in olds]
-        before = {
-            **current,
-            "details": current["details"][: -len(_REVIEW_MARKER_SUFFIX)],
-        }
-        if all(
-            same_component_version(rows[(candidate[1], candidate[2])], target)
-            and "[Status: Pending Review]" not in value["details"]
-            and value == before
-            for candidate, value in zip(candidates, values)
-        ):
+        if approved_origin(key, target, current, set()):
+            before = {
+                **current,
+                "details": current["details"][: -len(_REVIEW_MARKER_SUFFIX)],
+            }
             result.append((key, before, int(record.get("revision") or 0)))
     return result
+
+
+@dataclass(frozen=True)
+class _RowComponent:
+    """A gone finding's component, compared like a reported one."""
+
+    row: Mapping[str, Any]
+
+    @property
+    def component_name(self) -> Optional[str]:
+        return self.row.get("component_name")
+
+    @property
+    def component_version(self) -> Optional[str]:
+        return self.row.get("component_version")
+
+    @property
+    def component_purl(self) -> Optional[str]:
+        return self.row.get("component_purl")
 
 
 def own_assessments_to_supersede(

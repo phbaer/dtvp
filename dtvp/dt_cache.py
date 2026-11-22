@@ -2087,10 +2087,12 @@ class CacheManager:
           at the next recreation.
         """
         project_uuid = plan.project_uuid
+        # Either kind of carry: later builds carry a marked value on
+        # unchanged (``carried-over-recreated``).
         carried_last = await asyncio.to_thread(
             self.assessment_outbox.keys_last_written_by,
             project_uuid,
-            [ORIGIN_CARRIED_OVER],
+            [ORIGIN_CARRIED_OVER, ORIGIN_CARRIED_OVER_RECREATED],
         )
         reviews = plan_recreated_reviews(
             project_uuid, plan.presence.rows, plan.records, plan.reported, carried_last
