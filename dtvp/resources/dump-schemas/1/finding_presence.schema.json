@@ -84,6 +84,14 @@
         "null"
       ],
       "description": "A timestamp exactly as stored, or null."
+    },
+    "gone_cause": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string",
+      "description": "Why the finding went, where the stored BOMs tell (\"CPE changed from … to …\"); absent in dumps written before causes and when nothing more is known than the reason."
+    },
+    "predates_tracking": {
+      "type": "boolean",
+      "description": "True for a finding followed from an assessment record whose finding went before findings were tracked (first_seen_at is then empty); absent otherwise."
     }
   },
   "required": [

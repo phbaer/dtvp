@@ -579,13 +579,15 @@ class SqliteDumpSource:
                         "returned_at",
                     )
                 },
-                # Only when set: dumps written before acknowledgements, and
-                # findings nobody acknowledged, have no such fields.
+                # Only when set: dumps written before acknowledgements or
+                # causes, and findings without them, have no such fields.
                 **{
                     column: row[column]
-                    for column in ("acknowledged_by", "acknowledged_at")
+                    for column in ("acknowledged_by", "acknowledged_at", "gone_cause")
                     if row[column] is not None
                 },
+                # Only when set: a row made for a record from before tracking.
+                **({"predates_tracking": True} if row["predates_tracking"] else {}),
             }
 
     def _finding_read(self, connection: sqlite3.Connection) -> Iterator[dict[str, Any]]:

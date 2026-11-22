@@ -522,8 +522,42 @@ export interface GoneFinding {
     /** Acknowledged for everyone: who and when. */
     acknowledged_by?: string | null;
     acknowledged_at?: string | null;
-    /** An assessment with a value that did not carry over, not acknowledged. */
+    /** An assessment with a value that did not carry over, or one that was
+     * exploitable, in triage or ticketed; not acknowledged. */
     needs_attention?: boolean;
+    /** Why it went, where the stored BOMs tell ("CPE changed from … to …"). */
+    cause?: string | null;
+    /** Ticket keys of its assessment. */
+    tickets?: string[];
+    /** The same vulnerability under another id, still reported on the same component. */
+    alias?: GoneFindingAlias | null;
+}
+
+export interface GoneFindingAlias {
+    component_uuid: string;
+    vulnerability_uuid: string;
+    vuln_id: string | null;
+    state: string;
+    tickets: string[];
+    /** Both assessed, with different states. */
+    disagrees: boolean;
+    /** What applying this finding's assessment would do: copy it, add the
+     * missing team blocks, or nothing. */
+    proposal: 'copy' | 'blocks' | null;
+}
+
+export interface MassDisappearance {
+    reason: string;
+    count: number;
+    share: number;
+    findings_before: number;
+}
+
+export interface AliasDisagreement {
+    component_uuid: string;
+    component_name: string | null;
+    component_version: string | null;
+    findings: { vulnerability_uuid: string; vuln_id: string | null; state: string }[];
 }
 
 export interface GoneFindingsSummary {
@@ -531,6 +565,8 @@ export interface GoneFindingsSummary {
     by_carry_over: Record<string, number>;
     needs_attention: number;
     acknowledged: number;
+    /** Many findings went no longer matched at the last read. */
+    mass_disappearance?: MassDisappearance | null;
 }
 
 export interface FindingsReadSummary {
@@ -539,6 +575,7 @@ export interface FindingsReadSummary {
     returned: number;
     carried_over: number;
     not_carried: number;
+    mass_disappearance?: MassDisappearance | null;
 }
 
 export interface GoneFindingsOfVersion {
@@ -549,6 +586,8 @@ export interface GoneFindingsOfVersion {
     summary?: GoneFindingsSummary;
     /** How many findings went per day, by reason. */
     trend?: { day: string; went: Record<string, number> }[];
+    /** Reported findings of one vulnerability under two ids on one component whose states differ. */
+    alias_disagreements?: AliasDisagreement[];
     findings: GoneFinding[];
 }
 

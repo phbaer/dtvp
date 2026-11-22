@@ -1211,6 +1211,18 @@ def test_findings_the_source_no_longer_reports_are_counted_by_reason():
         )
 
 
+def test_gone_findings_that_need_attention_are_counted():
+    summary = {"gone": {"no_longer_matched": 3}, "attention": 2, "since": "2026-11-17T00:00:00+00:00"}
+    document = build_vdr(
+        SCHEMA_BOM, [_finding(C1)], [parse_assessment("NOT_SET", "", False)],
+        generated_at=NOW, findings_gone=summary,
+    )
+    assert _metadata(document)["dtvp:export_findings_gone_attention"] == "2"
+    assert _schema_errors(document) is None
+    none = _vdr([_finding(C1)], [("NOT_SET", "")], findings_gone={**summary, "attention": 0})
+    assert "dtvp:export_findings_gone_attention" not in _metadata(none)
+
+
 def test_a_general_assessment_does_not_hide_the_teams_assessors():
     """A save that writes the General block keeps every team's assessor in
     assessed_by (it used to shrink to the General block's assessor)."""

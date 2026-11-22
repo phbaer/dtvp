@@ -176,6 +176,28 @@ export const getGoneFindings = async (name: string): Promise<GoneFindingsOfProje
 };
 
 /** Acknowledge gone findings of a project version for everyone, or withdraw it. */
+/** Apply a gone finding's assessment to its vulnerability under another id,
+ * still reported on the same component (reviewers; saved pending review). */
+export const applyGoneFindingToAlias = async (
+    projectUuid: string,
+    componentUuid: string,
+    vulnerabilityUuid: string,
+    aliasVulnerabilityUuid: string,
+    aliasComponentUuid?: string,
+): Promise<{ kind: 'copy' | 'blocks' }> => {
+    const res = await api.post('/gone-findings/apply-to-alias', {
+        project_uuid: projectUuid,
+        component_uuid: componentUuid,
+        vulnerability_uuid: vulnerabilityUuid,
+        alias_vulnerability_uuid: aliasVulnerabilityUuid,
+        // Only when the alias is on the recreated component.
+        ...(aliasComponentUuid && aliasComponentUuid !== componentUuid
+            ? { alias_component_uuid: aliasComponentUuid }
+            : {}),
+    });
+    return res.data;
+};
+
 export const acknowledgeGoneFindings = async (
     projectUuid: string,
     findings: { component_uuid: string; vulnerability_uuid: string }[],

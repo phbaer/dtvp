@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, ChevronDown, ChevronRight, CircleSlash, Loader2, Undo2, X } from '@lucide/vue'
-import { acknowledgeGoneFindings, getGoneFindings } from '../lib/api'
+import { acknowledgeGoneFindings, applyGoneFindingToAlias, getGoneFindings } from '../lib/api'
 import {
     REASONS,
     attentionCount,
@@ -37,6 +37,30 @@ const actionError = ref('')
 
 const total = computed(() => goneCount(versions.value))
 const attention = computed(() => attentionCount(versions.value))
+
+// Versions in which many findings went no longer matched at the last read:
+// a change in matching (other CPEs in a new BOM, an analyzer change).
+const massNotices = computed(() =>
+    versions.value
+        .filter(version => version.last_read?.mass_disappearance)
+        .map(version => ({ version, mass: version.last_read!.mass_disappearance! })),
+)
+const massLine = (notice: { version: GoneFindingsOfVersion, mass: { count: number, share: number } }) =>
+    `${notice.version.version || '(no version)'}: ${notice.mass.count} findings went no longer matched at the last read`
+    + ` (${Math.round(notice.mass.share * 100)}% of the findings)`
+
+const disagreements = computed(() =>
+    versions.value.flatMap(version =>
+        (version.alias_disagreements || []).map(item => ({ version, item })),
+    ),
+)
+
+const buttonTitle = computed(() => {
+    if (!available.value) return 'No gone findings'
+    const lines = [`${attention.value} gone finding(s) need attention, ${total.value} gone in all`]
+    for (const notice of massNotices.value) lines.push(massLine(notice))
+    return lines.join('\n')
+})
 
 const load = async () => {
     if (!props.projectName) return
@@ -163,6 +187,25 @@ const acknowledge = async (projectUuid: string, findings: GoneFinding[], acknowl
 
 const unacknowledged = (findings: GoneFinding[]) => findings.filter(finding => !finding.acknowledged_by)
 
+const applied = ref<Set<string>>(new Set())
+const applyToAlias = async (projectUuid: string, finding: GoneFinding) => {
+    const alias = finding.alias
+    if (!alias || !alias.proposal || busy.value) return
+    busy.value = true
+    actionError.value = ''
+    try {
+        await applyGoneFindingToAlias(
+            projectUuid, finding.component_uuid, finding.vulnerability_uuid, alias.vulnerability_uuid, alias.component_uuid,
+        )
+        applied.value = new Set([...applied.value, `${finding.component_uuid}/${finding.vulnerability_uuid}`])
+        await load()
+    } catch {
+        actionError.value = `The assessment could not be applied to ${alias.vuln_id || 'the other finding'}.`
+    } finally {
+        busy.value = false
+    }
+}
+
 const available = computed(() => total.value > 0 || Boolean(error.value))
 
 const toggle = () => {
@@ -193,9 +236,7 @@ onBeforeUnmount(() => {
         <button
             type="button"
             data-testid="gone-findings-button"
-            :title="available
-                ? `${attention} gone finding(s) need attention, ${total} gone in all`
-                : 'No gone findings'"
+            :title="buttonTitle"
             aria-haspopup="dialog"
             :aria-expanded="open"
             :disabled="loading || !available"
@@ -231,9 +272,10 @@ onBeforeUnmount(() => {
                                 <h2 id="gone-findings-title" class="text-sm font-semibold text-white">Gone findings</h2>
                                 <p class="mt-1 text-[11px] leading-snug text-gray-400">
                                     Findings Dependency-Track no longer reports. Shown first: those whose
-                                    assessment did not carry over to anything. Acknowledge them once looked
-                                    at; that hides them for everyone. All counts and the trend are in the
-                                    project statistics.
+                                    assessment did not carry over to anything, and those that were
+                                    exploitable, in triage or ticketed, whatever the reason they went.
+                                    Acknowledge them once looked at; that hides them for everyone. All
+                                    counts and the trend are in the project statistics.
                                 </p>
                             </div>
                             <button
@@ -288,6 +330,28 @@ onBeforeUnmount(() => {
                                 placeholder="Search vulnerability or component"
                                 class="min-w-[12rem] flex-1 rounded-lg border border-white/10 bg-slate-900 px-2 py-1 text-gray-200 placeholder:text-gray-500"
                             />
+                        </div>
+                        <div
+                            v-for="notice in massNotices"
+                            :key="notice.version.project_uuid"
+                            data-testid="gone-findings-mass"
+                            role="status"
+                            class="mt-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-100"
+                        >
+                            {{ massLine(notice) }}. A change in matching, such as other CPEs in a new BOM:
+                            check that the findings that went were not real issues.
+                        </div>
+                        <div
+                            v-if="disagreements.length"
+                            data-testid="gone-findings-disagreements"
+                            class="mt-2 rounded-lg border border-white/10 px-2 py-1.5 text-[11px] text-gray-300"
+                        >
+                            <div class="font-semibold text-gray-200">One vulnerability, two ids, different assessments</div>
+                            <div v-for="entry in disagreements" :key="`${entry.version.project_uuid}/${entry.item.component_uuid}/${entry.item.findings.map(f => f.vuln_id).join('/')}`">
+                                <span class="font-mono">{{ entry.item.component_name || entry.item.component_uuid }}{{ entry.item.component_version ? `@${entry.item.component_version}` : '' }}</span>
+                                ({{ entry.version.version || '(no version)' }}):
+                                {{ entry.item.findings.map(f => `${f.vuln_id} ${f.state}`).join(' · ') }}
+                            </div>
                         </div>
                         <div v-if="reasonCounts.length" class="mt-2 flex flex-wrap gap-1.5" data-testid="gone-findings-reasons">
                             <button
@@ -423,9 +487,43 @@ onBeforeUnmount(() => {
                                                             {{ carryOverLabel(finding) }}
                                                         </span>
                                                         <span>Assessment: {{ assessmentLabel(finding) }}</span>
+                                                        <span v-if="finding.tickets?.length" data-testid="gone-finding-tickets">
+                                                            Tickets: {{ finding.tickets.join(', ') }}
+                                                        </span>
                                                         <span v-if="finding.acknowledged_by" data-testid="gone-finding-acknowledged">
                                                             Acknowledged by {{ finding.acknowledged_by }}, {{ when(finding.acknowledged_at) }}
                                                         </span>
+                                                    </div>
+                                                    <div v-if="finding.cause" data-testid="gone-finding-cause" class="mt-0.5 break-all text-gray-400">
+                                                        {{ finding.cause }}
+                                                    </div>
+                                                    <div
+                                                        v-if="finding.alias"
+                                                        data-testid="gone-finding-alias"
+                                                        class="mt-0.5 flex flex-wrap items-baseline gap-x-2"
+                                                        :class="finding.alias.disagrees ? 'text-amber-200' : 'text-sky-200'"
+                                                    >
+                                                        <span>
+                                                            Still reported as {{ finding.alias.vuln_id }}: {{ finding.alias.state }}{{
+                                                                finding.alias.tickets.length ? ` (${finding.alias.tickets.join(', ')})` : '' }}{{
+                                                                finding.alias.disagrees ? ', a different assessment' : '' }}
+                                                        </span>
+                                                        <button
+                                                            v-if="props.canAcknowledge && finding.alias.proposal"
+                                                            type="button"
+                                                            :disabled="busy"
+                                                            data-testid="gone-finding-apply-alias"
+                                                            class="rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-white/10 disabled:opacity-50"
+                                                            :title="finding.alias.proposal === 'copy'
+                                                                ? 'Copy this assessment to it, pending review'
+                                                                : 'Add the team blocks it lacks as historical blocks, pending review'"
+                                                            @click="applyToAlias(item.version.project_uuid, finding)"
+                                                        >Apply to {{ finding.alias.vuln_id }}</button>
+                                                        <span
+                                                            v-if="applied.has(`${finding.component_uuid}/${finding.vulnerability_uuid}`)"
+                                                            data-testid="gone-finding-applied"
+                                                            class="text-emerald-300"
+                                                        >Applied, pending review</span>
                                                     </div>
                                                 </li>
                                             </ul>

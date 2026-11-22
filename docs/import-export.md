@@ -285,7 +285,33 @@ be read at all is not acted on.
    | Reason | Meaning |
    | :--- | :--- |
    | `replaced` | The vulnerability is now reported on another component with the same identity (package URL without version, else name), and the BOM no longer has the old component. The successor is recorded |
-   | `no_longer_matched` | The component, or one of the same identity, is still there; the vulnerability is no longer reported on it (an analyser or mirror change) |
+   | `no_longer_matched` | The component, or one of the same identity, is still there; the vulnerability is no longer reported on it (an analyser or mirror change, or a changed CPE: then the finding records "CPE changed from … to …") |
+
+   Every assessment record is followed, an inactive one too: a record whose
+   finding went before DTVP tracked findings gets a gone row, once at the
+   first start of this version for all records and at each read for the
+   version read, marked as predating tracking (first seen unknown, not
+   counted as gone at that read nor in "followed since"). A row without a
+   component name takes it from the BOM stored before the read, before its
+   reason is told; an earlier `component_removed` told without the identity
+   (a row predating tracking, or one that got its identity in this read)
+   becomes `no_longer_matched` once a component of the same identity and
+   version is in the BOM (the component was only recreated). A removal told
+   with the identity known stays, also when a later version of the package
+   appears. A carry-over by identity, and a recreation that needs no new
+   review, need the package URL, unless the component was named by the
+   findings themselves (a finding DTVP saw reported): then name and version
+   suffice, and a recreation also needs the only finding of the
+   vulnerability with that name and version. A component whose name was
+   taken from a BOM for an old record is carried by vulnerability and name,
+   with that rule's safeguards (exactly one candidate, the same name),
+   pending review. A replaced finding whose assessment has a value and that
+   no rule carries is never dropped: it is left undetermined, for a person.
+   A row made for an old record knows only the vulnerability's UUID; at each
+   read, and when gone findings are shown, it is named from the stored
+   findings and vulnerability records, so its aliases are found. The startup backfill skips
+   versions whose findings DTVP never read, and a row predating tracking
+   whose finding is reported is not counted as returned.
    | `component_removed` | The project's BOM no longer has the component |
    | `undetermined` | The findings do not tell, or suggest a replacement, and the BOM could not be read |
    | `missing_at_export` | An export was rejected and Dependency-Track confirmed the finding no longer exists |
@@ -369,15 +395,25 @@ be read at all is not acted on.
 /api/project/{project_uuid}/gone-findings` returns them for one version, and
 `GET /api/gone-findings?name=<project name>` for every version of a project:
 the last read (time, how many went by reason, returned,
-carried over, not carried), the current counts by reason, and per finding the
+carried over, not carried, and `mass_disappearance` when many went no longer
+matched), the current counts by reason, and per finding the
 component, vulnerability, reason, dates, carry-over, successor, the
-assessment record's status, whether the component was recreated (same name
-and version), whether it needs attention, and who acknowledged it when. Each
+assessment record's status and tickets, whether the component was recreated
+(same name and version), whether it needs attention, who acknowledged it
+when, `cause` (a CPE change, where the stored BOMs tell) and `alias` (the
+same vulnerability under another id still reported on the component, its
+state, whether it disagrees, and what applying would do). Each
 version also has `summary` (counts by reason and carry-over outcome, needing
-attention, acknowledged) and `trend` (how many went per day, by reason).
+attention, acknowledged, `mass_disappearance`), `trend` (how many went per
+day, by reason) and `alias_disagreements` (reported ids of one vulnerability
+on one component whose states differ). Aliases come from the stored findings
+and vulnerability records of the version.
 `POST /api/gone-findings/acknowledge` acknowledges gone findings for every
-user, or withdraws it. Acknowledgements are part of the instance dump
-(optional `acknowledged_by` and `acknowledged_at` of `finding_presence`).
+user, or withdraws it. `POST /api/gone-findings/apply-to-alias` (reviewers)
+applies a gone finding's assessment to its alias as described in
+[Gone findings](review-workflows.md#gone-findings). Acknowledgements and
+causes are part of the instance dump (optional `acknowledged_by`,
+`acknowledged_at` and `gone_cause` of `finding_presence`).
 The VDR states the counts in
 `<prefix>:export_findings_gone`; see
 [CycloneDX inventory and VDR](cyclonedx-export.md).

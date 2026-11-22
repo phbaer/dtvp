@@ -216,16 +216,34 @@ reason and dates. Right after a BOM upload a finding can be gone for one read
 and come back, or be replaced, at the next; see [Findings that disappear](import-export.md#findings-that-disappear).
 
 **Gone findings** in the project view's toolbar, beside **CycloneDX**, counts
-the gone findings of all versions that **need attention**: their assessment
-has a value and did not carry over (**Assessments differ, not carried** or
-**Component unknown, not carried**), and nobody acknowledged them. The
-tooltip gives the total; the button is disabled when nothing is gone.
+the gone findings of all versions that **need attention**, unless someone
+acknowledged them:
+
+- their assessment has a value and did not carry over (**Assessments differ,
+  not carried** or **Component unknown, not carried**); or
+- their assessment says they were, or may be, a real issue: **Exploitable**
+  or **In triage**, or a ticket in any block. That holds whatever the reason
+  they went, so an exploitable finding that only stopped matching is not lost
+  among the expected ones. An assessment that carried over is not counted:
+  it moved with the finding. Findings followed from records older than
+  finding tracking count only by this rule: a carry-over was never tried for
+  them.
+
+The tooltip gives the total, and names every version in which many findings
+went **no longer matched** at the last read (a *mass disappearance*: at least
+50, or at least 10 that are a tenth or more of the version's findings). That
+is a change in matching, for example other CPEs in a newly uploaded BOM,
+rather than single findings. The button is disabled when nothing is gone.
 
 Opened, it shows a dialog above the page:
 
 - **Needs attention** (the default) or **All**; **Show acknowledged**; a
   version choice; a search over vulnerability and component; and chips with
   the count per reason, each a filter.
+- A notice per version with a mass disappearance at the last read (how many,
+  and what share of the findings), and a list of components on which one
+  vulnerability is reported under two ids (a CVE and its GitHub advisory)
+  whose assessments have different states.
 - Per version, the last read ("Last read *time*: N went (2 replaced,
   1 component removed)"), then the findings grouped by reason and by
   component, with counts. Small lists are open; long ones open per group.
@@ -235,7 +253,27 @@ Opened, it shows a dialog above the page:
   seen, what became of its assessment (**Carried over, pending review**,
   **Assessments differ, not carried**, **Successor has its own assessment**,
   **Component unknown, not carried**), and the record's status (`inactive`,
-  or `superseded` once carried over).
+  or `superseded` once carried over), and its tickets.
+- **Why, where the BOM tells:** a finding no longer matched on a component
+  that is unchanged except for its CPE says so: "CPE changed from *old* to
+  *new*". DTVP compares the BOM it stored before the read with the one read
+  now. It reads the BOM for this only when it reads it anyway, or when ten or
+  more findings went no longer matched in one read.
+- **The same vulnerability under another id:** when a gone finding's
+  vulnerability is still reported under another id (its GitHub advisory for
+  a CVE, or the other way round) on the same component, or on a component of
+  the same identity and version that Dependency-Track recreated, the finding says
+  "Still reported as *id*: *state*", and whether the two assessments differ.
+  Another UUID counts only for the same package: equal package URL, so a
+  component known only by its name is never taken for another group's.
+  Reviewers get **Apply to *id***, accepted only for a finding reported on
+  that component whose id is an alias of the gone one: when that finding has no assessment it
+  takes this one; when it has its own, the team blocks it lacks are added as
+  historical blocks with their tickets, and its state stays. Either way it is
+  saved pending review with origin `carried-over-by-alias`, and only while
+  that finding still has the record the proposal was made for. Nothing is
+  applied without a person. The ids come from the stored findings and
+  vulnerability records, read through the source adapter.
 - Components of findings recorded before DTVP tracked findings are known only
   by their Dependency-Track UUID. When gone findings are shown, DTVP looks
   their name, version and package URL up once in local sources (the stored
@@ -251,7 +289,8 @@ Opened, it shows a dialog above the page:
   if it goes again it asks again.
 
 The full picture is in the project's **Statistics** tab, under **Gone
-findings**: the total, how many need attention or were acknowledged, the
+findings**: the total, how many need attention or were acknowledged, each
+version with a mass disappearance at the last read, the
 counts by reason (recreated components apart from replacements) and by
 what became of the assessments, and a bar per day of the last 30 days with
 findings gone, by reason. The day is when each finding went, as recorded per

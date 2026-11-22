@@ -46,6 +46,7 @@ from .finding_lifecycle_services import (
     component_identity as _component_cache_identity,
     follow_findings_plan,
     index_bom,
+    vuln_ids_by_uuid,
     own_assessments_to_supersede,
     plan_recreated_reviews,
     read_summary,
@@ -612,6 +613,14 @@ class CacheManager:
             get_assessment_outbox_path(self.base_path), logger=logger
         )
         self.finding_lifecycle.backfill_once(self.store.stored_findings)
+        # Records whose findings went before findings were tracked get a
+        # gone row once, so every record is followed.
+        self.finding_lifecycle.backfill_untracked_records_once(
+            self.assessment_outbox.all_states,
+            self._stored_bom_component,
+            at=datetime.now(timezone.utc).isoformat(),
+        )
+        self.__dict__.pop("_startup_bom_indexes", None)
         # Per-version sync state (ADR 0004), in the local store's database.
         self.sync_state = SyncStateStore(self.store._connection)
 
@@ -1929,6 +1938,22 @@ class CacheManager:
             bool(value.get("suppressed")),
         )
 
+    def _stored_bom_component(
+        self, project_uuid: str, component_uuid: str
+    ) -> Optional[Dict[str, Any]]:
+        """What the stored BOM of a project version says of a component;
+        each BOM is indexed once per call site's lifetime (startup)."""
+        cache = self.__dict__.setdefault("_startup_bom_indexes", {})
+        if project_uuid not in cache:
+            try:
+                cache[project_uuid] = index_bom(
+                    self._load_project_cache(self._bom_path(project_uuid), None)
+                )
+            except Exception:
+                cache[project_uuid] = None
+        index = cache[project_uuid]
+        return index.components.get(component_uuid) if index is not None else None
+
     async def _stored_bom_index(self, project_uuid: str) -> Optional[BomIndex]:
         async with self.lock:
             bom = self._load_project_cache(self._bom_path(project_uuid), None)
@@ -1992,6 +2017,33 @@ class CacheManager:
                 and not value["suppressed"]
             )
 
+        # Rows made for old records know only the vulnerability's UUID: name
+        # it from what the source said of it (findings and vulnerability
+        # records, stored or just read), so aliases can be matched.
+        reference_of = getattr(type(client), "vulnerability_reference", None) or (
+            DTClient.vulnerability_reference
+        )
+
+        def name_vulnerabilities() -> None:
+            lifecycle = self.finding_lifecycle
+            unnamed = {
+                row["vulnerability_uuid"]
+                for row in lifecycle.presence(project_uuid).values()
+                if not row.get("vuln_id")
+            }
+            if not unnamed:
+                return
+            ids = vuln_ids_by_uuid(
+                reference_of,
+                findings,
+                self._load_project_cache(self._findings_path(project_uuid), []) or [],
+                self._load_project_cache(self._project_vulns_path(project_uuid), []) or [],
+            )
+            lifecycle.fill_vuln_ids(
+                project_uuid, {uuid: ids[uuid] for uuid in unnamed if uuid in ids}
+            )
+
+        await asyncio.to_thread(name_vulnerabilities)
         plan = await asyncio.to_thread(
             lambda: follow_findings_plan(
                 project_uuid=project_uuid,
@@ -2350,7 +2402,9 @@ class CacheManager:
         # Findings of the version gone now (two exports in a row agree), and
         # those that went at the last read.
         findings_gone = await asyncio.to_thread(
-            self.finding_lifecycle.export_gone_summary, project_uuid
+            self.finding_lifecycle.export_gone_summary,
+            project_uuid,
+            self.assessment_outbox,
         )
 
         def assemble() -> Dict[str, Any]:

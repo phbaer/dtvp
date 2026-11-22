@@ -45,6 +45,13 @@ const totals = computed(() => {
 
 const sorted = (counts: Record<string, number>) => Object.entries(counts).sort((a, b) => b[1] - a[1])
 
+// Versions in which many findings went no longer matched at the last read.
+const massVersions = computed(() =>
+    versions.value
+        .filter(version => version.summary?.mass_disappearance)
+        .map(version => ({ version: version.version, mass: version.summary!.mass_disappearance! })),
+)
+
 // The last 30 days with something gone, oldest first.
 const trend = computed(() => {
     const days: Record<string, Record<string, number>> = {}
@@ -88,6 +95,15 @@ onMounted(() => void load())
             <p class="mt-1 text-xs text-gray-400" data-testid="gone-findings-statistics-total">
                 {{ totals.total }} gone in all versions; {{ totals.attention }} need attention,
                 {{ totals.acknowledged }} acknowledged.
+            </p>
+            <p
+                v-for="entry in massVersions"
+                :key="entry.version"
+                data-testid="gone-findings-statistics-mass"
+                class="mt-1 text-xs text-amber-200"
+            >
+                {{ entry.version || '(no version)' }}: {{ entry.mass.count }} findings went no longer matched at the last read
+                ({{ Math.round(entry.mass.share * 100) }}% of the findings).
             </p>
             <div class="mt-3 grid gap-4 md:grid-cols-2">
                 <div>

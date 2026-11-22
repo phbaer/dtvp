@@ -120,7 +120,7 @@ def test_round_trip_gives_identical_records(source_dump, tmp_path, monkeypatch):
     assert before["entities"]["code_evidence"]["records"] == 2
     assert before["entities"]["code_evidence_application"]["records"] == 1
     # What happened to findings survives as well.
-    assert before["entities"]["finding_presence"]["records"] == 2
+    assert before["entities"]["finding_presence"]["records"] == 3
     assert before["entities"]["finding_read"]["records"] == 1
     # The history is written as dumped (the trigger never fires), including
     # the compacted storage: text_in_record and base_same are back.

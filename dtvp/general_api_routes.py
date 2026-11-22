@@ -29,7 +29,13 @@ from .cyclonedx_export import (
     valid_property_prefix,
     valid_ticket_prefix,
 )
-from .finding_lifecycle_services import describe_gone_findings
+from .finding_lifecycle_services import (
+    ORIGIN_CARRIED_OVER_BY_ALIAS,
+    alias_map,
+    vuln_ids_by_uuid,
+    alias_proposal,
+    describe_gone_findings,
+)
 from .gone_component_names import resolve_gone_component_names
 from .project_archive_services import get_project_archive_path
 from .team_mapping import normalize_team_values
@@ -134,6 +140,18 @@ class GoneFindingsAcknowledgeRequest(BaseModel):
     findings: list[GoneFindingRef] = Field(min_length=1, max_length=20000)
     # False withdraws the acknowledgement.
     acknowledged: bool = True
+
+
+class GoneFindingAliasRequest(BaseModel):
+    project_uuid: str = Field(min_length=1, max_length=200)
+    component_uuid: str = Field(min_length=1, max_length=200)
+    # The gone finding, and its vulnerability under another id that is still
+    # reported on the same component.
+    vulnerability_uuid: str = Field(min_length=1, max_length=200)
+    alias_vulnerability_uuid: str = Field(min_length=1, max_length=200)
+    # The alias's component when the source recreated the component (same
+    # identity and version, another UUID); the gone finding's otherwise.
+    alias_component_uuid: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class ExportDiscardRequest(BaseModel):
@@ -3578,9 +3596,53 @@ def _register_gone_findings_routes(
             logger = getattr(deps, "logger", None)
             if logger is not None:
                 logger.exception("Could not look up gone components of %s", project_uuid)
+        name_vulnerabilities(project_uuid)
         return describe_gone_findings(
-            manager.finding_lifecycle, manager.assessment_outbox, project_uuid
+            manager.finding_lifecycle,
+            manager.assessment_outbox,
+            project_uuid,
+            aliases=stored_aliases(project_uuid),
         )
+
+    def stored_sources(project_uuid: str) -> tuple[list[Any], list[Any]]:
+        manager = deps.cache_manager
+        return (
+            manager._load_project_cache(manager._findings_path(project_uuid), []) or [],
+            manager._load_project_cache(manager._project_vulns_path(project_uuid), []) or [],
+        )
+
+    def name_vulnerabilities(project_uuid: str) -> None:
+        """Rows made for old records know only the vulnerability's UUID; the
+        stored findings and vulnerability records name it."""
+        lifecycle = deps.cache_manager.finding_lifecycle
+        unnamed = {
+            row["vulnerability_uuid"]
+            for row in lifecycle.presence(project_uuid).values()
+            if not row.get("vuln_id")
+        }
+        if not unnamed:
+            return
+        try:
+            ids = vuln_ids_by_uuid(DTClient.vulnerability_reference, *stored_sources(project_uuid))
+            lifecycle.fill_vuln_ids(
+                project_uuid, {uuid: ids[uuid] for uuid in unnamed if uuid in ids}
+            )
+        except Exception:
+            logger = getattr(deps, "logger", None)
+            if logger is not None:
+                logger.exception("Could not name the vulnerabilities of %s", project_uuid)
+
+    def stored_aliases(project_uuid: str) -> dict[str, set[str]]:
+        """The ids of each vulnerability, from what is stored of the
+        project version: its findings and its vulnerability records."""
+        manager = deps.cache_manager
+        try:
+            return alias_map(DTClient.vulnerability_ids, *stored_sources(project_uuid))
+        except Exception:
+            logger = getattr(deps, "logger", None)
+            if logger is not None:
+                logger.exception("Could not read the aliases of %s", project_uuid)
+            return {}
 
     @router.get("/project/{project_uuid}/gone-findings")
     async def get_gone_findings(
@@ -3617,6 +3679,100 @@ def _register_gone_findings_routes(
             at=datetime.now(timezone.utc).isoformat(),
         )
         return {"changed": changed}
+
+    @router.post("/gone-findings/apply-to-alias")
+    async def apply_gone_finding_to_alias(
+        request: GoneFindingAliasRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Propose a gone finding's assessment for its vulnerability under
+        another id, still reported on the same component: copied when that
+        finding has none, else the team blocks it lacks are added as
+        historical blocks. Saved pending review, through the normal
+        write path. Reviewers only."""
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+        manager = deps.cache_manager
+        gone_key = (request.project_uuid, request.component_uuid, request.vulnerability_uuid)
+        alias_component = request.alias_component_uuid or request.component_uuid
+        alias_key = (request.project_uuid, alias_component, request.alias_vulnerability_uuid)
+        await asyncio.to_thread(name_vulnerabilities, request.project_uuid)
+        rows = await asyncio.to_thread(
+            manager.finding_lifecycle.presence, request.project_uuid
+        )
+        gone_row = rows.get((request.component_uuid, request.vulnerability_uuid)) or {}
+        if gone_row.get("status") != "gone":
+            raise HTTPException(status_code=404, detail="The finding is not gone")
+        alias_row = rows.get((alias_component, request.alias_vulnerability_uuid)) or {}
+        if alias_row.get("status") != "reported":
+            raise HTTPException(
+                status_code=409, detail="The other finding is not reported on this component"
+            )
+        # Only the same vulnerability under another id: the gone finding's
+        # id and the target's must be aliases of each other.
+        known = await asyncio.to_thread(stored_aliases, request.project_uuid)
+        gone_id = str(gone_row.get("vuln_id") or "").strip().upper()
+        target_id = str(alias_row.get("vuln_id") or "").strip().upper()
+        if not gone_id or not target_id or target_id not in known.get(gone_id, set()):
+            raise HTTPException(
+                status_code=409, detail="The other finding is not the same vulnerability"
+            )
+        if alias_component != request.component_uuid and (
+            not gone_row.get("component_purl")
+            or any(
+                (gone_row.get(name) or None) != (alias_row.get(name) or None)
+                for name in ("component_identity", "component_version", "component_purl")
+            )
+        ):
+            # Onto another UUID only for the same component: package URL
+            # (identity and version) equal, as the gone findings view
+            # proposes it.
+            raise HTTPException(
+                status_code=409, detail="The other finding is on another component"
+            )
+        record = manager.assessment_outbox.get_overlay(gone_key)
+        alias_record = manager.assessment_outbox.get_overlay(alias_key)
+        proposal = alias_proposal(record, alias_record, deps.load_team_mapping())
+        if proposal is None:
+            raise HTTPException(status_code=409, detail="Nothing to apply")
+        instance = {
+            "project_uuid": request.project_uuid,
+            "component_uuid": alias_component,
+            "vulnerability_uuid": request.alias_vulnerability_uuid,
+        }
+        payload = {
+            **instance,
+            "state": proposal["state"],
+            "details": proposal["details"],
+            "suppressed": proposal["suppressed"],
+        }
+        try:
+            # Written only while the other finding has the record this was
+            # proposed for.
+            persisted = await manager.persist_assessment_updates(
+                [payload],
+                replace=True,
+                origin=ORIGIN_CARRIED_OVER_BY_ALIAS,
+                author=user,
+                expected_revisions={
+                    alias_key: int((alias_record or {}).get("revision") or 0)
+                },
+            )
+        except AssessmentRevisionConflictError:
+            raise HTTPException(
+                status_code=409, detail="The other finding was saved meanwhile; reload"
+            ) from None
+        try:
+            await asyncio.to_thread(
+                _refresh_grouped_vuln_task_snapshots,
+                deps.tasks,
+                [(instance, payload)],
+                deps.load_team_mapping(),
+            )
+        except Exception:
+            deps.logger.exception("Failed to refresh grouped task snapshots after an alias apply")
+        return {"kind": proposal["kind"], "results": persisted}
 
     @router.get("/gone-findings")
     async def get_named_gone_findings(

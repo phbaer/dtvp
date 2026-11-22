@@ -1625,6 +1625,92 @@ def _bom(*component_uuids, version="1.1"):
     }
 
 
+async def test_records_from_before_tracking_get_a_gone_row_at_startup(tmp_path):
+    """An upgraded instance: assessment records whose findings went before
+    findings were tracked are followed from the next start on, once."""
+    import sqlite3
+
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    # DTVP knows the version's findings (a read), and has a record of a
+    # finding that is not among them.
+    client.get_vulnerabilities.return_value = [_lib("c1", "1.0", vuln="v2")]
+    await manager.import_findings(client, "p1")
+    await manager.persist_assessment_updates([{
+        "project_uuid": "p1", "component_uuid": "c-old", "vulnerability_uuid": "v1",
+        "state": "EXPLOITABLE", "details": _ALPHA, "suppressed": False,
+    }])
+    await manager.persist_assessment_updates([{
+        "project_uuid": "p-unread", "component_uuid": "c-x", "vulnerability_uuid": "v1",
+        "state": "EXPLOITABLE", "details": _ALPHA, "suppressed": False,
+    }])
+    await manager.close()
+    # As before this change: no record of the startup backfill.
+    with sqlite3.connect(manager.finding_lifecycle.path) as connection:
+        connection.execute(
+            "DELETE FROM finding_lifecycle_metadata WHERE key = 'untracked_records_backfilled'"
+        )
+
+    again = CacheManager(base_path=str(tmp_path))
+    row = again.finding_lifecycle.presence("p1")[("c-old", "v1")]
+    assert (row["status"], row["predates_tracking"], row["gone_reason"]) == ("gone", 1, "undetermined")
+    # A version DTVP never read: its first read follows the record.
+    assert again.finding_lifecycle.presence("p-unread") == {}
+    await again.close()
+
+
+async def test_a_read_names_the_vulnerability_of_a_row_made_for_an_old_record(tmp_path):
+    import sqlite3
+
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c1", "1.0", vuln="v2")]
+    await manager.import_findings(client, "p1")
+    manager.finding_lifecycle.record_read("p1", [{
+        "project_uuid": "p1", "component_uuid": "c-old", "vulnerability_uuid": "v9",
+        "vuln_id": None, "component_name": None, "component_version": None,
+        "component_purl": None, "component_identity": None, "first_seen_at": "",
+        "status": "gone", "gone_at": "t0", "last_seen_at": None,
+        "gone_reason": "undetermined", "successor_component_uuid": None,
+        "carry_over": None, "returned_at": None, "predates_tracking": 1,
+    }])
+    manager._save_project_cache(
+        manager._project_vulns_path("p1"), [{"uuid": "v9", "vulnId": "CVE-2026-79651"}],
+        project_uuid="p1",
+    )
+    await manager.import_findings(client, "p1")
+    assert manager.finding_lifecycle.presence("p1")[("c-old", "v9")]["vuln_id"] == "CVE-2026-79651"
+    await manager.close()
+
+
+async def test_a_cpe_change_in_the_bom_is_the_recorded_cause_of_a_bulk_loss(tmp_path):
+    """A new BOM gives a component another CPE; ten NVD findings stop
+    matching at once. Each says why."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+
+    def bom(cpe):
+        return {"components": [{"bom-ref": "c1", "name": "lib-a", "version": "1.0",
+                                "purl": "pkg:maven/org.example/lib-a@1.0", "cpe": cpe}]}
+
+    client.get_vulnerabilities.return_value = [_lib("c1", "1.0", vuln=f"n{n}") for n in range(11)]
+    client.get_bom.return_value = bom("cpe:2.3:a:example:lib:1.0")
+    await manager.import_findings(client, "p1")
+    await manager.get_bom(client, "p1")  # stored as the previous BOM
+
+    client.get_vulnerabilities.return_value = [_lib("c1", "1.0", vuln="n0")]
+    client.get_bom.return_value = bom("cpe:2.3:a:lib-a:lib-a:1.0")
+    await manager.import_findings(client, "p1")
+
+    presence = manager.finding_lifecycle.presence("p1")
+    causes = {row["gone_cause"] for key, row in presence.items() if row["status"] == "gone"}
+    assert causes == {
+        "CPE changed from cpe:2.3:a:example:lib:1.0 to cpe:2.3:a:lib-a:lib-a:1.0"
+    }
+    assert sum(row["status"] == "gone" for row in presence.values()) == 10
+    await manager.close()
+
+
 async def test_a_replaced_component_keeps_its_assessment_across_the_reanalysis(tmp_path):
     """A read taken while the source re-analyses a BOM upload is acted on;
     the next read heals it (no waiting for the source's analysis)."""
@@ -1979,7 +2065,9 @@ async def test_an_assessment_from_before_findings_were_recorded_is_carried_by_vu
 
     assert result.carried_over == [("p1", "c-new", "v1")]
     history = manager.get_assessment_history("p1", "c-new", "v1")
-    assert history[0]["origin"] == "carried-over-by-vulnerability"
+    # The stored BOM names the component with its package URL before the
+    # reason is told: a replacement by identity, carried over as such.
+    assert history[0]["origin"] == "carried-over"
     assert manager.assessment_outbox.get_overlay(("p1", "c-gone", "v1"))["sync_status"] == "superseded"
     row = manager.finding_lifecycle.presence("p1")[("c-gone", "v1")]
     assert (row["gone_reason"], row["carry_over"]) == ("replaced", "carried")
@@ -2197,7 +2285,10 @@ async def test_an_inactive_record_from_before_the_upgrade_is_carried_by_vulnerab
             "gone", "component_removed", "undetermined",
         )
     else:
-        assert result.not_carried == 0 and row is None
+        # Another package: not carried. The record is followed all the same
+        # (it predates tracking), so a person can see it went.
+        assert result.not_carried == 0
+        assert (row["status"], row["component_name"], row["predates_tracking"]) == ("gone", "lib-z", 1)
     await manager.close()
 
 
