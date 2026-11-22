@@ -429,31 +429,6 @@ onBeforeUnmount(() => {
                             {{ massLine(notice) }}. A change in matching, such as other CPEs in a new BOM:
                             check that the findings that went were not real issues.
                         </div>
-                        <div
-                            v-if="disagreements.length"
-                            data-testid="gone-findings-disagreements"
-                            class="mt-2 rounded-lg border border-white/10 px-2 py-1.5 text-[11px] text-gray-300"
-                        >
-                            <div class="font-semibold text-gray-200">One vulnerability, two ids, different assessments</div>
-                            <div v-for="entry in disagreements" :key="`${entry.version.project_uuid}/${entry.item.component_uuid}/${entry.item.findings.map(f => f.vuln_id).join('/')}`">
-                                <span class="font-mono">{{ entry.item.component_name || entry.item.component_uuid }}{{ entry.item.component_version ? `@${entry.item.component_version}` : '' }}</span>
-                                ({{ entry.version.version || '(no version)' }}):
-                                {{ entry.item.findings.map(f => `${f.vuln_id} ${f.state}`).join(' · ') }}
-                            </div>
-                        </div>
-                        <div
-                            v-if="sameIssueDisagreements.length"
-                            data-testid="gone-findings-same-issue-disagreements"
-                            class="mt-2 rounded-lg border border-white/10 px-2 py-1.5 text-[11px] text-gray-300"
-                        >
-                            <div class="font-semibold text-gray-200">Probably one issue, two ids, different assessments</div>
-                            <div v-for="entry in sameIssueDisagreements" :key="`${entry.version.project_uuid}/${entry.item.component_uuid}/${entry.item.findings.map(f => f.vuln_id).join('/')}`">
-                                <span class="font-mono">{{ entry.item.component_name || entry.item.component_uuid }}{{ entry.item.component_version ? `@${entry.item.component_version}` : '' }}</span>
-                                ({{ entry.version.version || '(no version)' }}):
-                                {{ entry.item.findings.map(f => `${f.vuln_id} ${f.state}`).join(' · ') }}
-                                <span class="text-gray-500">({{ entry.item.reason }}; no source links them)</span>
-                            </div>
-                        </div>
                         <div v-if="reasonCounts.length" class="mt-2 flex flex-wrap gap-1.5" data-testid="gone-findings-reasons">
                             <button
                                 v-for="[reason, count] in reasonCounts"
@@ -759,6 +734,46 @@ onBeforeUnmount(() => {
                                     </div>
                                 </div>
                             </section>
+                        <!-- Below the findings and collapsed: these lists can be long
+                             and must never push the findings out of view. -->
+                        <details
+                            v-if="disagreements.length || sameIssueDisagreements.length"
+                            data-testid="gone-findings-duplicates"
+                            class="mt-4 rounded-lg border border-white/10 px-2 py-1.5"
+                        >
+                            <summary class="cursor-pointer text-[11px] font-semibold text-gray-200">
+                                {{ disagreements.length + sameIssueDisagreements.length }}
+                                probable duplicate{{ disagreements.length + sameIssueDisagreements.length === 1 ? '' : 's' }}
+                                with different assessments
+                            </summary>
+                            <div class="max-h-60 overflow-y-auto">
+                            <div
+                                v-if="disagreements.length"
+                                data-testid="gone-findings-disagreements"
+                                class="mt-2 text-[11px] text-gray-300"
+                            >
+                                <div class="font-semibold text-gray-200">One vulnerability, two ids, different assessments</div>
+                                <div v-for="entry in disagreements" :key="`${entry.version.project_uuid}/${entry.item.component_uuid}/${entry.item.findings.map(f => f.vuln_id).join('/')}`">
+                                    <span class="font-mono">{{ entry.item.component_name || entry.item.component_uuid }}{{ entry.item.component_version ? `@${entry.item.component_version}` : '' }}</span>
+                                    ({{ entry.version.version || '(no version)' }}):
+                                    {{ entry.item.findings.map(f => `${f.vuln_id} ${f.state}`).join(' · ') }}
+                                </div>
+                            </div>
+                            <div
+                                v-if="sameIssueDisagreements.length"
+                                data-testid="gone-findings-same-issue-disagreements"
+                                class="mt-2 text-[11px] text-gray-300"
+                            >
+                                <div class="font-semibold text-gray-200">Probably one issue, two ids, different assessments</div>
+                                <div v-for="entry in sameIssueDisagreements" :key="`${entry.version.project_uuid}/${entry.item.component_uuid}/${entry.item.findings.map(f => f.vuln_id).join('/')}`">
+                                    <span class="font-mono">{{ entry.item.component_name || entry.item.component_uuid }}{{ entry.item.component_version ? `@${entry.item.component_version}` : '' }}</span>
+                                    ({{ entry.version.version || '(no version)' }}):
+                                    {{ entry.item.findings.map(f => `${f.vuln_id} ${f.state}`).join(' · ') }}
+                                    <span class="text-gray-500">({{ entry.item.reason }}; no source links them)</span>
+                                </div>
+                            </div>
+                            </div>
+                        </details>
                         </template>
                     </div>
                 </div>

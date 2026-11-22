@@ -153,8 +153,8 @@ class VulnerabilityIdentifiers(Protocol):
 class VulnerabilityFacts(Protocol):
     """Optional: what a stored finding or vulnerability record tells of its
     vulnerability, so DTVP can guess that two records without an alias are
-    one issue (``dtvp/same_issue.py``): the same description, or the same
-    affected range and CWE. A source without it gets no such guesses."""
+    one issue (``dtvp/same_issue.py``): the same description. A source
+    without it gets no such guesses."""
 
     @staticmethod
     def vulnerability_facts(item: Any) -> dict[str, Any] | None:

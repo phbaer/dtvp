@@ -534,7 +534,7 @@ export interface GoneFinding {
     /** The same vulnerability under another id, still reported on the same component. */
     alias?: GoneFindingAlias | null;
     /** A reported finding that is probably the same issue although no source
-     * links the two (same description, or same affected range and CWE): a
+     * links the two (same description): a
      * guess, applied only once a person confirmed it. */
     same_issue?: GoneFindingSameIssue | null;
 }
