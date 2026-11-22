@@ -1033,10 +1033,16 @@ async def test_the_loop_keeps_planning_while_an_export_waits(tmp_path):
     await asyncio.sleep(0.01)
     clock.advance(20)
     await asyncio.wait_for(scheduler.run_cycle(source, wait=False), 1)
-    await asyncio.sleep(0.05)
-    # One export at a time; the versions were planned and synced meanwhile.
+
+    # The versions are planned and synced while the export waits. Wait for
+    # that with a deadline rather than a fixed sleep: CI runners are slower.
+    async def synced():
+        while {row["status"] for row in manager.sync_state.rows()} != {"synced"}:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(synced(), 10)
+    # One export at a time, and it is still waiting.
     assert exports == [1]
-    assert {row["status"] for row in manager.sync_state.rows()} == {"synced"}
     blocked.set()
     await scheduler.drain()
     await manager.close()
