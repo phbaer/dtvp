@@ -254,8 +254,11 @@ Every read of a project version from Dependency-Track is recorded in
 [ADR 0004](adr/0004-background-sync-and-event-stream.md#sync-state)), by
 `dtvp/source_sync_state.py`. The project list adds versions as
 `never_synced` and marks inactive ones, and, from a complete list, missing
-ones, `gone`; it stores the source's change signals (`dtvpSourceMarks`:
-Dependency-Track's last BOM import and vulnerability analysis). A
+ones, `gone`; it stores the source's change hints (`dtvpSourceMarks`, for
+Dependency-Track its last BOM import and vulnerability analysis) in
+`source_bom_hint` and `source_analysis_hint`. Hints are optional
+(`ChangeHints` in `dtvp/ports.py`): a source without them gets regular,
+staggered re-reads instead ([Sync scheduler](#sync-scheduler)). A
 findings, vulnerability, or BOM read stores a sha256 digest over the raw
 response (before DTVP's overlay), the attempt and success times, and resets
 the failures; a failed read records its error class and counts failures.
@@ -295,8 +298,8 @@ backend. Each pass (at least once a second, and at once after a save) it:
    | :--- | :--- |
    | P0 | a pending user request (`requested_at`; the request route comes with step 8) |
    | P1 | the first import of a version of a watched product |
-   | P2 | a changed list signal (BOM import: all kinds; vulnerability analysis: findings and vulnerability records), or a watched product's findings after 120 s, vulnerability records after 6 h, BOM after 24 h |
-   | P3 | the first import of any other active version (backfill) |
+   | P2 | a changed change hint, for a source with hints (BOM: all kinds; analysis: findings and vulnerability records), or a watched product's findings after 120 s, vulnerability records after 6 h, BOM after 24 h |
+   | P3 | the first import of any other active version (backfill); and, for a source without change hints (one that does not declare `ChangeHints`), every active version's findings after `DTVP_SYNC_UNHINTED_FINDINGS_SECONDS` (1 h), vulnerability records after 6 h, the BOM after 24 h or after changed findings, each interval staggered per version between 75 % and 100 % |
    | P4 | the safety re-read, 12 h after the last success |
 
    Gone and inactive versions are skipped; a failed one, requested or

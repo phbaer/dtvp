@@ -43,4 +43,5 @@ MIGRATION_RECORD_EFFECTS: dict[tuple[str, int], Effect] = {
     ("assessment_outbox", 8): Baseline(),
     ("assessment_outbox", 9): NoRecordEffect("derived fields tables only"),
     ("local_store", 6): NoRecordEffect("sync_versions only, which is not dumped"),
+    ("local_store", 7): NoRecordEffect("sync_versions only, which is not dumped"),
 }

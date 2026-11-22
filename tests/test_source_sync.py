@@ -26,6 +26,7 @@ from dtvp.source_sync import (
     SourceUnavailable,
     SyncItem,
     TokenBucket,
+    _stagger,
     plan_version,
 )
 
@@ -63,8 +64,8 @@ def _finding(component, vuln="v1"):
     }
 
 
-class Source:
-    """Two products, one version each."""
+class PlainSource:
+    """Two products, one version each; no change hints (ports.ChangeHints)."""
 
     def __init__(self):
         self.projects = [
@@ -101,6 +102,13 @@ class Source:
 
     def synced(self):
         return [call[1] for call in self.calls if call[0] == "findings"]
+
+
+class Source(PlainSource):
+    """Like Dependency-Track: change hints under ``dtvpSourceMarks``."""
+
+    def change_hint_kinds(self):
+        return ("bom", "analysis")
 
 
 def _scheduler(tmp_path, *, watched=(), concurrency=2):
@@ -201,8 +209,8 @@ def _row(**values):
         "project_uuid": "p1", "product_name": "App", "active_in_dt": 1,
         "status": "synced", "settled_status": "synced", "last_success_at": NOW.isoformat(),
         "findings_read_at": NOW.isoformat(), "vulns_read_at": NOW.isoformat(),
-        "bom_read_at": NOW.isoformat(), "dt_last_bom_import": "1",
-        "read_bom_signal": "1", "dt_last_vuln_analysis": "1",
+        "bom_read_at": NOW.isoformat(), "source_bom_hint": "1",
+        "read_bom_signal": "1", "source_analysis_hint": "1",
         "read_analysis_signal": "1", "next_due_at": None, "requested_at": None,
     }
     return {**base, **values}
@@ -217,8 +225,8 @@ def _row(**values):
         (_row(), False, 12 * 3600, (P4_SAFETY, ("findings", "vulns", "bom"))),
         (_row(last_success_at=None), False, 0, (P3_BACKFILL, ("findings", "vulns", "bom"))),
         (_row(last_success_at=None), True, 0, (P1_WATCHED_FIRST, ("findings", "vulns", "bom"))),
-        (_row(dt_last_bom_import="2"), False, 0, (P2_DUE, ("findings", "vulns", "bom"))),
-        (_row(dt_last_vuln_analysis="2"), False, 0, (P2_DUE, ("findings", "vulns"))),
+        (_row(source_bom_hint="2"), False, 0, (P2_DUE, ("findings", "vulns", "bom"))),
+        (_row(source_analysis_hint="2"), False, 0, (P2_DUE, ("findings", "vulns"))),
         (_row(requested_at=NOW.isoformat()), False, 0, (P0_REQUEST, ("findings", "vulns", "bom"))),
         (_row(status="gone"), True, 0, None),
         (_row(active_in_dt=0), True, 0, None),
@@ -601,6 +609,84 @@ async def test_list_signals_reread_what_they_announce(tmp_path):
     await scheduler.run_cycle(source)
     assert [call for call in source.calls if call[0] != "projects"] == []
     await manager.close()
+
+
+# -- sources without change hints (ports.ChangeHints) -------------------------
+
+
+def test_a_version_without_hints_is_read_again_on_staggered_intervals():
+    schedule = Schedule()
+    row = _row()
+    factor = _stagger("p1")
+
+    def due(seconds):
+        return plan_version(
+            row, watched=False, now=NOW + timedelta(seconds=seconds),
+            schedule=schedule, hinted=False,
+        )
+
+    assert 0.75 <= factor < 1
+    # Changed hints mean nothing without hints: nothing is due early.
+    assert plan_version(
+        _row(source_bom_hint="2"), watched=False, now=NOW, schedule=schedule, hinted=False
+    ) is None
+    assert due(3600 * factor - 1) is None
+    assert due(3600 * factor + 1) == (P3_BACKFILL, ("findings",))
+    assert due(6 * 3600 * factor + 1) == (P3_BACKFILL, ("findings", "vulns"))
+    assert due(24 * 3600 * factor + 1)[1] == ("findings", "vulns", "bom")
+    # With hints, an unwatched version waits for a hint or the safety re-read.
+    assert plan_version(
+        row, watched=False, now=NOW + timedelta(hours=2), schedule=schedule
+    ) is None
+
+
+def test_the_stagger_spreads_versions_over_the_interval():
+    factors = [_stagger(f"version-{index}") for index in range(200)]
+    assert all(0.75 <= factor < 1 for factor in factors)
+    assert max(factors) - min(factors) > 0.2
+    assert len({round(factor, 3) for factor in factors}) > 100
+
+
+async def test_a_source_without_hints_reads_hourly_and_the_bom_after_changed_findings(tmp_path):
+    scheduler, manager, hub, clock = _scheduler(tmp_path)
+    source = PlainSource()
+    manager.refresh_interval_seconds = 3600 * 24
+    await scheduler.run_cycle(source)
+    assert scheduler.hinted is False
+    assert sorted(source.synced()) == ["a1", "b1"]
+    source.calls.clear()
+
+    clock.advance(20 * 60)
+    await scheduler.run_cycle(source)
+    assert [call for call in source.calls if call[0] != "projects"] == []
+
+    # After an hour (staggered) the findings are read again; changed
+    # findings make the BOM due next.
+    source.findings["a1"] = [_finding("c1"), _finding("c9")]
+    clock.advance(45 * 60)
+    await scheduler.run_cycle(source)
+    reads = [call for call in source.calls if call[0] != "projects"]
+    assert sorted(reads) == [("findings", "a1"), ("findings", "b1")]
+    assert manager.sync_state.row("a1")["bom_read_at"] is None
+    assert manager.sync_state.row("b1")["bom_read_at"] is not None
+    source.calls.clear()
+    clock.advance(20)
+    await scheduler.run_cycle(source)
+    # Only the version whose findings changed reads its BOM.
+    boms = [call for call in source.calls if call[0] == "bom"]
+    assert boms == [("bom", "a1")]
+    await manager.close()
+
+
+async def test_the_dependency_track_client_declares_its_hints():
+    from dtvp.dt_client import DTClient
+    from dtvp.ports import ChangeHints, change_hint
+
+    assert issubclass(DTClient, ChangeHints) or hasattr(DTClient, "change_hint_kinds")
+    assert not isinstance(PlainSource(), ChangeHints)
+    assert isinstance(Source(), ChangeHints)
+    assert change_hint({"dtvpSourceMarks": {"bom": 3}}, "bom") == 3
+    assert change_hint({"name": "x"}, "bom") is None
 
 
 async def test_the_export_shares_the_budget(tmp_path):
