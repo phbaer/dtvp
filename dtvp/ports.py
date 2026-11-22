@@ -134,6 +134,23 @@ class BudgetedTransport(Protocol):
 
 
 @runtime_checkable
+class VulnerabilityIdentifiers(Protocol):
+    """Optional: the ids under which one vulnerability is known (its own id
+    and its aliases, for example a CVE and its GitHub advisory), read from a
+    finding or a vulnerability record as the source stores them."""
+
+    @staticmethod
+    def vulnerability_ids(item: Any) -> set[str]:
+        """Every id of the item's vulnerability, upper case; empty when the
+        item is not one of the source's findings or records."""
+
+    @staticmethod
+    def vulnerability_reference(item: Any) -> tuple[str, str] | None:
+        """The item's vulnerability UUID and its own id (as the source names
+        it), or ``None``."""
+
+
+@runtime_checkable
 class ChangeHints(Protocol):
     """Optional: the source tells, per project version, when its data
     changed, so unchanged versions are not read again (ADR 0004, "Change

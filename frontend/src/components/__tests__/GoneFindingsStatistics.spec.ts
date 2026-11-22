@@ -49,6 +49,21 @@ describe('GoneFindingsStatistics', () => {
         ])
     })
 
+    it('names a version in which many findings went no longer matched', async () => {
+        vi.mocked(getGoneFindings).mockResolvedValue({
+            name: 'App',
+            versions: [version('6.15.6', {
+                by_reason: { no_longer_matched: 1743 }, by_carry_over: {}, needs_attention: 1, acknowledged: 0,
+                mass_disappearance: { reason: 'no_longer_matched', count: 1743, share: 0.425, findings_before: 4098 },
+            }, [])],
+        } as any)
+        const wrapper = mount(GoneFindingsStatistics, { props: { projectName: 'App' } })
+        await flushPromises()
+        expect(wrapper.get('[data-testid="gone-findings-statistics-mass"]').text()).toBe(
+            '6.15.6: 1743 findings went no longer matched at the last read (43% of the findings).',
+        )
+    })
+
     it('is hidden with nothing gone and says when loading failed', async () => {
         vi.mocked(getGoneFindings).mockResolvedValue({ name: 'App', versions: [] } as any)
         const empty = mount(GoneFindingsStatistics, { props: { projectName: 'App' } })

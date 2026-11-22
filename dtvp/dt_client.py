@@ -44,6 +44,44 @@ def _finding_matches_cve(finding: Dict[str, Any], cve_upper: str) -> bool:
 
 
 class DTClient:
+    @staticmethod
+    def vulnerability_ids(item: Any) -> set:
+        """Every id of a finding's or vulnerability record's vulnerability,
+        upper case: ``vulnId``, ``name`` and the values of ``aliases``
+        (``VulnerabilityIdentifiers`` in ``ports``)."""
+        if not isinstance(item, dict):
+            return set()
+        vulnerability = item.get("vulnerability") if "vulnerability" in item else item
+        if not isinstance(vulnerability, dict):
+            return set()
+        ids = {
+            value.strip().upper()
+            for value in (vulnerability.get("vulnId"), vulnerability.get("name"))
+            if isinstance(value, str) and value.strip()
+        }
+        for alias in vulnerability.get("aliases") or []:
+            if isinstance(alias, dict):
+                ids.update(
+                    value.strip().upper()
+                    for value in alias.values()
+                    if isinstance(value, str) and value.strip()
+                )
+        return ids
+
+    @staticmethod
+    def vulnerability_reference(item: Any):
+        """The vulnerability UUID and ``vulnId`` of a finding or a
+        vulnerability record (``VulnerabilityIdentifiers`` in ``ports``)."""
+        if not isinstance(item, dict):
+            return None
+        vulnerability = item.get("vulnerability") if "vulnerability" in item else item
+        if not isinstance(vulnerability, dict):
+            return None
+        uuid, vuln_id = vulnerability.get("uuid"), vulnerability.get("vulnId")
+        if isinstance(uuid, str) and uuid and isinstance(vuln_id, str) and vuln_id:
+            return uuid, vuln_id
+        return None
+
     def __init__(
         self,
         base_url: str,

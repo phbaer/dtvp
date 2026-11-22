@@ -356,6 +356,8 @@ COLUMN_MAP: dict[str, dict[str, str]] = {
                 "returned_at",
                 "acknowledged_by",
                 "acknowledged_at",
+                "gone_cause",
+                "predates_tracking",
             )
         },
     },

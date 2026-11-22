@@ -1878,6 +1878,12 @@ class AssessmentOutboxStore:
                 self._reload_keys(connection, targets)
             return targets
 
+    def all_states(self) -> list[tuple[AssessmentKey, dict[str, Any]]]:
+        """Every local record, by finding; copies."""
+        self._ensure_initialized()
+        with self._lock:
+            return [(key, copy.deepcopy(state)) for key, state in self._states.items()]
+
     def project_states(self, project_uuid: str) -> dict[AssessmentKey, dict[str, Any]]:
         """The local records of one project's findings, by finding."""
         self._ensure_initialized()

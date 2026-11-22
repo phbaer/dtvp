@@ -472,3 +472,140 @@ async def test_gone_findings_are_acknowledged_for_everyone(client, queued):
     assert after["acknowledged_by"] and after["acknowledged_at"]
     assert withdrawn["acknowledged_by"] is None
     assert (empty.status_code, blank.status_code) == (422, 422)
+
+
+def _advisory_of_1(analysis=None):
+    """GHSA record of CVE-2026-0001 on the same component."""
+    return {
+        "uuid": "finding-g",
+        "vulnerability": {
+            "vulnId": "GHSA-aaaa-bbbb-cccc", "uuid": "vuln-g", "severity": "HIGH",
+            "aliases": [{"cveId": "CVE-2026-0001", "ghsaId": "GHSA-aaaa-bbbb-cccc"}],
+        },
+        "component": {"name": "library-a", "uuid": "component-1", "version": "2.0"},
+        "analysis": analysis or {},
+    }
+
+
+async def test_a_gone_cve_is_applied_to_its_reported_advisory_by_a_reviewer(client, queued):
+    """CVE-2026-0001 stops matching; its advisory on the same component is
+    still reported and unassessed. The reviewer applies the CVE's assessment
+    to it: saved pending review."""
+    queued.get_analysis.return_value = None
+    queued.get_vulnerabilities.return_value = [_advisory_of_1(), _finding(2)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+
+    gone = client.get("/api/project/p1/gone-findings").json()
+    [finding] = gone["findings"]
+    assert finding["vuln_id"] == "CVE-2026-0001"
+    assert finding["alias"]["vuln_id"] == "GHSA-aaaa-bbbb-cccc"
+    assert finding["alias"]["proposal"] == "copy"
+    request = {
+        "project_uuid": "p1", "component_uuid": "component-1",
+        "vulnerability_uuid": "vuln-1", "alias_vulnerability_uuid": "vuln-g",
+    }
+
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        assert client.post("/api/gone-findings/apply-to-alias", json=request).status_code == 403
+    applied = client.post("/api/gone-findings/apply-to-alias", json=request)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["kind"] == "copy"
+    record = main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-g")
+    assert record["analysisState"] == "NOT_AFFECTED"
+    assert "Decision 1" in record["analysisDetails"]
+    assert record["analysisDetails"].rstrip().endswith("[Status: Pending Review]")
+
+    # Applied once: the advisory has it now, nothing more to add.
+    again = client.post("/api/gone-findings/apply-to-alias", json=request)
+    assert again.status_code == 409
+    # Only from a gone finding.
+    reported = {**request, "vulnerability_uuid": "vuln-2", "component_uuid": "component-2"}
+    assert client.post("/api/gone-findings/apply-to-alias", json=reported).status_code == 404
+
+
+async def test_an_advisory_on_the_recreated_component_takes_the_gone_cve_by_alias(client, queued):
+    """The component was recreated (same package URL and version, another
+    UUID) and only the CVE's advisory matches it now: applied there, origin
+    carried-over-by-alias, pending review."""
+    queued.get_analysis.return_value = None
+    purl = "pkg:npm/library-a@2.0"
+    cve = _finding(1)
+    cve["component"] = {**cve["component"], "purl": purl}
+    queued.get_vulnerabilities.return_value = [cve, _finding(2)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    advisory = _advisory_of_1()
+    advisory["component"] = {"name": "library-a", "uuid": "component-new", "version": "2.0", "purl": purl}
+    queued.get_vulnerabilities.return_value = [advisory, _finding(2)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+
+    [finding] = client.get("/api/project/p1/gone-findings").json()["findings"]
+    assert finding["alias"]["component_uuid"] == "component-new"
+    request = {
+        "project_uuid": "p1", "component_uuid": "component-1", "vulnerability_uuid": "vuln-1",
+        "alias_vulnerability_uuid": "vuln-g", "alias_component_uuid": "component-new",
+    }
+    applied = client.post("/api/gone-findings/apply-to-alias", json=request)
+    assert applied.status_code == 200, applied.text
+    history = main.cache_manager.get_assessment_history("p1", "component-new", "vuln-g")
+    assert [entry["origin"] for entry in history][-1] == "carried-over-by-alias"
+    record = main.cache_manager.get_assessment_overlay("p1", "component-new", "vuln-g")
+    assert record["analysisDetails"].rstrip().endswith("[Status: Pending Review]")
+
+    # Not onto an unrelated finding on another component.
+    other = {**request, "alias_component_uuid": "component-2", "alias_vulnerability_uuid": "vuln-2"}
+    assert client.post("/api/gone-findings/apply-to-alias", json=other).status_code == 409
+
+
+async def test_apply_to_alias_takes_only_a_reported_alias(client, queued):
+    """The reviewer's case: a vulnerability that is no alias, or one not
+    reported on the component, gets nothing written."""
+    queued.get_analysis.return_value = None
+    queued.get_vulnerabilities.return_value = [_advisory_of_1(), _finding(2)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    request = {"project_uuid": "p1", "component_uuid": "component-1", "vulnerability_uuid": "vuln-1"}
+
+    unknown = client.post("/api/gone-findings/apply-to-alias",
+                          json={**request, "alias_vulnerability_uuid": "vuln-NOT-AN-ALIAS"})
+    assert unknown.status_code == 409
+    assert main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-NOT-AN-ALIAS") is None
+    # Reported, but another vulnerability (CVE-2026-0002 on another component).
+    unrelated = client.post("/api/gone-findings/apply-to-alias", json={
+        **request, "alias_vulnerability_uuid": "vuln-2", "alias_component_uuid": "component-2",
+    })
+    assert unrelated.status_code == 409
+    assert main.cache_manager.list_export_queue(include_texts=False) == [
+        item for item in main.cache_manager.list_export_queue(include_texts=False)
+        if item["component_uuid"] != "component-1" or item["vulnerability_uuid"] == "vuln-1"
+    ]
+
+
+async def test_a_row_for_an_old_record_is_named_and_gets_its_alias(client, queued):
+    """CVE-2026-79651's case: the gone row knows only the vulnerability UUID
+    (made for a record from before tracking). The stored vulnerability
+    records name it, so its advisory is found and can be applied."""
+    import sqlite3
+
+    queued.get_analysis.return_value = None
+    queued.get_vulnerabilities.return_value = [_advisory_of_1(), _finding(2)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    lifecycle = main.cache_manager.finding_lifecycle
+    with sqlite3.connect(lifecycle.path) as connection:
+        connection.execute(
+            "UPDATE finding_presence SET vuln_id = NULL, predates_tracking = 1 "
+            "WHERE vulnerability_uuid = 'vuln-1'"
+        )
+    lifecycle._presence.clear()
+    main.cache_manager._save_project_cache(
+        main.cache_manager._project_vulns_path("p1"),
+        [{"uuid": "vuln-1", "vulnId": "CVE-2026-0001"}],
+        project_uuid="p1",
+    )
+
+    [finding] = client.get("/api/project/p1/gone-findings").json()["findings"]
+    assert finding["vuln_id"] == "CVE-2026-0001"
+    assert finding["alias"]["vuln_id"] == "GHSA-aaaa-bbbb-cccc"
+    applied = client.post("/api/gone-findings/apply-to-alias", json={
+        "project_uuid": "p1", "component_uuid": "component-1",
+        "vulnerability_uuid": "vuln-1", "alias_vulnerability_uuid": "vuln-g",
+    })
+    assert applied.status_code == 200, applied.text

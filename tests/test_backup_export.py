@@ -80,6 +80,7 @@ def test_gone_findings_and_session_versions_are_records(instance):
     presence = {
         record["key"]["component_uuid"]: record
         for record in _records(members, "finding_presence")
+        if record["key"]["vulnerability_uuid"] == "v-l"
     }
     assert presence["c-old"]["gone_reason"] == "replaced"
     assert presence["c-old"]["successor_component_uuid"] == "c-new"
@@ -88,8 +89,16 @@ def test_gone_findings_and_session_versions_are_records(instance):
         "rita", "2026-11-19T09:00:00+00:00",
     )
     assert presence["c-new"]["status"] == "reported"
-    # Fields of an acknowledgement only where there is one.
+    # Fields of an acknowledgement or a cause only where there is one.
     assert "acknowledged_by" not in presence["c-new"]
+    assert "gone_cause" not in presence["c-old"]
+    [cpe] = [
+        record for record in _records(members, "finding_presence")
+        if record["key"]["vulnerability_uuid"] == "v-cpe"
+    ]
+    assert cpe["gone_cause"] == "CPE changed from cpe:2.3:a:x:lib:1.1 to cpe:2.3:a:y:lib:1.1"
+    assert (cpe["predates_tracking"], cpe["first_seen_at"]) == (True, "")
+    assert "predates_tracking" not in presence["c-old"]
     [read] = _records(members, "finding_read")
     assert (read["project_uuid"], read["went"], read["carried_over"]) == (
         "p-lifecycle", {"replaced": 1}, 1,

@@ -1,9 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import GoneFindingsPanel from '../GoneFindingsPanel.vue'
-import { acknowledgeGoneFindings, getGoneFindings } from '../../lib/api'
+import { acknowledgeGoneFindings, applyGoneFindingToAlias, getGoneFindings } from '../../lib/api'
 
-vi.mock('../../lib/api', () => ({ getGoneFindings: vi.fn(), acknowledgeGoneFindings: vi.fn() }))
+vi.mock('../../lib/api', () => ({
+    getGoneFindings: vi.fn(), acknowledgeGoneFindings: vi.fn(), applyGoneFindingToAlias: vi.fn(),
+}))
 
 const READ = {
     read_at: '2026-11-20T10:00:00+00:00',
@@ -222,6 +224,71 @@ describe('GoneFindingsPanel', () => {
             expect(document.body.querySelector(`[data-testid="${id}"]`)).toBeNull()
         }
         wrapper.unmount()
+    })
+
+    it('flags a mass disappearance, names the cause, and applies to an alias', async () => {
+        const dompurify = {
+            component_uuid: 'c-d', component_name: 'dompurify', component_version: '3.2.7',
+            component_purl: 'pkg:npm/dompurify@3.2.7', reason: 'no_longer_matched',
+        }
+        vi.mocked(getGoneFindings).mockResolvedValue({
+            name: 'App',
+            versions: [{
+                version: '6.15.6', project_uuid: 'p1',
+                last_read: {
+                    ...READ, went: { no_longer_matched: 1743 },
+                    mass_disappearance: { reason: 'no_longer_matched', count: 1743, share: 0.425, findings_before: 4098 },
+                },
+                gone: { no_longer_matched: 1743 },
+                alias_disagreements: [{
+                    component_uuid: 'c-d', component_name: 'dompurify', component_version: '3.2.7',
+                    findings: [
+                        { vulnerability_uuid: 'va', vuln_id: 'CVE-2026-65913', state: 'NOT_AFFECTED' },
+                        { vulnerability_uuid: 'vb', vuln_id: 'GHSA-v9jr-rg53-9pgp', state: 'EXPLOITABLE' },
+                    ],
+                }],
+                findings: [finding({
+                    ...dompurify, vulnerability_uuid: 'v-cve', vuln_id: 'CVE-2026-65901',
+                    needs_attention: true, tickets: ['VP-61182'],
+                    assessment: { sync_status: 'inactive', state: 'EXPLOITABLE', revision: 2 },
+                    cause: 'CPE changed from cpe:2.3:a:cure53:dompurify:3.2.7 to cpe:2.3:a:dompurify:dompurify:3.2.7',
+                    alias: {
+                        component_uuid: 'c-d', vulnerability_uuid: 'v-ghsa', vuln_id: 'GHSA-x4vx-rjvf-j5p4',
+                        state: 'NOT_AFFECTED', tickets: [], disagrees: true, proposal: 'blocks',
+                    },
+                })],
+            }],
+        } as any)
+        vi.mocked(applyGoneFindingToAlias).mockResolvedValue({ kind: 'blocks' })
+        const wrapper = await mountPanel()
+
+        expect(wrapper.get('[data-testid="gone-findings-button"]').attributes('title')).toContain(
+            '6.15.6: 1743 findings went no longer matched at the last read (43% of the findings)',
+        )
+        await wrapper.get('[data-testid="gone-findings-button"]').trigger('click')
+        expect(texts('[data-testid="gone-findings-mass"]')[0]).toContain('1743 findings went no longer matched')
+        expect(texts('[data-testid="gone-findings-disagreements"]')[0]).toContain(
+            'CVE-2026-65913 NOT_AFFECTED · GHSA-v9jr-rg53-9pgp EXPLOITABLE',
+        )
+        expect(texts('[data-testid="gone-finding-cause"]')).toEqual([
+            'CPE changed from cpe:2.3:a:cure53:dompurify:3.2.7 to cpe:2.3:a:dompurify:dompurify:3.2.7',
+        ])
+        expect(texts('[data-testid="gone-finding-tickets"]')).toEqual(['Tickets: VP-61182'])
+        expect(texts('[data-testid="gone-finding-alias"]')[0]).toContain(
+            'Still reported as GHSA-x4vx-rjvf-j5p4: NOT_AFFECTED, a different assessment',
+        )
+
+        await click(document.body.querySelector('[data-testid="gone-finding-apply-alias"]'))
+        expect(applyGoneFindingToAlias).toHaveBeenCalledWith('p1', 'c-d', 'v-cve', 'v-ghsa', 'c-d')
+        expect(texts('[data-testid="gone-finding-applied"]')).toEqual(['Applied, pending review'])
+        wrapper.unmount()
+
+        // Analysts see the proposal, not the action.
+        const analyst = await mountPanel(false)
+        await analyst.get('[data-testid="gone-findings-button"]').trigger('click')
+        expect(document.body.querySelector('[data-testid="gone-finding-alias"]')).not.toBeNull()
+        expect(document.body.querySelector('[data-testid="gone-finding-apply-alias"]')).toBeNull()
+        analyst.unmount()
     })
 
     it('says when nothing needs attention, and is disabled with nothing gone', async () => {

@@ -947,6 +947,10 @@ def _gone_properties(
         )
     if not properties:
         return []  # nothing went: an export says nothing about it
+    if int(summary.get("attention") or 0) > 0:
+        properties.append(
+            {"name": f"{prefix}:export_findings_gone_attention", "value": str(summary["attention"])}
+        )
     last_read = summary.get("last_read") or {}
     if last_read.get("at"):
         properties.append(
