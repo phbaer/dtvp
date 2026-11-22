@@ -4,7 +4,7 @@ import os
 import logging
 import json
 import threading
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, Callable
 from urllib.parse import quote
 from fastapi import Request
 from pydantic import Field
@@ -180,6 +180,62 @@ class DTClient:
             return bool(response.json().get("processing"))
         except (ValueError, AttributeError):
             return False
+
+    async def portfolio_findings(
+        self,
+        *,
+        page_size: int = 1000,
+        on_page: Optional[Callable[[int, int], None]] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """``BulkFindings`` (dtvp/ports.py): every finding of every active
+        project version, by project UUID, from ``GET /api/v1/finding``
+        (Dependency-Track 4.x ``FindingResource.getAllFindings``, permission
+        ``VIEW_VULNERABILITY``; Alpine paging with ``pageNumber`` and
+        ``pageSize``, the total in ``X-Total-Count``). Inactive projects are
+        left out (``showInactive=false``, the default), suppressed findings
+        are included. Each finding is ``Finding.QUERY_ALL_FINDINGS``'s shape:
+        the component (with its project UUID under ``project``), the
+        vulnerability, the attribution and the analysis (``state``,
+        ``isSuppressed``, ``detail``). Every page is one HTTP request, so a
+        budget hook pays for each."""
+        by_project: Dict[str, List[Dict[str, Any]]] = {}
+        page_number = 1
+        read = 0
+        total: Optional[int] = None
+        while True:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/finding",
+                params={
+                    "pageNumber": page_number,
+                    "pageSize": page_size,
+                    "showInactive": "false",
+                    "showSuppressed": "true",
+                },
+            )
+            response.raise_for_status()
+            page = response.json()
+            if total is None:
+                try:
+                    total = int(response.headers.get("X-Total-Count"))
+                except (TypeError, ValueError):
+                    total = None
+            if not isinstance(page, list):
+                raise TypeError("Unexpected findings page")
+            for finding in page:
+                component = finding.get("component") if isinstance(finding, dict) else None
+                project = (component or {}).get("project")
+                if project:
+                    by_project.setdefault(str(project), []).append(finding)
+            read += len(page)
+            if on_page is not None:
+                pages = (
+                    max(1, -(-total // page_size)) if total is not None else page_number
+                )
+                on_page(page_number, pages)
+            if not page or len(page) < page_size or (total is not None and read >= total):
+                break
+            page_number += 1
+        return by_project
 
     async def __aenter__(self):
         return self

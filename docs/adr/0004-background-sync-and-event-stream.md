@@ -157,6 +157,48 @@ version between 75 % and 100 % of the interval so they do not fall due at
 once; content digests find what changed. Watched products keep their
 intervals either way. The schedule below describes a source with hints.
 
+**Portfolio pass** (amendment, 2026-11-22). Reading many versions one by one
+is slow: a version costs a findings read, a vulnerability-records read and
+often a BOM read, each paced by the budget. A source that can list every
+version's findings in one paginated read declares `BulkFindings`
+(`dtvp/ports.py`). When more versions are due for a findings re-read than
+the last list took pages (at least five; at most one pass a minute), the
+scheduler holds them back and reads the list once instead. Each findings
+read of a version records a `portfolio_digest` of what such a list can show
+(finding keys, analysis state, details and suppression; migration
+`0009_sync_portfolio_digest.sql`). A held version whose share of the list
+gives the same digest is marked checked: its findings count as read, the
+analysis hint seen as the pass started counts as read, and a request made
+before the pass is answered as done. The others, and versions without a
+digest yet, are read one by one as before. Not candidates: first imports
+(the list lacks what the version's own read stores) and the 12-hour safety
+re-read, which stays a full read because the list does not carry
+justification and response. Progress is in `source.portfolio_pass` events
+and `GET /api/sync/status` (`portfolio_pass`). A failed pass leaves the
+versions to be read one by one.
+
+The Dependency-Track adapter uses `GET /api/v1/finding`
+(`FindingResource.getAllFindings`, permission `VIEW_VULNERABILITY`, paged
+with `pageNumber`/`pageSize`, total in `X-Total-Count`; `showInactive=false`,
+`showSuppressed=true`). Checked against Dependency-Track 4.14.x
+(`FindingResource`, `FindingsSearchQueryManager.getAllFindings`,
+`Finding.QUERY_ALL_FINDINGS`): each finding carries the component (UUID,
+name, group, version, purl, CPE, and its project's UUID, name and version),
+the vulnerability (UUID, source, id, severity, scores, CWEs, EPSS, aliases,
+description), the attribution, and the analysis state, suppression and
+details, but not justification or response. Every page re-runs the whole
+query on the server, so the page size is large (1000,
+`DTVP_SYNC_PORTFOLIO_PAGE_SIZE`).
+
+Dependency-Track's CycloneDX VDR (`GET /api/v1/bom/cyclonedx/project/{uuid}?variant=vdr`)
+was considered as one read per changed version instead of the three, and
+rejected for now: checked against 4.14.x `BomResource`, `CycloneDXExporter`
+and `ModelConverter`, its components are only those with vulnerabilities
+(so it cannot replace the BOM or the dependency chains), and its
+vulnerabilities carry no aliases, EPSS or attribution (which the findings
+read provides). It does carry the analysis with state, justification,
+response and details, ratings, CWEs, description, recommendation and dates.
+
 - **Project list:** read every `DTVP_DT_CACHE_REFRESH_SECONDS` (60 s) and
   compared with `sync_versions`. A new uuid becomes `never_synced`
   (`projects.changed{added}`); a missing or inactive one becomes `gone`
@@ -466,4 +508,5 @@ tab, and a 401 or an `auth` event signs every tab out.
 | 7 Clients keep their place | Not implemented |
 | 8 Other integrations | Not implemented |
 | Step 8, requests | Implemented 2026-11-22: `POST /api/sync/requests` (P0, persisted with `requested_at`, `requested_by`, `request_id`; repeats are one request; progress and outcome under `request` in `GET /api/sync/versions`, migration `0008_sync_request_outcome.sql`; reviewers only) and `POST /api/sync/analysis-requests` (optional `ports.AnalysisTrigger`, the Dependency-Track client asks for an analysis and the version is read when it is done); the project view's Sync menu with Export now; see [Manual requests](../runtime.md#manual-requests). `POST /api/export` returning 202, Reload, and archive restore through the export queue are open |
+| Amendment: portfolio pass | Implemented 2026-11-22: optional `BulkFindings` in `dtvp/ports.py`, the Dependency-Track client pages `GET /api/v1/finding`; `portfolio_digest` recorded at every findings read (`0009_sync_portfolio_digest.sql`); the scheduler settles unchanged versions from one list and reads only changed ones; `source.portfolio_pass` events, `portfolio_pass` in the status; `DTVP_SYNC_PORTFOLIO_PAGE_SIZE` |
 | Amendment: optional change hints | Implemented 2026-11-22: `ChangeHints` in `dtvp/ports.py`, declared by the Dependency-Track client; without it, staggered regular re-reads (`DTVP_SYNC_UNHINTED_FINDINGS_SECONDS`); the sync table's hint columns renamed (`0007_neutral_change_hints.sql`); the grouped snapshot fingerprint and the summary index key read the neutral hint (`ports.change_hint`) |

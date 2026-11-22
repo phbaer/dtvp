@@ -111,6 +111,7 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | `DTVP_SYNC_WATCHED_FINDINGS_SECONDS` | How often the findings of each version of a watched product are re-read; at least 1. See [Sync scheduler](runtime.md#sync-scheduler) | `120` |
 | `DTVP_SYNC_SAFETY_SECONDS` | Safety re-read of every other active version; at least 60 | `43200` |
 | `DTVP_SYNC_UNHINTED_FINDINGS_SECONDS` | For a source without change hints (`ChangeHints`, not Dependency-Track): how often every active version's findings are re-read, staggered per version; at least 60. See [Sync scheduler](runtime.md#sync-scheduler) | `3600` |
+| `DTVP_SYNC_PORTFOLIO_PAGE_SIZE` | Findings per page of the portfolio pass's list (`GET /api/v1/finding`); Dependency-Track runs the whole query for every page, so larger pages cost it less. See [Manual requests](runtime.md#manual-requests) | `1000` |
 | `DTVP_SYNC_CONCURRENCY` | Versions synced at a time | `2` |
 | `DTVP_DT_REQUESTS_PER_SECOND` / `DTVP_DT_REQUEST_BURST` | One budget for every Dependency-Track call of the scheduler and the export | `4` / `8` |
 

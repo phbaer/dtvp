@@ -35,7 +35,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
-from .ports import AnalysisTrigger, ChangeHints, source_display_name
+from .ports import AnalysisTrigger, BulkFindings, ChangeHints, source_display_name
 from .source_sync_state import (
     KIND_BOM,
     KIND_FINDINGS,
@@ -45,6 +45,7 @@ from .source_sync_state import (
         STATUS_QUEUED,
     SourceUnavailable,
     finding_key,
+    portfolio_digest,
 )
 
 logger = logging.getLogger(__name__)
@@ -444,6 +445,13 @@ class SourceSync:
         # Whether the source offers change hints (ports.ChangeHints); known
         # once a client is seen.
         self.hinted = True
+        # The portfolio pass (ADR 0004): the running one, the versions it
+        # holds back, when the last one ended, and how many pages it read.
+        self._pass: Optional[asyncio.Task] = None
+        self._pass_holds: set[str] = set()
+        self._pass_ended = float("-inf")
+        self._pass_pages: Optional[int] = None
+        self.pass_progress: Optional[dict[str, Any]] = None
 
     def limited(self, client: Any) -> LimitedSource:
         """The budgeted view of ``client``, built once per client (its
@@ -636,7 +644,10 @@ class SourceSync:
         )
 
     def next_items(self, slots: int) -> list[SyncItem]:
-        chosen = self._ordered(self._monotonic())[: max(0, slots)]
+        chosen = [
+            item for item in self._ordered(self._monotonic())
+            if item.project_uuid not in self._pass_holds
+        ][: max(0, slots)]
         for item in chosen:
             del self.queue[item.project_uuid]
         return chosen
@@ -771,6 +782,7 @@ class SourceSync:
             self.mark_dirty()
         if self._plan_due():
             self.plan()
+        self._maybe_start_pass(limited)
         slots = self.schedule.concurrency - len(self.running)
         items = self.next_items(slots)
         if items:
@@ -784,6 +796,138 @@ class SourceSync:
             self._update_backlog()
         if wait:
             await self.drain()
+
+    # -- the portfolio pass (ADR 0004, "Portfolio pass") ------------------------
+
+    # A pass is worth it when more versions are due for a findings re-read
+    # than it takes pages (at least this many), and at most this often.
+    PASS_MIN_VERSIONS = 5
+    PASS_MIN_INTERVAL_SECONDS = 60.0
+
+    def _pass_candidates(self) -> list[str]:
+        """Queued versions a portfolio list can settle: due for a findings
+        re-read, read before (a first import needs the version's own read),
+        not running. The safety re-read stays a full read of the version:
+        it catches what a portfolio list cannot show (justification and
+        response)."""
+        rows = {row["project_uuid"]: row for row in self.cache.sync_state.rows()}
+        return [
+            uuid
+            for uuid, item in self.queue.items()
+            if KIND_FINDINGS in item.kinds
+            and item.priority != P4_SAFETY
+            and uuid not in self.running
+            and (rows.get(uuid) or {}).get("last_success_at")
+        ]
+
+    def _maybe_start_pass(self, client: Any) -> None:
+        if not isinstance(getattr(client, "_source", client), BulkFindings):
+            return
+        if self._pass is not None and not self._pass.done():
+            return
+        if self._monotonic() - self._pass_ended < self.PASS_MIN_INTERVAL_SECONDS:
+            return
+        candidates = self._pass_candidates()
+        if len(candidates) < max(self.PASS_MIN_VERSIONS, self._pass_pages or 0):
+            return
+        self._pass_holds = set(candidates)
+        self._pass = asyncio.create_task(self._portfolio_pass(client, candidates))
+        self._tasks.add(self._pass)
+        self._pass.add_done_callback(self._tasks.discard)
+
+    async def _portfolio_pass(self, client: Any, candidates: list[str]) -> None:
+        """One portfolio-wide findings list instead of a read per version:
+        a version whose share of it shows what its last findings read showed
+        is marked checked; the others are read one by one as planned."""
+        started_at = self._now().isoformat()
+        size = int(_env_float("DTVP_SYNC_PORTFOLIO_PAGE_SIZE", 1000.0, 1.0))
+        # The analysis hints as the pass starts: what it reads covers them.
+        hints = {
+            row["project_uuid"]: row.get("source_analysis_hint")
+            for row in self.cache.sync_state.rows()
+            if row["project_uuid"] in set(candidates)
+        }
+        unchanged: list[str] = []
+
+        def on_page(read: int, total: int) -> None:
+            self.pass_progress = {"pages_read": read, "pages_total": total}
+            self._publish(
+                "source.portfolio_pass",
+                {"phase": "reading", "pages_read": read, "pages_total": total},
+            )
+
+        try:
+            self.pass_progress = {"pages_read": 0, "pages_total": None}
+            self._publish("source.portfolio_pass", {"phase": "started", "versions": len(candidates)})
+            by_version = await client.portfolio_findings(page_size=size, on_page=on_page)
+            known = self.cache.sync_state.portfolio_digests()
+            # Versions read before the pass existed have no digest yet: seed
+            # it from their stored findings, so the first pass after the
+            # upgrade already settles the unchanged ones. The stored findings
+            # carry DTVP's own values over the source's; where those differ
+            # (an assessment not exported yet) the version is read once,
+            # which is the safe side.
+            seeded = {
+                uuid: portfolio_digest(stored)
+                for uuid in candidates
+                if not known.get(uuid)
+                and isinstance(
+                    stored := self.cache._load_project_cache(
+                        self.cache._findings_path(uuid), None
+                    ),
+                    list,
+                )
+            }
+            if seeded:
+                self.cache.sync_state.set_portfolio_digests(seeded)
+                known.update(seeded)
+            for uuid in candidates:
+                recorded = known.get(uuid)
+                if recorded and recorded == portfolio_digest(by_version.get(uuid, [])):
+                    unchanged.append(uuid)
+            answered = self.cache.sync_state.mark_checked(
+                unchanged, at=self._now().isoformat(), started_at=started_at,
+                analysis_hints=hints,
+            )
+            for uuid in unchanged:
+                item = self.queue.get(uuid)
+                if item is None:
+                    continue
+                remaining = tuple(k for k in item.kinds if k != KIND_FINDINGS)
+                if item.priority == P0_REQUEST or not remaining:
+                    # Answered (a request) or nothing else due: settled.
+                    del self.queue[uuid]
+                else:
+                    item.kinds = remaining
+            self._pass_pages = (self.pass_progress or {}).get("pages_total")
+            logger.info(
+                "Portfolio pass: %d version(s) unchanged, %d to read one by one "
+                "(%s page(s); %d request(s) answered)",
+                len(unchanged), len(candidates) - len(unchanged),
+                self._pass_pages, len(answered),
+            )
+            self._publish(
+                "source.portfolio_pass",
+                {
+                    "phase": "done",
+                    "unchanged": len(unchanged),
+                    "changed": len(candidates) - len(unchanged),
+                    "pages": self._pass_pages,
+                },
+            )
+        except Exception as exc:
+            # The versions are read one by one, as without a pass.
+            logger.warning("Portfolio pass failed, reading versions one by one: %s", exc)
+            self._publish("source.portfolio_pass", {"phase": "failed", "error_class": type(exc).__name__})
+        finally:
+            self._pass_holds = set()
+            self._pass_ended = self._monotonic()
+            self.pass_progress = None
+            self.mark_dirty()
+            self._update_backlog()
+            wake = getattr(self.cache, "wake_sync", None)
+            if callable(wake):
+                wake()
 
     def _start_export(self, client: Any) -> None:
         """The automatic export runs beside the loop, one at a time: an
@@ -910,6 +1054,7 @@ class SourceSync:
                 "can_request_analysis": self.can_request_analysis,
             },
             "analysing": sorted(self._analyses),
+            "portfolio_pass": self.pass_progress,
             "breaker": self.breaker.state,
             "queued": len(self.queue),
             "running": sorted(self.running),

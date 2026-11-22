@@ -11,7 +11,7 @@ whether the finding is suppressed. A finding is identified by the UUIDs of
 its project, component, and vulnerability.
 """
 
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -193,6 +193,25 @@ class AnalysisTrigger(Protocol):
 
     async def analysis_running(self, token: str) -> bool:
         """Whether the analysis started with ``token`` is still running."""
+
+
+@runtime_checkable
+class BulkFindings(Protocol):
+    """Optional: the source lists the findings of every active project
+    version in one paginated read. The scheduler uses it to tell which
+    versions changed, and reads only those one by one (ADR 0004,
+    "Portfolio pass")."""
+
+    async def portfolio_findings(
+        self,
+        *,
+        page_size: int = 1000,
+        on_page: Optional[Callable[[int, int], None]] = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Every finding of every active version, by project version UUID.
+        Each finding carries its component UUID, vulnerability UUID and the
+        source's analysis (state, suppression, details). ``on_page`` gets
+        (pages read, pages in total) after each page."""
 
 
 def source_display_name(source: Any) -> str:

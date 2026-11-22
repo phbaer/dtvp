@@ -98,6 +98,40 @@ def findings_digests(findings: Any) -> tuple[str, str, dict[str, str]]:
     return _digest(identities), analyses, index
 
 
+def portfolio_digest(findings: Any) -> str:
+    """What a portfolio-wide findings list can tell about a version: its
+    finding keys and, per finding, the analysis state, details and
+    suppression. Justification and response are left out, because the
+    portfolio list does not carry them (ADR 0004, "Portfolio pass"). The
+    same digest over a version's own findings read and over its share of a
+    portfolio list means nothing a portfolio list can see has changed."""
+    items = []
+    for finding in findings if isinstance(findings, list) else []:
+        if not isinstance(finding, Mapping):
+            continue
+        key = finding_key(finding)
+        if key is None:
+            continue
+        analysis = finding.get("analysis") if isinstance(finding.get("analysis"), Mapping) else {}
+        items.append(
+            (
+                key[0],
+                key[1],
+                str(analysis.get("analysisState") or analysis.get("state") or "NOT_SET"),
+                _text_hash(
+                    str(
+                        analysis.get("analysisDetails")
+                        or analysis.get("details")
+                        or analysis.get("detail")
+                        or ""
+                    ).strip()
+                ),
+                bool(analysis.get("isSuppressed", analysis.get("suppressed", False))),
+            )
+        )
+    return _digest(items)
+
+
 def vulns_digest(vulns: Any) -> str:
     items = []
     for vuln in vulns if isinstance(vulns, list) else []:
@@ -194,7 +228,7 @@ _COLUMNS = (
     "findings_read_at", "vulns_read_at", "bom_read_at", "read_bom_signal",
     "read_analysis_signal", "staged_kinds", "staged_digests_json",
     "last_request_id", "last_request_by", "last_request_at", "last_request_state",
-    "last_request_finished_at", "last_request_error",
+    "last_request_finished_at", "last_request_error", "portfolio_digest",
 )
 _READ_AT = {KIND_FINDINGS: "findings_read_at", KIND_VULNS: "vulns_read_at", KIND_BOM: "bom_read_at"}
 _DIGEST_COLUMNS = {
@@ -292,6 +326,7 @@ class SyncStateStore:
         at: Optional[str] = None,
         analyses_index: Optional[Mapping[str, str]] = None,
         origins: Optional[Mapping[str, list[str]]] = None,
+        portfolio: Optional[str] = None,
     ) -> bool:
         """A successful read of one kind. Returns whether its content changed
         (a known digest differs); that bumps the generation, or, while the
@@ -307,6 +342,9 @@ class SyncStateStore:
             )
             first = row["last_success_at"] is None
             assignments = {column: digest for column, digest in zip(columns, digests)}
+            if portfolio is not None:
+                # Compared by the next portfolio pass (``mark_checked``).
+                assignments["portfolio_digest"] = portfolio
             if analyses_index is not None:
                 origins = origins or {}
                 assignments["analyses_index_json"] = json.dumps(analyses_index)
@@ -624,6 +662,68 @@ class SyncStateStore:
                 (*assignments.values(), project_uuid),
             )
         return kinds, first, generation
+
+    def portfolio_digests(self) -> dict[str, Optional[str]]:
+        """Per version, the portfolio digest of its last findings read."""
+        return {
+            str(row[0]): row[1]
+            for row in self._connection().execute(
+                "SELECT project_uuid, portfolio_digest FROM sync_versions"
+            )
+        }
+
+    def set_portfolio_digests(self, digests: Mapping[str, str]) -> None:
+        """Seed the portfolio digest of versions that have none yet (read
+        before the portfolio pass existed), from their stored findings."""
+        connection = self._connection()
+        with connection:
+            connection.executemany(
+                "UPDATE sync_versions SET portfolio_digest = ? "
+                "WHERE project_uuid = ? AND portfolio_digest IS NULL",
+                [(digest, uuid) for uuid, digest in digests.items()],
+            )
+
+    def mark_checked(
+        self,
+        project_uuids: Iterable[str],
+        *,
+        at: str,
+        started_at: str,
+        analysis_hints: Optional[Mapping[str, Any]] = None,
+    ) -> list[str]:
+        """A portfolio pass that started at ``started_at`` found these
+        versions as their last findings read left them: their findings count
+        as read at ``at`` (the safety re-read and the other kinds keep their
+        own times), the analysis hint seen when the pass started counts as
+        read (a findings read covers it), the status settles, and a request
+        made before the pass started is answered. Returns the versions whose
+        request it answered."""
+        answered: list[str] = []
+        connection = self._connection()
+        with connection:
+            for uuid in project_uuids:
+                row = self._row(connection, uuid)
+                if row is None or row["staged_generation"] is not None:
+                    continue  # a sync of its own is running: it decides
+                assignments: dict[str, Any] = {"findings_read_at": at}
+                if analysis_hints is not None and uuid in analysis_hints:
+                    assignments["read_analysis_signal"] = analysis_hints[uuid]
+                if row["status"] not in (STATUS_GONE,):
+                    assignments["status"] = row["settled_status"] or STATUS_SYNCED
+                if row["requested_at"] and row["requested_at"] <= started_at:
+                    assignments.update(
+                        requested_at=None, requested_by=None, request_id=None,
+                        last_request_id=row["request_id"], last_request_by=row["requested_by"],
+                        last_request_at=row["requested_at"], last_request_state="done",
+                        last_request_finished_at=at, last_request_error=None,
+                    )
+                    answered.append(uuid)
+                connection.execute(
+                    f"UPDATE sync_versions SET {', '.join(f'{n} = ?' for n in assignments)} "
+                    "WHERE project_uuid = ?",
+                    (*assignments.values(), uuid),
+                )
+        return answered
 
     def set_next_due(self, project_uuid: str, next_due_at: Optional[str]) -> None:
         """When a failed version may be tried again (its backoff)."""

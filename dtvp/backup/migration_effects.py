@@ -45,4 +45,5 @@ MIGRATION_RECORD_EFFECTS: dict[tuple[str, int], Effect] = {
     ("local_store", 6): NoRecordEffect("sync_versions only, which is not dumped"),
     ("local_store", 7): NoRecordEffect("sync_versions only, which is not dumped"),
     ("local_store", 8): NoRecordEffect("sync_versions only, which is not dumped"),
+    ("local_store", 9): NoRecordEffect("sync_versions only, which is not dumped"),
 }

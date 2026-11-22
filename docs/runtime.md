@@ -419,6 +419,21 @@ project version (`project_uuid`) or every active version of a product
 - **Export now** in the menu calls `POST /api/export` (all queued
   assessments), as **Settings → Export** does.
 
+**Portfolio pass.** "Read all versions again", and any moment when more
+versions are due for a findings re-read than the last portfolio list took
+pages (at least five, at most one pass a minute), use one portfolio-wide
+findings list instead of a read per version, for a source that offers it
+(`ports.BulkFindings`; Dependency-Track: `GET /api/v1/finding`, paged).
+A version whose findings, analysis states, details and suppression are as
+its last own read left them (`portfolio_digest`) is marked checked and its
+request answered as done; only the others are read one by one. First
+imports and the 12-hour safety re-read stay per version: the list has no
+justification or response. While a pass runs, the versions it covers wait;
+`source.portfolio_pass` events (`started`, `reading` with pages read and
+total, `done` with unchanged and changed counts, or `failed`) and
+`portfolio_pass` in `GET /api/sync/status` show its progress. A failed pass
+leaves the versions to their own reads. See ADR 0004, "Portfolio pass".
+
 Versions read again without a request: a version whose sync state says
 read but which has no stored findings (more than five minutes after that
 read, as documents are written in the background) is read again, once. A
