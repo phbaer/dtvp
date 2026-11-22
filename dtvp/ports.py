@@ -180,6 +180,27 @@ class ChangeHints(Protocol):
         """The hint kinds this source provides."""
 
 
+@runtime_checkable
+class AnalysisTrigger(Protocol):
+    """Optional: the source can be asked to analyse a project version again
+    (match its components against its vulnerability data) on request. The
+    result shows up in the findings of the next read."""
+
+    source_display_name: str
+
+    async def request_analysis(self, project_uuid: str) -> Optional[str]:
+        """Start an analysis; a token to follow it with, or ``None``."""
+
+    async def analysis_running(self, token: str) -> bool:
+        """Whether the analysis started with ``token`` is still running."""
+
+
+def source_display_name(source: Any) -> str:
+    """How the UI names the source ("Dependency-Track"); a neutral default."""
+    name = getattr(source, "source_display_name", None)
+    return str(name) if isinstance(name, str) and name.strip() else "the source"
+
+
 def change_hint(project: Any, kind: str) -> Any:
     """One change hint of a project version (``ChangeHints``), or ``None``
     when the source gives none."""

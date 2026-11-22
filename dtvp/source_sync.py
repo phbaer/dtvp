@@ -35,7 +35,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
-from .ports import ChangeHints
+from .ports import AnalysisTrigger, ChangeHints, source_display_name
 from .source_sync_state import (
     KIND_BOM,
     KIND_FINDINGS,
@@ -280,6 +280,11 @@ def _parse(value: Optional[str]) -> Optional[datetime]:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+# How long after a read its documents are surely stored (they are written
+# by a background thread).
+STORE_SETTLE_SECONDS = 300.0
+
+
 def _older(value: Optional[str], now: datetime, seconds: float) -> bool:
     at = _parse(value)
     return at is None or (now - at).total_seconds() >= seconds
@@ -310,6 +315,7 @@ def plan_version(
     now: datetime,
     schedule: Schedule,
     hinted: bool = True,
+    stored_findings_at: Optional[str] = "unknown",
 ) -> Optional[tuple[int, tuple[str, ...]]]:
     """What is due for one version, with its priority, or ``None``.
 
@@ -327,6 +333,17 @@ def plan_version(
         return P0_REQUEST, KINDS
     if row.get("last_success_at") is None:
         return (P1_WATCHED_FIRST if watched else P3_BACKFILL), KINDS
+    # The sync state says read, but no findings are stored for the version:
+    # the two disagree (a database restored or replaced without the other).
+    # Read everything again; ``stored_findings_at`` is "unknown" when the
+    # caller cannot tell. Stored documents are written in the background, so
+    # only a read older than ``STORE_SETTLE_SECONDS`` counts. (A restore with
+    # ``python -m dtvp.backup`` starts with an empty sync state, so every
+    # version counts as never read.)
+    if stored_findings_at is None and _older(
+        row.get("last_success_at"), now, STORE_SETTLE_SECONDS
+    ):
+        return P2_DUE, KINDS
     if hinted:
         bom_signal = row.get("source_bom_hint") != row.get("read_bom_signal")
         analysis_signal = row.get("source_analysis_hint") != row.get("read_analysis_signal")
@@ -422,6 +439,8 @@ class SourceSync:
         self._plan_dirty = True
         self._watched_seen: Optional[frozenset[str]] = None
         self._limited: Optional[tuple[Any, LimitedSource]] = None
+        # Analyses the source was asked for, followed until they finish.
+        self._analyses: dict[str, asyncio.Task] = {}
         # Whether the source offers change hints (ports.ChangeHints); known
         # once a client is seen.
         self.hinted = True
@@ -440,6 +459,85 @@ class SourceSync:
     def mark_dirty(self) -> None:
         """Plan on the next pass (the list, a sync or the interest changed)."""
         self._plan_dirty = True
+
+    def _wake(self) -> None:
+        self.mark_dirty()
+        wake = getattr(self.cache, "wake_sync", None)
+        if callable(wake):
+            wake()
+
+    # -- requests (ADR 0004 step 8) ------------------------------------------
+
+    # How often a requested analysis is asked whether it finished, and for
+    # how long at most; then the version is read anyway.
+    ANALYSIS_POLL_SECONDS = 10.0
+    ANALYSIS_MAX_SECONDS = 1800.0
+
+    def request_reads(
+        self, project_uuids: list[str], *, by: Optional[str]
+    ) -> list[dict[str, Any]]:
+        """Read these versions before anything else (P0). Returns one entry
+        per version with its ``request_id``; ``new`` is False for a request
+        that was already waiting."""
+        requests = self.cache.sync_state.request(
+            project_uuids, by=by, at=self._now().isoformat()
+        )
+        new = [entry for entry in requests if entry["new"]]
+        if new:
+            logger.info("%s requested a read of %d version(s)", by or "someone", len(new))
+            self._wake()
+        return requests
+
+    @property
+    def source_name(self) -> str:
+        return source_display_name(self._limited[0] if self._limited else None)
+
+    @property
+    def can_request_analysis(self) -> bool:
+        return self._limited is not None and isinstance(self._limited[0], AnalysisTrigger)
+
+    async def request_analysis(self, project_uuids: list[str], *, by: Optional[str]) -> list[str]:
+        """Ask the source to analyse these versions again, within the shared
+        budget and breaker; each version is read when its analysis has
+        finished (or after ``ANALYSIS_MAX_SECONDS``). Returns the versions
+        the source accepted."""
+        if not self.can_request_analysis:
+            raise NotImplementedError("The source cannot be asked for an analysis")
+        if self.breaker.open:
+            raise SourceUnavailable("The source is unavailable")
+        limited = self._limited[1]
+        accepted: list[str] = []
+        for uuid in dict.fromkeys(project_uuids):
+            if uuid in self._analyses:
+                continue  # one at a time per version
+            token = await limited.request_analysis(uuid)
+            accepted.append(uuid)
+            row = self.cache.sync_state.row(uuid) or {"project_uuid": uuid}
+            self._publish_state(row, "analysing", force=True)
+            task = asyncio.create_task(self._follow_analysis(limited, uuid, token, by))
+            self._analyses[uuid] = task
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            task.add_done_callback(lambda _t, uuid=uuid: self._analyses.pop(uuid, None))
+        if accepted:
+            logger.info("%s requested an analysis of %d version(s)", by or "someone", len(accepted))
+        return accepted
+
+    async def _follow_analysis(
+        self, limited: Any, uuid: str, token: Optional[str], by: Optional[str]
+    ) -> None:
+        """Wait for the source's analysis, then request the read."""
+        waited = 0.0
+        while token and waited < self.ANALYSIS_MAX_SECONDS:
+            await asyncio.sleep(self.ANALYSIS_POLL_SECONDS)
+            waited += self.ANALYSIS_POLL_SECONDS
+            try:
+                if not await limited.analysis_running(token):
+                    break
+            except Exception as exc:
+                logger.info("Could not follow the analysis of %s: %s", uuid, exc)
+                break
+        self.request_reads([uuid], by=by)
 
     # -- interest --------------------------------------------------------------
 
@@ -479,13 +577,21 @@ class SourceSync:
         }
         queued: list[dict[str, Any]] = []
         dropped: list[str] = []
+        # When each version's findings were stored, in one query: a version
+        # whose sync state says read but whose findings are missing or older
+        # is read again (LocalStore.snapshot_times).
+        snapshot_times = getattr(getattr(self.cache, "store", None), "snapshot_times", None)
+        stored = snapshot_times(KIND_FINDINGS) if callable(snapshot_times) else None
         for row in rows:
             uuid = row["project_uuid"]
             if uuid in self.running:
                 continue
             watched = str(row.get("product_name") or "").lower() in products
             due = plan_version(
-                row, watched=watched, now=now, schedule=self.schedule, hinted=self.hinted
+                row, watched=watched, now=now, schedule=self.schedule, hinted=self.hinted,
+                stored_findings_at=(
+                    stored.get(uuid) if stored is not None else "unknown"
+                ),
             )
             existing = self.queue.get(uuid)
             if due is None:
@@ -799,6 +905,11 @@ class SourceSync:
 
     def status(self) -> dict[str, Any]:
         return {
+            "source": {
+                "name": self.source_name,
+                "can_request_analysis": self.can_request_analysis,
+            },
+            "analysing": sorted(self._analyses),
             "breaker": self.breaker.state,
             "queued": len(self.queue),
             "running": sorted(self.running),

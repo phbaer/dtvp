@@ -44,6 +44,9 @@ def _finding_matches_cve(finding: Dict[str, Any], cve_upper: str) -> bool:
 
 
 class DTClient:
+    # How the UI names this source (ports.AnalysisTrigger).
+    source_display_name = "Dependency-Track"
+
     @staticmethod
     def vulnerability_ids(item: Any) -> set:
         """Every id of a finding's or vulnerability record's vulnerability,
@@ -150,6 +153,33 @@ class DTClient:
         response = await self.client.get(f"{self.base_url}/api/version")
         response.raise_for_status()
         return True
+
+    async def request_analysis(self, project_uuid: str) -> Optional[str]:
+        """Ask Dependency-Track to analyse a project version again
+        (``POST /api/v1/finding/project/{uuid}/analyze``, Dependency-Track
+        4.x ``FindingResource.analyzeProject``; needs the
+        ``VIEW_VULNERABILITY`` permission in 4.14.x). Returns the event token
+        Dependency-Track answers with (``{"token": ...}``), or ``None``."""
+        response = await self.client.post(
+            f"{self.base_url}/api/v1/finding/project/{project_uuid}/analyze"
+        )
+        response.raise_for_status()
+        try:
+            token = response.json().get("token")
+        except (ValueError, AttributeError):
+            return None
+        return str(token) if token else None
+
+    async def analysis_running(self, token: str) -> bool:
+        """Whether the analysis behind ``token`` is still being processed
+        (``GET /api/v1/event/token/{token}`` answers ``{"processing": ...}``,
+        ``EventResource.isTokenBeingProcessed``)."""
+        response = await self.client.get(f"{self.base_url}/api/v1/event/token/{token}")
+        response.raise_for_status()
+        try:
+            return bool(response.json().get("processing"))
+        except (ValueError, AttributeError):
+            return False
 
     async def __aenter__(self):
         return self

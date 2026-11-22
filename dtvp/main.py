@@ -1241,6 +1241,8 @@ api_router.include_router(
         current_user_dependency=get_current_user,
         scheduler_status=source_sync.status,
         review_markers_kept=lambda: cache_manager.recreated_review_kept,
+        scheduler=source_sync,
+        is_reviewer=lambda user: get_user_role(user).upper() == "REVIEWER",
     )
 )
 

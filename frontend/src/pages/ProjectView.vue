@@ -73,6 +73,7 @@ import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
 import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from '@lucide/vue'
 import CycloneDxExportMenu from '../components/CycloneDxExportMenu.vue'
+import SourceSyncMenu from '../components/SourceSyncMenu.vue'
 import GoneFindingsPanel from '../components/GoneFindingsPanel.vue'
 import GoneFindingsStatistics from '../components/GoneFindingsStatistics.vue'
 
@@ -1553,6 +1554,10 @@ watch(currentUserRole, (role) => {
                     :can-acknowledge="projectHeaderState.isReviewer.value"
                 />
                 <CycloneDxExportMenu :project-name="($route.params.name as string)" />
+                <SourceSyncMenu
+                    v-if="projectHeaderState.isReviewer.value"
+                    :project-name="($route.params.name as string)"
+                />
                 <button
                     v-if="currentUserRole === 'REVIEWER'"
                     type="button"

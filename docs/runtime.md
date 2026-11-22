@@ -380,6 +380,52 @@ not, or moves by ten), and `assessments.changed` with origin `dt` (the
 source changed an assessment) or `export_echo` (the source now holds
 DTVP's export; open views are not refreshed for it).
 
+### Manual requests
+
+Status: implemented 2026-11-22 (ADR 0004 step 8, the request part; checked
+against `tests/test_sync_requests.py`).
+
+Reviewers can trigger work on the source by hand, from the project view's
+**Sync** menu (shown to reviewers only) or the API. Each request takes one
+project version (`project_uuid`) or every active version of a product
+(`product`); other roles get 403.
+
+- `POST /api/sync/requests` reads the versions again before anything else
+  (P0) and wakes the loop, so the read of findings, vulnerability records
+  and BOM starts within one planning interval while the source is
+  reachable. The request is persisted (`requested_at`, `requested_by`,
+  `request_id`). A repeat while it waits is the same request: the answer
+  lists it under `already_requested` with the waiting `request_id`. A
+  request made while the version syncs is kept, so it is read once more
+  afterwards. Its progress is under `request` in `GET /api/sync/versions`:
+  `requested`, `running`, `done` with `read_at`, or `failed` with `error`
+  (a failed request stays and is tried again after the version's backoff). The read is the scheduler's own: it
+  respects a failing version's backoff, the budget and the breaker, and its
+  progress is in the usual `version.sync_state`, `version.synced` and
+  `version.sync_failed` events.
+- `POST /api/sync/analysis-requests` asks the source to analyse the
+  versions again, for a source that offers it (`ports.AnalysisTrigger`;
+  Dependency-Track: `POST /api/v1/finding/project/{uuid}/analyze`, followed
+  with `GET /api/v1/event/token/{token}`; checked against Dependency-Track
+  4.14.x `FindingResource` and `EventResource`: the analysis needs only the
+  `VIEW_VULNERABILITY` permission on DTVP's API key, the token check any
+  authenticated key). Each version gets a
+  `version.sync_state` event with status `analysing`; when the source
+  reports the analysis finished (polled every 10 s within the budget, at
+  most 30 min), the version is requested as above. One analysis per version
+  at a time. 501 when the source cannot be asked, 503 while the breaker is
+  open. `GET /api/sync/status` tells under `scheduler_state.source` the
+  source's name and `can_request_analysis`; the menu hides the analysis then.
+- **Export now** in the menu calls `POST /api/export` (all queued
+  assessments), as **Settings → Export** does.
+
+Versions read again without a request: a version whose sync state says
+read but which has no stored findings (more than five minutes after that
+read, as documents are written in the background) is read again, once. A
+restore with `python -m dtvp.backup` brings back the stored documents but
+not the sync state (it is not dumped), so after a restore every active
+version counts as never read and is read once.
+
 ### Product interest
 
 Status: implemented 2026-11-21 (ADR 0004 step 4a; checked against
