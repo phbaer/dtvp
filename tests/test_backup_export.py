@@ -99,6 +99,13 @@ def test_gone_findings_and_session_versions_are_records(instance):
     assert cpe["gone_cause"] == "CPE changed from cpe:2.3:a:x:lib:1.1 to cpe:2.3:a:y:lib:1.1"
     assert (cpe["predates_tracking"], cpe["first_seen_at"]) == (True, "")
     assert "predates_tracking" not in presence["c-old"]
+    # A confirmed same-issue match, only where there is one.
+    assert (
+        cpe["same_issue_component_uuid"], cpe["same_issue_vulnerability_uuid"],
+        cpe["same_issue_reason"], cpe["same_issue_confirmed_by"],
+        cpe["same_issue_confirmed_at"],
+    ) == ("c-new", "v-l", "same description", "rita", "2026-11-19T09:30:00+00:00")
+    assert "same_issue_confirmed_by" not in presence["c-old"]
     [read] = _records(members, "finding_read")
     assert (read["project_uuid"], read["went"], read["carried_over"]) == (
         "p-lifecycle", {"replaced": 1}, 1,

@@ -65,6 +65,9 @@ ORIGIN_CARRIED_OVER_BY_VULNERABILITY = "carried-over-by-vulnerability"
 # A reviewer applied a gone finding's assessment to the same vulnerability
 # under another id (a CVE's GitHub advisory), pending review.
 ORIGIN_CARRIED_OVER_BY_ALIAS = "carried-over-by-alias"
+# Applied to a finding a person confirmed to be the same issue, without an
+# alias in any source (dtvp/same_issue.py).
+ORIGIN_CARRIED_OVER_BY_SAME_ISSUE = "carried-over-by-same-issue"
 
 PRESENCE_COLUMNS = (
     "project_uuid",
@@ -729,6 +732,48 @@ class FindingLifecycleStore:
                     ).rowcount
             self._presence.pop(project_uuid, None)
         return changed
+
+    def confirm_same_issue(
+        self,
+        project_uuid: str,
+        finding: tuple[str, str],
+        other: tuple[str, str],
+        *,
+        reason: Optional[str],
+        by: Optional[str],
+        at: str,
+    ) -> bool:
+        """Record that a person confirmed ``finding`` to be the same issue as
+        ``other`` (component, vulnerability UUID), which no source names as
+        its alias; ``by`` None withdraws it. Written on ``finding``'s row,
+        which reads leave alone. Returns whether the row changed."""
+        self._ensure_initialized()
+        values = (
+            (other[0], other[1], reason, by, at) if by else (None, None, None, None, None)
+        )
+        with self._lock, closing(self._connect()) as connection:
+            with connection:
+                changed = connection.execute(
+                    """
+                    UPDATE finding_presence
+                    SET same_issue_component_uuid = ?,
+                        same_issue_vulnerability_uuid = ?,
+                        same_issue_reason = ?,
+                        same_issue_confirmed_by = ?,
+                        same_issue_confirmed_at = ?
+                    WHERE project_uuid = ? AND component_uuid = ?
+                      AND vulnerability_uuid = ?
+                      AND (same_issue_confirmed_by IS NOT ?
+                           OR same_issue_component_uuid IS NOT ?
+                           OR same_issue_vulnerability_uuid IS NOT ?)
+                    """,
+                    (
+                        *values, project_uuid, finding[0], finding[1],
+                        values[3], values[0], values[1],
+                    ),
+                ).rowcount
+            self._presence.pop(project_uuid, None)
+        return bool(changed)
 
     def fill_vuln_ids(self, project_uuid: str, ids: Mapping[str, str]) -> int:
         """Record the id of vulnerabilities whose rows lack it (rows made for
@@ -1789,6 +1834,7 @@ def describe_gone_findings(
     outbox: Any,
     project_uuid: str,
     aliases: Optional[Mapping[str, set[str]]] = None,
+    same_issue: Any = None,
 ) -> Optional[dict[str, Any]]:
     """The gone findings of a project version with the last read, for
     display. ``None`` when DTVP has no record of the version's findings.
@@ -1796,7 +1842,12 @@ def describe_gone_findings(
     ``aliases`` maps a vulnerability id (upper case) to its other ids; with
     it, a gone finding whose alias is still reported on the same component
     gets that alias as ``alias``, and aliases on one component whose
-    assessments disagree are listed in ``alias_disagreements``."""
+    assessments disagree are listed in ``alias_disagreements``.
+
+    ``same_issue`` (a ``same_issue.SameIssueIndex``) adds the guesses for
+    records no source links: a gone finding without a reported alias gets
+    ``same_issue``, the reported finding it is probably the same issue as,
+    and such pairs that disagree are listed in ``same_issue_disagreements``."""
     rows = lifecycle.presence(project_uuid)
     last = lifecycle.last_read(project_uuid)
     if not rows and last is None:
@@ -1869,6 +1920,8 @@ def describe_gone_findings(
                 ),
             }
         )
+        if same_issue is not None and findings[-1]["alias"] is None:
+            findings[-1]["same_issue"] = _same_issue_of(row, record, same_issue, record_of)
     findings.sort(
         key=lambda item: (
             str(item["gone_at"] or ""),
@@ -1905,6 +1958,9 @@ def describe_gone_findings(
         "summary": summary,
         "alias_disagreements": _alias_disagreements(
             reported_by_component, aliases, record_of
+        ),
+        "same_issue_disagreements": (
+            same_issue.disagreements(record_of) if same_issue is not None else []
         ),
         "trend": gone_trend(rows.values()),
         "findings": findings,
@@ -1998,6 +2054,41 @@ def _reported_alias(
             "proposal": proposal["kind"] if proposal else None,
         }
     return None
+
+
+def _same_issue_of(
+    row: Mapping[str, Any],
+    record: Optional[Mapping[str, Any]],
+    index: Any,
+    record_of: Callable[[Mapping[str, Any]], Optional[dict[str, Any]]],
+) -> Optional[dict[str, Any]]:
+    """The reported finding a gone finding is probably the same issue as
+    (see ``same_issue``), with why, its assessment, whether a person
+    confirmed it, and what applying would write. A guess, not an alias."""
+    found = index.match(row)
+    if found is None:
+        return None
+    other, reason = found
+    other_record = record_of(other)
+    state = (other_record or {}).get("analysisState") or "NOT_SET"
+    own_state = (record or {}).get("analysisState") or "NOT_SET"
+    proposal = alias_proposal(record, other_record)
+    confirmed = bool(row.get("same_issue_confirmed_by")) and (
+        row.get("same_issue_component_uuid"),
+        row.get("same_issue_vulnerability_uuid"),
+    ) == (other["component_uuid"], other["vulnerability_uuid"])
+    return {
+        "component_uuid": other["component_uuid"],
+        "vulnerability_uuid": other["vulnerability_uuid"],
+        "vuln_id": other.get("vuln_id"),
+        "reason": reason,
+        "state": state,
+        "tickets": record_tickets(other_record),
+        "disagrees": own_state != "NOT_SET" and state != "NOT_SET" and own_state != state,
+        "proposal": proposal["kind"] if proposal else None,
+        "confirmed_by": row.get("same_issue_confirmed_by") if confirmed else None,
+        "confirmed_at": row.get("same_issue_confirmed_at") if confirmed else None,
+    }
 
 
 def _alias_disagreements(

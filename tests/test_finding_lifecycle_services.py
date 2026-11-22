@@ -228,7 +228,7 @@ def test_the_store_migrates_and_backfills_once(tmp_path):
         versions = connection.execute(
             "SELECT version FROM schema_migrations WHERE namespace = 'finding_lifecycle'"
         ).fetchall()
-    assert versions == [(1,), (2,), (3,)]
+    assert versions == [(1,), (2,), (3,), (4,)]
 
 
 def test_a_finding_gone_at_export_is_marked_once(tmp_path):

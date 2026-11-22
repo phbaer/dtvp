@@ -92,6 +92,29 @@
     "predates_tracking": {
       "type": "boolean",
       "description": "True for a finding followed from an assessment record whose finding went before findings were tracked (first_seen_at is then empty); absent otherwise."
+    },
+    "same_issue_component_uuid": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string",
+      "description": "The component of the finding a person confirmed this one to be the same issue as (no source names it as an alias); absent otherwise."
+    },
+    "same_issue_vulnerability_uuid": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string",
+      "description": "The vulnerability UUID of that finding; absent otherwise."
+    },
+    "same_issue_reason": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string",
+      "description": "Why DTVP proposed the match (\"same description\" or \"same affected range and CWE\"); absent otherwise."
+    },
+    "same_issue_confirmed_by": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string",
+      "description": "Who confirmed the match; absent otherwise."
+    },
+    "same_issue_confirmed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A timestamp exactly as stored, or null."
     }
   },
   "required": [

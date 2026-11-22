@@ -978,6 +978,7 @@ def build_vdr(
     findings_read_at: str = "",
     fixed_versions: Mapping[tuple[str, str], dict[str, Any]] | None = None,
     findings_gone: Mapping[str, Any] | None = None,
+    same_issue_as: Mapping[tuple[str, str], Iterable[str]] | None = None,
 ) -> dict[str, Any]:
     """The BOM with its findings and their assessments.
 
@@ -997,6 +998,11 @@ def build_vdr(
     the source no longer reports (they are not listed), as
     ``FindingLifecycleStore.export_gone_summary`` returns it; a plain
     mapping of reason to count stands for its ``gone`` part.
+    ``same_issue_as`` maps a finding (component UUID, vulnerability UUID) to
+    the vulnerability ids a person confirmed it to be the same issue as,
+    although no source names them as aliases; exported as
+    ``<prefix>:same_issue_as``, never as ``references`` (it is DTVP's
+    record, not a source's).
     """
     moment = (generated_at or datetime.now(UTC)).astimezone(UTC).isoformat()
     document = build_inventory(bom, findings, property_prefix=property_prefix)
@@ -1156,12 +1162,24 @@ def build_vdr(
             scope_properties[vuln_id] = _scope_properties(
                 fields_by_vulnerability[vuln_id], property_prefix
             )
+        same_issue = sorted({
+            str(other)
+            for component in group["components"]
+            for other in (same_issue_as or {}).get(
+                (str(component.get("uuid") or ""), str(vulnerability.get("uuid") or "")), ()
+            )
+            if str(other) != vuln_id
+        })
         if properties := [
             *_properties(
                 fields, read, property_prefix, borrowed=borrowed, undated=undated
             ),
             *scope_properties[vuln_id],
             *provenance,
+            *(
+                [{"name": f"{property_prefix}:same_issue_as", "value": ", ".join(same_issue)}]
+                if same_issue else []
+            ),
         ]:
             entry["properties"] = properties
         vulnerabilities.append(entry)

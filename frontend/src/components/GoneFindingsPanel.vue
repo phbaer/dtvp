@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, ChevronDown, ChevronRight, CircleSlash, Loader2, Undo2, X } from '@lucide/vue'
-import { acknowledgeGoneFindings, applyGoneFindingToAlias, getGoneFindings } from '../lib/api'
+import { acknowledgeGoneFindings, applyGoneFindingToAlias, confirmGoneFindingSameIssue, getGoneFindings } from '../lib/api'
 import {
     REASONS,
     attentionCount,
@@ -52,6 +52,12 @@ const massLine = (notice: { version: GoneFindingsOfVersion, mass: { count: numbe
 const disagreements = computed(() =>
     versions.value.flatMap(version =>
         (version.alias_disagreements || []).map(item => ({ version, item })),
+    ),
+)
+// Pairs that are probably one issue without an alias: apart, as guesses.
+const sameIssueDisagreements = computed(() =>
+    versions.value.flatMap(version =>
+        (version.same_issue_disagreements || []).map(item => ({ version, item })),
     ),
 )
 
@@ -206,6 +212,43 @@ const applyToAlias = async (projectUuid: string, finding: GoneFinding) => {
     }
 }
 
+// A guess (no source links the two): a reviewer confirms it first, then
+// applies it like an alias.
+const confirmSameIssue = async (projectUuid: string, finding: GoneFinding, confirmed = true) => {
+    const guess = finding.same_issue
+    if (!guess || busy.value) return
+    busy.value = true
+    actionError.value = ''
+    try {
+        await confirmGoneFindingSameIssue(
+            projectUuid, finding.component_uuid, finding.vulnerability_uuid,
+            guess.component_uuid, guess.vulnerability_uuid, confirmed,
+        )
+        await load()
+    } catch {
+        actionError.value = `The match with ${guess.vuln_id || 'the other finding'} could not be ${confirmed ? 'confirmed' : 'withdrawn'}.`
+    } finally {
+        busy.value = false
+    }
+}
+const applyToSameIssue = async (projectUuid: string, finding: GoneFinding) => {
+    const guess = finding.same_issue
+    if (!guess || !guess.confirmed_by || !guess.proposal || busy.value) return
+    busy.value = true
+    actionError.value = ''
+    try {
+        await applyGoneFindingToAlias(
+            projectUuid, finding.component_uuid, finding.vulnerability_uuid, guess.vulnerability_uuid, guess.component_uuid,
+        )
+        applied.value = new Set([...applied.value, `${finding.component_uuid}/${finding.vulnerability_uuid}`])
+        await load()
+    } catch {
+        actionError.value = `The assessment could not be applied to ${guess.vuln_id || 'the other finding'}.`
+    } finally {
+        busy.value = false
+    }
+}
+
 const available = computed(() => total.value > 0 || Boolean(error.value))
 
 const toggle = () => {
@@ -351,6 +394,19 @@ onBeforeUnmount(() => {
                                 <span class="font-mono">{{ entry.item.component_name || entry.item.component_uuid }}{{ entry.item.component_version ? `@${entry.item.component_version}` : '' }}</span>
                                 ({{ entry.version.version || '(no version)' }}):
                                 {{ entry.item.findings.map(f => `${f.vuln_id} ${f.state}`).join(' · ') }}
+                            </div>
+                        </div>
+                        <div
+                            v-if="sameIssueDisagreements.length"
+                            data-testid="gone-findings-same-issue-disagreements"
+                            class="mt-2 rounded-lg border border-white/10 px-2 py-1.5 text-[11px] text-gray-300"
+                        >
+                            <div class="font-semibold text-gray-200">Probably one issue, two ids, different assessments</div>
+                            <div v-for="entry in sameIssueDisagreements" :key="`${entry.version.project_uuid}/${entry.item.component_uuid}/${entry.item.findings.map(f => f.vuln_id).join('/')}`">
+                                <span class="font-mono">{{ entry.item.component_name || entry.item.component_uuid }}{{ entry.item.component_version ? `@${entry.item.component_version}` : '' }}</span>
+                                ({{ entry.version.version || '(no version)' }}):
+                                {{ entry.item.findings.map(f => `${f.vuln_id} ${f.state}`).join(' · ') }}
+                                <span class="text-gray-500">({{ entry.item.reason }}; no source links them)</span>
                             </div>
                         </div>
                         <div v-if="reasonCounts.length" class="mt-2 flex flex-wrap gap-1.5" data-testid="gone-findings-reasons">
@@ -524,6 +580,51 @@ onBeforeUnmount(() => {
                                                             data-testid="gone-finding-applied"
                                                             class="text-emerald-300"
                                                         >Applied, pending review</span>
+                                                    </div>
+                                                    <div
+                                                        v-if="finding.same_issue"
+                                                        data-testid="gone-finding-same-issue"
+                                                        class="mt-0.5 flex flex-wrap items-baseline gap-x-2"
+                                                        :class="finding.same_issue.disagrees ? 'text-amber-200' : 'text-violet-200'"
+                                                    >
+                                                        <span>
+                                                            Probably the same as {{ finding.same_issue.vuln_id }} ({{ finding.same_issue.reason }}):
+                                                            {{ finding.same_issue.state }}{{
+                                                                finding.same_issue.tickets.length ? ` (${finding.same_issue.tickets.join(', ')})` : '' }}{{
+                                                                finding.same_issue.disagrees ? ', a different assessment' : '' }}{{
+                                                                finding.same_issue.confirmed_by ? ` · confirmed by ${finding.same_issue.confirmed_by}` : '' }}
+                                                        </span>
+                                                        <template v-if="props.canAcknowledge">
+                                                            <button
+                                                                v-if="!finding.same_issue.confirmed_by"
+                                                                type="button"
+                                                                :disabled="busy"
+                                                                data-testid="gone-finding-confirm-same-issue"
+                                                                class="rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-white/10 disabled:opacity-50"
+                                                                title="No source links the two; confirm that they are one issue before applying anything"
+                                                                @click="confirmSameIssue(item.version.project_uuid, finding)"
+                                                            >Confirm same issue</button>
+                                                            <template v-else>
+                                                                <button
+                                                                    v-if="finding.same_issue.proposal"
+                                                                    type="button"
+                                                                    :disabled="busy"
+                                                                    data-testid="gone-finding-apply-same-issue"
+                                                                    class="rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-white/10 disabled:opacity-50"
+                                                                    :title="finding.same_issue.proposal === 'copy'
+                                                                        ? 'Copy this assessment to it, pending review'
+                                                                        : 'Add the team blocks it lacks as historical blocks, pending review'"
+                                                                    @click="applyToSameIssue(item.version.project_uuid, finding)"
+                                                                >Apply to {{ finding.same_issue.vuln_id }}</button>
+                                                                <button
+                                                                    type="button"
+                                                                    :disabled="busy"
+                                                                    data-testid="gone-finding-withdraw-same-issue"
+                                                                    class="rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-300 hover:bg-white/10 disabled:opacity-50"
+                                                                    @click="confirmSameIssue(item.version.project_uuid, finding, false)"
+                                                                >Not the same</button>
+                                                            </template>
+                                                        </template>
                                                     </div>
                                                 </li>
                                             </ul>

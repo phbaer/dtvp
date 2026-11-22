@@ -29,8 +29,10 @@ from .cyclonedx_export import (
     valid_property_prefix,
     valid_ticket_prefix,
 )
+from .same_issue import SameIssueIndex, affected_ranges, facts_by_uuid
 from .finding_lifecycle_services import (
     ORIGIN_CARRIED_OVER_BY_ALIAS,
+    ORIGIN_CARRIED_OVER_BY_SAME_ISSUE,
     alias_map,
     vuln_ids_by_uuid,
     alias_proposal,
@@ -152,6 +154,18 @@ class GoneFindingAliasRequest(BaseModel):
     # The alias's component when the source recreated the component (same
     # identity and version, another UUID); the gone finding's otherwise.
     alias_component_uuid: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class GoneFindingSameIssueRequest(BaseModel):
+    project_uuid: str = Field(min_length=1, max_length=200)
+    # A gone or reported finding, and the reported finding DTVP proposed it
+    # to be the same issue as (no source names either as the other's alias).
+    component_uuid: str = Field(min_length=1, max_length=200)
+    vulnerability_uuid: str = Field(min_length=1, max_length=200)
+    other_component_uuid: str = Field(min_length=1, max_length=200)
+    other_vulnerability_uuid: str = Field(min_length=1, max_length=200)
+    # False withdraws the confirmation.
+    confirmed: bool = True
 
 
 class ExportDiscardRequest(BaseModel):
@@ -3597,11 +3611,13 @@ def _register_gone_findings_routes(
             if logger is not None:
                 logger.exception("Could not look up gone components of %s", project_uuid)
         name_vulnerabilities(project_uuid)
+        aliases = stored_aliases(project_uuid)
         return describe_gone_findings(
             manager.finding_lifecycle,
             manager.assessment_outbox,
             project_uuid,
-            aliases=stored_aliases(project_uuid),
+            aliases=aliases,
+            same_issue=same_issue_index(project_uuid, aliases),
         )
 
     def stored_sources(project_uuid: str) -> tuple[list[Any], list[Any]]:
@@ -3631,6 +3647,53 @@ def _register_gone_findings_routes(
             logger = getattr(deps, "logger", None)
             if logger is not None:
                 logger.exception("Could not name the vulnerabilities of %s", project_uuid)
+
+    same_issue_facts: dict[str, tuple[Any, dict[str, Any]]] = {}
+
+    def same_issue_index(
+        project_uuid: str, aliases: dict[str, set[str]]
+    ) -> SameIssueIndex | None:
+        """Probable same-issue matches of the version, from what is stored:
+        the vulnerabilities' facts (cached until the stored findings or
+        records change) and their stored version ranges. No source call."""
+        manager = deps.cache_manager
+        try:
+            paths = (
+                manager._findings_path(project_uuid),
+                manager._project_vulns_path(project_uuid),
+            )
+            stamp = tuple(
+                os.path.getmtime(path) if os.path.exists(path) else None for path in paths
+            )
+            cached = same_issue_facts.get(project_uuid)
+            if cached is None or cached[0] != stamp:
+                facts = facts_by_uuid(
+                    DTClient.vulnerability_facts, *stored_sources(project_uuid)
+                )
+                same_issue_facts[project_uuid] = (stamp, facts)
+            else:
+                facts = cached[1]
+            ranges = manager.store.fixed_version_entries(
+                {
+                    (str(item["source"]), str(item["vuln_id"]))
+                    for item in facts.values()
+                    if item.get("source") and item.get("vuln_id")
+                }
+            )
+
+            def ranges_of(vulnerability_uuid: str, version: Any) -> frozenset[str]:
+                item = facts.get(vulnerability_uuid) or {}
+                stored = ranges.get((str(item.get("source")), str(item.get("vuln_id"))))
+                return affected_ranges((stored or {}).get("payload") or [], version)
+
+            return SameIssueIndex(
+                manager.finding_lifecycle.presence(project_uuid), facts, ranges_of, aliases
+            )
+        except Exception:
+            logger = getattr(deps, "logger", None)
+            if logger is not None:
+                logger.exception("Could not look for same issues in %s", project_uuid)
+            return None
 
     def stored_aliases(project_uuid: str) -> dict[str, set[str]]:
         """The ids of each vulnerability, from what is stored of the
@@ -3680,6 +3743,63 @@ def _register_gone_findings_routes(
         )
         return {"changed": changed}
 
+    @router.post("/gone-findings/same-issue")
+    async def confirm_same_issue(
+        request: GoneFindingSameIssueRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Confirm, or withdraw, that a finding is the same issue as a
+        reported one DTVP proposed for it (same description, or same
+        affected range and CWE, on the same component), although no source
+        names either as the other's alias. Only a confirmed match can be
+        applied and is exported. Reviewers only."""
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+        lifecycle = deps.cache_manager.finding_lifecycle
+        finding = (request.component_uuid, request.vulnerability_uuid)
+        other = (request.other_component_uuid, request.other_vulnerability_uuid)
+        if request.confirmed:
+            rows = await asyncio.to_thread(lifecycle.presence, request.project_uuid)
+            row = rows.get(finding)
+            other_row = rows.get(other)
+            if row is None or row.get("status") not in ("gone", "reported"):
+                raise HTTPException(status_code=404, detail="Unknown finding")
+            if (other_row or {}).get("status") != "reported":
+                raise HTTPException(
+                    status_code=409, detail="The other finding is not reported"
+                )
+            aliases = await asyncio.to_thread(stored_aliases, request.project_uuid)
+            index = await asyncio.to_thread(
+                same_issue_index, request.project_uuid, aliases
+            )
+            on_component = (
+                index is not None
+                and any(
+                    candidate["component_uuid"] == other[0]
+                    and candidate["vulnerability_uuid"] == other[1]
+                    for candidate in index.candidates(row)
+                )
+            )
+            reason = index.reason(row, other_row) if on_component else None
+            if not reason:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The findings are not proposed as the same issue",
+                )
+        else:
+            reason = None
+        changed = await asyncio.to_thread(
+            lifecycle.confirm_same_issue,
+            request.project_uuid,
+            finding,
+            other,
+            reason=reason,
+            by=user if request.confirmed else None,
+            at=datetime.now(timezone.utc).isoformat(),
+        )
+        return {"changed": changed, "reason": reason}
+
     @router.post("/gone-findings/apply-to-alias")
     async def apply_gone_finding_to_alias(
         request: GoneFindingAliasRequest,
@@ -3714,7 +3834,14 @@ def _register_gone_findings_routes(
         known = await asyncio.to_thread(stored_aliases, request.project_uuid)
         gone_id = str(gone_row.get("vuln_id") or "").strip().upper()
         target_id = str(alias_row.get("vuln_id") or "").strip().upper()
-        if not gone_id or not target_id or target_id not in known.get(gone_id, set()):
+        # Or the same issue without an alias, once a person confirmed it.
+        same_issue = bool(gone_row.get("same_issue_confirmed_by")) and (
+            gone_row.get("same_issue_component_uuid"),
+            gone_row.get("same_issue_vulnerability_uuid"),
+        ) == (alias_component, request.alias_vulnerability_uuid)
+        if not same_issue and (
+            not gone_id or not target_id or target_id not in known.get(gone_id, set())
+        ):
             raise HTTPException(
                 status_code=409, detail="The other finding is not the same vulnerability"
             )
@@ -3753,7 +3880,11 @@ def _register_gone_findings_routes(
             persisted = await manager.persist_assessment_updates(
                 [payload],
                 replace=True,
-                origin=ORIGIN_CARRIED_OVER_BY_ALIAS,
+                origin=(
+                    ORIGIN_CARRIED_OVER_BY_SAME_ISSUE
+                    if same_issue
+                    else ORIGIN_CARRIED_OVER_BY_ALIAS
+                ),
                 author=user,
                 expected_revisions={
                     alias_key: int((alias_record or {}).get("revision") or 0)

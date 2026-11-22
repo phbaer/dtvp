@@ -150,6 +150,19 @@ class VulnerabilityIdentifiers(Protocol):
         it), or ``None``."""
 
 
+class VulnerabilityFacts(Protocol):
+    """Optional: what a stored finding or vulnerability record tells of its
+    vulnerability, so DTVP can guess that two records without an alias are
+    one issue (``dtvp/same_issue.py``): the same description, or the same
+    affected range and CWE. A source without it gets no such guesses."""
+
+    @staticmethod
+    def vulnerability_facts(item: Any) -> dict[str, Any] | None:
+        """``uuid``, ``vuln_id``, ``source``, ``description`` and ``cwes``
+        (CWE ids as integers) of the item's vulnerability; ``None`` when the
+        item is not one of the source's findings or records."""
+
+
 @runtime_checkable
 class ChangeHints(Protocol):
     """Optional: the source tells, per project version, when its data

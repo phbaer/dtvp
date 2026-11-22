@@ -478,6 +478,12 @@ class SqliteDumpTarget:
             "acknowledged_at",
             "gone_cause",
             "predates_tracking",
+            # Optional: a confirmed same-issue match (dumps before have none).
+            "same_issue_component_uuid",
+            "same_issue_vulnerability_uuid",
+            "same_issue_reason",
+            "same_issue_confirmed_by",
+            "same_issue_confirmed_at",
         )
         self._db(FINDING_LIFECYCLE_MIGRATION_NAMESPACE).execute(
             "INSERT INTO finding_presence (project_uuid, component_uuid, "
