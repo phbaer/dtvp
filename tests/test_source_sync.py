@@ -654,6 +654,9 @@ async def test_a_source_without_hints_reads_hourly_and_the_bom_after_changed_fin
     await scheduler.run_cycle(source)
     assert scheduler.hinted is False
     assert sorted(source.synced()) == ["a1", "b1"]
+    # Stored documents are written in the background; a version whose
+    # findings are not stored yet would count as read but missing.
+    await manager.flush_cache_writes()
     source.calls.clear()
 
     clock.advance(20 * 60)

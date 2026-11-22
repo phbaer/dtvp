@@ -70,6 +70,7 @@ from .source_sync_state import (
     bom_digest,
     classify_analysis_changes,
     findings_digests,
+    portfolio_digest,
     vulns_digest,
 )
 from .local_store import (
@@ -1837,6 +1838,7 @@ class CacheManager:
                 raise
             # Over the raw response, before anything of DTVP's is read into it.
             findings_identity, analyses, analyses_index = findings_digests(fresh_findings)
+            portfolio = portfolio_digest(fresh_findings)
             # Which analyses the source changed, and which are DTVP's own
             # export coming back; against the record before this read is
             # merged into it.
@@ -1896,6 +1898,7 @@ class CacheManager:
             at=fetch_started_at.isoformat(),
             analyses_index=analyses_index,
             origins=analysis_origins,
+            portfolio=portfolio,
         )
         echoes = [
             (project_uuid, *key.split(":", 1))
