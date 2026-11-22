@@ -1223,6 +1223,21 @@ def test_gone_findings_that_need_attention_are_counted():
     assert "dtvp:export_findings_gone_attention" not in _metadata(none)
 
 
+def test_predating_gone_findings_are_exported_apart():
+    summary = {"gone": {"no_longer_matched": 3}, "predating": {"undetermined": 4945}}
+    document = build_vdr(
+        SCHEMA_BOM, [_finding(C1)], [parse_assessment("NOT_SET", "", False)],
+        generated_at=NOW, findings_gone=summary,
+    )
+    metadata = _metadata(document)
+    assert metadata["dtvp:export_findings_gone"] == "no_longer_matched=3"
+    assert metadata["dtvp:export_findings_gone_predating"] == "undetermined=4945"
+    assert _schema_errors(document) is None
+    # Only predating rows: still stated, apart.
+    only = _vdr([_finding(C1)], [("NOT_SET", "")], findings_gone={"gone": {}, "predating": {"undetermined": 2}})
+    assert _metadata(only)["dtvp:export_findings_gone_predating"] == "undetermined=2"
+
+
 def test_a_general_assessment_does_not_hide_the_teams_assessors():
     """A save that writes the General block keeps every team's assessor in
     assessed_by (it used to shrink to the General block's assessor)."""

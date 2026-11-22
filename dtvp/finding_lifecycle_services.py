@@ -591,12 +591,16 @@ class FindingLifecycleStore:
         - ``since``: when DTVP started following the version's findings;
           rows made for records that predate tracking do not count;
         - ``attention``: with ``outbox``, how many gone findings need
-          attention and nobody acknowledged (see ``needs_attention``).
+          attention and nobody acknowledged (see ``needs_attention``);
+        - ``predating``: rows made for records from before tracking whose
+          reason no read has told yet, by reason; they are not in ``gone``,
+          most stand for earlier generations of findings still reported.
         """
         rows = self.presence(project_uuid)
         last = self.last_read(project_uuid)
         components = _components_by_uuid(rows)
         gone: dict[str, int] = {}
+        predating: dict[str, int] = {}
         went: dict[str, int] = {}
         recreated = attention = 0
         read_at = (last or {}).get("read_at")
@@ -614,6 +618,8 @@ class FindingLifecycleStore:
             reason = row.get("gone_reason") or REASON_UNDETERMINED
             if is_recreated:
                 recreated += 1
+            elif row.get("predates_tracking") and reason == REASON_UNDETERMINED:
+                predating[reason] = predating.get(reason, 0) + 1
             else:
                 gone[reason] = gone.get(reason, 0) + 1
             if read_at and row.get("gone_at") == read_at and not row.get("predates_tracking"):
@@ -630,6 +636,7 @@ class FindingLifecycleStore:
         return {
             "gone": dict(sorted(gone.items())),
             "recreated": recreated,
+            "predating": dict(sorted(predating.items())),
             "attention": attention,
             "last_read": {"at": read_at, "went": dict(sorted(went.items()))} if read_at else None,
             "since": since,
@@ -1215,11 +1222,34 @@ def same_component_version(
     version = str(row.get("component_version") or "").strip()
     if not version or version != str(target.component_version or "").strip():
         return False
-    purl = str(row.get("component_purl") or "").strip().lower()
-    target_purl = str(target.component_purl or "").strip().lower()
+    purl = _purl_key(row.get("component_purl"))
+    target_purl = _purl_key(target.component_purl)
     if purl or target_purl:
         return purl == target_purl
     return identity_from_findings(row)
+
+
+# Package URL qualifiers that name another artifact of the same package
+# (another build, platform or source): two components that differ in one of
+# them are not the same component. Other qualifiers (download_url,
+# checksum, file_name, vcs_url, …) only describe where it came from.
+ARTIFACT_QUALIFIERS = ("arch", "classifier", "distro", "repository_url", "type")
+
+
+def _purl_key(purl: Any) -> str:
+    """A package URL as two generations of one component are compared:
+    lower case, without subpath, with only the qualifiers that name another
+    artifact (``ARTIFACT_QUALIFIERS``), sorted."""
+    text = str(purl or "").strip().lower()
+    if not text:
+        return ""
+    text = text.split("#", 1)[0]
+    base, _, query = text.partition("?")
+    kept = sorted(
+        part for part in query.split("&")
+        if part.partition("=")[0] in ARTIFACT_QUALIFIERS
+    )
+    return base + (f"?{'&'.join(kept)}" if kept else "")
 
 
 def plan_carry_over(
@@ -1660,26 +1690,86 @@ def record_carry_over(
 _REVIEW_MARKER_SUFFIX = "\n\n[Status: Pending Review]"
 
 
+# Origins of automatic writes that may follow a carry without anyone
+# deciding anything: bulk workflows (Restore adds historical blocks). Such a
+# write keeps a carry chain alive only when it changed nothing but
+# historical blocks (``keys_untouched_since_carry``); a person's save, or a
+# bulk write that changed the assessment, counts as saved since.
+AUTOMATIC_ORIGINS = ("bulk-workflow",)
+
+# The review marker as DTVP writes it: on a line of its own, any case.
+_MARKER_LINE_RE = re.compile(r"^[ \t]*\[Status:\s*Pending Review\][ \t]*$", re.I | re.M)
+
+# Why plan_recreated_reviews keeps a marker, for the read's log line.
+KEEP_SAVED_SINCE = "saved_since"
+KEEP_NO_CARRY = "no_carry_found"
+KEEP_COMPONENT_DIFFERS = "component_differs"
+KEEP_VALUE_DIFFERS = "value_differs"
+KEEP_STEP_SAVED_SINCE = "step_saved_since"
+
+
+def _chain_value(value: Mapping[str, Any]) -> tuple[str, str, bool]:
+    """A value as a carry chain compares it: without historical blocks and
+    without the review marker."""
+    from .logic import without_historical_blocks
+
+    details = _without_marker(str(value.get("details") or ""))
+    return (
+        str(value.get("state") or "NOT_SET"),
+        without_historical_blocks(details).strip(),
+        bool(value.get("suppressed")),
+    )
+
+
+def _is_marked(value: Mapping[str, Any]) -> bool:
+    """The value carries the review marker on a line of its own."""
+    return bool(_MARKER_LINE_RE.search(str(value.get("details") or "")))
+
+
+def _without_marker(details: str) -> str:
+    """``details`` without the marker line and the blank lines before it,
+    wherever it stands (a restore may have appended blocks after it). A
+    marker inside a block's text is not the marker and stays."""
+    match = _MARKER_LINE_RE.search(details)
+    if match is None:
+        return details
+    before = details[: match.start()].rstrip("\n")
+    after = details[match.end():].lstrip("\n")
+    if not after:
+        return before
+    return f"{before}\n\n{after}" if before else after
+
+
 def plan_recreated_reviews(
     project_uuid: str,
     rows: Mapping[tuple[str, str], Mapping[str, Any]],
     records: Mapping[AssessmentKey, Mapping[str, Any]],
     reported: "ReportedIndex",
     carried_last: set[AssessmentKey],
+    *,
+    kept: Optional[dict[str, int]] = None,
 ) -> list[tuple[AssessmentKey, dict[str, Any], int]]:
     """Carries onto a recreated component that an earlier build marked for
     review: the value to take back without the marker, and the revision it
     is written on top of.
 
-    ``carried_last`` are the records whose latest revision is a carry-over
-    of either kind (nobody saved since). A reported finding's marker is taken
-    back when its value, followed back through the records it was carried
-    from, leads to the same value without the marker, and every step was a
-    recreation: the same name, version and package URL, each record in
-    between carried too, untouched since. Components were recreated every
-    night, so a marker an earlier build added can have been carried on
-    several times before the rule changed, and unchanged after.
+    ``carried_last`` are the records still holding what a carry wrote:
+    every revision since their last carry-over (of either kind) is an
+    automatic write that changed only historical blocks
+    (``AssessmentOutboxStore.keys_untouched_since_carry``). A reported
+    finding's marker is
+    taken back when its value, followed back through the records it was
+    carried from, leads to the same value without the marker, and every
+    step was a recreation: the same name, version and package URL, each
+    record in between carried too, untouched since. Components were
+    recreated every night, so a marker an earlier build added can have been
+    carried on several times before the rule changed, and unchanged after.
+
+    ``kept``, when given, counts by reason the marked carries of reported
+    findings that keep their marker (``KEEP_*``); earlier generations in a
+    chain are not counted.
     """
+    chain_last = set(carried_last)
     by_target: dict[AssessmentKey, list[AssessmentKey]] = {}
     for finding, row in rows.items():
         if row.get("status") != STATUS_GONE or row.get("carry_over") != CARRY_CARRIED:
@@ -1690,54 +1780,66 @@ def plan_recreated_reviews(
                 (project_uuid, str(successor), finding[1]), []
             ).append((project_uuid, *finding))
 
-    def approved_origin(key: AssessmentKey, component: Any, marked: dict, seen: set) -> bool:
-        """``key``, whose value is ``marked``, was carried from records of
-        the same component holding that value without the marker, directly
-        or through earlier recreations."""
+    def approved_origin(
+        key: AssessmentKey, component: Any, marked: tuple, seen: set
+    ) -> Optional[str]:
+        """``None`` when ``key``, whose value compares as ``marked``, was
+        carried from records of the same component holding that value
+        without the marker, directly or through earlier recreations;
+        otherwise why not."""
         candidates = by_target.get(key)
         if not candidates or key in seen:
-            return False
+            return KEEP_NO_CARRY
         seen = seen | {key}
-        before = {**marked, "details": marked["details"][: -len(_REVIEW_MARKER_SUFFIX)]}
         for candidate in candidates:
             old = records.get(candidate)
             row = rows.get((candidate[1], candidate[2]))
-            if old is None or row is None or not same_component_version(row, component):
-                return False
+            if old is None or row is None:
+                return KEEP_NO_CARRY
+            if not same_component_version(row, component):
+                return KEEP_COMPONENT_DIFFERS
             value = _record_value(old)
-            if value == before and "[Status: Pending Review]" not in value["details"]:
-                continue
+            if _chain_value(value) != marked:
+                return KEEP_VALUE_DIFFERS
+            if not _is_marked(value):
+                continue  # the value as it was before any marker
             # Carried on with the marker: follow it back, if a carry put it
             # there and nobody saved since.
-            if not (
-                value == marked
-                and candidate in carried_last
-                and approved_origin(candidate, _RowComponent(row), marked, seen)
-            ):
-                return False
-        return True
+            if candidate not in chain_last:
+                return KEEP_STEP_SAVED_SINCE
+            reason = approved_origin(candidate, _RowComponent(row), marked, seen)
+            if reason is not None:
+                return reason
+        return None
+
+    def count(reason: str) -> None:
+        if kept is not None:
+            kept[reason] = kept.get(reason, 0) + 1
 
     result = []
-    for key in sorted(carried_last):
+    for key in sorted(by_target):
         record = records.get(key)
-        if record is None or not by_target.get(key):
+        if record is None or record.get("sync_status") not in CARRY_FROM_STATUSES:
             continue
-        if record.get("sync_status") not in CARRY_FROM_STATUSES:
+        current = _record_value(record)
+        if not _is_marked(current):
             continue
         target = next(
             (item for item in reported.of_vulnerability(key[2], None)
              if item.component_uuid == key[1]),
             None,
         )
-        current = _record_value(record)
-        if target is None or not current["details"].endswith(_REVIEW_MARKER_SUFFIX):
+        if target is None:
+            continue  # an earlier generation of the chain, not a finding today
+        if key not in chain_last:
+            count(KEEP_SAVED_SINCE)
             continue
-        if approved_origin(key, target, current, set()):
-            before = {
-                **current,
-                "details": current["details"][: -len(_REVIEW_MARKER_SUFFIX)],
-            }
-            result.append((key, before, int(record.get("revision") or 0)))
+        reason = approved_origin(key, target, _chain_value(current), set())
+        if reason is not None:
+            count(reason)
+            continue
+        before = {**current, "details": _without_marker(current["details"])}
+        result.append((key, before, int(record.get("revision") or 0)))
     return result
 
 

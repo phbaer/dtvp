@@ -49,6 +49,7 @@ from .finding_lifecycle_services import (
     index_bom,
     vuln_ids_by_uuid,
     own_assessments_to_supersede,
+    AUTOMATIC_ORIGINS,
     plan_recreated_reviews,
     read_summary,
     record_carry_over,
@@ -501,6 +502,12 @@ class _ExchangeGate:
             self._released()
 
 
+# Project archives a findings read parses at most to name gone components;
+# parsed archives are kept for every project, so this only bounds the first
+# reads after a start.
+ARCHIVE_READS_PER_FINDINGS_READ = 3
+
+
 class CacheManager:
     def __init__(
         self,
@@ -572,6 +579,9 @@ class CacheManager:
         self._cache_status_expires_at = 0.0
         self._assessment_sync_lock = asyncio.Lock()
         self._assessment_sync_wakeup = asyncio.Event()
+        # Per project version, why carried assessments kept their review
+        # marker at the last read (see ``plan_recreated_reviews``).
+        self.recreated_review_kept: Dict[str, Dict[str, int]] = {}
         self._assessment_change_listeners: List[
             Callable[..., None]
         ] = []
@@ -2045,6 +2055,34 @@ class CacheManager:
             )
 
         await asyncio.to_thread(name_vulnerabilities)
+
+        def name_components() -> None:
+            # Gone rows without a component (made for records from before
+            # tracking) get it from local sources before they are
+            # classified: the stored BOM, then project archives, newest
+            # first, each parsed once per process and only until all are
+            # found; a read parses at most a few new archives, the next read
+            # goes on.
+            # With the identity known, a row whose vulnerability is reported
+            # on the same component under a new ID is classified as replaced
+            # and counted as recreated, not as gone.
+            from .gone_component_names import resolve_gone_component_names
+            from .project_archive_services import get_project_archive_path
+
+            try:
+                resolve_gone_component_names(
+                    self.finding_lifecycle,
+                    project_uuid,
+                    stored_bom=lambda: self._load_project_cache(
+                        self._bom_path(project_uuid), None
+                    ),
+                    archive_dir=get_project_archive_path(),
+                    max_archive_reads=ARCHIVE_READS_PER_FINDINGS_READ,
+                )
+            except Exception:
+                logger.exception("Could not look up gone components of %s", project_uuid)
+
+        await asyncio.to_thread(name_components)
         plan = await asyncio.to_thread(
             lambda: follow_findings_plan(
                 project_uuid=project_uuid,
@@ -2148,14 +2186,28 @@ class CacheManager:
         project_uuid = plan.project_uuid
         # Either kind of carry: later builds carry a marked value on
         # unchanged (``carried-over-recreated``).
+        # Still the carried value: every revision since the last carry is a
+        # carry or an automatic write that changed only historical blocks.
         carried_last = await asyncio.to_thread(
-            self.assessment_outbox.keys_last_written_by,
+            self.assessment_outbox.keys_untouched_since_carry,
             project_uuid,
             [ORIGIN_CARRIED_OVER, ORIGIN_CARRIED_OVER_RECREATED],
+            list(AUTOMATIC_ORIGINS),
         )
+        kept: Dict[str, int] = {}
         reviews = plan_recreated_reviews(
-            project_uuid, plan.presence.rows, plan.records, plan.reported, carried_last
+            project_uuid, plan.presence.rows, plan.records, plan.reported, carried_last,
+            kept=kept,
         )
+        if kept:
+            # Why marked carries keep their marker: a person saved since, or
+            # the chain does not lead back to an approved value.
+            logger.info(
+                "Kept the review marker of carried assessments of %s: %s",
+                project_uuid,
+                ", ".join(f"{reason}={count}" for reason, count in sorted(kept.items())),
+            )
+        self.recreated_review_kept[project_uuid] = dict(sorted(kept.items()))
         if reviews:
             entries = await self.persist_assessment_updates(
                 [

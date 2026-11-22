@@ -293,7 +293,15 @@ be read at all is not acted on.
    version read, marked as predating tracking (first seen unknown, not
    counted as gone at that read nor in "followed since"). A row without a
    component name takes it from the BOM stored before the read, before its
-   reason is told; an earlier `component_removed` told without the identity
+   reason is told; a gone row still without one takes it from local sources
+   inside the read: the stored BOM, then project archives, newest first,
+   each parsed once per process for every project and only until every row
+   is named; a read parses at most three new archives and the next read
+   goes on. With the
+   identity known, a row whose vulnerability is reported on the same
+   component under a new ID is `replaced` and counts as recreated, not as
+   gone. A row predating tracking whose reason no read has told yet is
+   exported apart (`export_findings_gone_predating`); an earlier `component_removed` told without the identity
    (a row predating tracking, or one that got its identity in this read)
    becomes `no_longer_matched` once a component of the same identity and
    version is in the BOM (the component was only recreated). A removal told
@@ -357,8 +365,20 @@ be read at all is not acted on.
    is a carry-over, `carried-over` or `carried-over-recreated`: nobody saved
    since), and, followed back through the records it was carried from, the
    value leads to the same value without the marker, every step a recreation
-   (same name, version and package URL) and every record in between a carry
-   nobody saved since. A value that was pending review where the chain
+   (same name, version and package URL; package URLs compared with only
+   the qualifiers that name another artifact: `arch`, `classifier`,
+   `distro`, `repository_url`, `type`) and every record in between a carry
+   nobody saved since. "Nobody saved since" means every revision after the
+   last carry is a carry or an automatic write (origin `bulk-workflow`, for
+   example Restore adding historical blocks) that changed nothing but
+   historical blocks; a person's save anywhere after the carry, or a bulk
+   write that changed the assessment (Synchronize copying another text),
+   keeps the marker. The marker, matched in any case on a line of its own,
+   is then removed where it stands and the historical blocks stay. Each read logs, at INFO, why the markers
+   it kept stayed (`saved_since`, `value_differs`, `component_differs`,
+   `step_saved_since`, `no_carry_found`; reported findings only), and
+   `GET /api/sync/status` lists those counts per project version under
+   `review_markers_kept`. A value that was pending review where the chain
    starts, or a step to another version, keeps the marker. A new revision
    with origin `carried-over-recreated` restores the value without the
    marker and is queued for export. It runs once per record; anything saved
