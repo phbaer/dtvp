@@ -395,6 +395,13 @@ describe('GoneFindingsPanel', () => {
         expect(texts('[data-testid="gone-findings-same-issue-disagreements"]')[0]).toContain(
             'CVE-2026-65913 NOT_AFFECTED · GHSA-v9jr-rg53-9pgp EXPLOITABLE',
         )
+        // The list is collapsed and below the findings, so it never hides them.
+        const duplicates = document.body.querySelector('[data-testid="gone-findings-duplicates"]') as HTMLDetailsElement
+        expect(duplicates.open).toBe(false)
+        expect(duplicates.querySelector('summary')!.textContent).toContain('1 probable duplicate with different assessments')
+        const firstFinding = document.body.querySelector('[data-testid="gone-finding"]')!
+        expect(firstFinding.compareDocumentPosition(duplicates) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(document.body.querySelector('header [data-testid="gone-findings-same-issue-disagreements"]')).toBeNull()
         // Nothing to apply before a person confirms it.
         expect(document.body.querySelector('[data-testid="gone-finding-apply-same-issue"]')).toBeNull()
         vi.mocked(getGoneFindings).mockResolvedValue(response('rita') as any)

@@ -2,15 +2,17 @@
 
 Some vulnerabilities are recorded twice, for example as a CVE (from NVD) and
 as a GitHub advisory, without either record naming the other as an alias.
-DTVP can only guess that they are one issue: from the same description, or,
-failing that, from the same affected version range and the same CWE, on the
-same component. Such a guess is shown as "probably the same as <id>", never
+DTVP can only guess that they are one issue: from the same description on
+the same component. (An earlier fallback on the same affected range and CWE
+matched far too many different vulnerabilities of one package and was
+removed.) A description several ids on one component share is a template,
+not an issue, and matches nothing. Such a guess is shown as "probably the same as <id>", never
 as an alias and never exported as one; a person confirms it before anything
 is applied, and only a confirmed match is exported (``<prefix>:same_issue_as``).
 
 Everything here is a pure function over what DTVP stores: the vulnerability
 records and findings (read through the source adapter's
-``VulnerabilityFacts``), the stored version ranges, and the finding rows.
+``VulnerabilityFacts``) and the finding rows.
 See docs/review-workflows.md, "Gone findings".
 """
 
@@ -19,13 +21,13 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Iterable, Mapping, Optional
 
-from .fixed_versions import compare_versions, range_contains, range_text
-
 REASON_DESCRIPTION = "same description"
-REASON_RANGE_AND_CWE = "same affected range and CWE"
 
 # A description this short says too little to tell two issues apart.
 MIN_DESCRIPTION_LENGTH = 40
+# A description more ids than this share on one component is a template
+# (boilerplate of a distribution or a scanner), not one issue.
+MAX_IDS_SHARING_A_DESCRIPTION = 2
 
 _ID_PATTERN = re.compile(
     r"\b(?:CVE-\d{4}-\d+|GHSA(?:-[0-9a-z]{4}){3}|[A-Z][A-Z0-9]+-\d{4}-[0-9A-Z-]+)\b",
@@ -78,47 +80,17 @@ def facts_by_uuid(
     return result
 
 
-def affected_ranges(entries: Iterable[Mapping[str, Any]], version: Any) -> frozenset[str]:
-    """The ranges of a vulnerability's affected components that contain the
-    installed version, written like ``>=3.0.0 <3.0.2``; an exact version as
-    ``=1.2``. Whatever package the entry names: the two records of one issue
-    name it differently (a CPE and a package URL)."""
-    installed = str(version or "").strip()
-    if not installed:
-        return frozenset()
-    found = set()
-    for entry in entries or []:
-        if not isinstance(entry, Mapping):
-            continue
-        text = range_text(entry)
-        if text:
-            if range_contains(entry, installed):
-                found.add(text)
-        elif entry.get("version") and compare_versions(str(entry["version"]), installed) == 0:
-            found.add(f"={entry['version']}")
-    return frozenset(found)
-
-
 def same_issue_reason(
     left: Optional[Mapping[str, Any]],
     right: Optional[Mapping[str, Any]],
-    left_ranges: frozenset[str] = frozenset(),
-    right_ranges: frozenset[str] = frozenset(),
 ) -> Optional[str]:
     """Why two vulnerabilities on one component are probably one issue, or
-    ``None``. Their facts come from ``facts_by_uuid``; the ranges from
-    ``affected_ranges`` for the component's version."""
+    ``None``: the same description (see ``description_key``). Their facts
+    come from ``facts_by_uuid``."""
     if not left or not right:
         return None
     if left.get("description") and left["description"] == right.get("description"):
         return REASON_DESCRIPTION
-    if (
-        left_ranges
-        and left_ranges == right_ranges
-        and left.get("cwes")
-        and left["cwes"] == right.get("cwes")
-    ):
-        return REASON_RANGE_AND_CWE
     return None
 
 
@@ -129,21 +101,20 @@ def _state(record: Optional[Mapping[str, Any]]) -> str:
 class SameIssueIndex:
     """Probable same-issue matches of one project version.
 
-    ``facts`` maps a vulnerability UUID to its facts; ``ranges_of(uuid,
-    version)`` gives the ranges containing that version (empty when none are
-    stored). Matches are looked for on the same component, or on a
-    component with the same package URL and version (one the source
-    recreated); aliases are left out, they have their own view."""
+    ``facts`` maps a vulnerability UUID to its facts. Matches are looked for
+    on the same component, or on a component with the same package URL and
+    version (one the source recreated); aliases are left out, they have
+    their own view. A description that more than
+    ``MAX_IDS_SHARING_A_DESCRIPTION`` ids share on one component matches
+    nothing there."""
 
     def __init__(
         self,
         rows: Mapping[tuple[str, str], Mapping[str, Any]],
         facts: Mapping[str, Mapping[str, Any]],
-        ranges_of: Callable[[str, Any], frozenset[str]] = lambda _uuid, _version: frozenset(),
         aliases: Optional[Mapping[str, set[str]]] = None,
     ) -> None:
         self.facts = facts
-        self.ranges_of = ranges_of
         self.aliases = aliases or {}
         self.reported_by_component: dict[str, list[Mapping[str, Any]]] = {}
         self.reported_by_package: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
@@ -154,6 +125,21 @@ class SameIssueIndex:
             package = _package_key(row)
             if package:
                 self.reported_by_package.setdefault(package, []).append(row)
+        # Per component, the ids of every finding (reported or gone) that
+        # carry one description.
+        self.ids_by_description: dict[tuple[str, str], set[str]] = {}
+        for row in rows.values():
+            description = (facts.get(row["vulnerability_uuid"]) or {}).get("description")
+            if description:
+                self.ids_by_description.setdefault(
+                    (row["component_uuid"], description), set()
+                ).add(str(row["vulnerability_uuid"]))
+
+    def _is_template(self, row: Mapping[str, Any], description: str) -> bool:
+        return (
+            len(self.ids_by_description.get((row["component_uuid"], description), ()))
+            > MAX_IDS_SHARING_A_DESCRIPTION
+        )
 
     def _is_alias(self, left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
         left_id = str(left.get("vuln_id") or "").strip().upper()
@@ -166,13 +152,14 @@ class SameIssueIndex:
             return None
         if self._is_alias(left, right):
             return None
-        version = left.get("component_version")
-        return same_issue_reason(
-            self.facts.get(left["vulnerability_uuid"]),
-            self.facts.get(right["vulnerability_uuid"]),
-            self.ranges_of(left["vulnerability_uuid"], version),
-            self.ranges_of(right["vulnerability_uuid"], right.get("component_version")),
-        )
+        left_facts = self.facts.get(left["vulnerability_uuid"])
+        reason = same_issue_reason(left_facts, self.facts.get(right["vulnerability_uuid"]))
+        if reason and (
+            self._is_template(left, left_facts["description"])
+            or self._is_template(right, left_facts["description"])
+        ):
+            return None
+        return reason
 
     def candidates(self, row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         """Reported findings a gone finding may be the same issue as: on its
@@ -188,17 +175,14 @@ class SameIssueIndex:
 
     def match(self, row: Mapping[str, Any]) -> Optional[tuple[Mapping[str, Any], str]]:
         """The first reported finding a gone finding is probably the same
-        issue as, with the reason; a description match before a range one."""
-        best: Optional[tuple[Mapping[str, Any], str]] = None
+        issue as, with the reason."""
         for other in sorted(
             self.candidates(row), key=lambda item: str(item.get("vuln_id") or "")
         ):
             reason = self.reason(row, other)
-            if reason == REASON_DESCRIPTION:
+            if reason:
                 return other, reason
-            if reason and best is None:
-                best = (other, reason)
-        return best
+        return None
 
     def disagreements(
         self, record_of: Callable[[Mapping[str, Any]], Optional[Mapping[str, Any]]]

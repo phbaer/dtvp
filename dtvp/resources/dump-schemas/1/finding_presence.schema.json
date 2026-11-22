@@ -103,7 +103,7 @@
     },
     "same_issue_reason": {
       "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string",
-      "description": "Why DTVP proposed the match (\"same description\" or \"same affected range and CWE\"); absent otherwise."
+      "description": "Why DTVP proposed the match (\"same description\"; dumps from before 2.0.0 final may also hold \"same affected range and CWE\"); absent otherwise."
     },
     "same_issue_confirmed_by": {
       "$ref": "urn:dtvp:dump:1:common#/$defs/nullable_string",

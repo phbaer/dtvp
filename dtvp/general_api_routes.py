@@ -29,7 +29,7 @@ from .cyclonedx_export import (
     valid_property_prefix,
     valid_ticket_prefix,
 )
-from .same_issue import SameIssueIndex, affected_ranges, facts_by_uuid
+from .same_issue import SameIssueIndex, facts_by_uuid
 from .finding_lifecycle_services import (
     ORIGIN_CARRIED_OVER_BY_ALIAS,
     ORIGIN_CARRIED_OVER_BY_SAME_ISSUE,
@@ -3673,21 +3673,8 @@ def _register_gone_findings_routes(
                 same_issue_facts[project_uuid] = (stamp, facts)
             else:
                 facts = cached[1]
-            ranges = manager.store.fixed_version_entries(
-                {
-                    (str(item["source"]), str(item["vuln_id"]))
-                    for item in facts.values()
-                    if item.get("source") and item.get("vuln_id")
-                }
-            )
-
-            def ranges_of(vulnerability_uuid: str, version: Any) -> frozenset[str]:
-                item = facts.get(vulnerability_uuid) or {}
-                stored = ranges.get((str(item.get("source")), str(item.get("vuln_id"))))
-                return affected_ranges((stored or {}).get("payload") or [], version)
-
             return SameIssueIndex(
-                manager.finding_lifecycle.presence(project_uuid), facts, ranges_of, aliases
+                manager.finding_lifecycle.presence(project_uuid), facts, aliases
             )
         except Exception:
             logger = getattr(deps, "logger", None)
@@ -3750,8 +3737,8 @@ def _register_gone_findings_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         """Confirm, or withdraw, that a finding is the same issue as a
-        reported one DTVP proposed for it (same description, or same
-        affected range and CWE, on the same component), although no source
+        reported one DTVP proposed for it (the same description on the same
+        component), although no source
         names either as the other's alias. Only a confirmed match can be
         applied and is exported. Reviewers only."""
         if deps.get_user_role(user).upper() != "REVIEWER":

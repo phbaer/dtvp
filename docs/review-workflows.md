@@ -280,15 +280,18 @@ Opened, it shows a dialog above the page:
   alias then says "Probably the same as *id* (*reason*)" when a finding on
   the same component, or on one with the same package URL and version, has
   the same description (compared without case, punctuation, spacing and the
-  ids themselves; at least 40 characters), or, failing that, the same
-  affected version range for the installed version and the same CWEs (from
-  the stored ranges; for a CVE and an advisory the ranges name the package
-  differently and still compare). It is DTVP's guess: reviewers first
+  ids themselves; at least 40 characters). A description that more than two
+  ids share on one component is a template (boilerplate of a distribution or
+  a scanner) and matches nothing. The same affected range and CWE are not
+  enough: on one package they matched many different vulnerabilities. It is
+  DTVP's guess: reviewers first
   **Confirm same issue** (or later **Not the same**), only then **Apply to
   *id*** works as for an alias, saved pending review with origin
   `carried-over-by-same-issue`. Reported findings on one component that are
-  probably one issue and have different states are listed apart from the
-  alias disagreements ("Probably one issue, two ids"). The facts come from
+  probably one issue and have different states are listed, with the alias
+  disagreements, in a collapsed section below the findings ("N probable
+  duplicates with different assessments"), so a long list never hides the
+  findings. The facts come from
   the stored findings and vulnerability records through the source adapter
   (`VulnerabilityFacts`); no source call. A confirmation is kept with the
   finding, in the instance dump too, and exported (see

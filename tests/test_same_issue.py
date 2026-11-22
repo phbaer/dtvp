@@ -1,7 +1,7 @@
 """Findings that are probably the same issue under two ids no source links
 (CVE-2026-65901 and GHSA-x4vx-rjvf-j5p4 on dompurify): proposed by their
-text, or by their affected range and CWE; applied and exported only once a
-person confirmed them."""
+text alone (never by range and CWE, which matched different issues of one
+package); applied and exported only once a person confirmed them."""
 
 from unittest.mock import patch
 
@@ -10,9 +10,7 @@ from dtvp.cyclonedx_export import build_vdr
 from dtvp.dt_client import DTClient
 from dtvp.same_issue import (
     REASON_DESCRIPTION,
-    REASON_RANGE_AND_CWE,
     SameIssueIndex,
-    affected_ranges,
     confirmed_pairs,
     description_key,
     facts_by_uuid,
@@ -67,21 +65,45 @@ def test_two_records_without_aliases_and_the_same_text_are_the_same_issue():
     assert same_issue_reason(facts["v-cve"], other["v-other"]) is None
 
 
-def test_without_the_same_text_the_same_range_and_cwe_still_tell():
-    left = {"description": None, "cwes": frozenset({79})}
-    right = {"description": "something else entirely, long enough to compare", "cwes": frozenset({79})}
-    entries = [{"identityType": "PURL", "identity": "pkg:npm/dompurify",
-                "versionStartIncluding": "3.0.0", "versionEndExcluding": "3.2.8"}]
-    cpe_entries = [{"identityType": "CPE", "identity": "cpe:2.3:a:cure53:dompurify:*",
-                    "versionStartIncluding": "3.0.0", "versionEndExcluding": "3.2.8"}]
-    ranges = affected_ranges(entries, "3.2.7")
-    assert ranges == affected_ranges(cpe_entries, "3.2.7") == frozenset({">=3.0.0 <3.2.8"})
-    assert same_issue_reason(left, right, ranges, ranges) == REASON_RANGE_AND_CWE
-    # Another range, another CWE, or none stored: no guess.
-    assert same_issue_reason(left, right, ranges, frozenset({">=3.2.0 <3.2.9"})) is None
-    assert same_issue_reason(left, {**right, "cwes": frozenset({20})}, ranges, ranges) is None
-    assert same_issue_reason(left, right) is None
-    assert affected_ranges(entries, "3.2.8") == frozenset()
+def test_the_same_range_and_cwe_without_the_same_text_is_no_match():
+    """CVE-2026-59898 and CVE-2026-59900 on every netty 4.1.133.Final package:
+    same affected range, same CWE, different issues."""
+    facts = facts_by_uuid(
+        DTClient.vulnerability_facts,
+        [
+            _record("v-a", "CVE-2026-59898", "Netty HTTP/2 codec allows a flood of RST frames to exhaust memory.", cwes=(400,)),
+            _record("v-b", "CVE-2026-59900", "Netty resolver accepts oversized DNS answers and loops on compression pointers.", cwes=(400,)),
+        ],
+    )
+    assert same_issue_reason(facts["v-a"], facts["v-b"]) is None
+    rows = {
+        ("c", "v-a"): _row("c", "v-a", "CVE-2026-59898", component_name="netty-codec-http2"),
+        ("c", "v-b"): _row("c", "v-b", "CVE-2026-59900", component_name="netty-codec-http2"),
+    }
+    states = {"v-a": "EXPLOITABLE", "v-b": "NOT_AFFECTED"}
+    assert SameIssueIndex(rows, facts).disagreements(
+        lambda row: {"analysisState": states[row["vulnerability_uuid"]]}
+    ) == []
+
+
+def test_a_description_several_ids_share_on_a_component_is_a_template():
+    boilerplate = "This vulnerability affects the package and may allow an attacker to cause harm."
+    facts = facts_by_uuid(
+        DTClient.vulnerability_facts,
+        [_record(f"v-{n}", f"PYSEC-2026-{n}", boilerplate) for n in (1, 2, 3)],
+    )
+    rows = {
+        ("c", f"v-{n}"): _row("c", f"v-{n}", f"PYSEC-2026-{n}") for n in (2, 3)
+    }
+    gone = _row("c", "v-1", "PYSEC-2026-1", status="gone")
+    rows[("c", "v-1")] = gone
+    states = {"v-1": "EXPLOITABLE", "v-2": "NOT_AFFECTED", "v-3": "EXPLOITABLE"}
+    index = SameIssueIndex(rows, facts)
+    assert index.match(gone) is None
+    assert index.disagreements(lambda row: {"analysisState": states[row["vulnerability_uuid"]]}) == []
+    # Two ids sharing it are still one issue.
+    del rows[("c", "v-3")]
+    assert SameIssueIndex(rows, facts).match(gone)[1] == REASON_DESCRIPTION
 
 
 def test_the_index_matches_on_the_component_or_its_recreation_and_skips_aliases():
