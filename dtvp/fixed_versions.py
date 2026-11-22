@@ -393,6 +393,59 @@ def derive_recommendation(
     return Derived(recommendation_text(component, fix), fix.sources)
 
 
+def _installed_list(components: Iterable[Mapping[str, Any]]) -> str:
+    """``lib-a 1.0, 1.2; lib-b 2.0``: each package once, with its installed
+    versions in version order."""
+    versions: dict[str, list[str]] = {}
+    for component in components:
+        name = display_name(component)
+        version = str(component.get("version") or "").strip()
+        found = versions.setdefault(name, [])
+        if version and version not in found:
+            found.append(version)
+    parts = []
+    for name in sorted(versions, key=str.casefold):
+        found = sorted(versions[name], key=functools.cmp_to_key(compare_versions))
+        parts.append(f"{name} {', '.join(found)}".strip())
+    return "; ".join(parts)
+
+
+def grouped_recommendation(
+    components: Iterable[Mapping[str, Any]],
+    entries: Iterable[Mapping[str, Any]] | None,
+) -> Derived | None:
+    """One sentence per fix target for all affected components, each naming
+    the installed packages and versions it applies to; components without
+    a fix in one sentence. None when no component has a fix."""
+    entries = list(entries or [])
+    by_fix: dict[tuple[str, tuple[str, ...]], list[Mapping[str, Any]]] = {}
+    without_fix: list[Mapping[str, Any]] = []
+    sources: set[str] = set()
+    for component in components:
+        fix = fix_for(component, entries)
+        if fix is None:
+            without_fix.append(component)
+            continue
+        by_fix.setdefault((fix.version, fix.later_ranges), []).append(component)
+        sources.update(fix.sources)
+    if not by_fix:
+        return None
+    sentences = []
+    for (version, later), group in sorted(
+        by_fix.items(),
+        key=lambda item: (
+            functools.cmp_to_key(compare_versions)(item[0][0]), item[0][1]
+        ),
+    ):
+        text = f"Upgrade {_installed_list(group)} to {version} or later."
+        if later:
+            text += f" Later versions are affected too: {', '.join(later)}."
+        sentences.append(text)
+    if without_fix:
+        sentences.append(f"No fixed version is known for {_installed_list(without_fix)}.")
+    return Derived(" ".join(sentences), tuple(sorted(sources)))
+
+
 def slim_affected_components(items: Any) -> list[dict[str, Any]]:
     """What is kept of ``affectedComponents``: the identity, the version or
     the bounds, and the distinct sources of the attributions. Everything

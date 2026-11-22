@@ -45,7 +45,7 @@ from .assessment_model import (
     render_assessment,
 )
 from .assessment_scopes import AMBIGUOUS, BASE, assessment_scopes
-from .fixed_versions import derive_recommendation, display_name, installed_name
+from .fixed_versions import grouped_recommendation
 
 VARIANT_INVENTORY = "inventory"
 VARIANT_VDR = "vdr"
@@ -259,20 +259,92 @@ def complete_findings(
     return completed
 
 
-def _references(vulnerability: dict[str, Any], vuln_id: str) -> list[dict[str, Any]]:
-    sources = {
-        "cveId": "NVD", "ghsaId": "GITHUB", "osvId": "OSV", "sonatypeId": "OSSINDEX",
-        "snykId": "SNYK", "gsdId": "GSD", "vulnDbId": "VULNDB", "internalId": "INTERNAL",
-    }
-    seen: dict[str, str] = {}
+_ALIAS_SOURCES = {
+    "cveId": "NVD", "ghsaId": "GITHUB", "osvId": "OSV", "sonatypeId": "OSSINDEX",
+    "snykId": "SNYK", "gsdId": "GSD", "vulnDbId": "VULNDB", "internalId": "INTERNAL",
+}
+
+
+def _source_of(identifier: str) -> str | None:
+    upper = identifier.upper()
+    if upper.startswith("CVE-"):
+        return "NVD"
+    if upper.startswith("GHSA-"):
+        return "GITHUB"
+    return None
+
+
+def _identifiers(vulnerability: dict[str, Any]) -> dict[str, str | None]:
+    """The vulnerability's own id and its aliases, each with its source."""
+    found: dict[str, str | None] = {}
+    vuln_id = str(vulnerability.get("vulnId") or "").strip()
+    if vuln_id:
+        found[vuln_id] = str(vulnerability.get("source") or "") or _source_of(vuln_id)
     for alias in vulnerability.get("aliases") or []:
         if not isinstance(alias, dict):
             continue
-        for key, source in sources.items():
+        for key, source in _ALIAS_SOURCES.items():
             value = str(alias.get(key) or "").strip()
-            if value and value.upper() != vuln_id.upper():
-                seen.setdefault(value, source)
-    return [{"id": value, "source": {"name": source}} for value, source in sorted(seen.items())]
+            if value:
+                found.setdefault(value, source)
+    return found
+
+
+def _alias_groups(findings: Iterable[dict[str, Any]]) -> dict[str, dict[str, str | None]]:
+    """Every identifier with all identifiers it is an alias of, across the
+    findings: a CVE whose own record names no GHSA still gets the one
+    whose record names the CVE. Keyed by the upper-case identifier."""
+    parent: dict[str, str] = {}
+    sources: dict[str, tuple[str, str | None]] = {}
+
+    def root(key: str) -> str:
+        while parent.setdefault(key, key) != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    for finding in findings:
+        found = _identifiers(finding.get("vulnerability") or {})
+        keys = []
+        for identifier, source in found.items():
+            key = identifier.upper()
+            known = sources.get(key)
+            if known is None or (known[1] is None and source):
+                sources[key] = (identifier, source)
+            keys.append(key)
+        for key in keys[1:]:
+            parent[root(key)] = root(keys[0])
+    members: dict[str, dict[str, str | None]] = {}
+    for key in sources:
+        identifier, source = sources[key]
+        members.setdefault(root(key), {})[identifier] = source
+    return {key: members[root(key)] for key in sources}
+
+
+def _references(
+    vulnerability: dict[str, Any],
+    vuln_id: str,
+    aliases: Mapping[str, Mapping[str, str | None]] | None = None,
+) -> list[dict[str, Any]]:
+    """The vulnerability's aliases: those its record names, and those DTVP
+    knows from the other findings' records."""
+    seen = {
+        identifier: source
+        for identifier, source in _identifiers(vulnerability).items()
+    }
+    for identifier, source in ((aliases or {}).get(vuln_id.upper()) or {}).items():
+        seen.setdefault(identifier, source)
+    references = []
+    for identifier, source in sorted(seen.items()):
+        if identifier.upper() == vuln_id.upper():
+            continue
+        reference: dict[str, Any] = {"id": identifier}
+        if source:
+            reference["source"] = {"name": source}
+        else:
+            reference["source"] = {}
+        references.append(reference)
+    return references
 
 
 def _component_refs(bom: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -746,27 +818,15 @@ class _Recommendations:
             [{"name": f"{self.prefix}:patched_versions", "value": patched}]
             if patched else []
         )
-        sentences: dict[str, tuple[str, tuple[str, ...]]] = {}
-        without_fix: list[dict[str, Any]] = []
-        for component in components:
-            derived = derive_recommendation(component, entries)
-            if derived is not None:
-                sentences.setdefault(derived.text, (display_name(component), derived.sources))
-            else:
-                without_fix.append(component)
-        if not sentences:
+        # One sentence per fix target, naming the installed packages and
+        # versions it applies to; every affected package is named, one the
+        # ranges give no fix for in a sentence of its own.
+        derived = grouped_recommendation(components, entries)
+        if derived is None:
             return "", hint
-        # Every affected package is named: one the ranges give no fix for
-        # says so, instead of being left out of the text.
-        for component in without_fix:
-            sentences.setdefault(
-                f"No fixed version is known for {installed_name(component)}.",
-                (display_name(component), ()),
-            )
         self.derived += 1
-        ordered = sorted(sentences.items(), key=lambda item: (item[1][0].casefold(), item[0]))
-        sources = sorted({source for _name, found in sentences.values() for source in found})
-        return " ".join(text for text, _found in ordered), [
+        sources = list(derived.sources)
+        return derived.text, [
             {"name": f"{self.prefix}:recommendation_source", "value": "fixed_version"},
             *(
                 {"name": f"{self.prefix}:recommendation_fixed_by", "value": source}
@@ -994,6 +1054,7 @@ def build_vdr(
     historical_assessments = 0
 
     refs = _component_refs(document)
+    aliases = _alias_groups(findings)
     groups: dict[tuple[Any, ...], dict[str, Any]] = {}
     fields_by_vulnerability: dict[str, list[dict[str, Any]]] = {}
     for finding, fields in zip(findings, assessments):
@@ -1029,14 +1090,28 @@ def build_vdr(
     vulnerabilities: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = list(document.get("annotations") or [])
     # A stable order, so the same split gives each entry the same bom-ref in
-    # every export: by vulnerability, then by the components it affects, then
-    # by the assessment; never by the order the source listed the findings.
-    ordered = sorted(
-        groups.items(),
-        key=lambda item: (
-            item[0][0], sorted(str(ref) for ref in item[1]["refs"]), repr(item[0])
-        ),
-    )
+    # every export: by vulnerability, then by the identity of the components
+    # it affects (package URL, else name and version: a component the source
+    # recreated under a new ID keeps its place), then by the assessment
+    # without its review state (approving one group does not swap it with
+    # the other); never by the order the source listed the findings.
+    def component_identity(component: dict[str, Any]) -> str:
+        purl = str(component.get("purl") or "").strip().lower()
+        if purl:
+            return purl
+        return f"{component.get('group') or ''}/{component.get('name') or ''}@{component.get('version') or ''}".lower()
+
+    def order(item: tuple[tuple[Any, ...], dict[str, Any]]) -> tuple[Any, ...]:
+        signature, group = item
+        assessment = signature[:3] + signature[4:]  # without pending_review
+        return (
+            signature[0],
+            sorted(component_identity(component) for component in group["components"]),
+            repr(assessment),
+            repr(signature),
+        )
+
+    ordered = sorted(groups.items(), key=order)
     for signature, group in ordered:
         vuln_id = signature[0]
         vulnerability, fields = group["vulnerability"], group["fields"]
@@ -1047,7 +1122,7 @@ def build_vdr(
         entry: dict[str, Any] = {"bom-ref": bom_ref, "id": vuln_id}
         if vulnerability.get("source"):
             entry["source"] = {"name": str(vulnerability["source"])}
-        if references := _references(vulnerability, vuln_id):
+        if references := _references(vulnerability, vuln_id, aliases):
             entry["references"] = references
         read = _read(fields, unowned, ticket_pattern)
         ratings = _advisory_ratings(vulnerability)

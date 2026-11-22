@@ -1320,3 +1320,63 @@ def test_the_override_of_one_vulnerability_does_not_reach_another():
 
     scopes = {entry["id"]: _scope(entry)["assessment_scope"] for entry in document["vulnerabilities"]}
     assert scopes == {"CVE-2026-1": ["version_override"], "CVE-2026-2": []}
+
+
+def test_packages_with_the_same_fix_share_one_sentence():
+    """One sentence per target, naming every installed package and version
+    it applies to; the packages without a fix share one too."""
+    pa2 = {"uuid": "c1b", "name": "lib-a", "version": "1.2", "purl": "pkg:npm/lib-a@1.2"}
+    pc = {"uuid": "c3", "name": "lib-c", "version": "4.0", "purl": "pkg:npm/lib-c@4.0"}
+    pd = {"uuid": "c4", "name": "lib-d", "version": "5.0", "purl": "pkg:npm/lib-d@5.0"}
+    fixed = {("NVD", "CVE-2026-1"): _ranges(
+        _excluding("lib-a", "3.0", "GITHUB"), _excluding("lib-b", "3.0", "OSV"),
+    )}
+    document = _vdr(
+        [_finding(pa2), _finding(PB), _finding(PA), _finding(pc), _finding(pd)],
+        [("NOT_SET", "")] * 5, fixed_versions=fixed,
+    )
+    [entry] = document["vulnerabilities"]
+    assert entry["recommendation"] == (
+        "Upgrade lib-a 1.0, 1.2; lib-b 2.0 to 3.0 or later. "
+        "No fixed version is known for lib-c 4.0; lib-d 5.0."
+    )
+    assert _property(entry, "dtvp:recommendation_fixed_by") == ["GITHUB", "OSV"]
+    assert _valid(document)
+
+
+def test_aliases_known_from_other_findings_are_references():
+    """The CVE's own record names no GHSA; the GHSA's record names the CVE.
+    Both entries list the other, so a consumer can connect them."""
+    cve = _finding(C1, "CVE-2026-65901", "v1", aliases=[])
+    ghsa = _finding(
+        C2, "GHSA-x4vx-rjvf-j5p4", "v2", source="GITHUB",
+        aliases=[{"ghsaId": "GHSA-x4vx-rjvf-j5p4", "cveId": "CVE-2026-65901"}],
+    )
+    document = _vdr([cve, ghsa], [("NOT_SET", "")] * 2)
+    entries = {entry["id"]: entry for entry in document["vulnerabilities"]}
+
+    assert entries["CVE-2026-65901"]["references"] == [
+        {"id": "GHSA-x4vx-rjvf-j5p4", "source": {"name": "GITHUB"}}
+    ]
+    assert entries["GHSA-x4vx-rjvf-j5p4"]["references"] == [
+        {"id": "CVE-2026-65901", "source": {"name": "NVD"}}
+    ]
+    assert _valid(document)
+
+
+def test_a_recreated_component_or_an_approval_does_not_swap_split_bom_refs():
+    """The plain bom-ref goes by the components' identity and the assessment
+    without its review state, not by the components' IDs."""
+    texts = [("NOT_AFFECTED", ""), ("EXPLOITABLE", "")]
+    # As in Dependency-Track's BOMs, the bom-ref is the component's UUID.
+    lib_x = {"uuid": "aa-old", "name": "lib-x", "version": "1.0", "purl": "pkg:npm/lib-x@1.0"}
+    lib_y = {"uuid": "bb", "name": "lib-y", "version": "2.0", "purl": "pkg:npm/lib-y@2.0"}
+    before = _vdr([_finding(lib_x), _finding(lib_y)], texts)
+    # lib-x recreated under an ID that sorts after lib-y's.
+    after = _vdr([_finding({**lib_x, "uuid": "zz-new"}), _finding(lib_y)], texts)
+
+    def plain(document):
+        [entry] = [item for item in document["vulnerabilities"] if "#" not in item["bom-ref"]]
+        return entry["analysis"]["state"]
+
+    assert plain(before) == plain(after)
