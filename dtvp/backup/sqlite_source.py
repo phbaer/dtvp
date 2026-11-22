@@ -583,7 +583,12 @@ class SqliteDumpSource:
                 # causes, and findings without them, have no such fields.
                 **{
                     column: row[column]
-                    for column in ("acknowledged_by", "acknowledged_at", "gone_cause")
+                    for column in (
+                        "acknowledged_by", "acknowledged_at", "gone_cause",
+                        "same_issue_component_uuid", "same_issue_vulnerability_uuid",
+                        "same_issue_reason", "same_issue_confirmed_by",
+                        "same_issue_confirmed_at",
+                    )
                     if row[column] is not None
                 },
                 # Only when set: a row made for a record from before tracking.
