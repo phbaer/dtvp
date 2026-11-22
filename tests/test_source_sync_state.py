@@ -237,6 +237,19 @@ def test_the_routes_report_versions_and_status(tmp_path):
     assert client.get("/api/sync/versions", params={"changed_since": "yesterday"}).status_code == 422
     status = client.get("/api/sync/status").json()
     assert status["versions"] == 1 and status["by_status"] == {"synced": 1}
+    assert "review_markers_kept" not in status
+
+    kept = {"p1": {"saved_since": 2}, "p2": {}}
+    with_kept = FastAPI()
+    with_kept.include_router(
+        create_sync_router(
+            lambda: store, current_user_dependency=lambda: "alice",
+            review_markers_kept=lambda: kept,
+        ),
+        prefix="/api",
+    )
+    status = TestClient(with_kept).get("/api/sync/status").json()
+    assert status["review_markers_kept"] == {"p1": {"saved_since": 2}}
     local.close()
 
 

@@ -15,6 +15,7 @@ def create_sync_router(
     *,
     current_user_dependency: Callable[..., Any],
     scheduler_status: Optional[Callable[[], dict[str, Any]]] = None,
+    review_markers_kept: Optional[Callable[[], dict[str, dict[str, int]]]] = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -48,6 +49,14 @@ def create_sync_router(
         if scheduler_status is not None:
             # The scheduler's breaker, queue and watched products.
             status["scheduler_state"] = scheduler_status()
+        if review_markers_kept is not None:
+            # Per project version, why carried assessments kept their review
+            # marker at the last read (plan_recreated_reviews).
+            status["review_markers_kept"] = {
+                project: dict(counts)
+                for project, counts in review_markers_kept().items()
+                if counts
+            }
         return status
 
     return router

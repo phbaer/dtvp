@@ -68,19 +68,52 @@ def _archives(archive_dir: Optional[str]) -> list[Path]:
     return sorted(paths, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
-def _archive_sources(project_uuid: str, archives: list[Path]) -> Iterator[dict[str, Fields]]:
-    for path in archives:
-        try:
-            archive = load_project_archive(str(path))
-        except Exception as exc:  # a broken archive is skipped, not fatal
-            logger.debug("Skipping archive %s: %s", path.name, exc)
+# Parsed archives, by path: their modification time and, per project
+# version, the components their findings and BOM name. Shared by every
+# project, so an archive is read once per process however many versions ask.
+_archive_cache: dict[str, tuple[float, dict[str, dict[str, Fields]]]] = {}
+_archive_cache_lock = threading.Lock()
+
+
+def _parse_archive(path: Path) -> dict[str, dict[str, Fields]]:
+    archive = load_project_archive(str(path))
+    by_project: dict[str, dict[str, Fields]] = {}
+    for version in archive.get("versions") or []:
+        entry = version.get("entry") or {}
+        project_uuid = str((entry.get("project") or {}).get("uuid") or "")
+        if not project_uuid:
             continue
-        for version in archive.get("versions") or []:
-            entry = version.get("entry") or {}
-            if str((entry.get("project") or {}).get("uuid") or "") != project_uuid:
-                continue
-            yield _from_findings(version.get("findings"))
-            yield _from_bom(version.get("bom"))
+        components = by_project.setdefault(project_uuid, {})
+        # The BOM first, the findings over it: what a finding said wins.
+        components.update(_from_bom(version.get("bom")))
+        for uuid, fields in _from_findings(version.get("findings")).items():
+            if fields.get("component_name"):
+                components[uuid] = fields
+    return by_project
+
+
+def _archive_components(
+    path: Path, mtime: float, budget: list[int]
+) -> Optional[dict[str, dict[str, Fields]]]:
+    """The parsed archive, from the cache or read now while ``budget``
+    allows (``budget[0]`` archives left to read). ``None`` when the budget
+    is spent; ``{}`` for an archive that cannot be read."""
+    key = str(path)
+    with _archive_cache_lock:
+        cached = _archive_cache.get(key)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    if budget[0] <= 0:
+        return None
+    budget[0] -= 1
+    try:
+        parsed = _parse_archive(path)
+    except Exception as exc:  # a broken archive is skipped, not fatal
+        logger.debug("Skipping archive %s: %s", path.name, exc)
+        parsed = {}
+    with _archive_cache_lock:
+        _archive_cache[key] = (mtime, parsed)
+    return parsed
 
 
 def resolve_gone_component_names(
@@ -89,9 +122,14 @@ def resolve_gone_component_names(
     *,
     stored_bom: Callable[[], Any],
     archive_dir: Optional[str],
+    max_archive_reads: Optional[int] = None,
 ) -> int:
     """Fill in the components of the project's gone findings that have no
-    name, from local sources. Returns how many rows were filled."""
+    name, from local sources. Returns how many rows were filled.
+
+    ``max_archive_reads`` bounds how many archives not yet parsed are read
+    in this call (a read passes a small number; the rest follows at the
+    next read). Parsed archives are kept for every project."""
     missing = frozenset(
         row["component_uuid"]
         for row in lifecycle.presence(project_uuid).values()
@@ -119,15 +157,22 @@ def resolve_gone_component_names(
     except Exception as exc:
         logger.debug("Stored BOM of %s unreadable: %s", project_uuid, exc)
         done = False
+    complete = True  # every archive was consulted
     if not done:
-        for source in _archive_sources(project_uuid, archives):
-            if take(source):
+        budget = [max_archive_reads if max_archive_reads is not None else len(archives)]
+        for path, (_name, mtime) in zip(archives, signature):
+            parsed = _archive_components(path, mtime, budget)
+            if parsed is None:
+                complete = False
+                break
+            if take(parsed.get(project_uuid) or {}):
                 break
 
     filled = lifecycle.fill_components(project_uuid, found) if found else 0
     with _attempted_lock:
         if found.keys() >= missing:
             _attempted.pop(project_uuid, None)
-        else:
+        elif complete:
+            # Nothing more to find until the rows or the archives change.
             _attempted[project_uuid] = (missing - found.keys(), signature)
     return filled

@@ -1830,6 +1830,74 @@ class AssessmentOutboxStore:
             (SYNC_SUPERSEDED, now, *key),
         )
 
+    def keys_untouched_since_carry(
+        self,
+        project_uuid: str,
+        carry_origins: Iterable[str],
+        automatic_origins: Iterable[str],
+    ) -> set[AssessmentKey]:
+        """Findings of a project whose value is still the one a carry wrote:
+        every revision after the last carry is an automatic write
+        (``automatic_origins``) that changed nothing but historical blocks.
+        A revision of any other origin since (a person's save), or an
+        automatic one that changed the state, the suppression or any text
+        outside historical blocks, leaves the finding out."""
+        from .logic import without_historical_blocks
+
+        self._ensure_initialized()
+        carries = set(carry_origins)
+        automatic = set(automatic_origins)
+        if not carries:
+            return set()
+        marks = ", ".join("?" for _ in carries)
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT r.component_uuid, r.vulnerability_uuid, r.origin,
+                       r.analysis_state, r.analysis_details, r.suppressed
+                FROM assessment_revisions r
+                WHERE r.project_uuid = ?
+                  AND EXISTS (
+                      SELECT 1 FROM assessment_revisions c
+                      WHERE c.project_uuid = r.project_uuid
+                        AND c.component_uuid = r.component_uuid
+                        AND c.vulnerability_uuid = r.vulnerability_uuid
+                        AND c.origin IN ({marks})
+                  )
+                ORDER BY r.component_uuid, r.vulnerability_uuid, r.revision_id
+                """,
+                (project_uuid, *sorted(carries)),
+            ).fetchall()
+
+        def mechanical(previous: Any, row: Any) -> bool:
+            return (
+                previous is not None
+                and str(row["analysis_state"]) == str(previous["analysis_state"])
+                and bool(row["suppressed"]) == bool(previous["suppressed"])
+                and without_historical_blocks(str(row["analysis_details"] or "")).strip()
+                == without_historical_blocks(str(previous["analysis_details"] or "")).strip()
+            )
+
+        result: set[AssessmentKey] = set()
+        current: tuple[str, str] | None = None
+        untouched = False
+        previous: Any = None
+        for row in rows:
+            finding = (str(row["component_uuid"]), str(row["vulnerability_uuid"]))
+            if finding != current:
+                if current is not None and untouched:
+                    result.add((project_uuid, *current))
+                current, untouched, previous = finding, False, None
+            origin = str(row["origin"])
+            if origin in carries:
+                untouched = True
+            elif untouched and not (origin in automatic and mechanical(previous, row)):
+                untouched = False
+            previous = row
+        if current is not None and untouched:
+            result.add((project_uuid, *current))
+        return result
+
     def keys_last_written_by(
         self, project_uuid: str, origins: Iterable[str]
     ) -> set[AssessmentKey]:

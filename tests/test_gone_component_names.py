@@ -22,8 +22,10 @@ LIB = {"name": "lib-a", "version": "1.0", "purl": "pkg:npm/lib-a@1.0"}
 @pytest.fixture(autouse=True)
 def _forget_lookups():
     gone_component_names._attempted.clear()
+    gone_component_names._archive_cache.clear()
     yield
     gone_component_names._attempted.clear()
+    gone_component_names._archive_cache.clear()
 
 
 def _store(tmp_path, *components):
@@ -172,3 +174,41 @@ def test_the_gone_findings_route_serves_the_resolved_name(tmp_path):
     described = describe_gone_findings(store, Outbox(), "p1")
     [finding] = described["findings"]
     assert (finding["component_name"], finding["component_version"]) == ("lib-a", "1.0")
+
+
+def test_an_archive_is_parsed_once_for_every_project_and_reads_are_bounded(tmp_path, monkeypatch):
+    """After a restart every project version may ask: an archive is read
+    once and kept for all of them, and one call reads at most
+    ``max_archive_reads`` new archives; the next call goes on."""
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    for index in range(3):
+        path = _archive(str(archives), f"a{index}", "p-other",
+                        bom={"components": [{"bom-ref": "x", **LIB}]})
+        os.utime(path, (1000 + index, 1000 + index))
+    _archive(str(archives), "named", "p1", bom={"components": [{"bom-ref": "c1", **LIB}]})
+    os.utime(os.path.join(str(archives), f"named{ARCHIVE_FILE_SUFFIX}"), (900, 900))
+    reads = []
+    real = gone_component_names.load_project_archive
+    monkeypatch.setattr(
+        gone_component_names, "load_project_archive",
+        lambda path: reads.append(os.path.basename(path)) or real(path),
+    )
+    store = _store(tmp_path, "c1")
+
+    first = resolve_gone_component_names(
+        store, "p1", stored_bom=lambda: None, archive_dir=str(archives), max_archive_reads=2
+    )
+    assert (first, len(reads)) == (0, 2)  # budget spent, not given up
+    second = resolve_gone_component_names(
+        store, "p1", stored_bom=lambda: None, archive_dir=str(archives), max_archive_reads=2
+    )
+    assert second == 1 and _row(store, "c1")["component_name"] == "lib-a"
+    assert len(reads) == 4  # the first two came from the cache
+
+    other = _store(tmp_path / "other", "x")
+    other_reads = len(reads)
+    resolve_gone_component_names(
+        other, "p1", stored_bom=lambda: None, archive_dir=str(archives), max_archive_reads=0
+    )
+    assert len(reads) == other_reads  # every archive already parsed

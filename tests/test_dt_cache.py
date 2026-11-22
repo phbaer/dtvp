@@ -2551,3 +2551,243 @@ def test_invalidating_the_cache_status_tells_listeners(tmp_path):
     before = calls["status"]
     manager._invalidate_cache_status()
     assert calls["status"] == before + 1
+
+
+# -- ninth reading: rc3 ----------------------------------------------------
+
+
+_RISKY = "--- [Team: D-Web] [State: EXPLOITABLE] [Assessed By: x] [Ticket: VP-61182] ---\nReal."
+
+
+def _maven_bom(*components):
+    return {"components": [
+        {"bom-ref": uuid, "name": "lib-a", "version": version,
+         "purl": f"pkg:maven/org.example/lib-a@{version}"}
+        for uuid, version in components
+    ]}
+
+
+async def test_a_risky_gone_finding_counts_for_attention_with_the_real_outbox(tmp_path):
+    """The export's attention count reads the real outbox: an exploitable,
+    ticketed record that went through nightly recreations and then stopped
+    matching is counted; once a person acknowledged it, it is not (the
+    ninth reading's zero on 6.15.6: every risky gone row was acknowledged)."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c1", "1.0", "EXPLOITABLE", _RISKY), _lib("c1", "1.0", vuln="v2")]
+    client.get_bom.return_value = _maven_bom(("c1", "1.0"))
+    await manager.import_findings(client, "p1")
+    client.get_vulnerabilities.return_value = [_lib("c2", "1.0"), _lib("c2", "1.0", vuln="v2")]
+    client.get_bom.return_value = _maven_bom(("c2", "1.0"))
+    await manager.import_findings(client, "p1")
+    client.get_vulnerabilities.return_value = [_lib("c3", "1.0", vuln="v2")]
+    client.get_bom.return_value = _maven_bom(("c3", "1.0"))
+    await manager.import_findings(client, "p1")
+
+    summary = manager.finding_lifecycle.export_gone_summary("p1", manager.assessment_outbox)
+    assert manager.assessment_outbox.get_overlay(("p1", "c2", "v1"))["sync_status"] == "inactive"
+    assert (summary["gone"], summary["attention"]) == ({"no_longer_matched": 1}, 1)
+    manager.finding_lifecycle.acknowledge("p1", [("c2", "v1")], by="rita", at="t")
+    summary = manager.finding_lifecycle.export_gone_summary("p1", manager.assessment_outbox)
+    assert summary["attention"] == 0
+    await manager.close()
+
+
+async def test_a_predating_row_gets_its_component_from_an_archive_and_counts_as_recreated(
+    tmp_path, monkeypatch
+):
+    """A row the startup backfill made for a record from before tracking: its
+    component UUID is in no stored BOM, its identity in an archived one. One
+    read names it and classifies it: the same vulnerability is reported on
+    the same component under a new ID, so it is an earlier generation
+    (recreated), not gone and not left undetermined."""
+    from dtvp import gone_component_names
+    from tests.test_gone_component_names import _archive
+
+    gone_component_names._attempted.clear()
+    archives = tmp_path / "archives"
+    archives.mkdir()
+    _archive(str(archives), "old", "p1", bom=_maven_bom(("c-old", "1.0")))
+    monkeypatch.setattr(
+        "dtvp.project_archive_services.get_project_archive_path", lambda: str(archives)
+    )
+
+    manager = CacheManager(base_path=str(tmp_path / "cache"))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [_lib("c-new", "1.0", "NOT_AFFECTED", _ALPHA)]
+    client.get_bom.return_value = _maven_bom(("c-new", "1.0"))
+    await manager.import_findings(client, "p1")
+
+    record = {"sync_status": "inactive", "analysisState": "NOT_AFFECTED", "analysisDetails": _ALPHA}
+    # The startup backfill ran when the store opened (nothing to do then);
+    # run it again as on an upgrade that finds this record.
+    from contextlib import closing
+    from dtvp.finding_lifecycle_services import UNTRACKED_RECORDS_BACKFILL_KEY
+
+    lifecycle = manager.finding_lifecycle
+    with closing(lifecycle._connect()) as connection, connection:
+        connection.execute(
+            "DELETE FROM finding_lifecycle_metadata WHERE key = ?",
+            (UNTRACKED_RECORDS_BACKFILL_KEY,),
+        )
+    made = manager.finding_lifecycle.backfill_untracked_records_once(
+        lambda: [(("p1", "c-old", "v1"), record)], lambda project, component: None, at="t0",
+    )
+    assert made == 1
+    before = manager.finding_lifecycle.export_gone_summary("p1")
+    assert (before["gone"], before["predating"]) == ({}, {"undetermined": 1})
+
+    await manager.import_findings(client, "p1")
+
+    row = manager.finding_lifecycle.presence("p1")[("c-old", "v1")]
+    assert (row["component_name"], row["gone_reason"], row["successor_component_uuid"]) == (
+        "lib-a", "replaced", "c-new",
+    )
+    after = manager.finding_lifecycle.export_gone_summary("p1")
+    assert (after["gone"], after["predating"], after["recreated"]) == ({}, {}, 1)
+    gone_component_names._attempted.clear()
+    await manager.close()
+
+
+_HISTORICAL = "\n\n--- [Team: R-Web] [State: NOT_AFFECTED] [Assessed By: old] [Historical: yes] [Ticket: VP-66089] ---\nRestored."
+
+
+async def _marked_chain(manager, client, monkeypatch):
+    """c-gen1 approved; two nights carried with the marker by the old rule."""
+    client.get_vulnerabilities.return_value = [_lib("c-gen1", "1.0", "NOT_AFFECTED", _ALPHA)]
+    client.get_bom.return_value = _same_version_bom(("c-gen1", "1.0"))
+    await manager.import_findings(client, "p1")
+    await _carry_as_before_the_fix(
+        manager, client, monkeypatch, [_lib("c-gen2", "1.0")], _same_version_bom(("c-gen2", "1.0"))
+    )
+    last = _lib("c-gen3", "1.0")
+    bom = _same_version_bom(("c-gen3", "1.0"))
+    await _carry_as_before_the_fix(manager, client, monkeypatch, [last], bom)
+    key = ("p1", "c-gen3", "v1")
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay(*key)["analysisDetails"]
+    return key, [last], bom
+
+
+async def _write(manager, key, details, *, origin, author=None, state="NOT_AFFECTED"):
+    await manager.persist_assessment_updates(
+        [{"project_uuid": key[0], "component_uuid": key[1], "vulnerability_uuid": key[2],
+          "state": state, "details": details, "suppressed": False}],
+        origin=origin, author=author, replace=True,
+    )
+
+
+async def test_a_restore_that_added_historical_blocks_does_not_keep_the_marker(tmp_path, monkeypatch):
+    """Ninth reading, item 3: the bulk restore (#322) added a historical block
+    to a marked carry. That decides nothing: the chain still leads back to
+    the approved value, the marker is taken back, the block stays."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    key, findings, bom = await _marked_chain(manager, client, monkeypatch)
+    marked = manager.get_assessment_overlay(*key)["analysisDetails"]
+    await _write(manager, key, marked + _HISTORICAL, origin="bulk-workflow")
+
+    client.get_vulnerabilities.return_value, client.get_bom.return_value = findings, bom
+    await manager.import_findings(client, "p1")
+
+    details = manager.get_assessment_overlay(*key)["analysisDetails"]
+    assert "[Status: Pending Review]" not in details
+    assert details.startswith(_ALPHA) and "[Historical: yes]" in details
+    assert manager.recreated_review_kept["p1"] == {}
+    await manager.close()
+
+
+@pytest.mark.parametrize("writer, reason", [
+    ({"origin": "bulk-workflow", "state": "EXPLOITABLE"}, "saved_since"),
+    ({"origin": "user", "author": "kim"}, "saved_since"),
+])
+async def test_a_marker_kept_says_why(tmp_path, monkeypatch, writer, reason):
+    """An automatic write that changed the assessment, or a person's save,
+    keeps the marker; the read counts why."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    key, findings, bom = await _marked_chain(manager, client, monkeypatch)
+    marked = manager.get_assessment_overlay(*key)["analysisDetails"]
+    await _write(manager, key, marked, **writer)
+
+    client.get_vulnerabilities.return_value, client.get_bom.return_value = findings, bom
+    await manager.import_findings(client, "p1")
+
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay(*key)["analysisDetails"]
+    assert manager.recreated_review_kept["p1"] == {reason: 1}
+    await manager.close()
+
+
+def test_package_urls_compare_by_the_qualifiers_that_name_an_artifact():
+    from dtvp.finding_lifecycle_services import ReportedFinding, _purl_key, same_component_version
+
+    base = "pkg:maven/org.example/lib-a@1.0"
+
+    def target(purl):
+        return ReportedFinding("c2", "v1", "CVE-1", "lib-a", "1.0", purl, "pkg:maven/org.example/lib-a")
+
+    row = {"component_name": "lib-a", "component_version": "1.0",
+           "component_purl": base + "?type=jar&download_url=https://a.example/x.jar"}
+    # Where it came from does not matter; what artifact it is does.
+    assert same_component_version(row, target(base + "?type=jar"))
+    assert not same_component_version(row, target(base))
+    assert not same_component_version(row, target(base + "?type=jar&classifier=sources"))
+    assert _purl_key("pkg:deb/debian/curl@8.0?arch=amd64") != _purl_key("pkg:deb/debian/curl@8.0?arch=arm64")
+    assert _purl_key("pkg:maven/a/b@1?repository_url=https://r1") != _purl_key(
+        "pkg:maven/a/b@1?repository_url=https://r2"
+    )
+    assert _purl_key("pkg:maven/a/b@1?checksum=sha1:x&type=jar") == _purl_key("pkg:maven/a/b@1?type=jar")
+    assert _purl_key("pkg:maven/a/b@1?type=jar&arch=x") == _purl_key("pkg:maven/a/b@1?arch=x&type=jar")
+    assert _purl_key("PKG:npm/x@1#sub") == "pkg:npm/x@1"
+
+
+async def test_a_person_save_between_a_carry_and_a_bulk_write_keeps_the_marker(tmp_path, monkeypatch):
+    """Review of #331: carry, then a person saves (keeping the marker), then
+    a bulk write. The latest revision is automatic, but a person decided in
+    between: the marker stays."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    key, findings, bom = await _marked_chain(manager, client, monkeypatch)
+    marked = manager.get_assessment_overlay(*key)["analysisDetails"]
+    await _write(manager, key, marked + _HISTORICAL, origin="user", author="kim")
+    await _write(
+        manager, key, marked + _HISTORICAL + _HISTORICAL.replace("VP-66089", "VP-1"),
+        origin="bulk-workflow",
+    )
+
+    client.get_vulnerabilities.return_value, client.get_bom.return_value = findings, bom
+    await manager.import_findings(client, "p1")
+
+    assert "[Status: Pending Review]" in manager.get_assessment_overlay(*key)["analysisDetails"]
+    assert manager.recreated_review_kept["p1"] == {"saved_since": 1}
+    await manager.close()
+
+
+async def test_a_bulk_write_that_changed_the_text_keeps_the_marker(tmp_path, monkeypatch):
+    """Synchronize copying another finding's text (with its own marker) is
+    not mechanical: only a bulk write that changed nothing but historical
+    blocks keeps the chain."""
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    key, findings, bom = await _marked_chain(manager, client, monkeypatch)
+    copied = _BETA + "\n\n[Status: Pending Review]"
+    await _write(manager, key, copied, origin="bulk-workflow")
+
+    client.get_vulnerabilities.return_value, client.get_bom.return_value = findings, bom
+    await manager.import_findings(client, "p1")
+
+    assert manager.get_assessment_overlay(*key)["analysisDetails"] == copied
+    assert manager.recreated_review_kept["p1"] == {"saved_since": 1}
+    await manager.close()
+
+
+def test_the_marker_is_matched_on_its_own_line_in_any_case():
+    from dtvp.finding_lifecycle_services import _is_marked, _without_marker
+
+    assert _is_marked({"details": "Text.\n\n[status: pending review]"})
+    assert _without_marker("Text.\n\n[STATUS: Pending Review]") == "Text."
+    assert _without_marker("Text.\n\n[Status: Pending Review]\n\n--- [Team: R] [Historical: yes] ---\nOld.") == (
+        "Text.\n\n--- [Team: R] [Historical: yes] ---\nOld."
+    )
+    quoted = "Quoted: [Status: Pending Review] in a sentence."
+    assert not _is_marked({"details": quoted})
+    assert _without_marker(quoted) == quoted
