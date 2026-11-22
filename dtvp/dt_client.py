@@ -104,6 +104,11 @@ class DTClient:
         response.raise_for_status()
         return response.json()
 
+    def change_hint_kinds(self) -> tuple[str, ...]:
+        """``ChangeHints`` (dtvp/ports.py): the last BOM import and the last
+        vulnerability analysis of each project version."""
+        return ("bom", "analysis")
+
     @staticmethod
     def _with_source_marks(project: Dict[str, Any]) -> Dict[str, Any]:
         """Add ``dtvpSourceMarks``: a value that changes whenever

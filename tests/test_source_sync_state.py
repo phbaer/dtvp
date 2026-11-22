@@ -91,7 +91,7 @@ def test_the_project_list_adds_versions_and_marks_missing_ones_gone(tmp_path):
     )
     rows = {row["project_uuid"]: row for row in store.list_versions(product="app")}
     assert rows["p1"]["status"] == "never_synced"
-    assert rows["p1"]["dt_last_bom_import"] == "5"
+    assert rows["p1"]["source_bom_hint"] == "5"
 
     # A partial list (a name search) never marks anything gone.
     store.record_project_list([{"uuid": "p1", "name": "App", "version": "1"}], complete=False)
@@ -333,5 +333,9 @@ def test_the_upgrade_counts_earlier_reads_as_read(tmp_path):
     row = connection.execute(
         "SELECT read_bom_signal, read_analysis_signal, findings_read_at FROM sync_versions"
     ).fetchone()
+    # 0007 renames the hint columns; their values stay.
+    assert connection.execute(
+        "SELECT source_bom_hint, source_analysis_hint FROM sync_versions"
+    ).fetchone() == ("b", "a")
     assert row == ("b", "a", "2026-11-20T00:00:00+00:00")
     connection.close()

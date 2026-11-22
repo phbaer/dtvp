@@ -10,12 +10,7 @@ DT_ONLY_FIELDS = ("lastBomImport", "lastVulnerabilityAnalysis")
 
 # Usages that predate this check; each is a known leak to be moved behind
 # the source adapter. Do not add to this list.
-KNOWN_LEAKS = {
-    # The project list fingerprint uses the source's last BOM import time.
-    ("dtvp/dt_cache.py", "lastBomImport"),
-    # The summary index cache key includes it, for the same reason.
-    ("dtvp/grouped_vuln_summary_index_services.py", "lastBomImport"),
-}
+KNOWN_LEAKS: set[tuple[str, str]] = set()
 
 
 def test_dependency_track_fields_stay_in_its_adapter():
@@ -34,3 +29,14 @@ def test_dependency_track_fields_stay_in_its_adapter():
         "Dependency-Track field names outside dtvp/dt_client.py; read them "
         "through the source adapter instead"
     )
+
+
+def test_core_names_the_source_change_hints_neutrally():
+    """The scheduler's columns and code call them hints, not by the
+    Dependency-Track fields they come from (ADR 0004, "Change hints are
+    optional")."""
+    root = Path(__file__).resolve().parents[1]
+    for path in sorted((root / "dtvp").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        assert "dt_last_bom_import" not in text, path
+        assert "dt_last_vuln_analysis" not in text, path

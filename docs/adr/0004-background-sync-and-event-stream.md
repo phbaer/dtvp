@@ -127,7 +127,8 @@ reserved) holds one row per Dependency-Track project version:
   and `settled_status`, the last of `synced`, `never_synced`, `failed`, `gone`
 - `first_seen_at`, `last_attempt_at`, `last_success_at`, `last_change_at`
 - `consecutive_failures`, `next_due_at`, `last_error_class`, `last_error`
-- the list signals `dt_last_bom_import`, `dt_last_vuln_analysis`
+- the source's change hints `source_bom_hint`, `source_analysis_hint`
+  (renamed from `dt_last_*` by `0007_neutral_change_hints.sql`)
 - `findings_digest`, `analyses_digest`, `vulns_digest`, `bom_digest`
 - `generation`, and a staged generation while an import is uncommitted
 - `requested_at`, `requested_by`, `request_id` for a pending user request
@@ -140,6 +141,21 @@ reports what changed while a client was disconnected, from `last_change_at`;
 ### Schedule and priorities
 
 All values are defaults and configurable.
+
+**Change hints are optional** (amendment, 2026-11-22). The core needs no
+source-specific feature; a source adapter may use one to avoid work. A
+source that can tell when a version's data changed declares `ChangeHints`
+(`dtvp/ports.py`) and puts its hints under `dtvpSourceMarks`: `bom`
+(components changed, every kind is read again) and `analysis` (findings or
+vulnerability records may have changed). The Dependency-Track adapter maps
+`lastBomImport` and `lastVulnerabilityAnalysis` to them, so most monitored
+versions, which do not change, are not downloaded again. A source without
+hints gets regular re-reads instead: every active version's findings every
+hour (`DTVP_SYNC_UNHINTED_FINDINGS_SECONDS`), vulnerability records every
+6 h and the BOM every 24 h or after its findings changed, each staggered per
+version between 75 % and 100 % of the interval so they do not fall due at
+once; content digests find what changed. Watched products keep their
+intervals either way. The schedule below describes a source with hints.
 
 - **Project list:** read every `DTVP_DT_CACHE_REFRESH_SECONDS` (60 s) and
   compared with `sync_versions`. A new uuid becomes `never_synced`
@@ -449,3 +465,4 @@ tab, and a 401 or an `auth` event signs every tab out.
 | 6 Event stream | Implemented 2026-11-20: hub, `/api/events`, `/api/events/poll`, nginx, producers `hello`, `projects.changed`, `assessments.changed{origin:local}`, `export.state`, `source.state`, `cache.refreshed`; step 5 adds `version.sync_state`, `version.synced`, `version.sync_failed`, `assessments.changed{origin:dt|export_echo}` and `source.state{backlog}`; per-user connection limit, cursor on heartbeats, streams end on the stop signal; the browser client with one stream per browser, the cache status and the export warning follow events; see [Event channel](../runtime.md#event-channel). The producers of later steps and the ProjectView and Dashboard updates are open |
 | 7 Clients keep their place | Not implemented |
 | 8 Other integrations | Not implemented |
+| Amendment: optional change hints | Implemented 2026-11-22: `ChangeHints` in `dtvp/ports.py`, declared by the Dependency-Track client; without it, staggered regular re-reads (`DTVP_SYNC_UNHINTED_FINDINGS_SECONDS`); the sync table's hint columns renamed (`0007_neutral_change_hints.sql`); the grouped snapshot fingerprint and the summary index key read the neutral hint (`ports.change_hint`) |

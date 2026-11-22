@@ -186,7 +186,7 @@ _COLUMNS = (
     "project_uuid", "product_name", "version", "active_in_dt", "status",
     "settled_status", "first_seen_at", "last_attempt_at", "last_success_at",
     "last_change_at", "consecutive_failures", "next_due_at", "last_error_class",
-    "last_error", "dt_last_bom_import", "dt_last_vuln_analysis",
+    "last_error", "source_bom_hint", "source_analysis_hint",
     "findings_digest", "analyses_digest", "vulns_digest", "bom_digest",
     "analyses_changed_in_dt", "analyses_export_echoes", "generation",
     "staged_generation", "requested_at", "requested_by", "request_id",
@@ -255,7 +255,7 @@ class SyncStateStore:
                     """
                     UPDATE sync_versions SET product_name = ?, version = ?,
                         active_in_dt = ?, status = ?, settled_status = ?,
-                        dt_last_bom_import = ?, dt_last_vuln_analysis = ?
+                        source_bom_hint = ?, source_analysis_hint = ?
                     WHERE project_uuid = ?
                     """,
                     (
@@ -452,6 +452,16 @@ class SyncStateStore:
                 [(uuid,) for uuid in uuids],
             )
 
+    def forget_read(self, project_uuid: str, kind: str) -> None:
+        """Make one kind due again: its last read time is forgotten."""
+        column = _READ_AT[kind]
+        connection = self._connection()
+        with connection:
+            connection.execute(
+                f"UPDATE sync_versions SET {column} = NULL WHERE project_uuid = ?",
+                (project_uuid,),
+            )
+
     def drop_stage(self, project_uuid: str) -> None:
         """The scheduler's sync ended without a commit: its staged reads are
         forgotten and the status settles."""
@@ -485,8 +495,8 @@ class SyncStateStore:
                     json.dumps(
                         {
                             "_signals": {
-                                "bom": row["dt_last_bom_import"],
-                                "analysis": row["dt_last_vuln_analysis"],
+                                "bom": row["source_bom_hint"],
+                                "analysis": row["source_analysis_hint"],
                             },
                             "_started_at": at,
                         }

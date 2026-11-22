@@ -134,5 +134,29 @@ class BudgetedTransport(Protocol):
 
 
 @runtime_checkable
+class ChangeHints(Protocol):
+    """Optional: the source tells, per project version, when its data
+    changed, so unchanged versions are not read again (ADR 0004, "Change
+    hints are optional"). It puts the hints under ``dtvpSourceMarks`` in
+    ``get_projects`` and names their kinds here:
+
+    - ``"bom"``: the components changed; every kind is read again;
+    - ``"analysis"``: the findings or vulnerability records may have changed.
+
+    Without it, versions are read again on a regular schedule and changes
+    are found by comparing content digests."""
+
+    def change_hint_kinds(self) -> tuple[str, ...]:
+        """The hint kinds this source provides."""
+
+
+def change_hint(project: Any, kind: str) -> Any:
+    """One change hint of a project version (``ChangeHints``), or ``None``
+    when the source gives none."""
+    marks = project.get("dtvpSourceMarks") if isinstance(project, dict) else None
+    return marks.get(kind) if isinstance(marks, dict) else None
+
+
+@runtime_checkable
 class SourceAndSink(VulnerabilitySource, AssessmentSink, Protocol):
     """A system DTVP both imports from and exports to."""

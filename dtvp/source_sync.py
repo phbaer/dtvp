@@ -24,6 +24,7 @@ staged come with step 6.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import os
@@ -34,6 +35,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
+from .ports import ChangeHints
 from .source_sync_state import (
     KIND_BOM,
     KIND_FINDINGS,
@@ -70,6 +72,11 @@ class Schedule:
     watched_vulns: float = 6 * 3600
     watched_bom: float = 24 * 3600
     safety: float = 12 * 3600
+    # A source without change hints (ports.ChangeHints): every active
+    # version is read again on these intervals instead.
+    unhinted_findings: float = 3600
+    unhinted_vulns: float = 6 * 3600
+    unhinted_bom: float = 24 * 3600
     max_backoff: float = 3600
     base_backoff: float = 60
     concurrency: int = 2
@@ -79,6 +86,9 @@ class Schedule:
         return cls(
             watched_findings=_env_float("DTVP_SYNC_WATCHED_FINDINGS_SECONDS", 120, 1),
             safety=_env_float("DTVP_SYNC_SAFETY_SECONDS", 12 * 3600, 60),
+            unhinted_findings=_env_float(
+                "DTVP_SYNC_UNHINTED_FINDINGS_SECONDS", 3600, 60
+            ),
             concurrency=int(_env_float("DTVP_SYNC_CONCURRENCY", 2, 1)),
         )
 
@@ -286,14 +296,27 @@ class SyncItem:
         return max(0, self.priority - int((now - self.enqueued_at) // AGING_SECONDS))
 
 
+def _stagger(project_uuid: str) -> float:
+    """A fixed factor between 0.75 and 1 per version, so regular re-reads of
+    many versions spread over the interval instead of falling due at once."""
+    digest = hashlib.sha256(project_uuid.encode("utf-8")).digest()
+    return 0.75 + 0.25 * (int.from_bytes(digest[:2], "big") / 65536)
+
+
 def plan_version(
     row: dict[str, Any],
     *,
     watched: bool,
     now: datetime,
     schedule: Schedule,
+    hinted: bool = True,
 ) -> Optional[tuple[int, tuple[str, ...]]]:
-    """What is due for one version, with its priority, or ``None``."""
+    """What is due for one version, with its priority, or ``None``.
+
+    ``hinted``: the source offers change hints (ports.ChangeHints). Then an
+    unwatched version is read again when a hint changes, or by the safety
+    re-read. Without hints, every active version is read again on the
+    ``unhinted_*`` intervals, staggered per version."""
     if not row.get("active_in_dt") or row.get("status") == STATUS_GONE:
         return None
     due_at = _parse(row.get("next_due_at"))
@@ -304,12 +327,13 @@ def plan_version(
         return P0_REQUEST, KINDS
     if row.get("last_success_at") is None:
         return (P1_WATCHED_FIRST if watched else P3_BACKFILL), KINDS
-    bom_signal = row.get("dt_last_bom_import") != row.get("read_bom_signal")
-    analysis_signal = row.get("dt_last_vuln_analysis") != row.get("read_analysis_signal")
-    if bom_signal:
-        return P2_DUE, KINDS
-    if analysis_signal:
-        return P2_DUE, (KIND_FINDINGS, KIND_VULNS)
+    if hinted:
+        bom_signal = row.get("source_bom_hint") != row.get("read_bom_signal")
+        analysis_signal = row.get("source_analysis_hint") != row.get("read_analysis_signal")
+        if bom_signal:
+            return P2_DUE, KINDS
+        if analysis_signal:
+            return P2_DUE, (KIND_FINDINGS, KIND_VULNS)
     if watched:
         kinds = tuple(
             kind
@@ -322,6 +346,19 @@ def plan_version(
         )
         if kinds:
             return P2_DUE, kinds
+    if not hinted:
+        stagger = _stagger(str(row.get("project_uuid") or ""))
+        kinds = tuple(
+            kind
+            for kind, column, interval in (
+                (KIND_FINDINGS, "findings_read_at", schedule.unhinted_findings),
+                (KIND_VULNS, "vulns_read_at", schedule.unhinted_vulns),
+                (KIND_BOM, "bom_read_at", schedule.unhinted_bom),
+            )
+            if _older(row.get(column), now, interval * stagger)
+        )
+        if kinds:
+            return P3_BACKFILL, kinds
     if _older(row.get("last_success_at"), now, schedule.safety):
         return P4_SAFETY, KINDS
     return None
@@ -385,12 +422,19 @@ class SourceSync:
         self._plan_dirty = True
         self._watched_seen: Optional[frozenset[str]] = None
         self._limited: Optional[tuple[Any, LimitedSource]] = None
+        # Whether the source offers change hints (ports.ChangeHints); known
+        # once a client is seen.
+        self.hinted = True
 
     def limited(self, client: Any) -> LimitedSource:
         """The budgeted view of ``client``, built once per client (its
         request hook is installed once)."""
         if self._limited is None or self._limited[0] is not client:
             self._limited = (client, LimitedSource(client, self.bucket, self.breaker))
+            hinted = isinstance(client, ChangeHints)
+            if hinted != self.hinted:
+                self.hinted = hinted
+                self.mark_dirty()
         return self._limited[1]
 
     def mark_dirty(self) -> None:
@@ -440,7 +484,9 @@ class SourceSync:
             if uuid in self.running:
                 continue
             watched = str(row.get("product_name") or "").lower() in products
-            due = plan_version(row, watched=watched, now=now, schedule=self.schedule)
+            due = plan_version(
+                row, watched=watched, now=now, schedule=self.schedule, hinted=self.hinted
+            )
             existing = self.queue.get(uuid)
             if due is None:
                 if existing is not None and existing.priority != P0_REQUEST:
@@ -525,6 +571,11 @@ class SourceSync:
         kinds, first, generation = store.commit(
             uuid, at=self._now().isoformat(), kinds_read=item.kinds
         )
+        if not self.hinted and KIND_FINDINGS in kinds and KIND_BOM not in item.kinds:
+            # Without change hints, changed findings are the sign that the
+            # components may have changed: read the BOM next.
+            store.forget_read(uuid, KIND_BOM)
+            self.mark_dirty()
         row = store.row(uuid) or row
         self._publish_state(row, row.get("status") or "synced", force=True)
         if kinds or first:

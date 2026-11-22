@@ -52,7 +52,12 @@ from .finding_lifecycle_services import (
     record_carry_over,
 )
 from .instance_stores import claim_instance, get_dt_cache_path, release_instance
-from .ports import AffectedVersionSource, AssessmentSink, VulnerabilitySource
+from .ports import (
+    AffectedVersionSource,
+    AssessmentSink,
+    VulnerabilitySource,
+    change_hint,
+)
 from .source_sync_state import (
     KIND_BOM,
     KIND_FINDINGS,
@@ -982,7 +987,8 @@ class CacheManager:
                 str(project.get("uuid") or ""),
                 str(project.get("name") or ""),
                 str(project.get("version") or ""),
-                str(project.get("lastBomImport") or ""),
+                # The source's change hint for its components (ports.ChangeHints).
+                str(change_hint(project, "bom") or ""),
                 # Not lastRiskScore: every export changes it (ADR 0004).
                 bool(project.get("active", True)),
             )

@@ -6,9 +6,10 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from .ports import change_hint
 
 
-GROUPED_VULN_SUMMARY_INDEX_SCHEMA_VERSION = 11
+GROUPED_VULN_SUMMARY_INDEX_SCHEMA_VERSION = 12
 
 
 def get_grouped_vuln_summary_index_path() -> str:
@@ -30,7 +31,8 @@ def _version_fingerprints(versions: list[dict[str, Any]]) -> list[dict[str, Any]
             "uuid": version.get("uuid"),
             "name": version.get("name"),
             "version": version.get("version"),
-            "lastBomImport": version.get("lastBomImport"),
+            # The source's change hint for its components (ports.ChangeHints).
+            "sourceBomHint": change_hint(version, "bom"),
             "lastInheritedRiskScore": version.get("lastInheritedRiskScore"),
             "lastRiskScore": version.get("lastRiskScore"),
         }
