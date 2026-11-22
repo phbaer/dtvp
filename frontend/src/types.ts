@@ -525,6 +525,8 @@ export interface GoneFinding {
     /** An assessment with a value that did not carry over, or one that was
      * exploitable, in triage or ticketed; not acknowledged. */
     needs_attention?: boolean;
+    /** Exploitable, in triage or ticketed (acknowledged or not). */
+    risky?: boolean;
     /** Why it went, where the stored BOMs tell ("CPE changed from … to …"). */
     cause?: string | null;
     /** Ticket keys of its assessment. */

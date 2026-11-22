@@ -2014,6 +2014,9 @@ def describe_gone_findings(
                 "acknowledged_at": row.get("acknowledged_at") if acknowledged else None,
                 "needs_attention": not acknowledged
                 and needs_attention(row, record),
+                # Exploitable, in triage or ticketed, acknowledged or not: a
+                # group acknowledge asks before it covers such findings.
+                "risky": is_risky(record),
                 "cause": row.get("gone_cause"),
                 "tickets": record_tickets(record),
                 "alias": _reported_alias(

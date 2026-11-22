@@ -407,6 +407,33 @@ def test_an_exploitable_or_ticketed_gone_finding_needs_attention_whatever_the_re
     assert flags["c6"][0] is False
 
 
+def test_risky_stays_marked_when_acknowledged_so_a_group_acknowledge_can_ask(tmp_path):
+    from dtvp.finding_lifecycle_services import describe_gone_findings
+
+    store, gone = _store_with_gone(tmp_path)
+    store.record_read("p1", [
+        {**gone, "component_uuid": "c3", "carry_over": None, "gone_reason": "no_longer_matched"},
+        {**gone, "component_uuid": "c5", "carry_over": None, "gone_reason": "no_longer_matched"},
+        {**gone, "component_uuid": "c6", "carry_over": "carried", "gone_reason": "replaced"},
+    ])
+    store.acknowledge("p1", [("c3", "v1")], by="rita", at="2026-11-22T10:00:00+00:00")
+    outbox = _Outbox({
+        ("p1", "c3", "v1"): _value_record("EXPLOITABLE", _EXPLOITABLE),
+        ("p1", "c5", "v1"): _value_record("NOT_AFFECTED", _NOT_AFFECTED),
+        ("p1", "c6", "v1"): _value_record("EXPLOITABLE", _EXPLOITABLE, sync_status="superseded"),
+    })
+
+    flags = {
+        f["component_uuid"]: (f["risky"], f["needs_attention"])
+        for f in describe_gone_findings(store, outbox, "p1")["findings"]
+    }
+    # Acknowledged: no longer needs attention, but still risky.
+    assert flags["c3"] == (True, False)
+    assert flags["c5"] == (False, False)
+    # Carried over: the assessment moved on, nothing to warn about here.
+    assert flags["c6"] == (False, False)
+
+
 def test_a_mass_disappearance_is_flagged_by_count_or_share():
     from dtvp.finding_lifecycle_services import mass_disappearance
 
