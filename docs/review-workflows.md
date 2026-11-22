@@ -274,6 +274,25 @@ Opened, it shows a dialog above the page:
   that finding still has the record the proposal was made for. Nothing is
   applied without a person. The ids come from the stored findings and
   vulnerability records, read through the source adapter.
+- **Probably the same issue, without an alias:** some issues are recorded
+  twice and neither record names the other (`CVE-2026-65901` and
+  `GHSA-x4vx-rjvf-j5p4` on `dompurify`). A gone finding without a reported
+  alias then says "Probably the same as *id* (*reason*)" when a finding on
+  the same component, or on one with the same package URL and version, has
+  the same description (compared without case, punctuation, spacing and the
+  ids themselves; at least 40 characters), or, failing that, the same
+  affected version range for the installed version and the same CWEs (from
+  the stored ranges; for a CVE and an advisory the ranges name the package
+  differently and still compare). It is DTVP's guess: reviewers first
+  **Confirm same issue** (or later **Not the same**), only then **Apply to
+  *id*** works as for an alias, saved pending review with origin
+  `carried-over-by-same-issue`. Reported findings on one component that are
+  probably one issue and have different states are listed apart from the
+  alias disagreements ("Probably one issue, two ids"). The facts come from
+  the stored findings and vulnerability records through the source adapter
+  (`VulnerabilityFacts`); no source call. A confirmation is kept with the
+  finding, in the instance dump too, and exported (see
+  [CycloneDX export](cyclonedx-export.md)).
 - Components of findings recorded before DTVP tracked findings are known only
   by their Dependency-Track UUID. When gone findings are shown, DTVP looks
   their name, version and package URL up once in local sources (the stored

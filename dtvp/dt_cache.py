@@ -35,6 +35,7 @@ from .assessment_outbox_services import (
 )
 from .dt_client import DTClient, DTSettings
 from .fixed_versions import slim_affected_components
+from .same_issue import confirmed_pairs
 from .finding_lifecycle_services import (
     ORIGIN_CARRIED_OVER,
     ORIGIN_CARRIED_OVER_BY_VULNERABILITY,
@@ -2406,6 +2407,13 @@ class CacheManager:
             project_uuid,
             self.assessment_outbox,
         )
+        # Findings a person confirmed to be the same issue as another one
+        # that no source names as their alias (dtvp/same_issue.py).
+        same_issue_as = confirmed_pairs(
+            (
+                await asyncio.to_thread(self.finding_lifecycle.presence, project_uuid)
+            ).values()
+        )
 
         def assemble() -> Dict[str, Any]:
             # The version ranges as the background read stored them; an
@@ -2443,6 +2451,7 @@ class CacheManager:
                 findings_read_at=findings_read_at or "",
                 fixed_versions=fixed_versions,
                 findings_gone=findings_gone,
+                same_issue_as=same_issue_as,
             )
             if not advisories_read:
                 # Ratings, dates, and recommendations are those of the

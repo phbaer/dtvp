@@ -358,6 +358,11 @@ COLUMN_MAP: dict[str, dict[str, str]] = {
                 "acknowledged_at",
                 "gone_cause",
                 "predates_tracking",
+                "same_issue_component_uuid",
+                "same_issue_vulnerability_uuid",
+                "same_issue_reason",
+                "same_issue_confirmed_by",
+                "same_issue_confirmed_at",
             )
         },
     },

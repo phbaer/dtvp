@@ -531,6 +531,16 @@ export interface GoneFinding {
     tickets?: string[];
     /** The same vulnerability under another id, still reported on the same component. */
     alias?: GoneFindingAlias | null;
+    /** A reported finding that is probably the same issue although no source
+     * links the two (same description, or same affected range and CWE): a
+     * guess, applied only once a person confirmed it. */
+    same_issue?: GoneFindingSameIssue | null;
+}
+
+export interface GoneFindingSameIssue extends GoneFindingAlias {
+    reason: string;
+    confirmed_by: string | null;
+    confirmed_at: string | null;
 }
 
 export interface GoneFindingAlias {
@@ -558,6 +568,8 @@ export interface AliasDisagreement {
     component_name: string | null;
     component_version: string | null;
     findings: { vulnerability_uuid: string; vuln_id: string | null; state: string }[];
+    /** For a same-issue pair: why DTVP thinks they are one issue. */
+    reason?: string;
 }
 
 export interface GoneFindingsSummary {
@@ -588,6 +600,8 @@ export interface GoneFindingsOfVersion {
     trend?: { day: string; went: Record<string, number> }[];
     /** Reported findings of one vulnerability under two ids on one component whose states differ. */
     alias_disagreements?: AliasDisagreement[];
+    /** The same, for findings that are probably one issue without an alias. */
+    same_issue_disagreements?: AliasDisagreement[];
     findings: GoneFinding[];
 }
 

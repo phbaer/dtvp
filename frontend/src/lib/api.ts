@@ -198,6 +198,27 @@ export const applyGoneFindingToAlias = async (
     return res.data;
 };
 
+/** Confirm (or withdraw) that a gone finding is the same issue as the
+ * reported one DTVP proposed for it, although no source links them. */
+export const confirmGoneFindingSameIssue = async (
+    projectUuid: string,
+    componentUuid: string,
+    vulnerabilityUuid: string,
+    otherComponentUuid: string,
+    otherVulnerabilityUuid: string,
+    confirmed = true,
+): Promise<{ changed: boolean; reason: string | null }> => {
+    const res = await api.post('/gone-findings/same-issue', {
+        project_uuid: projectUuid,
+        component_uuid: componentUuid,
+        vulnerability_uuid: vulnerabilityUuid,
+        other_component_uuid: otherComponentUuid,
+        other_vulnerability_uuid: otherVulnerabilityUuid,
+        confirmed,
+    });
+    return res.data;
+};
+
 export const acknowledgeGoneFindings = async (
     projectUuid: string,
     findings: { component_uuid: string; vulnerability_uuid: string }[],

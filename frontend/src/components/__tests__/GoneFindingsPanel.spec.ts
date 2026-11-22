@@ -1,10 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import GoneFindingsPanel from '../GoneFindingsPanel.vue'
-import { acknowledgeGoneFindings, applyGoneFindingToAlias, getGoneFindings } from '../../lib/api'
+import { acknowledgeGoneFindings, applyGoneFindingToAlias, confirmGoneFindingSameIssue, getGoneFindings } from '../../lib/api'
 
 vi.mock('../../lib/api', () => ({
     getGoneFindings: vi.fn(), acknowledgeGoneFindings: vi.fn(), applyGoneFindingToAlias: vi.fn(),
+    confirmGoneFindingSameIssue: vi.fn(),
 }))
 
 const READ = {
@@ -288,6 +289,66 @@ describe('GoneFindingsPanel', () => {
         await analyst.get('[data-testid="gone-findings-button"]').trigger('click')
         expect(document.body.querySelector('[data-testid="gone-finding-alias"]')).not.toBeNull()
         expect(document.body.querySelector('[data-testid="gone-finding-apply-alias"]')).toBeNull()
+        analyst.unmount()
+    })
+
+    it('proposes the same issue without an alias, applied only after confirming', async () => {
+        const guess = {
+            component_uuid: 'c-d', vulnerability_uuid: 'v-ghsa', vuln_id: 'GHSA-x4vx-rjvf-j5p4',
+            state: 'NOT_AFFECTED', tickets: [], disagrees: true, proposal: 'blocks',
+            reason: 'same description', confirmed_by: null, confirmed_at: null,
+        }
+        const response = (confirmedBy: string | null) => ({
+            name: 'App',
+            versions: [{
+                version: '6.15.6', project_uuid: 'p1', last_read: READ, gone: { no_longer_matched: 1 },
+                same_issue_disagreements: [{
+                    component_uuid: 'c-d', component_name: 'dompurify', component_version: '3.2.7',
+                    reason: 'same description',
+                    findings: [
+                        { vulnerability_uuid: 'va', vuln_id: 'CVE-2026-65913', state: 'NOT_AFFECTED' },
+                        { vulnerability_uuid: 'vb', vuln_id: 'GHSA-v9jr-rg53-9pgp', state: 'EXPLOITABLE' },
+                    ],
+                }],
+                findings: [finding({
+                    component_uuid: 'c-d', component_name: 'dompurify', component_version: '3.2.7',
+                    reason: 'no_longer_matched', vulnerability_uuid: 'v-cve', vuln_id: 'CVE-2026-65901',
+                    needs_attention: true, alias: null,
+                    assessment: { sync_status: 'inactive', state: 'EXPLOITABLE', revision: 2 },
+                    same_issue: { ...guess, confirmed_by: confirmedBy },
+                })],
+            }],
+        })
+        vi.mocked(getGoneFindings).mockResolvedValue(response(null) as any)
+        vi.mocked(confirmGoneFindingSameIssue).mockResolvedValue({ changed: true, reason: 'same description' })
+        vi.mocked(applyGoneFindingToAlias).mockResolvedValue({ kind: 'blocks' })
+        const wrapper = await mountPanel()
+        await wrapper.get('[data-testid="gone-findings-button"]').trigger('click')
+
+        expect(texts('[data-testid="gone-finding-same-issue"]')[0]).toContain(
+            'Probably the same as GHSA-x4vx-rjvf-j5p4 (same description): NOT_AFFECTED, a different assessment',
+        )
+        expect(texts('[data-testid="gone-findings-same-issue-disagreements"]')[0]).toContain(
+            'CVE-2026-65913 NOT_AFFECTED · GHSA-v9jr-rg53-9pgp EXPLOITABLE',
+        )
+        // Nothing to apply before a person confirms it.
+        expect(document.body.querySelector('[data-testid="gone-finding-apply-same-issue"]')).toBeNull()
+        vi.mocked(getGoneFindings).mockResolvedValue(response('rita') as any)
+        await click(document.body.querySelector('[data-testid="gone-finding-confirm-same-issue"]'))
+        expect(confirmGoneFindingSameIssue).toHaveBeenCalledWith('p1', 'c-d', 'v-cve', 'c-d', 'v-ghsa', true)
+        expect(texts('[data-testid="gone-finding-same-issue"]')[0]).toContain('confirmed by rita')
+
+        await click(document.body.querySelector('[data-testid="gone-finding-apply-same-issue"]'))
+        expect(applyGoneFindingToAlias).toHaveBeenCalledWith('p1', 'c-d', 'v-cve', 'v-ghsa', 'c-d')
+        await click(document.body.querySelector('[data-testid="gone-finding-withdraw-same-issue"]'))
+        expect(confirmGoneFindingSameIssue).toHaveBeenLastCalledWith('p1', 'c-d', 'v-cve', 'c-d', 'v-ghsa', false)
+        wrapper.unmount()
+
+        // Analysts see the guess, not the actions.
+        const analyst = await mountPanel(false)
+        await analyst.get('[data-testid="gone-findings-button"]').trigger('click')
+        expect(document.body.querySelector('[data-testid="gone-finding-same-issue"]')).not.toBeNull()
+        expect(document.body.querySelector('[data-testid="gone-finding-confirm-same-issue"]')).toBeNull()
         analyst.unmount()
     })
 

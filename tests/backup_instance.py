@@ -282,6 +282,11 @@ def populate(instance: Instance) -> dict:
     lifecycle.acknowledge(
         "p-lifecycle", [("c-old", "v-l")], by="rita", at="2026-11-19T09:00:00+00:00"
     )
+    # A gone finding a reviewer confirmed to be the same issue as a reported one.
+    lifecycle.confirm_same_issue(
+        "p-lifecycle", ("c-new", "v-cpe"), ("c-new", "v-l"),
+        reason="same description", by="rita", at="2026-11-19T09:30:00+00:00",
+    )
 
     results = instance.code_analysis()
     with results._lock:

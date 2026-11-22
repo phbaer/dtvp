@@ -82,6 +82,30 @@ class DTClient:
             return uuid, vuln_id
         return None
 
+    @staticmethod
+    def vulnerability_facts(item: Any):
+        """What a finding or vulnerability record tells of its vulnerability
+        for telling two records of one issue apart: ``uuid``, ``vuln_id``,
+        ``source``, ``description`` and the CWE ids (``VulnerabilityFacts``
+        in ``ports``)."""
+        if not isinstance(item, dict):
+            return None
+        vulnerability = item.get("vulnerability") if "vulnerability" in item else item
+        if not isinstance(vulnerability, dict) or not vulnerability.get("uuid"):
+            return None
+        cwes = []
+        for cwe in vulnerability.get("cwes") or []:
+            value = cwe.get("cweId") if isinstance(cwe, dict) else cwe
+            if str(value or "").isdigit():
+                cwes.append(int(value))
+        return {
+            "uuid": str(vulnerability["uuid"]),
+            "vuln_id": vulnerability.get("vulnId"),
+            "source": vulnerability.get("source"),
+            "description": vulnerability.get("description") or "",
+            "cwes": cwes,
+        }
+
     def __init__(
         self,
         base_url: str,
