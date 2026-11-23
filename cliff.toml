@@ -18,7 +18,7 @@ body = """
 {%- for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | striptags | trim | upper_first }}
 {% for commit in commits -%}
-- {% if commit.breaking %}⚠️ **BREAKING** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }}
+- {% if commit.breaking %}⚠️ **BREAKING** {% endif %}{% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }}
 {% endfor %}
 {%- endfor %}\n
 """
@@ -60,11 +60,12 @@ commit_parsers = [
   { message = "^chore: update changelog", skip = true },
 ]
 
-# Strip Forgejo trailers and extra blank lines from commit bodies
+# Strip Forgejo trailers from commit bodies. Blank lines stay: they separate
+# the subject from the body and the body from footers such as
+# "BREAKING CHANGE:", which the conventional-commit parser needs.
 commit_preprocessors = [
   { pattern = "\nReviewed-on:.*", replace = "" },
   { pattern = "\nCo-authored-by:.*", replace = "" },
-  { pattern = "\n\n", replace = "" },
 ]
 
 # Protect breaking changes from being skipped due to the filters

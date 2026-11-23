@@ -13,7 +13,15 @@ import {
     rememberAuthReturnPath,
     resetAuthExpiredNotification,
 } from './lib/authSession'
-import ChangelogModal from './components/ChangelogModal.vue'
+import WhatsNewDialog from './components/WhatsNewDialog.vue'
+import {
+    loadSeen,
+    nextSeen,
+    releasesSince,
+    saveSeen,
+    upgradeSize,
+    type Release,
+} from './lib/whatsNew'
 import AnalysisQueueIndicator from './components/AnalysisQueueIndicator.vue'
 import ExportIssuesIndicator from './components/ExportIssuesIndicator.vue'
 import type { PythonRuntimeStatus } from './types'
@@ -39,8 +47,15 @@ const apiBase = `${contextPath || ''}/api`
 const sbomUrl = ref(`${apiBase}/sbom`)
 const metadataUrl = `${apiBase}/metadata`
 
-const showChangelog = ref(false)
-const changelogContent = ref('')
+// "What's new": shown once after an upgrade (prominent for a new major
+// version, compact otherwise) and on request from the header or the footer.
+const releases = ref<Release[] | null>(null)
+const whatsNew = ref<{
+    mode: 'major' | 'compact' | 'browse'
+    shown: Release[]
+    previousVersion: string | null
+    automatic: boolean
+} | null>(null)
 
 const effectiveRole = computed(() =>
     isAnalystView.value ? 'ANALYST' : realRole.value
@@ -77,17 +92,62 @@ const loadVersionInfo = async () => {
     // Baseline for staleness detection: whatever the server reports now is, by
     // definition, the build this tab just loaded.
     recordServerIdentity(v)
+}
 
-    const lastSeenVersion = localStorage.getItem('dtvp_last_seen_version')
-    if (lastSeenVersion !== v.version && v.version !== '0.0.0') {
-        try {
-            const res = await getChangelog()
-            changelogContent.value = res.content
-            showChangelog.value = true
-        } catch (e) {
-            console.error('Failed to fetch changelog', e)
-        }
+const loadReleases = async (): Promise<Release[]> => {
+    if (releases.value === null) {
+        const res = await getChangelog()
+        releases.value = Array.isArray(res.releases) ? res.releases : []
     }
+    return releases.value
+}
+
+// After an upgrade: the releases the user has not seen, sized by the upgrade.
+// A first visit only remembers the version; an upgrade without anything for
+// users is remembered silently.
+const checkWhatsNew = async () => {
+    const username = user.value.username
+    const current = version.value
+    if (!username || !current || current === '0.0.0') return
+    const seen = loadSeen(username)
+    const size = upgradeSize(seen, current)
+    if (size === 'none') return
+    if (size === 'first') {
+        saveSeen(username, nextSeen(seen, current))
+        return
+    }
+    try {
+        const shown = releasesSince(await loadReleases(), seen?.version ?? null, current)
+        if (shown.length === 0) {
+            saveSeen(username, nextSeen(seen, current))
+            return
+        }
+        whatsNew.value = {
+            mode: size === 'major' ? 'major' : 'compact',
+            shown,
+            previousVersion: seen?.version ?? null,
+            automatic: true,
+        }
+    } catch (e) {
+        console.error('Failed to fetch the release notes', e)
+    }
+}
+
+const openWhatsNew = async () => {
+    try {
+        await loadReleases()
+    } catch (e) {
+        console.error('Failed to fetch the release notes', e)
+        releases.value = null
+    }
+    whatsNew.value = { mode: 'browse', shown: [], previousVersion: null, automatic: false }
+}
+
+const closeWhatsNew = () => {
+    if (whatsNew.value?.automatic && user.value.username) {
+        saveSeen(user.value.username, nextSeen(loadSeen(user.value.username), version.value))
+    }
+    whatsNew.value = null
 }
 
 const loadProjectMetadata = async () => {
@@ -146,6 +206,7 @@ const bootstrapApp = async () => {
         await loadVersionInfo()
         await loadProjectMetadata()
         await loadCurrentUser()
+        await checkWhatsNew()
 
         const returnPath = consumeAuthReturnPath()
         if (route.path === '/' && returnPath) {
@@ -285,11 +346,6 @@ watch(() => route.path, (path) => {
         }
     }
 }, { immediate: true })
-
-const acknowledgeChangelog = () => {
-    showChangelog.value = false
-    localStorage.setItem('dtvp_last_seen_version', version.value)
-}
 
 const updateAvailable = buildVersionStore.updateAvailable
 
@@ -483,6 +539,14 @@ const reloadForUpdate = () => {
                             <span class="text-blue-300 font-medium leading-none">{{ user.username }}</span>
                             <span class="text-gray-500 text-xs mt-1">({{ isAnalystView ? 'ANALYST View' : user.role }})</span>
                         </div>
+                        <button
+                            type="button"
+                            @click="openWhatsNew"
+                            class="text-blue-300 hover:text-blue-200 text-[11px]"
+                            data-testid="header-whats-new"
+                        >
+                            What's new
+                        </button>
                         <button 
                             @click="handleLogout"
                             class="bg-gray-700 hover:bg-gray-600 text-white text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer border border-gray-600"
@@ -521,6 +585,14 @@ const reloadForUpdate = () => {
             <div class="w-full p-3 flex flex-col gap-1 text-center text-[11px] text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:text-left">
                 <div class="font-medium text-gray-300">
                     DTVP v{{ version }} (build {{ build }})
+                    <button
+                        type="button"
+                        class="ml-2 text-blue-300 hover:text-blue-200"
+                        data-testid="footer-whats-new"
+                        @click="openWhatsNew"
+                    >
+                        What's new
+                    </button>
                     <span
                         v-if="realRole === 'REVIEWER' && backendRuntimeLabel"
                         class="ml-2 text-cyan-300"
@@ -542,10 +614,14 @@ const reloadForUpdate = () => {
             </div>
         </footer>
 
-        <ChangelogModal 
-            v-if="showChangelog" 
-            :changelog="changelogContent" 
-            @acknowledge="acknowledgeChangelog"
+        <WhatsNewDialog
+            v-if="whatsNew"
+            :mode="whatsNew.mode"
+            :current-version="version"
+            :shown="whatsNew.shown"
+            :releases="releases ?? []"
+            :previous-version="whatsNew.previousVersion"
+            @close="closeWhatsNew"
         />
         </template>
     </template>

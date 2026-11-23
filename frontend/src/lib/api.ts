@@ -1,3 +1,4 @@
+import type { Release } from './whatsNew';
 import axios from 'axios';
 import type { AxiosProgressEvent } from 'axios';
 import type {
@@ -97,7 +98,7 @@ export const getPerformanceStatus = async (): Promise<BackendPerformanceStatus> 
     return res.data;
 };
 
-export const getChangelog = async (): Promise<{ content: string }> => {
+export const getChangelog = async (): Promise<{ content: string; releases?: Release[] }> => {
     const res = await api.get('/changelog');
     return res.data;
 };

@@ -22,6 +22,7 @@ class AppInfoRouteDeps:
     media_type_json: str
     get_performance_status: Callable[[], dict[str, Any]] = lambda: {}
     get_runtime_status: Callable[[], dict[str, Any]] = lambda: {}
+    load_release_notes: Callable[[], list[dict[str, Any]]] = lambda: []
 
 
 def create_app_info_router(
@@ -59,7 +60,12 @@ def create_app_info_router(
 
     @router.get("/changelog")
     def get_changelog():
-        return {"content": deps.load_changelog_content()}
+        # ``releases``: what changed for users per version, newest first
+        # (dtvp/release_notes.py); ``content``: the whole Markdown changelog.
+        return {
+            "content": deps.load_changelog_content(),
+            "releases": deps.load_release_notes(),
+        }
 
     def build_sbom_response(filename: str) -> FileResponse:
         sbom_path = deps.get_sbom_path(filename)

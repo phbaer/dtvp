@@ -124,7 +124,7 @@ def test_app_info_routes_return_metadata_and_generated_openapi(app_info_client):
     assert client.get("/api/performance-status").json() == {
         "group_queries": {"active": 0}
     }
-    assert client.get("/api/changelog").json() == {"content": "changes"}
+    assert client.get("/api/changelog").json() == {"content": "changes", "releases": []}
 
     openapi = client.get("/api/openapi.json").json()
     assert openapi["info"]["title"] == "DTVP test"

@@ -477,6 +477,7 @@ def build_app_info_route_deps(
     media_type_json: str,
     get_performance_status: Callable[[], dict[str, Any]] | None = None,
     get_runtime_status: Callable[[], dict[str, Any]] | None = None,
+    load_release_notes: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> AppInfoRouteDeps:
     return AppInfoRouteDeps(
         version=version,
@@ -493,6 +494,7 @@ def build_app_info_route_deps(
         media_type_json=media_type_json,
         get_performance_status=get_performance_status or (lambda: {}),
         get_runtime_status=get_runtime_status or (lambda: {}),
+        load_release_notes=load_release_notes or (lambda: []),
     )
 
 

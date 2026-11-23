@@ -190,6 +190,10 @@ From a 1280px wide viewport the vulnerability detail can open a full-screen
 [assessment workspace](docs/screens.md#assessment-workspace) with the context
 beside the assessment form.
 
+After an upgrade DTVP shows [what's new](docs/screens.md#whats-new) since the
+version a user last saw: a large dialog for a new major version, a small one
+otherwise; **What's new** in the header and footer opens it again.
+
 See [Assessment model](docs/assessment-model.md) for exact state, ownership,
 SSVC, and evidence rules; [Review workflows](docs/review-workflows.md) for
 filtering, editing, bulk operations, and archives; or the

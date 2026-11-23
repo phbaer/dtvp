@@ -48,6 +48,7 @@ from .app_constants import (
 )
 from .app_info_routes import create_app_info_router
 from .app_info_services import build_sbom_html, load_changelog_content
+from .release_notes import load_releases
 from .app_info_services import get_sbom_path as get_sbom_path_impl
 from .app_info_services import load_pyproject_metadata as load_pyproject_metadata_impl
 from .app_wiring import (
@@ -746,6 +747,7 @@ api_router.include_router(
             cache_manager=cache_manager,
             load_pyproject_metadata=load_pyproject_metadata_impl,
             load_changelog_content=load_changelog_content,
+            load_release_notes=load_releases,
             get_sbom_path=get_sbom_path_impl,
             read_text=read_text_impl,
             build_sbom_html=build_sbom_html,

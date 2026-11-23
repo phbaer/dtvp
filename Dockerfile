@@ -52,7 +52,8 @@ RUN uv sync --frozen --no-dev
 
 # Copy application code
 COPY dtvp ./dtvp
-COPY start.sh CHANGELOG.md ./
+# CHANGELOG.json (git-cliff --context) feeds "What's new"; CHANGELOG.md is the fallback.
+COPY start.sh CHANGELOG.md CHANGELOG.jso[n] ./
 COPY sbom/dtvp-frontend-cyclonedx.json /app/sbom/dtvp-frontend-cyclonedx.json
 COPY sbom/dtvp-backend-cyclonedx.json /app/sbom/dtvp-backend-cyclonedx.json
 RUN chmod +x start.sh

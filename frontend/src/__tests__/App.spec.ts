@@ -81,7 +81,11 @@ const mountApp = () => {
         global: {
             stubs: {
                 AnalysisQueueIndicator: true,
-                ChangelogModal: true,
+                WhatsNewDialog: {
+                    props: ['mode', 'shown', 'releases', 'currentVersion', 'previousVersion'],
+                    emits: ['close'],
+                    template: '<div data-testid="whats-new-stub" :data-mode="mode" :data-shown="shown.map(r => r.version).join(\',\')"><button data-testid="whats-new-stub-close" @click="$emit(\'close\')">close</button></div>',
+                },
                 RouterLink: {
                     props: ['to'],
                     template: '<a><slot /></a>',
@@ -121,7 +125,7 @@ describe('App bootstrap state', () => {
         mocks.route.meta = {}
         mocks.router.replace.mockResolvedValue(undefined)
         mocks.router.push.mockResolvedValue(undefined)
-        mocks.getChangelog.mockResolvedValue({ content: '' })
+        mocks.getChangelog.mockResolvedValue({ content: '', releases: [] })
         mocks.getUserInfo.mockResolvedValue({ username: 'reviewer', role: 'REVIEWER' })
         projectHeaderState.currentProjectName.value = null
         projectHeaderState.lastProjectName.value = null
@@ -318,3 +322,87 @@ describe('App bootstrap state', () => {
         expect(handler).toHaveBeenCalledOnce()
     })
 })
+
+describe("What's new", () => {
+    const release = (version: string, text: string) => ({
+        version,
+        date: '2026-11-23',
+        prerelease: /rc\d+$/.test(version),
+        unreleased: false,
+        groups: { breaking: [], new: [{ text, scope: null, pr: null, breaking: false, note: null }], faster: [], fixed: [] },
+    })
+    const releases = [release('2.1.0', 'Minor thing'), release('2.0.0', 'Major thing'), release('1.0.26', 'Old')]
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mocks.route.path = '/'
+        mocks.route.fullPath = '/'
+        mocks.route.query = {}
+        mocks.route.meta = {}
+        mocks.router.replace.mockResolvedValue(undefined)
+        mocks.getChangelog.mockResolvedValue({ content: '', releases })
+        mocks.getUserInfo.mockResolvedValue({ username: 'alice', role: 'ANALYST' })
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+        vi.stubGlobal('localStorage', createLocalStorageMock())
+    })
+
+    afterEach(() => {
+        for (const wrapper of mountedWrappers.splice(0)) wrapper.unmount()
+        vi.unstubAllGlobals()
+    })
+
+    it('shows nothing on a first visit and remembers the version for the user', async () => {
+        mocks.getVersion.mockResolvedValue({ version: '2.0.0', build: 'abc' })
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        expect(wrapper.find('[data-testid="whats-new-stub"]').exists()).toBe(false)
+        expect(JSON.parse(localStorage.getItem('dtvp_whats_new:alice')!)).toEqual({ version: '2.0.0', final: '2.0.0' })
+        expect(mocks.getChangelog).not.toHaveBeenCalled()
+    })
+
+    it('shows a major upgrade prominently with every release since the last visit', async () => {
+        localStorage.setItem('dtvp_last_seen_version', '1.0.26')
+        mocks.getVersion.mockResolvedValue({ version: '2.1.0', build: 'abc' })
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        const dialog = wrapper.get('[data-testid="whats-new-stub"]')
+        expect(dialog.attributes('data-mode')).toBe('major')
+        expect(dialog.attributes('data-shown')).toBe('2.1.0,2.0.0')
+
+        await wrapper.get('[data-testid="whats-new-stub-close"]').trigger('click')
+        expect(wrapper.find('[data-testid="whats-new-stub"]').exists()).toBe(false)
+        expect(JSON.parse(localStorage.getItem('dtvp_whats_new:alice')!)).toEqual({ version: '2.1.0', final: '2.1.0' })
+    })
+
+    it('shows a minor upgrade compactly', async () => {
+        localStorage.setItem('dtvp_whats_new:alice', JSON.stringify({ version: '2.0.0', final: '2.0.0' }))
+        mocks.getVersion.mockResolvedValue({ version: '2.1.0', build: 'abc' })
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        expect(wrapper.get('[data-testid="whats-new-stub"]').attributes('data-mode')).toBe('compact')
+    })
+
+    it('opens again from the header and the footer', async () => {
+        localStorage.setItem('dtvp_whats_new:alice', JSON.stringify({ version: '2.1.0', final: '2.1.0' }))
+        mocks.getVersion.mockResolvedValue({ version: '2.1.0', build: 'abc' })
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+        expect(wrapper.find('[data-testid="whats-new-stub"]').exists()).toBe(false)
+
+        await wrapper.get('[data-testid="footer-whats-new"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.get('[data-testid="whats-new-stub"]').attributes('data-mode')).toBe('browse')
+        await wrapper.get('[data-testid="whats-new-stub-close"]').trigger('click')
+
+        await wrapper.get('[data-testid="header-whats-new"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.get('[data-testid="whats-new-stub"]').attributes('data-mode')).toBe('browse')
+        // Opening it by hand does not change what was seen.
+        expect(JSON.parse(localStorage.getItem('dtvp_whats_new:alice')!)).toEqual({ version: '2.1.0', final: '2.1.0' })
+        expect(mocks.getChangelog).toHaveBeenCalledTimes(1)
+    })
+})
+

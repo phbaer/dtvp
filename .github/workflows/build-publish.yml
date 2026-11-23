@@ -322,9 +322,11 @@ jobs:
             VERSION="v$DTVP_VERSION"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-      - name: Generate CHANGELOG.md for Docker
+      - name: Generate CHANGELOG.md and CHANGELOG.json for Docker
         run: |
           uv run git-cliff -o CHANGELOG.md
+          # The commits' parts for the "What's new" dialog (dtvp/release_notes.py).
+          uv run git-cliff --context -o CHANGELOG.json
       - name: Build and Push DTVP (free-threaded)
         env:
           REGISTRY: ${{ vars.RUNNER_PACKAGE_PUSH_HOST }}

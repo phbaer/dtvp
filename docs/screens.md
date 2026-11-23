@@ -16,6 +16,27 @@ The capture flow uses mocked API fixtures and Chromium for a consistent screensh
 
 The login screen offers the SSO entry point used before DTVP loads project data.
 
+### What's New
+
+After an upgrade, DTVP shows what changed since the version the signed-in user
+last saw, once per user and browser:
+
+- **A new major version** (for example 1.x to 2.0.0, or to one of its
+  pre-releases) opens a large dialog. Changes that need action come first, with
+  their note; then what is new and what is faster; fixes are folded.
+- **A minor or patch upgrade** opens a small dialog with the five most
+  important entries and **Show all**.
+- A first visit shows nothing, and an upgrade without changes for users is
+  remembered silently.
+
+**What's new** in the header (next to Logout) and in the footer (next to the
+version) opens it again at any time, with a list of every release of the build.
+The entries come from the commit history: new features, fixes, speed-ups and
+breaking changes, each with its area and a link to its pull request; chores,
+CI, tests, documentation, refactoring and dependency updates are left out
+(`GET /api/changelog`, `releases`; `dtvp/release_notes.py`). What a user saw
+is kept in the browser's local storage, per user.
+
 ### Dashboard
 
 ![Dashboard](screenshots/dashboard.png)
