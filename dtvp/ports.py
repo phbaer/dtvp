@@ -28,10 +28,20 @@ class VulnerabilitySource(Protocol):
         """
 
     async def get_vulnerabilities(
-        self, project_uuid: str, cve: Optional[str] = None
+        self,
+        project_uuid: str,
+        cve: Optional[str] = None,
+        *,
+        analysis_details: bool = True,
     ) -> list[dict[str, Any]]:
         """Findings of one project version, each with its component,
-        vulnerability, and current assessment under ``analysis``."""
+        vulnerability, and current assessment under ``analysis``.
+
+        With ``analysis_details=False`` it may list each assessment's state
+        and suppression only; DTVP then reads the details of the findings it
+        needs with ``get_analysis`` (``CacheManager._read_findings_list``). A
+        source may leave the keyword out and always return complete
+        assessments."""
 
     async def get_project_vulnerabilities(
         self, project_uuid: str

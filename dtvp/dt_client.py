@@ -406,10 +406,19 @@ class DTClient:
             await asyncio.sleep(interval_seconds)
 
     async def get_vulnerabilities(
-        self, project_uuid: str, cve: Optional[str] = None
+        self,
+        project_uuid: str,
+        cve: Optional[str] = None,
+        *,
+        analysis_details: bool = True,
     ) -> List[Dict[str, Any]]:
         """
         Get all findings for a project version, including analysis data.
+
+        With ``analysis_details=False`` only the findings list is read: each
+        analysis then holds its state and suppression, and the caller reads
+        the details of the findings it needs (``get_analysis``). The sync
+        does this, so an unchanged assessed finding costs no request.
 
         Current Dependency-Track releases expose the complete audit snapshot as
         one Finding Packaging Format response. Older releases fall back to the
@@ -418,6 +427,8 @@ class DTClient:
         """
         export_url = f"{self.base_url}/api/v1/finding/project/{project_uuid}/export"
         try:
+            if not analysis_details:
+                raise ValueError("details not wanted; the findings list suffices")
             if getattr(self, "_export_lacks_details", False):
                 # Known from an earlier read: this server's export never
                 # carries the details (Dependency-Track 4.x builds it from
@@ -502,7 +513,7 @@ class DTClient:
                 analysis_state not in (None, "NOT_SET") and not analysis_details_present
             )
 
-            if component_uuid and vulnerability_uuid and needs_enrichment:
+            if analysis_details and component_uuid and vulnerability_uuid and needs_enrichment:
                 findings_to_enrich.append(finding)
                 analysis_keys.append((component_uuid, vulnerability_uuid))
 

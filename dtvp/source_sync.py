@@ -38,6 +38,7 @@ import httpx
 
 from .ports import AnalysisTrigger, BulkFindings, ChangeHints, source_display_name
 from .source_sync_state import (
+    FULL_ANALYSIS_DETAILS,
     KIND_BOM,
     KIND_FINDINGS,
     KIND_VULNS,
@@ -746,6 +747,8 @@ class SourceSync:
         entry.update(started=time.perf_counter(), timings={}, phase=None)
         metrics: dict[str, float] = {}
         token = _METRICS.set(metrics)
+        # The safety re-read takes every assessment's details from the source.
+        details_token = FULL_ANALYSIS_DETAILS.set(item.priority == P4_SAFETY)
         try:
             self._phase(uuid, "preparing")
             before = self._finding_ids(uuid)
@@ -807,6 +810,7 @@ class SourceSync:
             return True
         finally:
             _METRICS.reset(token)
+            FULL_ANALYSIS_DETAILS.reset(details_token)
             self._phase(uuid, None)
             self._record_sync(uuid, item, metrics)
             if "task" not in entry:
@@ -828,16 +832,24 @@ class SourceSync:
             "seconds": round(total, 3),
             "phases": timings,
             "requests": int(metrics.get("requests", 0)),
+            # Of them, analyses read one by one (adoptions and findings
+            # whose state changed in the source).
+            "analysis_reads": int(
+                (getattr(self.cache, "last_analysis_reads", None) or {}).get(uuid, 0)
+                if KIND_FINDINGS in item.kinds
+                else 0
+            ),
             "budget_wait_seconds": round(metrics.get("budget_wait", 0.0), 3),
             "source_seconds": round(metrics.get("source_seconds", 0.0), 3),
         }
         self.recent = (self.recent + [summary])[-self.RECENT_LIMIT:]
         logger.info(
-            "Synced %s %s in %.1f s (%s); %d request(s), %.1f s waiting for the budget, "
-            "%.1f s in the source",
+            "Synced %s %s in %.1f s (%s); %d request(s) for %s, %d of them analyses one by one, "
+            "%.1f s waiting for the budget, %.1f s in the source",
             entry.get("product") or uuid, entry.get("version") or "", total,
             ", ".join(f"{name} {seconds:.1f} s" for name, seconds in timings.items()) or "nothing",
-            summary["requests"], summary["budget_wait_seconds"], summary["source_seconds"],
+            summary["requests"], "+".join(item.kinds) or "nothing", summary["analysis_reads"],
+            summary["budget_wait_seconds"], summary["source_seconds"],
         )
 
     def _failed(self, uuid: str, exc: BaseException, failures_before: int = 0) -> None:
@@ -945,9 +957,9 @@ class SourceSync:
             and (rows.get(uuid) or {}).get("last_success_at")
         ]
 
-    # Requests a version read takes one by one (findings, vulnerability
-    # records, BOM): a pass is worth it once it costs fewer pages than that.
-    REQUESTS_PER_VERSION = 3
+    # A pass is worth it once it costs fewer pages than the candidates' own
+    # reads: one request per kind each is due for. (Analysis details cost
+    # nothing for an unchanged version: ``CacheManager._read_findings_list``.)
 
     def _maybe_start_pass(self, client: Any) -> None:
         if not isinstance(getattr(client, "_source", client), BulkFindings):
@@ -972,7 +984,8 @@ class SourceSync:
             return
         if len(candidates) < self.PASS_MIN_VERSIONS:
             return
-        if (self._pass_pages or 0) > len(candidates) * self.REQUESTS_PER_VERSION:
+        own_reads = sum(len(self.queue[uuid].kinds) for uuid in candidates)
+        if (self._pass_pages or 0) >= own_reads:
             return
         self._pass_holds = set(candidates)
         self._pass = asyncio.create_task(self._portfolio_pass(client, candidates))

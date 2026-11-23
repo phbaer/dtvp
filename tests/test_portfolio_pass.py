@@ -416,3 +416,30 @@ async def test_the_dependency_track_client_pages_the_portfolio_list():
     assert progress == [(1, 3), (2, 3), (3, 3)]
     assert sum(len(v) for v in by_project.values()) == 2500
     assert set(by_project) == {"p0", "p1", "p2"}
+
+
+async def test_versions_due_for_findings_only_are_read_one_by_one_when_that_costs_fewer_requests(tmp_path):
+    """The pass is chosen by requests: a version due for its findings alone
+    costs one request (its analyses come from the record), so 29 of them
+    are cheaper than a 59-page portfolio list."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=4)
+    source = BulkSource(versions=30)
+    await _imported(scheduler, manager, source)
+    scheduler._pass_pages = 59
+    scheduler._pass_ended = float("-inf")
+    from dtvp.source_sync import P2_DUE, SyncItem
+    from dtvp.source_sync_state import KIND_FINDINGS
+
+    scheduler.queue.clear()
+    for i in range(29):
+        scheduler.queue[f"p{i}"] = SyncItem(f"p{i}", P2_DUE, (KIND_FINDINGS,), 0.0)
+    scheduler._maybe_start_pass(source)
+    assert scheduler._pass is None
+
+    # Due for everything (three requests each), the list is cheaper.
+    for i in range(29):
+        scheduler.queue[f"p{i}"].kinds = ("findings", "vulns", "bom")
+    scheduler._maybe_start_pass(source)
+    assert scheduler._pass is not None
+    await scheduler._pass
+    await manager.close()

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import copy
 import json
+import inspect
 import os
 import tempfile
 import threading
@@ -62,6 +63,7 @@ from .ports import (
     change_hint,
 )
 from .source_sync_state import (
+    FULL_ANALYSIS_DETAILS,
     KIND_BOM,
     KIND_FINDINGS,
     KIND_VULNS,
@@ -520,6 +522,8 @@ class CacheManager:
         fixed_versions_reads_per_cycle: int = None,
     ):
         self.base_path = base_path or get_dt_cache_path()
+        # Per project: analyses read one by one at its last findings read.
+        self.last_analysis_reads: Dict[str, int] = {}
         self.refresh_interval_seconds = (
             _refresh_seconds_from_env()
             if refresh_interval_seconds is None
@@ -1844,10 +1848,13 @@ class CacheManager:
         # exported, and the echo would count as a change in the source.
         async with self._project_exchange(project_uuid).read():
             try:
-                fresh_findings = await client.get_vulnerabilities(project_uuid, cve=None)
+                fresh_findings, detail_reads = await self._read_findings_list(
+                    client, project_uuid
+                )
             except Exception as exc:
                 self._record_sync_state(self.sync_state.record_failure, project_uuid, exc)
                 raise
+            self.last_analysis_reads[project_uuid] = detail_reads
             # Over the raw response, before anything of DTVP's is read into it.
             findings_identity, analyses, analyses_index = findings_digests(fresh_findings)
             portfolio = portfolio_digest(fresh_findings)
@@ -2541,6 +2548,104 @@ class CacheManager:
             return document
 
         return await asyncio.to_thread(assemble)
+
+    async def _read_findings_list(
+        self, client: VulnerabilitySource, project_uuid: str
+    ) -> Tuple[Any, int]:
+        """A version's findings with complete analyses, and how many
+        analyses had to be read one by one.
+
+        A source that can leave the details out (``analysis_details=False``)
+        lists each analysis with its state and suppression only. Where that
+        equals the value DTVP last saw in the source or last exported for the
+        finding, the details come from that record: the source still holds
+        them, so reading them again costs a request and tells nothing new.
+        Only the other assessed findings are read one by one: those DTVP has
+        no record of (adoption) and those whose state or suppression changed
+        in the source. A change of the details alone in the source is seen
+        by the safety re-read, which reads every assessment
+        (``FULL_ANALYSIS_DETAILS``; ADR 0004, "Analysis details").
+        """
+        try:
+            parameters = inspect.signature(client.get_vulnerabilities).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "analysis_details" not in parameters or FULL_ANALYSIS_DETAILS.get():
+            return await client.get_vulnerabilities(project_uuid, cve=None), 0
+        findings = await client.get_vulnerabilities(
+            project_uuid, cve=None, analysis_details=False
+        )
+        if not isinstance(findings, list):
+            return findings, 0
+        wanted: List[Tuple[Dict[str, Any], Tuple[str, str, str]]] = []
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            key = self._finding_analysis_key(project_uuid, finding)
+            listed = finding.get("analysis")
+            listed = listed if isinstance(listed, dict) else {}
+            state = str(
+                listed.get("analysisState") or listed.get("state") or "NOT_SET"
+            )
+            suppressed = _get_analysis_suppressed(listed)
+            if key is None or (
+                state == "NOT_SET" and not suppressed
+            ) or any(
+                name in listed
+                for name in ("analysisDetails", "analysis_details", "detail")
+            ):
+                continue  # nothing assessed, or the list already has it all
+            known = self._known_source_value(key, state, suppressed)
+            if known is not None:
+                finding["analysis"] = {**listed, "analysisDetails": known}
+                continue
+            wanted.append((finding, key))
+        batch_size = 20
+        for start in range(0, len(wanted), batch_size):
+            batch = wanted[start : start + batch_size]
+            results = await asyncio.gather(
+                *[
+                    client.get_analysis(
+                        project_uuid=key[0],
+                        component_uuid=key[1],
+                        vulnerability_uuid=key[2],
+                    )
+                    for _finding, key in batch
+                ],
+                return_exceptions=True,
+            )
+            for (finding, key), analysis in zip(batch, results):
+                if isinstance(analysis, BaseException):
+                    logger.warning(
+                        "Could not read the analysis of %s/%s in %s: %s",
+                        key[1], key[2], project_uuid, analysis,
+                    )
+                    continue
+                if isinstance(analysis, dict):
+                    listed = finding.get("analysis")
+                    finding["analysis"] = {
+                        **(listed if isinstance(listed, dict) else {}),
+                        **analysis,
+                    }
+        return findings, len(wanted)
+
+    def _known_source_value(
+        self, key: AssessmentKey, state: str, suppressed: bool
+    ) -> Optional[str]:
+        """The details the source holds for a finding, when DTVP knows them:
+        the value it last read from the source or last exported, if that has
+        the listed state and suppression; else ``None``."""
+        overlay = self.assessment_outbox.get_overlay(key)
+        if overlay is None:
+            return None
+        for value in (overlay.get("remote"), overlay.get("base")):
+            if (
+                isinstance(value, dict)
+                and str(value.get("state") or "NOT_SET") == state
+                and bool(value.get("suppressed")) == suppressed
+            ):
+                return str(value.get("details") or "")
+        return None
 
     async def _read_texts_without_state(
         self,

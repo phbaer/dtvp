@@ -448,11 +448,25 @@ budget: a range read takes a token only while no other request waits. They
 used to run inside every version sync, each with a fresh allowance of
 `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` reads.
 
-**Portfolio pass.** "Read all versions again", and any moment when more
-versions are due for a findings re-read than a third of the last portfolio
-list's pages (a version read one by one costs three requests; at least five
-versions, at most one pass a minute, a request not waiting for that minute
-unless the last pass failed), use one portfolio-wide
+**Analysis details.** A version's findings read is one request: the
+source lists each assessment's state and suppression (Dependency-Track:
+`GET /api/v1/finding/project/{uuid}`, which has no details). Where those
+equal the value DTVP last read from the source or last exported for the
+finding, the details come from that record. Only the other assessed
+findings are read one by one (`get_analysis`): those DTVP has no record of
+(adoption, so a first import still reads every assessed finding) and those
+whose state or suppression changed in the source. The 12-hour safety re-read
+reads every assessment, so an edit of the details alone in the source shows
+then. Each sync's log line counts these reads (`analysis_reads` in
+`recent_syncs`). Before, every read of a version read each assessed
+finding's analysis, about 900 requests in two hours on a production
+instance.
+
+**Portfolio pass.** "Read all versions again", and any moment when the due
+versions' own reads would cost more requests than the last portfolio list
+had pages (one request per kind a version is due for: findings, vulnerability
+records, BOM; at least five versions, at most one pass a minute, a request
+not waiting for that minute unless the last pass failed), use one portfolio-wide
 findings list instead of a read per version, for a source that offers it
 (`ports.BulkFindings`; Dependency-Track: `GET /api/v1/finding`, paged).
 A version whose unsuppressed findings and their analysis states are as its

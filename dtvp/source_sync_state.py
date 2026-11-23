@@ -12,6 +12,7 @@ This step records only; nothing is scheduled from it yet.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import sqlite3
@@ -50,6 +51,15 @@ def _digest(items: Iterable[Any]) -> str:
 
 def _text_hash(value: Any) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:16]
+
+
+# Set by the scheduler for the safety re-read: the findings read then takes
+# every assessment's details from the source, not from the record, so an
+# edit of the details alone in the source is seen (``CacheManager.
+# _read_findings_list``).
+FULL_ANALYSIS_DETAILS: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "dtvp_full_analysis_details", default=False
+)
 
 
 # -- digests over the raw source payloads -------------------------------------
