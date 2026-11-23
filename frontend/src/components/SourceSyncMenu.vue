@@ -9,6 +9,7 @@ import {
     getSyncSource,
     getSyncVersions,
     requestSourceAnalysis,
+    resumeSync,
     requestSyncRead,
     type SyncProgress,
     type SyncRequestTarget,
@@ -191,15 +192,28 @@ const cancel = async () => {
         const result = await cancelSync()
         mark([...result.requests, ...result.running].filter(known), 'cancelled')
         const parts = [
-            result.pass ? 'the portfolio pass' : '',
+            result.pass ? 'pass' : '',
+            result.running.length ? `${result.running.length} running` : '',
+            result.waiting ? `${result.waiting} waiting` : '',
             result.requests.length ? `${result.requests.length} request(s)` : '',
-            result.running.length ? `${result.running.length} running read(s)` : '',
         ].filter(Boolean)
-        message.value = parts.length ? `Cancelled ${parts.join(', ')}.` : 'Nothing was running.'
+        message.value = parts.length ? `Cancelled: ${parts.join(', ')}.` : 'Nothing was running.'
+        await loadProgress()
     } catch (err) {
         message.value = failure(err, 'cancel')
     } finally {
         cancelling.value = false
+    }
+}
+
+const resume = async () => {
+    message.value = ''
+    try {
+        await resumeSync()
+        message.value = 'Sync resumed.'
+        await loadProgress()
+    } catch (err) {
+        message.value = failure(err, 'resume')
     }
 }
 
@@ -225,6 +239,8 @@ useServerEvents('version.synced', event => {
 useServerEvents('version.sync_failed', event => {
     if (known(event.data?.uuid) && states.value[event.data.uuid]) mark([event.data.uuid], 'failed')
 })
+// A cancel, a reconnect or a missed event: read the state again.
+useServerEvents(['source.sync_cancelled', 'hello', 'resync'], () => { void loadProgress() })
 useServerEvents('source.sync_progress', event => {
     if (event.data) progress.value = event.data as SyncProgress
 })
@@ -312,6 +328,10 @@ onBeforeUnmount(() => {
                 <div v-if="lastPass && !progress?.pass" class="mt-1 text-[10px] text-gray-400" data-testid="source-sync-last-pass">
                     Last portfolio check: {{ lastPass.unchanged + lastPass.changed }} versions, {{ lastPass.changed }} changed
                 </div>
+            </div>
+            <div v-if="progress?.paused" data-testid="source-sync-paused" class="mt-3 flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2 py-1.5 text-amber-100" role="status">
+                <span>Sync paused after cancel<template v-if="progress.paused.until"> until {{ new Date(progress.paused.until).toLocaleString() }}</template>; requests still run.</span>
+                <button type="button" data-testid="sync-resume" class="ml-auto rounded-md border border-white/10 px-2 py-0.5 text-[10px] text-gray-100 hover:bg-white/10" @click="resume">Resume</button>
             </div>
             <div v-if="loading" class="mt-3 text-gray-400">Loading…</div>
             <div v-else-if="error" class="mt-3 text-red-300" role="alert">{{ error }}</div>

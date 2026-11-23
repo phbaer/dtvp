@@ -161,8 +161,9 @@ intervals either way. The schedule below describes a source with hints.
 sees what the sync does (`source.sync_progress`: the pass's pages, each
 running version's phase, what waits) and can cancel it
 (`POST /api/sync/cancel`: the pass, the waiting requests, the running
-syncs with their in-flight reads; staged reads are dropped, no failure is
-recorded). Each version sync and pass logs where its time went. The version
+syncs with their in-flight reads, and the waiting versions; staged reads
+are dropped, no failure is recorded) and the sync then pauses until Resume
+or the safety-re-read interval, a person's request still running. Each version sync and pass logs where its time went. The version
 ranges of the recommendation no longer run inside a version sync: they use
 only budget nobody else waits for, between syncs. A pass also starts for a
 request without waiting for the interval between passes, versions coming

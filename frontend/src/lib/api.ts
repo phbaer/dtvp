@@ -2488,6 +2488,7 @@ export interface SyncProgress {
     queued: number
     requested: number
     ranges: { versions: number; checked: number; reads: number } | null
+    paused?: { by: string | null; until: string } | null
 }
 
 export const getSyncProgress = async (): Promise<SyncProgress | null> => {
@@ -2500,9 +2501,14 @@ export type SyncCancelScope = 'pass' | 'requests' | 'running'
 /** Stop the portfolio pass, withdraw waiting requests, cancel running syncs. */
 export const cancelSync = async (
     scope?: SyncCancelScope[],
-): Promise<{ pass: boolean; requests: string[]; running: string[] }> => {
+): Promise<{ pass: boolean; requests: string[]; running: string[]; waiting?: number; paused?: boolean }> => {
     const res = await api.post('/sync/cancel', scope ? { scope } : {})
     return res.data
+}
+
+/** End the pause a cancel left. */
+export const resumeSync = async (): Promise<void> => {
+    await api.post('/sync/resume', {})
 }
 
 export interface SyncRequestProgress {

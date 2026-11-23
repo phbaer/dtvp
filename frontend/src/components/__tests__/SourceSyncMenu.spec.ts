@@ -13,6 +13,7 @@ vi.mock('../../lib/api', () => ({
     exportAssessments: vi.fn(),
     getSyncProgress: vi.fn(),
     cancelSync: vi.fn(),
+    resumeSync: vi.fn(),
 }))
 vi.mock('../../lib/eventStream', async () => {
     const { createFakeEventStreamModule } = await import('../../lib/__tests__/fakeEventStreamTestUtils')
@@ -68,7 +69,7 @@ describe('SourceSyncMenu', () => {
     })
 
     it('cancels what runs and marks the cancelled versions', async () => {
-        vi.mocked(api.cancelSync).mockResolvedValue({ pass: true, requests: ['p2'], running: ['p1'] })
+        vi.mocked(api.cancelSync).mockResolvedValue({ pass: true, requests: ['p2'], running: ['p1'], waiting: 27, paused: true })
         const wrapper = await open()
         fakeStream.emit('source.sync_progress', {
             pass: { phase: 'reading', versions: 2, pages_read: 0, pages_total: null },
@@ -80,10 +81,27 @@ describe('SourceSyncMenu', () => {
         await flushPromises()
         expect(api.cancelSync).toHaveBeenCalledWith()
         expect(wrapper.get('[data-testid="sync-message"]').text())
-            .toBe('Cancelled the portfolio pass, 1 request(s), 1 running read(s).')
+            .toBe('Cancelled: pass, 1 running, 27 waiting, 1 request(s).')
         expect(wrapper.get('[data-testid="sync-state-p1"]').text()).toBe('cancelled')
         expect(wrapper.get('[data-testid="sync-state-p2"]').text()).toBe('cancelled')
 
+        vi.mocked(api.getSyncProgress).mockResolvedValue({
+            pass: null, running: [], queued: 0, requested: 0, ranges: null,
+            paused: { by: 'rita', until: '2026-11-24T00:00:00Z' },
+        })
+        fakeStream.emit('source.sync_cancelled', { settled: true })
+        await flushPromises()
+        expect(wrapper.get('[data-testid="source-sync-paused"]').text()).toContain('Sync paused after cancel')
+        expect(wrapper.find('[data-testid="sync-cancel"]').exists()).toBe(false)
+        vi.mocked(api.resumeSync).mockResolvedValue()
+        vi.mocked(api.getSyncProgress).mockResolvedValue({ pass: null, running: [], queued: 0, requested: 0, ranges: null, paused: null })
+        await wrapper.get('[data-testid="sync-resume"]').trigger('click')
+        await flushPromises()
+        expect(api.resumeSync).toHaveBeenCalled()
+        expect(wrapper.find('[data-testid="source-sync-paused"]').exists()).toBe(false)
+
+        fakeStream.emit('source.sync_progress', { pass: { phase: 'reading', versions: 2, pages_read: 0, pages_total: null }, running: [], queued: 0, requested: 0, ranges: null })
+        await flushPromises()
         vi.mocked(api.cancelSync).mockRejectedValue({ response: { status: 403 } })
         await wrapper.get('[data-testid="sync-cancel"]').trigger('click')
         await flushPromises()
