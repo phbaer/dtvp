@@ -5,6 +5,20 @@ import type { GroupedVuln } from '../types'
 
 type MaybePromise<T> = T | Promise<T>
 
+// The server cancels a grouped query when a newer one of the same user and
+// task arrives (a higher generation). Generations therefore grow across page
+// mounts and tabs, not per mount: a remounted page that started again at 1
+// lost every request to the previous mount's still running one (409).
+let lastGeneration = 0
+export function nextGeneration(): number {
+    lastGeneration = Math.max(lastGeneration + 1, Date.now())
+    return lastGeneration
+}
+
+const isSuperseded = (err: any) =>
+    err?.response?.status === 409
+    && /superseded/i.test(String(err?.response?.data?.detail || ''))
+
 interface UseTaskGroupWindowsOptions {
     currentTaskId: Ref<string | null>
     groups: Ref<GroupedVuln[]>
@@ -38,6 +52,7 @@ export function useTaskGroupWindows({
     const appendLoading = ref(false)
     const windowError = ref('')
     let requestId = 0
+    let generation = 0
     let activeRequestController: AbortController | null = null
     let activeCountsController: AbortController | null = null
 
@@ -62,7 +77,7 @@ export function useTaskGroupWindows({
                 offset: 0,
                 limit: 1,
                 include_counts: true,
-                generation: activeRequestId,
+                generation,
             }, {
                 signal: requestController.signal,
             })
@@ -144,7 +159,7 @@ export function useTaskGroupWindows({
         partialVersionsTotal.value = status.partial_total_versions ?? partialVersionsTotal.value
     }
 
-    const loadWindow = async (options: { reset?: boolean } = {}) => {
+    const loadWindow = async (options: { reset?: boolean, retried?: boolean } = {}) => {
         const taskId = currentTaskId.value
         if (!taskId) return
 
@@ -168,10 +183,11 @@ export function useTaskGroupWindows({
         const requestController = new AbortController()
         activeRequestController = requestController
         const activeRequestId = ++requestId
+        generation = nextGeneration()
         const pageQuery: TaskVulnGroupListQuery = {
             ...querySnapshot,
             limit,
-            generation: activeRequestId,
+            generation,
         }
         if (shouldReset) {
             pageQuery.offset = 0
@@ -218,6 +234,13 @@ export function useTaskGroupWindows({
                 || err?.name === 'CanceledError'
                 || err?.code === 'ERR_CANCELED'
             ) return
+            // Another view of the same task (a second tab) sent a newer
+            // query; ask again once with a newer generation.
+            if (isSuperseded(err) && !options.retried) {
+                appendLoading.value = false
+                void loadWindow({ ...options, retried: true })
+                return
+            }
             windowError.value = 'Failed to load vulnerability window: ' + (err.message || err)
             console.error(err)
         } finally {

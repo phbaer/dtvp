@@ -30,7 +30,7 @@ means the integration or override is disabled.
 | `DTVP_ASSESSMENT_OUTBOX_PATH` | Separate file for local assessments and the export queue. Leave unset to keep them in the database; a former `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` is copied in once | `DTVP_DATABASE_PATH` |
 | `DTVP_EXPORT_MODE` | `auto` exports assessments in the background as they are saved; `manual` keeps them local until a reviewer exports them. See [Import and export](import-export.md) | `auto` |
 | `DTVP_FIXED_VERSIONS_REFRESH_DAYS` | Days after which the background refresh reads a vulnerability's affected version ranges from Dependency-Track again, for the [derived VDR recommendation](cyclonedx-export.md#recommendation); a changed record is read at once. Whole number, at least 1; an unusable value falls back to the default | `7` |
-| `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` | Most vulnerabilities whose version ranges one background refresh cycle reads (four at a time); the rest follow in later cycles | `200` |
+| `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` | Most vulnerabilities whose version ranges one round reads (four at a time, at low priority, only while no version waits or runs; see [Sync scheduler](runtime.md#sync-scheduler)); the rest follow in later rounds | `200` |
 | `DTVP_CYCLONEDX_ASSESSMENT_SOURCE` | `source.name` of DTVP's own rating in [CycloneDX VDR exports](cyclonedx-export.md); a request parameter overrides it | `DTVP` |
 | `DTVP_CYCLONEDX_PROPERTY_PREFIX` | Namespace of the properties in CycloneDX VDR exports; a request parameter overrides it | `dtvp` |
 | `DTVP_CYCLONEDX_TICKET_PREFIXES` | Comma-separated project keys of ticket references (`EXP` for `EXP-123`) that CycloneDX VDR exports recognise in assessment texts; the request parameter `ticket_prefixes` overrides it | unset: only recorded ticket fields are exported |
@@ -107,13 +107,14 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | `DTVP_EVENT_BUFFER_SIZE` | Events kept for clients that reconnect to `/api/events`; at least 100. See [Event channel](runtime.md#event-channel) | `2000` |
 | `DTVP_EVENT_MAX_CONNECTIONS` | Open `/api/events` streams; more get `503`; at least 1 | `200` |
 | `DTVP_EVENT_MAX_CONNECTIONS_PER_USER` | Open `/api/events` streams of one user; more get `429`; at least 1 | `20` |
-| `DTVP_SYNC_WATCH_TTL_SECONDS` | How long a browser's product interest lease lives after its last renewal (`PUT /api/events/interest`); see [Product interest](runtime.md#product-interest) | `900` |
-| `DTVP_SYNC_WATCHED_FINDINGS_SECONDS` | How often the findings of each version of a watched product are re-read; at least 1. See [Sync scheduler](runtime.md#sync-scheduler) | `120` |
-| `DTVP_SYNC_SAFETY_SECONDS` | Safety re-read of every other active version; at least 60 | `43200` |
+| `DTVP_SYNC_WATCH_TTL_SECONDS` | How long a browser's product interest lease lives after its last renewal (`PUT /api/events/interest`), and how long after the last authenticated API or MCP request DTVP counts as in use. Without either the sync is idle and reads only for exports and requests; see [Sync scheduler](runtime.md#sync-scheduler) and [Product interest](runtime.md#product-interest) | `900` |
+| `DTVP_SYNC_SAFETY_SECONDS` | Safety re-read of every active version, counted in time in use; also how old a version's last read must be for opening it to read it; at least 60 | `43200` |
 | `DTVP_SYNC_UNHINTED_FINDINGS_SECONDS` | For a source without change hints (`ChangeHints`, not Dependency-Track): how often every active version's findings are re-read, staggered per version; at least 60. See [Sync scheduler](runtime.md#sync-scheduler) | `3600` |
 | `DTVP_SYNC_PORTFOLIO_PAGE_SIZE` | Findings per page of the portfolio pass's list (`GET /api/v1/finding`); Dependency-Track runs the whole query for every page, so larger pages cost it less. See [Manual requests](runtime.md#manual-requests) | `1000` |
 | `DTVP_SYNC_CONCURRENCY` | Versions synced at a time | `2` |
 | `DTVP_DT_REQUESTS_PER_SECOND` / `DTVP_DT_REQUEST_BURST` | One budget for every Dependency-Track call of the scheduler and the export | `4` / `8` |
+
+Retired on 2026-11-23 (ADR 0004 amendment, "No polling, idle without users"): `DTVP_SYNC_WATCHED_FINDINGS_SECONDS`. Watched products are no longer polled; a set value is ignored with a warning at startup.
 
 Retired in ADR 0004 step 5: `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (a stored project list is always served; the scheduler re-reads it), `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` and `DTVP_DT_ACTIVE_PROJECT_LIMIT` (watched products replace recently opened versions). Set values are ignored.
 | `DTVP_REQUIRE_FREE_THREADED` | Fail startup unless CPython supports free threading and its GIL is actually disabled | local Python: `false`; Compose: `true` |

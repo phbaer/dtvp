@@ -12,6 +12,7 @@ This step records only; nothing is scheduled from it yet.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import sqlite3
@@ -50,6 +51,15 @@ def _digest(items: Iterable[Any]) -> str:
 
 def _text_hash(value: Any) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:16]
+
+
+# Set by the scheduler for the safety re-read: the findings read then takes
+# every assessment's details from the source, not from the record, so an
+# edit of the details alone in the source is seen (``CacheManager.
+# _read_findings_list``).
+FULL_ANALYSIS_DETAILS: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "dtvp_full_analysis_details", default=False
+)
 
 
 # -- digests over the raw source payloads -------------------------------------
@@ -98,13 +108,27 @@ def findings_digests(findings: Any) -> tuple[str, str, dict[str, str]]:
     return _digest(identities), analyses, index
 
 
+# Bumped when the digest's fields change: a recorded digest of another
+# version counts as missing and is seeded again, so the change cannot make
+# every version look changed for good.
+PORTFOLIO_DIGEST_VERSION = "p2"
+
+
 def portfolio_digest(findings: Any) -> str:
     """What a portfolio-wide findings list can tell about a version: its
-    finding keys and, per finding, the analysis state, details and
-    suppression. Justification and response are left out, because the
-    portfolio list does not carry them (ADR 0004, "Portfolio pass"). The
-    same digest over a version's own findings read and over its share of a
-    portfolio list means nothing a portfolio list can see has changed."""
+    finding keys and, per finding, the analysis state and suppression.
+
+    Only fields both reads carry the same way count. Dependency-Track 4.x
+    builds both from ``Finding``, whose analysis holds only ``state`` and
+    ``isSuppressed`` (``Finding.QUERY`` and ``QUERY_ALL_FINDINGS``); the
+    details, justification and response of a version's own read come from
+    its per-finding analysis reads, which a portfolio list does not make.
+    Counting the details made every assessed version differ from its share
+    of the list on every pass (ADR 0004, "Portfolio pass"). Edits of the
+    details alone are seen by the regular full re-read. Suppressed findings
+    are left out: the project export leaves them out (``getFindings(project)``
+    is ``includeSuppressed=false``) while the list and the portfolio read
+    carry them, so a suppression shows as the finding leaving the digest."""
     items = []
     for finding in findings if isinstance(findings, list) else []:
         if not isinstance(finding, Mapping):
@@ -113,23 +137,16 @@ def portfolio_digest(findings: Any) -> str:
         if key is None:
             continue
         analysis = finding.get("analysis") if isinstance(finding.get("analysis"), Mapping) else {}
+        if analysis.get("isSuppressed", analysis.get("suppressed", False)):
+            continue
         items.append(
             (
                 key[0],
                 key[1],
                 str(analysis.get("analysisState") or analysis.get("state") or "NOT_SET"),
-                _text_hash(
-                    str(
-                        analysis.get("analysisDetails")
-                        or analysis.get("details")
-                        or analysis.get("detail")
-                        or ""
-                    ).strip()
-                ),
-                bool(analysis.get("isSuppressed", analysis.get("suppressed", False))),
             )
         )
-    return _digest(items)
+    return f"{PORTFOLIO_DIGEST_VERSION}:{_digest(sorted(items))}"
 
 
 def vulns_digest(vulns: Any) -> str:
@@ -229,6 +246,7 @@ _COLUMNS = (
     "read_analysis_signal", "staged_kinds", "staged_digests_json",
     "last_request_id", "last_request_by", "last_request_at", "last_request_state",
     "last_request_finished_at", "last_request_error", "portfolio_digest",
+    "queued_reason",
 )
 _READ_AT = {KIND_FINDINGS: "findings_read_at", KIND_VULNS: "vulns_read_at", KIND_BOM: "bom_read_at"}
 _DIGEST_COLUMNS = {
@@ -481,6 +499,19 @@ class SyncStateStore:
         """``queued`` or ``syncing``: transient, the settled status stays."""
         self.set_statuses([project_uuid], status)
 
+    def queue(self, reasons: Mapping[str, str]) -> None:
+        """Queue these versions, each with the reason it is due (one
+        transaction): ``queued_reason`` is what the queue shows and logs."""
+        if not reasons:
+            return
+        connection = self._connection()
+        with connection:
+            connection.executemany(
+                "UPDATE sync_versions SET status = ?, queued_reason = ? "
+                "WHERE project_uuid = ? AND status != ?",
+                [(STATUS_QUEUED, reason, uuid, STATUS_GONE) for uuid, reason in reasons.items()],
+            )
+
     def set_statuses(self, project_uuids: Iterable[str], status: str) -> None:
         """One transaction for many versions (a plan queues many at once)."""
         uuids = list(project_uuids)
@@ -501,7 +532,7 @@ class SyncStateStore:
         connection = self._connection()
         with connection:
             connection.executemany(
-                "UPDATE sync_versions SET status = settled_status "
+                "UPDATE sync_versions SET status = settled_status, queued_reason = NULL "
                 "WHERE project_uuid = ? AND staged_generation IS NULL",
                 [(uuid,) for uuid in uuids],
             )
@@ -543,6 +574,37 @@ class SyncStateStore:
                 result.append({"project_uuid": uuid, "request_id": request_id, "new": True})
         return result
 
+    def cancel_requests(
+        self, project_uuids: Optional[Iterable[str]] = None, *, at: Optional[str] = None,
+        by: Optional[str] = None,
+    ) -> list[str]:
+        """Withdraw the waiting requests (of these versions, or all): each is
+        kept as the last request with state ``cancelled``. Returns the
+        versions whose request was withdrawn."""
+        at = at or _now()
+        connection = self._connection()
+        cancelled: list[str] = []
+        with connection:
+            rows = connection.execute(
+                "SELECT project_uuid, request_id, requested_by, requested_at "
+                "FROM sync_versions WHERE requested_at IS NOT NULL"
+            ).fetchall()
+            wanted = None if project_uuids is None else {str(uuid) for uuid in project_uuids}
+            for uuid, request_id, requested_by, requested_at in rows:
+                if wanted is not None and uuid not in wanted:
+                    continue
+                connection.execute(
+                    "UPDATE sync_versions SET requested_at = NULL, requested_by = NULL, "
+                    "request_id = NULL, last_request_id = ?, last_request_by = ?, "
+                    "last_request_at = ?, last_request_state = 'cancelled', "
+                    "last_request_finished_at = ?, last_request_error = ? "
+                    "WHERE project_uuid = ?",
+                    (request_id, requested_by, requested_at, at,
+                     f"Cancelled by {by}" if by else "Cancelled", uuid),
+                )
+                cancelled.append(uuid)
+        return cancelled
+
     def forget_read(self, project_uuid: str, kind: str) -> None:
         """Make one kind due again: its last read time is forgotten."""
         column = _READ_AT[kind]
@@ -561,7 +623,7 @@ class SyncStateStore:
             connection.execute(
                 """
                 UPDATE sync_versions SET status = settled_status, staged_generation = NULL,
-                    staged_kinds = NULL, staged_digests_json = NULL
+                    staged_kinds = NULL, staged_digests_json = NULL, queued_reason = NULL
                 WHERE project_uuid = ?
                 """,
                 (project_uuid,),
@@ -576,7 +638,8 @@ class SyncStateStore:
             connection.execute(
                 """
                 UPDATE sync_versions SET status = ?, staged_generation = ?,
-                    staged_kinds = '', staged_digests_json = ?, last_attempt_at = ?
+                    staged_kinds = '', staged_digests_json = ?, last_attempt_at = ?,
+                    queued_reason = NULL
                 WHERE project_uuid = ?
                 """,
                 (
@@ -664,9 +727,11 @@ class SyncStateStore:
         return kinds, first, generation
 
     def portfolio_digests(self) -> dict[str, Optional[str]]:
-        """Per version, the portfolio digest of its last findings read."""
+        """Per version, the portfolio digest of its last findings read; one
+        of an older digest version counts as none."""
+        prefix = f"{PORTFOLIO_DIGEST_VERSION}:"
         return {
-            str(row[0]): row[1]
+            str(row[0]): (row[1] if row[1] and str(row[1]).startswith(prefix) else None)
             for row in self._connection().execute(
                 "SELECT project_uuid, portfolio_digest FROM sync_versions"
             )
@@ -679,8 +744,12 @@ class SyncStateStore:
         with connection:
             connection.executemany(
                 "UPDATE sync_versions SET portfolio_digest = ? "
-                "WHERE project_uuid = ? AND portfolio_digest IS NULL",
-                [(digest, uuid) for uuid, digest in digests.items()],
+                "WHERE project_uuid = ? AND (portfolio_digest IS NULL "
+                "OR portfolio_digest NOT LIKE ?)",
+                [
+                    (digest, uuid, f"{PORTFOLIO_DIGEST_VERSION}:%")
+                    for uuid, digest in digests.items()
+                ],
             )
 
     def mark_checked(
@@ -799,8 +868,9 @@ def _signal(value: Any) -> Optional[str]:
 
 def request_progress(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     """What became of the version's manual request: ``requested``,
-    ``running``, ``done`` (with the read time) or ``failed`` (with why; a
-    failed request waits for the backoff and is tried again)."""
+    ``running``, ``done`` (with the read time), ``failed`` (with why; a
+    failed request waits for the backoff and is tried again) or
+    ``cancelled``."""
     if row.get("requested_at"):
         failed = (
             row.get("last_request_state") == "failed"

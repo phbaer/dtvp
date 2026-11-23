@@ -423,6 +423,53 @@ describe('GoneFindingsPanel', () => {
         analyst.unmount()
     })
 
+    it('lists every candidate of a gone finding whose component is unknown and applies only what is chosen', async () => {
+        const candidate = (uuid: string, version: string) => ({
+            component_uuid: uuid, component_name: 'tar', component_version: version,
+            vulnerability_uuid: 'v-tar', state: 'NOT_SET', proposal: 'copy',
+        })
+        const reason = "same vulnerability, the gone finding's component is unknown"
+        vi.mocked(getGoneFindings).mockResolvedValue({
+            name: 'ViewPoint_Product',
+            versions: [{
+                version: '7.2.0', project_uuid: 'p1', last_read: READ, gone: { undetermined: 1 },
+                findings: [finding({
+                    component_uuid: '36977e35', component_name: null, component_version: null,
+                    component_purl: null, reason: 'undetermined', vulnerability_uuid: 'v-tar',
+                    vuln_id: 'CVE-2024-28863', alias: null, needs_attention: true,
+                    same_issue: {
+                        component_uuid: 'c-a', vulnerability_uuid: 'v-tar', vuln_id: 'CVE-2024-28863',
+                        state: 'NOT_SET', tickets: [], disagrees: false, proposal: 'copy', reason,
+                        confirmed_by: null, confirmed_at: null, ambiguous: true,
+                        candidates: [candidate('c-a', '2.2.2'), candidate('c-b', '6.2.0')],
+                    },
+                })],
+            }],
+        } as any)
+        vi.mocked(confirmGoneFindingSameIssue).mockResolvedValue({ changed: true, reason })
+        vi.mocked(applyGoneFindingToAlias).mockResolvedValue({ kind: 'copy' })
+        const wrapper = await mountPanel()
+        await wrapper.get('[data-testid="gone-findings-button"]').trigger('click')
+
+        // No single guess: every candidate, and a choice.
+        expect(document.body.querySelector('[data-testid="gone-finding-same-issue"]')).toBeNull()
+        expect(texts('[data-testid="gone-finding-candidate"]').map(text => text?.replace(/\s+/g, ' '))).toEqual([
+            'tar 2.2.2: NOT_SETConfirm and apply here', 'tar 6.2.0: NOT_SETConfirm and apply here',
+        ])
+        await click(all('[data-testid="gone-finding-apply-candidate"]')[1])
+        expect(confirmGoneFindingSameIssue).toHaveBeenCalledTimes(1)
+        expect(confirmGoneFindingSameIssue).toHaveBeenCalledWith('p1', '36977e35', 'v-tar', 'c-b', 'v-tar', true)
+        expect(applyGoneFindingToAlias).toHaveBeenCalledWith('p1', '36977e35', 'v-tar', 'v-tar', 'c-b')
+
+        vi.mocked(confirmGoneFindingSameIssue).mockClear()
+        vi.mocked(applyGoneFindingToAlias).mockClear()
+        await click(document.body.querySelector('[data-testid="gone-finding-apply-all-candidates"]'))
+        expect(applyGoneFindingToAlias).toHaveBeenCalledTimes(2)
+        expect(applyGoneFindingToAlias).toHaveBeenNthCalledWith(1, 'p1', '36977e35', 'v-tar', 'v-tar', 'c-a')
+        expect(applyGoneFindingToAlias).toHaveBeenNthCalledWith(2, 'p1', '36977e35', 'v-tar', 'v-tar', 'c-b')
+        wrapper.unmount()
+    })
+
     it('says when nothing needs attention, and is disabled with nothing gone', async () => {
         vi.mocked(getGoneFindings).mockResolvedValue({
             name: 'App',

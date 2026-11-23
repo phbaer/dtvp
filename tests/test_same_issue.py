@@ -308,3 +308,179 @@ async def test_a_confirmed_match_is_exported_on_the_reported_entry(client, queue
     assert not any(
         p["name"] == "dtvp:same_issue_as" for p in entries["CVE-2026-0002"].get("properties", [])
     )
+
+
+# -- a gone finding whose component DTVP never knew ------------------------------
+
+
+def _unknown(component, vulnerability, vuln_id):
+    """A row made for a record from before tracking: no component facts."""
+    return {
+        "component_uuid": component, "vulnerability_uuid": vulnerability,
+        "vuln_id": vuln_id, "status": "gone",
+    }
+
+
+def test_a_gone_finding_on_an_unknown_component_proposes_the_same_vulnerability():
+    from dtvp.same_issue import REASON_UNKNOWN_COMPONENT
+
+    rows = {
+        ("c-old", "v1"): _unknown("c-old", "v1", "CVE-2024-28863"),
+        ("c-tar", "v1"): {**_row("c-tar", "v1", "CVE-2024-28863"), "component_name": "tar"},
+        ("c-other", "v2"): _row("c-other", "v2", "CVE-2026-1"),
+    }
+    index = SameIssueIndex(rows, {})
+    other, reason = index.match(rows[("c-old", "v1")])
+    assert (other["component_uuid"], reason) == ("c-tar", REASON_UNKNOWN_COMPONENT)
+    # Only for a gone row without component facts, never between reported
+    # findings, never for another vulnerability.
+    known = {**rows[("c-old", "v1")], "component_name": "tar", "component_purl": "pkg:npm/tar@1.0"}
+    assert index.reason(known, rows[("c-tar", "v1")]) is None
+    assert index.reason(rows[("c-tar", "v1")], rows[("c-tar", "v1")]) is None
+    assert index.reason(rows[("c-old", "v1")], rows[("c-other", "v2")]) is None
+    # Confirmed, it names nothing in the export: it is the same id.
+    confirmed = {**rows[("c-old", "v1")], "same_issue_component_uuid": "c-tar",
+                 "same_issue_vulnerability_uuid": "v1", "same_issue_confirmed_by": "rita"}
+    assert confirmed_pairs([confirmed, rows[("c-tar", "v1")]]) == {}
+
+
+async def test_a_gone_record_on_an_unknown_component_is_applied_after_confirming(
+    client, queued  # noqa: F811
+):
+    """CVE-2024-28863 on ViewPoint 7.2.0 (2026-11-23): the record of a finding
+    that went before tracking has no component; the finding on the recreated
+    component is unassessed. DTVP proposes it; a person confirms and applies."""
+    from contextlib import closing
+
+    from dtvp.same_issue import REASON_UNKNOWN_COMPONENT
+
+    queued.get_analysis.return_value = None
+    old = {**_finding(1), "analysis": {"analysisState": "NOT_AFFECTED", "analysisDetails": "Not used."}}
+    queued.get_vulnerabilities.return_value = [old]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    lifecycle = main.cache_manager.finding_lifecycle
+    # As a row made for a record from before tracking: nothing is known of
+    # its component.
+    with closing(lifecycle._connect()) as connection, connection:
+        connection.execute(
+            "UPDATE finding_presence SET component_identity = NULL, component_purl = NULL,"
+            " component_name = NULL, component_version = NULL, predates_tracking = 1"
+            " WHERE component_uuid = 'component-1'"
+        )
+    lifecycle._presence.pop("p1", None)
+    recreated = {**_finding(1), "component": {**_finding(1)["component"], "uuid": "component-9"},
+                 "analysis": {}}
+    queued.get_vulnerabilities.return_value = [recreated]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    assert main.cache_manager.get_assessment_overlay("p1", "component-9", "vuln-1") is None
+
+    [finding] = [
+        item for item in client.get("/api/project/p1/gone-findings").json()["findings"]
+        if item["component_uuid"] == "component-1"
+    ]
+    guess = finding["same_issue"]
+    assert (guess["component_uuid"], guess["reason"], guess["proposal"]) == (
+        "component-9", REASON_UNKNOWN_COMPONENT, "copy"
+    )
+    assert (guess["component_name"], guess["component_version"]) == ("library-a", "2.0")
+
+    request = {"project_uuid": "p1", "component_uuid": "component-1", "vulnerability_uuid": "vuln-1"}
+    apply = {**request, "alias_vulnerability_uuid": "vuln-1", "alias_component_uuid": "component-9"}
+    assert client.post("/api/gone-findings/apply-to-alias", json=apply).status_code == 409
+    confirmed = client.post("/api/gone-findings/same-issue", json={
+        **request, "other_component_uuid": "component-9", "other_vulnerability_uuid": "vuln-1",
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    applied = client.post("/api/gone-findings/apply-to-alias", json=apply)
+    assert applied.status_code == 200, applied.text
+    record = main.cache_manager.get_assessment_overlay("p1", "component-9", "vuln-1")
+    assert record["analysisState"] == "NOT_AFFECTED"
+    assert record["analysisDetails"].rstrip().endswith("[Status: Pending Review]")
+
+
+async def test_every_candidate_of_an_unknown_component_is_listed(client, queued):  # noqa: F811
+    """The vulnerability is reported on two components of the version: the
+    gone finding lists both and picks none."""
+    from contextlib import closing
+
+    queued.get_analysis.return_value = None
+    old = {**_finding(1), "analysis": {"analysisState": "NOT_AFFECTED", "analysisDetails": "Not used."}}
+    queued.get_vulnerabilities.return_value = [old]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    lifecycle = main.cache_manager.finding_lifecycle
+    with closing(lifecycle._connect()) as connection, connection:
+        connection.execute(
+            "UPDATE finding_presence SET component_identity = NULL, component_purl = NULL,"
+            " component_name = NULL, component_version = NULL, predates_tracking = 1"
+            " WHERE component_uuid = 'component-1'"
+        )
+    lifecycle._presence.pop("p1", None)
+
+    def on(uuid, version):
+        item = _finding(1)
+        return {**item, "uuid": f"finding-{uuid}", "analysis": {},
+                "component": {"name": "library-a", "uuid": uuid, "version": version}}
+
+    queued.get_vulnerabilities.return_value = [on("component-8", "1.0"), on("component-9", "2.0")]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+
+    [finding] = [
+        item for item in client.get("/api/project/p1/gone-findings").json()["findings"]
+        if item["component_uuid"] == "component-1"
+    ]
+    guess = finding["same_issue"]
+    assert guess["ambiguous"] is True
+    assert [(c["component_uuid"], c["component_version"], c["proposal"]) for c in guess["candidates"]] == [
+        ("component-8", "1.0", "copy"), ("component-9", "2.0", "copy"),
+    ]
+
+
+async def test_earlier_assessments_list_what_gone_findings_of_the_vulnerability_hold(
+    client, queued  # noqa: F811
+):
+    """A finding without an assessment: the form offers what DTVP still holds
+    for gone findings of the same vulnerability in the version, and of its
+    aliases; nothing is applied."""
+    from contextlib import closing
+
+    queued.get_analysis.return_value = None
+    text = (
+        "[Response: WILL_NOT_FIX]\n\n"
+        "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] "
+        "[Justification: CODE_NOT_REACHABLE] ---\n"
+        "tar functionality is not used in the product."
+    )
+    queued.get_vulnerabilities.return_value = [_finding(1)]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+    await main.cache_manager.persist_assessment_updates([{
+        "project_uuid": "p1", "component_uuid": "component-1", "vulnerability_uuid": "vuln-1",
+        "state": "NOT_AFFECTED", "details": text, "suppressed": False,
+    }], author="rita")
+    lifecycle = main.cache_manager.finding_lifecycle
+    with closing(lifecycle._connect()) as connection, connection:
+        connection.execute(
+            "UPDATE finding_presence SET component_identity = NULL, component_purl = NULL,"
+            " component_name = NULL, component_version = NULL, predates_tracking = 1"
+            " WHERE component_uuid = 'component-1'"
+        )
+    lifecycle._presence.pop("p1", None)
+    new = {**_finding(1), "component": {**_finding(1)["component"], "uuid": "component-9"}, "analysis": {}}
+    queued.get_vulnerabilities.return_value = [new]
+    await main.cache_manager.get_vulnerabilities(queued, "p1", refresh=True)
+
+    response = client.get("/api/project/p1/earlier-assessments", params={"vulnerability_uuid": "vuln-1"})
+    assert response.status_code == 200, response.text
+    [entry] = response.json()["earlier"]
+    assert (entry["component_uuid"], entry["component_name"], entry["state"], entry["justification"],
+            entry["response"], entry["alias"]) == (
+        "component-1", None, "NOT_AFFECTED", "CODE_NOT_REACHABLE", "WILL_NOT_FIX", False,
+    )
+    assert entry["preview"] == "tar functionality is not used in the product."
+    assert entry["teams"][0]["team"] == "General"
+    # Nothing was written.
+    assert main.cache_manager.get_assessment_overlay("p1", "component-9", "vuln-1") is None
+    # Only the vulnerability asked for: CVE-2026-0002 went too, with its own.
+    other = client.get("/api/project/p1/earlier-assessments", params={"vulnerability_uuid": "vuln-2"})
+    assert [item["vuln_id"] for item in other.json()["earlier"]] == ["CVE-2026-0002"]
+    nothing = client.get("/api/project/p1/earlier-assessments", params={"vulnerability_uuid": "vuln-x"})
+    assert nothing.json()["earlier"] == []

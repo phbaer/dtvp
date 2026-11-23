@@ -60,8 +60,10 @@ describe('vulnListSummary', () => {
         })
         const component = summary.affected_versions[0].components[0]
 
+        // The block under the team's alias counts for the team, as the list
+        // already names it (assessed_teams), so nothing is missing.
         expect(summary.list_metadata).toMatchObject({
-            lifecycle: 'INCOMPLETE',
+            lifecycle: 'ASSESSED',
             is_pending: false,
             is_open: false,
             technical_state: 'IN_TRIAGE',

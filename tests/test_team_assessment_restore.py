@@ -803,14 +803,16 @@ def test_preview_and_apply_with_an_uploaded_export(client, reviewer, mock_dt_cli
     stale = client.post(
         "/api/bulk-workflows/team-assessment-restore/apply",
         json={"task_id": task_id, "filters": {}, "source_id": other,
-              "group_ids": ["CVE-2099-0001"], "preview_token": preview["preview_token"]},
+              "group_ids": ["CVE-2099-0001"], "preview_token": preview["preview_token"],
+                  "group_fingerprints": preview["group_fingerprints"]},
     )
     assert stale.status_code == 409 and "stale" in stale.json()["detail"]
 
     applied = client.post(
         "/api/bulk-workflows/team-assessment-restore/apply",
         json={"task_id": task_id, "filters": {}, "source_id": source_id,
-              "group_ids": ["CVE-2099-0001"], "preview_token": preview["preview_token"]},
+              "group_ids": ["CVE-2099-0001"], "preview_token": preview["preview_token"],
+                  "group_fingerprints": preview["group_fingerprints"]},
     )
     assert applied.status_code == 200, applied.text
     assert applied.json()["summary"]["attempted"] == 1
@@ -1146,7 +1148,8 @@ def test_a_save_between_preview_and_write_is_not_overwritten(client, reviewer, m
         applied = client.post(
             "/api/bulk-workflows/team-assessment-restore/apply",
             json={"task_id": task_id, "filters": {}, "source_id": source_id,
-                  "group_ids": ["CVE-2099-0001"], "preview_token": preview["preview_token"]},
+                  "group_ids": ["CVE-2099-0001"], "preview_token": preview["preview_token"],
+                  "group_fingerprints": preview["group_fingerprints"]},
         )
     assert applied.status_code == 200, applied.text
     summary = applied.json()["summary"]
@@ -1195,7 +1198,8 @@ def test_a_save_during_a_repair_apply_is_not_overwritten(client, reviewer, mock_
             applied = client.post(
                 "/api/bulk-workflows/assessment-repair/apply",
                 json={"task_id": task_id, "filters": {},
-                      "group_ids": ["CVE-2099-0002"], "preview_token": preview["preview_token"]},
+                      "group_ids": ["CVE-2099-0002"], "preview_token": preview["preview_token"],
+                  "group_fingerprints": preview["group_fingerprints"]},
             )
         assert applied.status_code == 200, applied.text
         summary = applied.json()["summary"]

@@ -541,8 +541,24 @@ export interface GoneFinding {
 
 export interface GoneFindingSameIssue extends GoneFindingAlias {
     reason: string;
+    /** The reported finding's component, to tell findings of one id apart. */
+    component_name?: string | null;
+    component_version?: string | null;
+    /** For a gone finding whose component is unknown: every reported finding
+     * of the same vulnerability in the version; more than one is ambiguous. */
+    candidates?: GoneFindingCandidate[];
+    ambiguous?: boolean;
     confirmed_by: string | null;
     confirmed_at: string | null;
+}
+
+export interface GoneFindingCandidate {
+    component_uuid: string;
+    component_name: string | null;
+    component_version: string | null;
+    vulnerability_uuid: string;
+    state: string;
+    proposal: string | null;
 }
 
 export interface GoneFindingAlias {

@@ -279,6 +279,45 @@ value waits for export; otherwise it is a change in Dependency-Track.
 (`scheduler_state`: breaker, queue, running versions, watched products). The
 table is not in the dump: the next reads rebuild it.
 
+**An unchanged read writes no data.** A read of a version whose findings say
+what the stored ones say writes nothing but its read-time bookkeeping: the
+`sync_versions` row, the read time in `finding_reads`, and the project
+list's refresh time. The stored findings, the assessments, the revisions and
+the grouped snapshots built from them stay as they are. "The same" means the
+same findings in any order, ignoring the risk scores DT moves on its own
+(`lastRiskScore`, `lastInheritedRiskScore`; `same_findings` in
+`dtvp/dt_cache.py`). A real change in any other field is written and counts
+as a change. Before this, a reordered or re-scored read rewrote the findings
+and bumped `source_revisions`, which rebuilt the grouped snapshots and
+reordered their instances.
+
+**Sync status fields** (`GET /api/sync/status`):
+
+- `versions`, `by_status`: the counts of the rows and their statuses.
+- `last_success_at`: the newest successful read of any version (the Sync
+  menu shows it as "Last successful sync"); a version's own time is in
+  `GET /api/sync/versions`.
+- `last_change_at`: the newest change of any version.
+- `scheduler_state.queue`: `{total, items}`, the waiting versions in the order
+  they run (at most 200 listed). Each item has `uuid`, `product`, `version`,
+  `priority` (after aging), `kinds`, `reason` (why it is queued: `request`,
+  `first import, watched|backfill`, `findings missing from the store`,
+  `change hint: bom|analysis`, `opened, last read older than the safety
+  interval`, `unhinted findings|vulns|BOM interval`, `safety re-read`; the reason is also
+  in the version's row as `queued_reason` and in its sync's log line) and
+  `requested`.
+- `scheduler_state.progress`: what runs now (see below), with `paused` and
+  `active`.
+- `scheduler_state.activity`: whether DTVP is in use (`active`), the live
+  interest `leases`, `last_request_seconds_ago`, `ttl_seconds` and
+  `active_since`.
+- `scheduler_state.recent_syncs` and `last_portfolio_pass`: the timings.
+- `scheduler_state.running`: the versions being read.
+
+A version is never left in `syncing` with a staged generation: an error that
+is not the source's (a failed commit, say) drops the staged reads, the
+version settles and is planned again as due; it is not counted as a failure.
+
 ### Sync scheduler
 
 Status: implemented 2026-11-21 (ADR 0004 step 5; checked against
@@ -286,21 +325,33 @@ Status: implemented 2026-11-21 (ADR 0004 step 5; checked against
 `tests/test_dt_cache.py`).
 
 `SourceSync` (`dtvp/source_sync.py`) is the background loop of the
-backend. Each pass (at least once a second, and at once after a save) it:
+backend. It reads the source only while DTVP is in use (amended
+2026-11-23): while an interest lease lives (an open tab, see
+[Product interest](#product-interest)) or an authenticated API or MCP request
+came within `DTVP_SYNC_WATCH_TTL_SECONDS`. **Idle without users**, it reads
+no project list, plans no reads, runs no portfolio pass, no version-range
+reads and no safety re-reads; the export of saved assessments (and its echo
+handling) and explicit requests still run, and the breaker is probed only for
+them. When use starts again, the project list is read at once, then only the
+versions that the rules below make due; the safety and unhinted intervals
+count only time in use (from the later of the last read and the start of
+use), so coming back after a quiet night is no re-read of everything. The
+Sync menu shows "Idle (no users)" or "Active". Each pass (at least once a
+second, and at once after a save) it:
 
-1. runs the automatic export, then reads the project list when
-   `DTVP_DT_CACHE_REFRESH_SECONDS` have passed;
+1. runs the automatic export, then, while in use, reads the project list
+   when `DTVP_DT_CACHE_REFRESH_SECONDS` have passed;
 2. plans every row of `sync_versions` when something changed (the list, a
    finished sync, the watched products, the breaker closing) or 15 seconds
    have passed:
 
    | Priority | Due |
    | :--- | :--- |
-   | P0 | a pending user request (`requested_at`; the request route comes with step 8) |
-   | P1 | the first import of a version of a watched product |
-   | P2 | a changed change hint, for a source with hints (BOM: all kinds; analysis: findings and vulnerability records), or a watched product's findings after 120 s, vulnerability records after 6 h, BOM after 24 h |
+   | P0 | a pending user request (`requested_at`); also while idle |
+   | P1 | the first import of a version of a watched product; a watched (opened) version whose last read is older than the safety interval |
+   | P2 | a changed change hint, for a source with hints (BOM: all kinds; analysis: findings and vulnerability records); stored findings missing. A watched product is not polled |
    | P3 | the first import of any other active version (backfill); and, for a source without change hints (one that does not declare `ChangeHints`), every active version's findings after `DTVP_SYNC_UNHINTED_FINDINGS_SECONDS` (1 h), vulnerability records after 6 h, the BOM after 24 h or after changed findings, each interval staggered per version between 75 % and 100 % |
-   | P4 | the safety re-read, 12 h after the last success |
+   | P4 | the safety re-read, 12 h in use after the last success |
 
    Gone and inactive versions are skipped; a failed one, requested or
    not, waits for its backoff (60 s doubling per failure in a row, at most
@@ -418,17 +469,75 @@ project version (`project_uuid`) or every active version of a product
   source's name and `can_request_analysis`; the menu hides the analysis then.
 - **Export now** in the menu calls `POST /api/export` (all queued
   assessments), as **Settings → Export** does.
+- `POST /api/sync/cancel` (reviewers only; body `{"scope": [...]}` with
+  `pass`, `requests`, `running`, all three when left out) stops the running
+  portfolio pass, withdraws the waiting requests (their last request shows
+  `cancelled`) and cancels the running version syncs together with their
+  in-flight reads; their staged reads are dropped and each version keeps
+  what it had. Nothing of it counts as a failure: no backoff, no breaker.
+  Without a scope it also drops the waiting versions and **pauses** the
+  sync: no list read, no planning of due versions, no pass and no range
+  reads until `POST /api/sync/resume` (reviewers), or the safety-re-read
+  interval (`DTVP_SYNC_SAFETY_SECONDS`, 12 h) has passed; a reviewer's
+  request still runs. Otherwise the next tick would plan the same due
+  versions again and start them at once. The response counts what was
+  stopped (`pass`, `running`, `waiting`, `requests`); `progress.paused`
+  says until when. **Cancel** in the menu calls it while something runs;
+  the menu then shows "Sync paused after cancel" with **Resume**.
 
-**Portfolio pass.** "Read all versions again", and any moment when more
-versions are due for a findings re-read than the last portfolio list took
-pages (at least five, at most one pass a minute), use one portfolio-wide
+**Progress and timings.** `source.sync_progress` (at most two a second,
+the last state always sent) and `scheduler_state.progress` in
+`GET /api/sync/status` carry what runs now: the portfolio pass with its
+pages, each running version with its phase (`preparing`, `findings`,
+`vulns`, `bom`, `commit`, `events`) and seconds, how many wait and how many
+of them are requests, the version-range reads and the pause. It is sent on
+every change of the queue as well, and once more when a cancel has
+settled (`source.sync_cancelled` with `settled`), on which the menu reads
+the status again. The Sync button shows
+the pass's pages or the number of versions waiting; the menu shows the
+detail and the last pass's outcome. Every version sync logs one INFO line
+with its time per phase, its requests, the time spent waiting for the
+budget and in the source; the last 20 are under `recent_syncs`. A
+portfolio pass logs its pages and their slowest, the budget wait, the time
+to compare and to mark, and why versions are read one by one (`changed`,
+`no_digest`, `not_in_list`); the last one is under `last_portfolio_pass`.
+These lines show where a slow sync spends its time.
+
+**Version ranges.** The version ranges of the recommendation
+(`refresh_fixed_versions`) are read between syncs, when no version waits or
+runs and no pass runs, at most every minute, and at low priority in the
+budget: a range read takes a token only while no other request waits. They
+used to run inside every version sync, each with a fresh allowance of
+`DTVP_FIXED_VERSIONS_READS_PER_CYCLE` reads.
+
+**Analysis details.** A version's findings read is one request: the
+source lists each assessment's state and suppression (Dependency-Track:
+`GET /api/v1/finding/project/{uuid}`, which has no details). Where those
+equal the value DTVP last read from the source or last exported for the
+finding, the details come from that record. Only the other assessed
+findings are read one by one (`get_analysis`): those DTVP has no record of
+(adoption, so a first import still reads every assessed finding) and those
+whose state or suppression changed in the source. The 12-hour safety re-read
+reads every assessment, so an edit of the details alone in the source shows
+then. Each sync's log line counts these reads (`analysis_reads` in
+`recent_syncs`). Before, every read of a version read each assessed
+finding's analysis, about 900 requests in two hours on a production
+instance.
+
+**Portfolio pass.** "Read all versions again", and any moment when the due
+versions' own reads would cost more requests than the last portfolio list
+had pages (one request per kind a version is due for: findings, vulnerability
+records, BOM; at least five versions, at most one pass a minute, a request
+not waiting for that minute unless the last pass failed), use one portfolio-wide
 findings list instead of a read per version, for a source that offers it
 (`ports.BulkFindings`; Dependency-Track: `GET /api/v1/finding`, paged).
-A version whose findings, analysis states, details and suppression are as
-its last own read left them (`portfolio_digest`) is marked checked and its
-request answered as done; only the others are read one by one. First
-imports and the 12-hour safety re-read stay per version: the list has no
-justification or response. While a pass runs, the versions it covers wait;
+A version whose unsuppressed findings and their analysis states are as its
+last own read left them (`portfolio_digest`) is marked checked and its
+request answered as done; only the others are read one by one, and they are
+not put into another pass before that read is done. First imports and the
+12-hour safety re-read stay per version: the list has no details,
+justification or response, so an edit of the details alone in
+Dependency-Track shows with that re-read. While a pass runs, the versions it covers wait;
 `source.portfolio_pass` events (`started`, `reading` with pages read and
 total, `done` with unchanged and changed counts, or `failed`) and
 `portfolio_pass` in `GET /api/sync/status` show its progress. A failed pass

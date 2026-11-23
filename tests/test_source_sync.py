@@ -46,14 +46,17 @@ class Hub:
 
 
 class Clock:
-    def __init__(self):
+    def __init__(self, on_advance=None):
         # The cache stamps reads with the wall clock: start there.
         self.now = datetime.now(timezone.utc)
         self.tick = 1000.0
+        self.on_advance = on_advance
 
     def advance(self, seconds):
         self.now += timedelta(seconds=seconds)
         self.tick += seconds
+        if self.on_advance is not None:
+            self.on_advance()
 
 
 def _finding(component, vuln="v1"):
@@ -111,11 +114,17 @@ class Source(PlainSource):
         return ("bom", "analysis")
 
 
-def _scheduler(tmp_path, *, watched=(), concurrency=2):
-    clock = Clock()
+def _scheduler(tmp_path, *, watched=(), concurrency=2, active=True):
+    """``active``: someone uses DTVP (a request is noted at every clock
+    step), so the scheduler reads the source; ``False`` leaves it idle
+    unless a test adds a lease or a request."""
+    clock = Clock(on_advance=None)
     manager = CacheManager(base_path=str(tmp_path))
     manager.refresh_interval_seconds = 3600
     interest = ProductInterest(clock=lambda: clock.tick)
+    if active:
+        interest.note_request("tester")
+        clock.on_advance = lambda: interest.note_request("tester")
     for product in watched:
         interest.put("alice", "tab", [product])
     hub = Hub()
@@ -221,13 +230,18 @@ def _row(**values):
     [
         (_row(), False, 60, None),
         (_row(), True, 60, None),
-        (_row(), True, 121, (P2_DUE, ("findings",))),
-        (_row(), False, 12 * 3600, (P4_SAFETY, ("findings", "vulns", "bom"))),
-        (_row(last_success_at=None), False, 0, (P3_BACKFILL, ("findings", "vulns", "bom"))),
-        (_row(last_success_at=None), True, 0, (P1_WATCHED_FIRST, ("findings", "vulns", "bom"))),
-        (_row(source_bom_hint="2"), False, 0, (P2_DUE, ("findings", "vulns", "bom"))),
-        (_row(source_analysis_hint="2"), False, 0, (P2_DUE, ("findings", "vulns"))),
-        (_row(requested_at=NOW.isoformat()), False, 0, (P0_REQUEST, ("findings", "vulns", "bom"))),
+        # A watched product is not polled: unchanged hints, nothing due ...
+        (_row(), True, 121, None),
+        (_row(), True, 6 * 3600, None),
+        # ... until it is opened with its last read older than the safety interval.
+        (_row(), True, 12 * 3600, (P1_WATCHED_FIRST, ("findings", "vulns", "bom"),
+                                   "opened, last read older than the safety interval")),
+        (_row(), False, 12 * 3600, (P4_SAFETY, ("findings", "vulns", "bom"), "safety re-read")),
+        (_row(last_success_at=None), False, 0, (P3_BACKFILL, ("findings", "vulns", "bom"), "first import, backfill")),
+        (_row(last_success_at=None), True, 0, (P1_WATCHED_FIRST, ("findings", "vulns", "bom"), "first import, watched")),
+        (_row(source_bom_hint="2"), False, 0, (P2_DUE, ("findings", "vulns", "bom"), "change hint: bom")),
+        (_row(source_analysis_hint="2"), False, 0, (P2_DUE, ("findings", "vulns"), "change hint: analysis")),
+        (_row(requested_at=NOW.isoformat()), False, 0, (P0_REQUEST, ("findings", "vulns", "bom"), "request")),
         (_row(status="gone"), True, 0, None),
         (_row(active_in_dt=0), True, 0, None),
         (
@@ -276,25 +290,33 @@ async def test_a_watched_product_is_imported_first_then_the_backfill(tmp_path):
     await manager.close()
 
 
-async def test_a_watched_product_is_reread_and_only_a_change_is_announced(tmp_path):
+async def test_a_watched_product_is_read_on_a_hint_change_and_only_a_change_is_announced(tmp_path):
+    """No polling (ADR 0004, 2026-11-23): a watched product with unchanged
+    hints is not read again, however long it stays open; a hint change
+    reads it, and only a change is announced."""
     scheduler, manager, hub, clock = _scheduler(tmp_path, watched=["Alpha"])
     source = Source()
+    source.projects = [_marked(project, "b1", "a1") for project in source.projects]
+    manager.refresh_interval_seconds = 60
     await scheduler.run_cycle(source)
+    await scheduler.drain()
     source.calls.clear()
 
-    clock.advance(60)
-    await scheduler.run_cycle(source)
-    assert source.calls == []
-
-    clock.advance(65)  # past 120 s, with room for the read's own time
-    await scheduler.run_cycle(source)
-    # Findings only; Beta is not watched and not due.
-    assert source.calls == [("findings", "a1")]
+    for _ in range(30):  # 30 list reads over 2.5 h, every interval of old passed
+        clock.advance(300)
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+    assert [call for call in source.calls if call[0] != "projects"] == []
     assert len(hub.of("version.synced")) == 2  # the two first imports
 
     source.findings["a1"].append(_finding("c9", vuln="v9"))
-    clock.advance(121)
+    source.projects[0] = _marked(source.projects[0], "b1", "a2")  # DT re-analysed Alpha
+    clock.advance(300)
     await scheduler.run_cycle(source)
+    await scheduler.drain()
+    assert [call for call in source.calls if call[0] != "projects"] == [
+        ("findings", "a1"), ("vulns", "a1"),
+    ]
     [*_, changed] = hub.of("version.synced")
     assert changed["uuid"] == "a1" and changed["first_import"] is False
     assert (changed["findings_added"], changed["new_vuln_ids"]) == (1, ["CVE-v9"])
@@ -631,8 +653,8 @@ def test_a_version_without_hints_is_read_again_on_staggered_intervals():
         _row(source_bom_hint="2"), watched=False, now=NOW, schedule=schedule, hinted=False
     ) is None
     assert due(3600 * factor - 1) is None
-    assert due(3600 * factor + 1) == (P3_BACKFILL, ("findings",))
-    assert due(6 * 3600 * factor + 1) == (P3_BACKFILL, ("findings", "vulns"))
+    assert due(3600 * factor + 1) == (P3_BACKFILL, ("findings",), "unhinted findings interval")
+    assert due(6 * 3600 * factor + 1) == (P3_BACKFILL, ("findings", "vulns"), "unhinted findings interval")
     assert due(24 * 3600 * factor + 1)[1] == ("findings", "vulns", "bom")
     # With hints, an unwatched version waits for a hint or the safety re-read.
     assert plan_version(
@@ -726,10 +748,14 @@ async def test_a_queued_version_no_longer_due_settles(tmp_path):
     source = Source()
     await scheduler.run_cycle(source)
     await scheduler.run_cycle(source)
-    clock.advance(125)
+    await manager.flush_cache_writes()  # stored, or the findings count as missing
+    clock.advance(scheduler.schedule.safety + 5)  # opened, last read older than that
+    scheduler.interest.put("alice", "tab", ["Alpha"])  # the open tab renews its lease
     scheduler.plan()
     assert manager.sync_state.row("a1")["status"] == "queued"
+    assert scheduler.queue["a1"].reason == "opened, last read older than the safety interval"
     scheduler.interest.put("alice", "tab", [])  # nobody watches Alpha any more
+    scheduler.active_since = clock.now  # and the safety re-read counts from now
     scheduler.plan()
     assert "a1" not in scheduler.queue
     assert manager.sync_state.row("a1")["status"] == "synced"
@@ -894,6 +920,7 @@ async def test_a_finished_sync_is_planned_after_at_once(tmp_path):
     """Without the timer: a sync's end marks the plan as due."""
     scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=1)
     scheduler.PLAN_INTERVAL_SECONDS = 3600
+    scheduler._next_enrich = float("inf")  # the version ranges read the rows too
     source = Source()
     await scheduler.run_cycle(source)  # plans both, syncs one
     await scheduler.run_cycle(source)  # syncs the other
@@ -1117,4 +1144,56 @@ async def test_idle_gates_are_dropped(tmp_path):
         pass
     await asyncio.sleep(0.01)
     assert manager.__dict__.get("_exchange_gates") == {}
+    await manager.close()
+
+
+async def test_the_version_ranges_are_read_through_the_budget(tmp_path):
+    """The scheduler's budgeted wrapper hides the source's methods from a
+    protocol check; the ranges of the recommendation must still be read."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path)
+    reads = []
+
+    class Ranges(Source):
+        async def get_project_vulnerabilities(self, project_uuid):
+            return [{"uuid": "v1", "vulnId": "CVE-v1", "source": "NVD"}]
+
+        async def get_vulnerability_affected(self, source, vuln_id):
+            reads.append(vuln_id)
+            return {"affectedComponents": []}
+
+    source = Ranges()
+    await scheduler.run_cycle(source)
+    await scheduler.drain()
+
+    assert await manager.refresh_fixed_versions(scheduler.limited(source), "a1") == 1
+    assert reads == ["CVE-v1"]
+    await manager.close()
+
+
+async def test_the_version_ranges_wait_until_no_version_is_read(tmp_path):
+    """They run between syncs, at low priority, never inside a sync."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path)
+    order = []
+
+    class Ranges(Source):
+        async def get_vulnerabilities(self, project_uuid, cve=None):
+            order.append(("findings", project_uuid))
+            return await super().get_vulnerabilities(project_uuid, cve)
+
+        async def get_project_vulnerabilities(self, project_uuid):
+            return [{"uuid": "v1", "vulnId": f"CVE-{project_uuid}", "source": "NVD"}]
+
+        async def get_vulnerability_affected(self, source, vuln_id):
+            order.append(("ranges", vuln_id))
+            return {"affectedComponents": []}
+
+    source = Ranges()
+    for _ in range(4):
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+
+    kinds = [kind for kind, _ in order]
+    assert kinds.count("findings") == 2 and kinds.count("ranges") == 2
+    # Every range read comes after both versions' findings reads.
+    assert kinds.index("ranges") > max(i for i, k in enumerate(kinds) if k == "findings")
     await manager.close()

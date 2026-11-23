@@ -62,11 +62,13 @@ REPAIR_REFER_TEAMS = "refer_teams"
 REPAIR_UNOWNED_REFERENCES = "unowned_references"
 REPAIR_COMBINE_CONFLICT = "combine_conflict"
 REPAIR_RESCORING = "rescoring"
+REPAIR_UNKNOWN_COMPONENT = "unknown_component"
 
 # Short names for the per-topic selection buttons, in pipeline order.
 REPAIR_TOPICS = {
     REPAIR_RESTORE_CVSS: "Restore CVSS",
     REPAIR_RESTORE_TICKETS: "Restore tickets",
+    REPAIR_UNKNOWN_COMPONENT: "Unknown component",
     REPAIR_SYNC_FINDINGS: "Synchronize",
     REPAIR_FORMER_TEAMS: "Former teams",
     REPAIR_REFER_TEAMS: "Refer to global",
@@ -156,6 +158,23 @@ def _current_teams(group: dict[str, Any], team_mapping: dict[str, Any]) -> dict[
         for team in _normalize_group_tags(group.get("tags") or [], team_mapping)
         if _team_key(team) not in unowned
     }
+
+
+def _still_open(
+    blocks: list[dict[str, Any]],
+    current: dict[str, str],
+    team_mapping: dict[str, Any],
+) -> list[str]:
+    """The current teams without an assessment of their own among the
+    blocks, after the repair: nothing to copy or refer to for them."""
+    covered = {
+        _team_key((_normalize_group_tags([block["team"]], team_mapping) or [block["team"]])[0])
+        for block in blocks
+        if _team_key(block["team"]) != "general" and _is_assessed(block)
+    }
+    return sorted(
+        (team for key, team in current.items() if key not in covered), key=str.casefold
+    )
 
 
 def _normalized(text: str) -> str:
@@ -757,6 +776,115 @@ def _ticket_stage(
     return payloads, info
 
 
+def _teams_of(details: str) -> list[str]:
+    return sorted(
+        {block["team"] for block in _parse_blocks(details) if _team_key(block["team"]) != "general"},
+        key=str.casefold,
+    )
+
+
+def _unknown_component_stage(
+    groups: list[dict[str, Any]],
+    context: BulkWorkflowContext,
+) -> tuple[list[Payload], dict[str, dict[str, Any]]]:
+    """Carry a gone finding's assessment whose component DTVP never knew to
+    the finding of the same vulnerability reported now in the same version
+    (Dependency-Track recreated the component before DTVP tracked findings).
+
+    Only onto a finding without an assessment, only when the vulnerability
+    is reported on exactly one component of that version and the gone
+    records agree on the state. Copied as the gone findings panel applies a
+    confirmed match: pending review, origin ``carried-over-by-same-issue``.
+    Ambiguous and conflicting vulnerabilities are listed, not applied."""
+    from ..finding_lifecycle_services import ORIGIN_CARRIED_OVER_BY_SAME_ISSUE, alias_proposal
+    from ..same_issue import (
+        UNKNOWN_AMBIGUOUS,
+        UNKNOWN_CONFLICTING,
+        UNKNOWN_READY,
+        classify_unknown_component,
+    )
+
+    read = context.unknown_component_records
+    if not callable(read):
+        return [], {}
+    by_project: dict[str, dict[str, dict[str, Any]]] = {}
+    payloads: list[Payload] = []
+    info: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        group_id = str(group.get("id") or "")
+        entry: dict[str, Any] = {"applied": [], "ambiguous": [], "conflicting": []}
+        for instance in _instances(group):
+            project = str(instance.get("project_uuid") or "")
+            component = str(instance.get("component_uuid") or "")
+            vulnerability = str(instance.get("vulnerability_uuid") or "")
+            if not (project and component and vulnerability):
+                continue
+            if project not in by_project:
+                by_project[project] = read(project) or {}
+            records = by_project[project].get(vulnerability)
+            if not records or component not in {
+                candidate["component_uuid"] for candidate in records["candidates"]
+            }:
+                continue
+            if _state(instance) != "NOT_SET" or _details(instance).strip():
+                # Assessed already: nothing to carry onto it.
+                continue
+            verdict = classify_unknown_component(records)
+            version = str(instance.get("project_version") or "")
+            if verdict["kind"] == UNKNOWN_CONFLICTING:
+                if not any(item["version"] == version for item in entry["conflicting"]):
+                    entry["conflicting"].append({"version": version, "states": verdict["states"]})
+                continue
+            if verdict["kind"] == UNKNOWN_AMBIGUOUS:
+                if not any(item["version"] == version for item in entry["ambiguous"]):
+                    entry["ambiguous"].append({
+                        "version": version,
+                        "candidates": [
+                            " ".join(
+                                str(part) for part in (
+                                    candidate.get("component_name") or candidate["component_uuid"][:8],
+                                    candidate.get("component_version") or "",
+                                ) if part
+                            )
+                            for candidate in verdict["candidates"]
+                        ],
+                    })
+                continue
+            if verdict["kind"] != UNKNOWN_READY:
+                continue
+            target = next(
+                (item for item in verdict["targets"] if item["component_uuid"] == component), None
+            )
+            if target is None:
+                continue
+            source = verdict["source"]
+            proposal = alias_proposal(source["record"], target.get("record"), context.team_mapping)
+            if proposal is None or proposal["kind"] != "copy":
+                continue
+            payload = _payload(instance, proposal["state"], proposal["details"])
+            payload["suppressed"] = bool(proposal["suppressed"])
+            payload["origin"] = ORIGIN_CARRIED_OVER_BY_SAME_ISSUE
+            payloads.append((instance, payload))
+            entry["applied"].append({
+                "version": version,
+                "component": " ".join(
+                    str(part) for part in (
+                        instance.get("component_name"), instance.get("component_version"),
+                    ) if part
+                ),
+                "state": source["state"],
+                "teams": _teams_of(source["details"]),
+                "date": source.get("updated_at"),
+                "from_component": source["component_uuid"],
+                # Several candidates: the records agree, so every one gets it.
+                "agreeing": verdict["agreeing"] if len(verdict["targets"]) > 1 else 0,
+                "candidates": len(verdict["targets"]),
+            })
+        if entry["applied"] or entry["ambiguous"] or entry["conflicting"]:
+            info[group_id] = entry
+    return payloads, info
+
+
 def _team_stage(
     groups: list[dict[str, Any]],
     context: BulkWorkflowContext,
@@ -775,6 +903,9 @@ def _team_stage(
         former: dict[str, Any] | None = None
         conflict: dict[str, Any] | None = None
         synchronized = 0
+        # Current teams the repair cannot complete (INCOMPLETE groups only).
+        open_teams: list[str] = []
+        open_pending = False
         # Findings a new project version added stay unassessed: nothing is
         # copied onto them unless the reviewer includes them for this
         # vulnerability (ADR 0010 decision 7).
@@ -837,6 +968,8 @@ def _team_stage(
                 now_ms=now_ms,
             )
             blocks = [block for block in blocks if id(block) not in record_ids]
+            open_teams = _still_open(blocks, current, context.team_mapping)
+            open_pending = pending
             rescored = _with_rescoring(_render(blocks, pending=pending), instances)
             rescored_sync = _with_rescoring(sync_only, instances)
             for instance in instances:
@@ -887,9 +1020,12 @@ def _team_stage(
                 missing_identity += 1
                 continue
             payloads.append((instance, _payload(instance, calculate_aggregated_state(details), details)))
-        if synchronized or former or conflict or new_changing:
+        if synchronized or former or conflict or new_changing or open_teams:
             info[group_id] = {
                 "synchronized": synchronized, "former": former, "conflict": conflict,
+                # Teams with no assessment of their own after the repair, and
+                # whether the global assessment they could refer to is pending.
+                "open_teams": open_teams, "open_pending": open_pending,
                 # The new findings the repair would change, where they are,
                 # and how many this run left.
                 "new_findings": len(new_changing),
@@ -963,6 +1099,9 @@ def _run(
     ticket_payloads, ticket_info = _ticket_stage(keep_alive[-1], context)
     record(ticket_payloads, {})
 
+    unknown_payloads, unknown_info = _unknown_component_stage(keep_alive[-1], context)
+    record(unknown_payloads, {})
+
     team_payloads, team_info, missing_identity, new_left = _team_stage(
         keep_alive[-1], context, int(time.time() * 1000)
     )
@@ -984,6 +1123,7 @@ def _run(
         "notes": notes,
         "restore_items": {item["group_id"]: item for item in restore_preview["items"]},
         "ticket_info": ticket_info,
+        "unknown_info": unknown_info,
         "team_info": team_info,
         "rescore_items": {item["group_id"]: item for item in rescore_preview["items"]},
     }
@@ -1059,6 +1199,38 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
             "no assessment of its team or global one to return it to"
         )
 
+    unknown = run["unknown_info"].get(group_id) or {}
+    for applied in unknown.get("applied") or []:
+        teams = ", ".join(applied["teams"]) or "no team"
+        date = str(applied.get("date") or "")[:10]
+        agree = (
+            f"; {applied['agreeing']} earlier records agree, applied to all "
+            f"{applied['candidates']} candidates"
+            if applied.get("agreeing") else ""
+        )
+        repairs.append({
+            "id": REPAIR_UNKNOWN_COMPONENT,
+            "label": (
+                f"Carry the assessment of a gone finding whose component is unknown "
+                f"({applied['state']}, {teams}{', ' + date if date else ''}) to "
+                f"{applied['component'] or 'the reported finding'} in {applied['version']}, "
+                f"pending review{agree}"
+            ),
+            # A guess from the same vulnerability in the same version.
+            "needs_review": True,
+        })
+    for ambiguous in unknown.get("ambiguous") or []:
+        review.append(
+            f"A gone finding whose component is unknown has an assessment; in "
+            f"{ambiguous['version']} the vulnerability is reported on "
+            f"{', '.join(ambiguous['candidates'])}: ambiguous, choose in the gone findings panel"
+        )
+    for conflicting in unknown.get("conflicting") or []:
+        review.append(
+            f"Gone findings whose component is unknown disagree in {conflicting['version']} "
+            f"({', '.join(conflicting['states'])}): conflicting, not carried"
+        )
+
     team = run["team_info"].get(group_id) or {}
     if team.get("synchronized"):
         repairs.append({
@@ -1090,6 +1262,23 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
             "label": _conflict_label(team["conflict"]),
             "needs_review": True,
         })
+
+    open_teams = team.get("open_teams") or []
+    already_named = set((team.get("former") or {}).get("open_teams") or []) | set(
+        (team.get("conflict") or {}).get("open_teams") or []
+    )
+    left = [name for name in open_teams if name not in already_named]
+    if left:
+        teams = ", ".join(left)
+        verb = "has" if len(left) == 1 else "have"
+        review.append(
+            f"{teams} {verb} not assessed this vulnerability yet; nothing to copy"
+            + (
+                " and the global assessment is pending review, so no team can refer to it"
+                if team.get("open_pending") else ""
+            )
+            + ": open the vulnerability to assess it"
+        )
 
     rescore = run["rescore_items"].get(group_id)
     if rescore:

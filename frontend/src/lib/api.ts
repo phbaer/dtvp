@@ -170,6 +170,39 @@ export const listProjectArchiveSnapshots = async (): Promise<ProjectArchiveSnaps
     return res.data;
 };
 
+/** One assessment DTVP still holds for a gone finding of a vulnerability. */
+export interface EarlierAssessment {
+    component_uuid: string;
+    component_name: string | null;
+    component_version: string | null;
+    component_purl: string | null;
+    vulnerability_uuid: string;
+    vuln_id: string | null;
+    /** On an alias of the vulnerability, not the same id. */
+    alias: boolean;
+    gone_at: string | null;
+    state: string;
+    justification: string;
+    response: string;
+    suppressed: boolean;
+    date: string | null;
+    teams: { team: string; state: string; justification: string; details: string }[];
+    details: string;
+    preview: string;
+}
+
+/** The assessments of gone findings of a vulnerability (and its aliases) in
+ * a project version: a starting point for a finding that has none. */
+export const getEarlierAssessments = async (
+    projectUuid: string,
+    vulnerabilityUuid: string,
+): Promise<EarlierAssessment[]> => {
+    const res = await api.get(`/project/${projectUuid}/earlier-assessments`, {
+        params: { vulnerability_uuid: vulnerabilityUuid },
+    });
+    return res.data.earlier || [];
+};
+
 /** Findings Dependency-Track no longer reports, per version of a project. */
 export const getGoneFindings = async (name: string): Promise<GoneFindingsOfProject> => {
     const res = await api.get('/gone-findings', { params: { name } });
@@ -425,6 +458,8 @@ export interface BulkWorkflowPreviewResponse {
     task_id: string;
     workflow: BulkWorkflowMetadata;
     preview_token: string;
+    /** Per selectable group, the fingerprint of its item (checked on apply). */
+    group_fingerprints?: Record<string, string>;
     selectable_group_ids: string[];
     items: BulkWorkflowPreviewItem[];
     summary: Record<string, any>;
@@ -451,6 +486,33 @@ export interface BulkWorkflowTaskStatus<T = unknown> {
     progress: number;
     result?: T | null;
     error?: string;
+    /** The structured part of the error, e.g. the groups that changed since the preview. */
+    error_detail?: BulkWorkflowErrorDetail | null;
+}
+
+export interface BulkWorkflowFieldChange {
+    path: string;
+    before: string;
+    after: string;
+}
+
+export interface BulkWorkflowErrorDetail {
+    code?: string;
+    message?: string;
+    changed_groups?: string[];
+    /** Per changed group, the fields that differ from the preview as shown. */
+    changes?: Record<string, BulkWorkflowFieldChange[]>;
+}
+
+/** A failed bulk task; ``detail`` is its structured error, when it has one. */
+export class BulkWorkflowTaskError extends Error {
+    detail: BulkWorkflowErrorDetail | null;
+
+    constructor(message: string, detail: BulkWorkflowErrorDetail | null = null) {
+        super(message);
+        this.name = 'BulkWorkflowTaskError';
+        this.detail = detail;
+    }
 }
 
 export type BulkWorkflowProgressHandler = (
@@ -668,7 +730,10 @@ export const waitForBulkWorkflowTask = async <T>(
         const status = await getBulkWorkflowTask<T>(operationId);
         await onProgress?.(status);
         if (status.status === 'failed') {
-            throw new Error(status.error || status.message || 'Bulk workflow task failed.');
+            throw new BulkWorkflowTaskError(
+            status.error || status.message || 'Bulk workflow task failed.',
+            status.error_detail ?? null,
+        );
         }
         if (status.status === 'completed') {
             if (status.result == null) {
@@ -744,12 +809,18 @@ export const applyBulkWorkflow = async (
     sourceId?: string,
     /** Vulnerabilities whose new findings are to be synchronized as well. */
     includeNewFindings: string[] = [],
+    /** Per selected group, its fingerprint in the preview shown. */
+    groupFingerprints: Record<string, string> = {},
+    /** Per selected group, the preview item shown (for the diff of a refused apply). */
+    groupItems: Record<string, BulkWorkflowPreviewItem> = {},
 ): Promise<BulkWorkflowApplyResponse> => {
     const operationId = await startBulkWorkflowTask(workflowId, 'apply', withSource({
         task_id: taskId,
         filters,
         group_ids: groupIds,
         preview_token: previewToken,
+        group_fingerprints: groupFingerprints,
+        group_items: groupItems,
         ...(includeNewFindings.length ? { include_new_findings: includeNewFindings } : {}),
     }, sourceId));
     return waitForBulkWorkflowTask<BulkWorkflowApplyResponse>(operationId, onProgress);
@@ -763,12 +834,16 @@ export const buildBulkWorkflowDocument = async (
     previewToken: string,
     onProgress?: BulkWorkflowProgressHandler,
     sourceId?: string,
+    groupFingerprints: Record<string, string> = {},
+    groupItems: Record<string, BulkWorkflowPreviewItem> = {},
 ): Promise<string> => {
     const operationId = await startBulkWorkflowTask(workflowId, 'document', withSource({
         task_id: taskId,
         filters,
         group_ids: groupIds,
         preview_token: previewToken,
+        group_fingerprints: groupFingerprints,
+        group_items: groupItems,
     }, sourceId));
     return waitForBulkWorkflowTask<string>(operationId, onProgress);
 };
@@ -2477,16 +2552,70 @@ export const exportAssessments = async (updateIds?: string[]): Promise<ExportRes
 export interface SyncRequestTarget { project_uuid?: string; product?: string }
 export interface SyncSourceInfo { name: string; can_request_analysis: boolean }
 
-export const getSyncSource = async (): Promise<SyncSourceInfo | null> => {
+/** The sync's status: the source, the queue with the reasons, the newest
+ * successful read of any version. */
+export interface SyncQueueEntry {
+    uuid: string
+    product: string | null
+    version: string | null
+    priority: number
+    kinds: string[]
+    reason: string | null
+    requested: boolean
+}
+
+export interface SyncStatus {
+    source: SyncSourceInfo | null
+    queue: { total: number; items: SyncQueueEntry[] } | null
+    last_success_at: string | null
+}
+
+export const getSyncStatus = async (): Promise<SyncStatus> => {
     const res = await api.get('/sync/status')
-    return res.data?.scheduler_state?.source ?? null
+    return {
+        source: res.data?.scheduler_state?.source ?? null,
+        queue: res.data?.scheduler_state?.queue ?? null,
+        last_success_at: res.data?.last_success_at ?? null,
+    }
+}
+
+/** What the background sync does right now (``source.sync_progress``). */
+export interface SyncProgress {
+    pass: { phase: string; versions: number; pages_read: number; pages_total: number | null } | null
+    running: Array<{ uuid: string; product: string | null; version: string | null; phase: string | null; seconds: number | null }>
+    queued: number
+    requested: number
+    ranges: { versions: number; checked: number; reads: number } | null
+    paused?: { by: string | null; until: string } | null
+    /** False without users: the sync reads only for exports and requests. */
+    active?: boolean
+}
+
+export const getSyncProgress = async (): Promise<SyncProgress | null> => {
+    const res = await api.get('/sync/status')
+    return res.data?.scheduler_state?.progress ?? null
+}
+
+export type SyncCancelScope = 'pass' | 'requests' | 'running'
+
+/** Stop the portfolio pass, withdraw waiting requests, cancel running syncs. */
+export const cancelSync = async (
+    scope?: SyncCancelScope[],
+): Promise<{ pass: boolean; requests: string[]; running: string[]; waiting?: number; paused?: boolean }> => {
+    const res = await api.post('/sync/cancel', scope ? { scope } : {})
+    return res.data
+}
+
+/** End the pause a cancel left. */
+export const resumeSync = async (): Promise<void> => {
+    await api.post('/sync/resume', {})
 }
 
 export interface SyncRequestProgress {
     id: string
     by: string | null
     at: string
-    state: 'requested' | 'running' | 'done' | 'failed'
+    state: 'requested' | 'running' | 'done' | 'failed' | 'cancelled'
     read_at?: string
     error?: string | null
 }

@@ -35,6 +35,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from .assessment_model import PENDING_REVIEW_MARKER, parse_assessment
 from .assessment_outbox_services import AssessmentKey, source_matches_base
 from .sqlite_migration_services import run_sqlite_migrations
+from .same_issue import REASON_UNKNOWN_COMPONENT
 
 logger = logging.getLogger(__name__)
 
@@ -292,8 +293,12 @@ def classify_gone(
       BOM is known, a place in it).
     - ``no_longer_matched``: the component, or one of the same identity, is
       still there; the vulnerability is no longer reported on it.
-    - ``component_removed``: the BOM no longer has the component.
-    - ``undetermined``: without a BOM the findings alone do not tell.
+    - ``component_removed``: the BOM has neither the component nor one of
+      its identity. Only with the identity known: without it, a component
+      missing from the BOM may as well have been recreated under a new ID
+      (Dependency-Track recreated components nightly before tracking).
+    - ``undetermined``: without a BOM, or without the component's identity,
+      the findings alone do not tell.
     """
     result: dict[tuple[str, str], tuple[str, list[str]]] = {}
     for row in gone_rows:
@@ -321,7 +326,7 @@ def classify_gone(
             or (bom is not None and identity and identity in bom.identities)
         ):
             result[key] = (REASON_NO_LONGER_MATCHED, [])
-        elif bom is not None:
+        elif bom is not None and identity:
             result[key] = (REASON_COMPONENT_REMOVED, [])
         else:
             result[key] = (REASON_UNDETERMINED, [])
@@ -806,6 +811,27 @@ class FindingLifecycleStore:
             if changed:
                 self._presence.pop(project_uuid, None)
         return changed
+
+    def repair_unfounded_removals(self) -> int:
+        """Gone rows told "component removed" without the component's
+        identity become "undetermined": without it a removal cannot be told
+        from a recreation (classify_gone). Once, at startup; idempotent. A
+        later read may tell them by identity (gone_component_names).
+        Returns how many rows changed."""
+        self._ensure_initialized()
+        with self._lock, closing(self._connect()) as connection:
+            with connection:
+                changed = connection.execute(
+                    """
+                    UPDATE finding_presence SET gone_reason = ?
+                    WHERE status = ? AND gone_reason = ?
+                      AND (component_identity IS NULL OR component_identity = '')
+                    """,
+                    (REASON_UNDETERMINED, STATUS_GONE, REASON_COMPONENT_REMOVED),
+                ).rowcount
+            if changed:
+                self._presence.clear()  # cached rows are read again
+        return int(changed or 0)
 
     def fill_components(
         self,
@@ -2182,11 +2208,36 @@ def _same_issue_of(
         row.get("same_issue_component_uuid"),
         row.get("same_issue_vulnerability_uuid"),
     ) == (other["component_uuid"], other["vulnerability_uuid"])
+    # The same vulnerability reported on several components of the version:
+    # every one is a candidate, a person chooses (never one picked silently).
+    candidates = []
+    if reason == REASON_UNKNOWN_COMPONENT:
+        for candidate in index.candidates(row):
+            if index.reason(row, candidate) != reason:
+                continue
+            candidate_record = record_of(candidate)
+            candidate_proposal = alias_proposal(record, candidate_record)
+            candidates.append({
+                "component_uuid": candidate["component_uuid"],
+                "component_name": candidate.get("component_name"),
+                "component_version": candidate.get("component_version"),
+                "vulnerability_uuid": candidate["vulnerability_uuid"],
+                "state": (candidate_record or {}).get("analysisState") or "NOT_SET",
+                "proposal": candidate_proposal["kind"] if candidate_proposal else None,
+            })
+        candidates.sort(key=lambda item: (
+            str(item["component_name"] or ""), str(item["component_version"] or ""),
+            item["component_uuid"],
+        ))
     return {
         "component_uuid": other["component_uuid"],
+        "component_name": other.get("component_name"),
+        "component_version": other.get("component_version"),
         "vulnerability_uuid": other["vulnerability_uuid"],
         "vuln_id": other.get("vuln_id"),
         "reason": reason,
+        "candidates": candidates,
+        "ambiguous": len(candidates) > 1,
         "state": state,
         "tickets": record_tickets(other_record),
         "disagrees": own_state != "NOT_SET" and state != "NOT_SET" and own_state != state,
@@ -2415,3 +2466,68 @@ def gone_trend(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
         {"day": day, "went": dict(sorted(counts.items()))}
         for day, counts in sorted(days.items())
     ]
+
+
+def earlier_assessments(
+    rows: Mapping[tuple[str, str], Mapping[str, Any]],
+    record_of: Callable[[Mapping[str, Any]], Optional[Mapping[str, Any]]],
+    vulnerability_uuid: str,
+    alias_ids: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """The assessments DTVP still holds for gone findings of a vulnerability
+    in one project version (and of its aliases), newest first: what a person
+    may take as a starting point for a finding that has none. Read only;
+    nothing is applied here."""
+    aliases = {str(alias).strip().upper() for alias in alias_ids if alias}
+    found = []
+    for row in rows.values():
+        if row.get("status") != STATUS_GONE:
+            continue
+        same = str(row["vulnerability_uuid"]) == str(vulnerability_uuid)
+        if not same and str(row.get("vuln_id") or "").strip().upper() not in aliases:
+            continue
+        record = record_of(row)
+        if record is None or record.get("sync_status") in ("superseded", "cancelled"):
+            continue
+        value = _record_value(record)
+        if is_blank_value(value):
+            continue
+        read = parse_assessment(value["state"], value["details"], value["suppressed"])
+        general = next(
+            (team for team in read["teams"] if team["team"] == "General" and not team.get("historical")),
+            None,
+        )
+        decisive = general or next(
+            (team for team in read["teams"] if not team.get("historical") and team.get("state") != "NOT_SET"),
+            None,
+        )
+        text = (decisive or {}).get("details") or read["free_text"] or ""
+        found.append({
+            "component_uuid": row["component_uuid"],
+            "component_name": row.get("component_name"),
+            "component_version": row.get("component_version"),
+            "component_purl": row.get("component_purl"),
+            "vulnerability_uuid": row["vulnerability_uuid"],
+            "vuln_id": row.get("vuln_id"),
+            "alias": not same,
+            "gone_at": row.get("gone_at"),
+            "state": value["state"],
+            "justification": (decisive or {}).get("justification") or "NOT_SET",
+            "response": read.get("response") or "NOT_SET",
+            "suppressed": value["suppressed"],
+            "date": record.get("updated_at"),
+            "teams": [
+                {
+                    "team": team["team"],
+                    "state": team.get("state") or "NOT_SET",
+                    "justification": team.get("justification") or "NOT_SET",
+                    "details": team.get("details") or "",
+                }
+                for team in read["teams"] if not team.get("historical")
+            ],
+            "details": text,
+            "preview": " ".join(text.split())[:240],
+            "full_text": value["details"],
+        })
+    found.sort(key=lambda item: str(item["date"] or ""), reverse=True)
+    return found

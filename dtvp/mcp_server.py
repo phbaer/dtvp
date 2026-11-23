@@ -108,6 +108,8 @@ class McpServerDeps:
     get_dt_client: Callable[[], Awaitable[Any]]
     logger: Any
     task_wait_seconds: float = DEFAULT_TASK_WAIT_SECONDS
+    # Told of every authenticated MCP request (the sync's activity).
+    note_request: Callable[[str], None] = lambda _user: None
 
 
 def agent_label(token: AccessToken) -> str:
@@ -1376,6 +1378,10 @@ class McpEndpoint:
                 bearer=True,
             )
             return
+        try:
+            self.deps.note_request(token.username)
+        except Exception:  # never fails the request
+            pass
         transport = self._transport
         if transport is None:
             await _send_json(send, 503, "MCP endpoint is starting")

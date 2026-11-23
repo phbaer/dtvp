@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import inspect
 import math
 import re
@@ -214,6 +215,7 @@ _COMPARISON_IGNORED_TAGS = [
 ]
 
 
+@functools.lru_cache(maxsize=8192)
 def comparable_assessment_text(details: str) -> str:
     """The part of an assessment text that the findings of a vulnerability
     must agree on.
@@ -407,11 +409,24 @@ def _derive_group_inconsistency_reasons(
     return reasons
 
 
+def _assessed_team_keys(
+    assessed_teams: Any, team_mapping: Optional[Dict[str, Any]]
+) -> set[str]:
+    """The assessed teams as the required teams name them: a block under a
+    team's alias (an earlier name in the team mapping) counts for the team,
+    and names match regardless of case and surrounding space."""
+    return {
+        team.casefold()
+        for team in _normalize_group_tags(list(assessed_teams), team_mapping or {})
+    }
+
+
 def _derive_group_lifecycle(
     group: Dict[str, Any],
     summary: Dict[str, Any],
     required_teams: List[str],
     inconsistency_reasons: Optional[List[str]] = None,
+    team_mapping: Optional[Dict[str, Any]] = None,
 ) -> str:
     instances = summary["instances"]
     blocks = summary["blocks"]
@@ -429,10 +444,11 @@ def _derive_group_lifecycle(
     ):
         return "INCONSISTENT"
 
+    assessed_keys = _assessed_team_keys(summary["assessed_teams"], team_mapping)
     missing_teams = [
         team
         for team in required_teams
-        if team not in summary["assessed_teams"]
+        if team.strip().casefold() not in assessed_keys
     ]
 
     # Pending review always wins over legacy detection. If coverage is also
@@ -585,6 +601,7 @@ def _build_group_list_metadata(
             summary,
             required_teams,
             inconsistency_reasons,
+            team_mapping,
         )
     # Pending review is not done, even when all currently visible team blocks
     # are populated. Lifecycle filters still keep NEEDS_APPROVAL separate from
@@ -685,7 +702,9 @@ def _scoped_lifecycle(
         ):
             scope_reasons.append(INCONSISTENCY_REASON_ASSESSMENT_DETAILS_MISMATCH)
         teams = _scope_required_teams(scope.instances, team_mapping, required_teams)
-        lifecycle = _derive_group_lifecycle(part, summary, teams, scope_reasons)
+        lifecycle = _derive_group_lifecycle(
+            part, summary, teams, scope_reasons, team_mapping
+        )
         lifecycles.append(lifecycle)
         for reason in scope_reasons:
             add(reason)

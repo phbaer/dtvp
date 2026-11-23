@@ -6,6 +6,7 @@ import {
     getPathParts,
     normalizeLegacyTags,
     selectRepresentativePaths,
+    wildcardTeams,
 } from './dependency-team-selection'
 import { resolveCanonicalTeamName } from './team-mapping'
 import { sortVersions } from './version'
@@ -16,7 +17,14 @@ interface TaggedComponentInfo {
     name: string
     versions: string[]
     tag: string
+    /** The team comes from the mapping's catch-all ``*``: neither the
+     * component nor any component of the chain is mapped. */
+    catchAll?: boolean
+    /** For a catch-all: the project versions whose chains it tops. */
+    under?: string[]
 }
+
+type TaggedData = { versions: Set<string>; tag: string; catchAll?: boolean; under?: Set<string> }
 
 interface UseVulnDependencyInfoOptions {
     group: ComputedRef<GroupedVuln> | Ref<GroupedVuln>
@@ -29,12 +37,13 @@ const sortComponentVersions = (versions: Set<string>) => {
     return Array.from(versions).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
 }
 
-const sortTaggedComponents = (items: Map<string, { versions: Set<string>; tag: string }>): TaggedComponentInfo[] => {
+const sortTaggedComponents = (items: Map<string, TaggedData>): TaggedComponentInfo[] => {
     return Array.from(items.entries())
         .map(([name, data]) => ({
             name,
             versions: sortComponentVersions(data.versions),
             tag: data.tag,
+            ...(data.catchAll ? { catchAll: true, under: Array.from(data.under || []).sort() } : {}),
         }))
         .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }))
 }
@@ -145,7 +154,7 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
     })
 
     const affectedTaggedComponents = computed(() => {
-        const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
+        const taggedComponents = new Map<string, TaggedData>()
         for (const { instance: component, directTeam } of visibleOwnership.value) {
             const name = component.component_name || 'Unknown'
             if (!directTeam) continue
@@ -163,7 +172,7 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
     })
 
     const triggeringTaggedComponents = computed(() => {
-        const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
+        const taggedComponents = new Map<string, TaggedData>()
         const paths = visibleInstances.value.flatMap(instance => instance.dependency_chains || [])
         const selectedPaths = selectRepresentativePaths(paths, teamMapping.value, 100)
         const ownerTeams = new Set(visibleOwnership.value.flatMap(ownership =>
@@ -192,6 +201,41 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
             if (instance.component_version) {
                 taggedComponents.get(name)?.versions.add(instance.component_version)
             }
+        }
+
+        // A team from the catch-all ``*``: no mapped component and no mapped
+        // chain. What triggered it is the finding's component and the top of
+        // each chain below the project, the names a mapping could add.
+        const catchAll = wildcardTeams(teamMapping.value)
+        const versionOf = new Map<unknown, string>()
+        for (const version of group.value.affected_versions || []) {
+            for (const component of version.components || []) versionOf.set(component, version.project_version || '')
+        }
+        const triggers = new Map<string, TaggedData>()
+        const add = (name: string, tag: string) => {
+            if (!triggers.has(name)) triggers.set(name, { versions: new Set(), tag, catchAll: true, under: new Set() })
+            return triggers.get(name)!
+        }
+        for (const { instance, directTeam, teams } of visibleOwnership.value) {
+            if (directTeam) continue
+            const tag = teams.find(team => catchAll.has(team.toLocaleLowerCase()))
+            if (!tag) continue
+            const own = add(instance.component_name || 'Unknown', tag)
+            if (instance.component_version) own.versions.add(instance.component_version)
+            for (const path of instance.dependency_chains || []) {
+                // Chains run from the component to the project: the top is
+                // the component right below the project.
+                const parts = getPathParts(path)
+                if (parts.length < 3 || getFirstMappedTeamOnPath(parts, teamMapping.value)) continue
+                const top = add(parts[parts.length - 2], tag)
+                top.under!.add(
+                    [parts[parts.length - 1], instance.project_version || versionOf.get(instance)]
+                        .filter(Boolean).join(' ')
+                )
+            }
+        }
+        for (const [name, data] of triggers) {
+            if (!taggedComponents.has(name)) taggedComponents.set(name, data)
         }
 
         return sortTaggedComponents(taggedComponents)

@@ -294,17 +294,26 @@ be read at all is not acted on.
    counted as gone at that read nor in "followed since"). A row without a
    component name takes it from the BOM stored before the read, before its
    reason is told; a gone row still without one takes it from local sources
-   inside the read: the stored BOM, then project archives, newest first,
+   inside the read: the stored BOM, the version's stored findings (its
+   component may still have other findings), then project archives, newest first,
    each parsed once per process for every project and only until every row
    is named; a read parses at most three new archives and the next read
    goes on. With the
    identity known, a row whose vulnerability is reported on the same
    component under a new ID is `replaced` and counts as recreated, not as
    gone. A row predating tracking whose reason no read has told yet is
-   exported apart (`export_findings_gone_predating`); an earlier `component_removed` told without the identity
-   (a row predating tracking, or one that got its identity in this read)
-   becomes `no_longer_matched` once a component of the same identity and
-   version is in the BOM (the component was only recreated). A removal told
+   exported apart (`export_findings_gone_predating`). A component missing
+   from the BOM is `component_removed` only when its identity is known:
+   without it the row is `undetermined` (Dependency-Track recreated
+   components nightly before tracking, so a missing UUID proves no
+   removal). Rows stored as `component_removed` without an identity are
+   repaired to `undetermined` once at startup (idempotent); a read then tells
+   them by identity where the lookup finds it. Each read logs how many rows
+   it looked up, where it found them (stored BOM, stored findings, archived
+   BOMs) and how many stay undetermined. An earlier `component_removed`
+   whose row got its identity in this read becomes `no_longer_matched` once a
+   component of the same identity and version is in the BOM (the component
+   was only recreated). A removal told
    with the identity known stays, also when a later version of the package
    appears. A carry-over by identity, and a recreation that needs no new
    review, need the package URL, unless the component was named by the
@@ -320,8 +329,8 @@ be read at all is not acted on.
    findings and vulnerability records, so its aliases are found. The startup backfill skips
    versions whose findings DTVP never read, and a row predating tracking
    whose finding is reported is not counted as returned.
-   | `component_removed` | The project's BOM no longer has the component |
-   | `undetermined` | The findings do not tell, or suggest a replacement, and the BOM could not be read |
+   | `component_removed` | The project's BOM has neither the component nor one of its identity; told only with the component's identity known |
+   | `undetermined` | The findings do not tell, or suggest a replacement, and the BOM could not be read; or the component's identity is unknown, so a removal cannot be told from a recreation |
    | `missing_at_export` | An export was rejected and Dependency-Track confirmed the finding no longer exists |
 
    The BOM is read when the findings alone do not decide, and to confirm a
@@ -356,6 +365,22 @@ be read at all is not acted on.
    assessment is approved (a record without the pending-review marker), the
    old record becomes `superseded`, so it is no candidate when the component
    is recreated again.
+
+   A gone finding whose component DTVP never knew (a record from before
+   DTVP tracked findings, on a component Dependency-Track has since
+   recreated) is never carried on a read: nothing says which package it was
+   on. Three things offer it to a person instead, none automatic:
+   - the gone findings panel proposes the reported finding of the same
+     vulnerability in the version ("same vulnerability, the gone finding's
+     component is unknown"); with several candidates it lists all of them,
+     and the reviewer applies to one or explicitly to all;
+   - the **Unknown component** stage of Repair Assessments applies such
+     records in bulk where that is unambiguous (see
+     [Review workflows](review-workflows.md));
+   - a finding without an assessment shows **Earlier assessments** in its
+     assessment form: what DTVP still holds for gone findings of the same
+     vulnerability (and its aliases) in the version, each with **Use this**
+     to fill the form (`GET /api/project/{uuid}/earlier-assessments`).
 
    Carries of builds before the recreated rule (2.0.0rc1 and earlier) put
    the marker on a recreated component's assessment too, and components

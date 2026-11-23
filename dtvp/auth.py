@@ -2,7 +2,7 @@ import asyncio
 import logging
 import sqlite3
 from functools import lru_cache
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 
 from authlib.integrations.base_client.errors import MismatchingStateError, OAuthError
@@ -381,10 +381,27 @@ async def get_session_user(request: Request):
     return await _session_user(request)
 
 
+# Told of every authenticated request (the sync's activity, ADR 0004).
+_request_listeners: list[Callable[[str], None]] = []
+
+
+def add_request_listener(listener: Callable[[str], None]) -> None:
+    _request_listeners.append(listener)
+
+
+def _note_request(user: str) -> str:
+    for listener in _request_listeners:
+        try:
+            listener(user)
+        except Exception:  # never fails the request
+            pass
+    return user
+
+
 async def get_current_user(request: Request):
     plain = _bearer_access_token(request)
     if plain is None:
-        return await _session_user(request)
+        return _note_request(await _session_user(request))
 
     record = await authenticate_access_token(plain)
     if not record.has_scope(SCOPE_READ) or not _access_token_may_call(request):
@@ -396,7 +413,7 @@ async def get_current_user(request: Request):
             ),
         )
     request.state.access_token = record
-    return record.username
+    return _note_request(record.username)
 
 
 @router.get("/me")

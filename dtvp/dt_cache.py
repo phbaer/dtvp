@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import copy
 import json
+import inspect
 import os
 import tempfile
 import threading
@@ -35,7 +36,7 @@ from .assessment_outbox_services import (
 )
 from .dt_client import DTClient, DTSettings
 from .fixed_versions import slim_affected_components
-from .same_issue import confirmed_pairs
+from .same_issue import confirmed_pairs, unknown_component_records
 from .finding_lifecycle_services import (
     ORIGIN_CARRIED_OVER,
     ORIGIN_CARRIED_OVER_BY_VULNERABILITY,
@@ -62,6 +63,7 @@ from .ports import (
     change_hint,
 )
 from .source_sync_state import (
+    FULL_ANALYSIS_DETAILS,
     KIND_BOM,
     KIND_FINDINGS,
     KIND_VULNS,
@@ -242,6 +244,41 @@ class ReadBudget:
 
 def _updated_text(value: Any) -> str:
     return "" if value is None else str(value)
+
+
+# Values the source moves on its own, without a change in what the findings
+# say (every export changes the risk scores; ADR 0004).
+VOLATILE_FINDING_KEYS = frozenset({"lastRiskScore", "lastInheritedRiskScore"})
+
+
+def _without_volatile(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_volatile(child)
+            for key, child in value.items()
+            if key not in VOLATILE_FINDING_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_volatile(child) for child in value]
+    return value
+
+
+def same_findings(stored: Any, fresh: Any) -> bool:
+    """Whether a findings read says what the stored findings say: the same
+    findings, in any order, apart from the volatile values. A read that only
+    reorders or moves a risk score must not rewrite the findings or bump the
+    revisions a grouped snapshot is built from (the snapshot would then be
+    built again, and its instances come out in another order)."""
+    if not isinstance(stored, list) or not isinstance(fresh, list):
+        return stored == fresh
+
+    def signature(findings: list[Any]) -> list[str]:
+        return sorted(
+            json.dumps(_without_volatile(finding), sort_keys=True, default=str)
+            for finding in findings
+        )
+
+    return len(stored) == len(fresh) and signature(stored) == signature(fresh)
 
 
 def _parse_time(value: Any) -> Optional[datetime]:
@@ -520,6 +557,8 @@ class CacheManager:
         fixed_versions_reads_per_cycle: int = None,
     ):
         self.base_path = base_path or get_dt_cache_path()
+        # Per project: analyses read one by one at its last findings read.
+        self.last_analysis_reads: Dict[str, int] = {}
         self.refresh_interval_seconds = (
             _refresh_seconds_from_env()
             if refresh_interval_seconds is None
@@ -633,6 +672,14 @@ class CacheManager:
             at=datetime.now(timezone.utc).isoformat(),
         )
         self.__dict__.pop("_startup_bom_indexes", None)
+        # "Component removed" told without the identity is unfounded: such
+        # rows become undetermined, once (idempotent); a read may tell them.
+        repaired = self.finding_lifecycle.repair_unfounded_removals()
+        if repaired:
+            logger.info(
+                "Gone findings: %d row(s) told 'component removed' without the "
+                "component's identity are undetermined now", repaired,
+            )
         # Per-version sync state (ADR 0004), in the local store's database.
         self.sync_state = SyncStateStore(self.store._connection)
 
@@ -1217,11 +1264,21 @@ class CacheManager:
                 await self._remove_inflight_fetch(key, task)
         return copy.deepcopy(result)
 
-    def cancel_inflight_fetches(self) -> list[asyncio.Task[Any]]:
-        """At shutdown: the shared upstream reads are shielded from their
-        callers' cancellation, so the background loop cancels them itself
-        before its client closes. Returns them, to be awaited."""
-        tasks = [task for task in self._inflight_fetches.values() if not task.done()]
+    def cancel_inflight_fetches(
+        self, project_uuids: Optional[Iterable[str]] = None
+    ) -> list[asyncio.Task[Any]]:
+        """The shared upstream reads are shielded from their callers'
+        cancellation: at shutdown the background loop cancels them itself
+        before its client closes, and a person's cancel of a version sync
+        cancels that version's reads (``project_uuids``; keys whose second
+        part is the project). Returns them, to be awaited."""
+        wanted = None if project_uuids is None else {str(uuid) for uuid in project_uuids}
+        tasks = [
+            task
+            for key, task in self._inflight_fetches.items()
+            if not task.done()
+            and (wanted is None or (len(key) > 1 and str(key[1]) in wanted))
+        ]
         for task in tasks:
             task.cancel()
         return tasks
@@ -1558,7 +1615,9 @@ class CacheManager:
         the source. The rows are shared by all projects, and one read per
         vulnerability is in flight at a time. Returns the number of reads.
         """
-        if not isinstance(client, AffectedVersionSource):
+        # The scheduler passes its budgeted wrapper (source_sync.LimitedSource),
+        # whose methods a protocol check cannot see: check what it wraps.
+        if not isinstance(getattr(client, "_source", client), AffectedVersionSource):
             return 0
         async with self.lock:
             records = self._load_project_cache(
@@ -1832,10 +1891,13 @@ class CacheManager:
         # exported, and the echo would count as a change in the source.
         async with self._project_exchange(project_uuid).read():
             try:
-                fresh_findings = await client.get_vulnerabilities(project_uuid, cve=None)
+                fresh_findings, detail_reads = await self._read_findings_list(
+                    client, project_uuid
+                )
             except Exception as exc:
                 self._record_sync_state(self.sync_state.record_failure, project_uuid, exc)
                 raise
+            self.last_analysis_reads[project_uuid] = detail_reads
             # Over the raw response, before anything of DTVP's is read into it.
             findings_identity, analyses, analyses_index = findings_digests(fresh_findings)
             portfolio = portfolio_digest(fresh_findings)
@@ -1888,7 +1950,15 @@ class CacheManager:
         )
         fresh_findings = self._overlay_local_analysis(project_uuid, fresh_findings)
         async with self.lock:
-            self._save_project_cache(path, fresh_findings, project_uuid=project_uuid)
+            # An unchanged read writes nothing: the stored findings and the
+            # revisions stay as they are (see same_findings).
+            # Only when the stored document is there too: a database missing
+            # it (replaced without the rest) is written again.
+            unchanged = self._document_exists(path) and same_findings(
+                self._load_project_cache(path, None), fresh_findings
+            )
+            if not unchanged:
+                self._save_project_cache(path, fresh_findings, project_uuid=project_uuid)
         result.findings = fresh_findings
         self._record_sync_state(
             self.sync_state.record_read,
@@ -2072,6 +2142,7 @@ class CacheManager:
             from .gone_component_names import resolve_gone_component_names
             from .project_archive_services import get_project_archive_path
 
+            stats: dict[str, Any] = {}
             try:
                 resolve_gone_component_names(
                     self.finding_lifecycle,
@@ -2079,11 +2150,25 @@ class CacheManager:
                     stored_bom=lambda: self._load_project_cache(
                         self._bom_path(project_uuid), None
                     ),
+                    stored_findings=lambda: self._load_project_cache(
+                        self._findings_path(project_uuid), None
+                    ),
                     archive_dir=get_project_archive_path(),
                     max_archive_reads=ARCHIVE_READS_PER_FINDINGS_READ,
+                    stats=stats,
                 )
             except Exception:
                 logger.exception("Could not look up gone components of %s", project_uuid)
+            if stats.get("looked_up"):
+                found = stats.get("found") or {}
+                logger.info(
+                    "Gone components of %s: %d looked up; found %d in the stored BOM, "
+                    "%d in the stored findings, %d in archived BOMs; %d without identity "
+                    "stay undetermined",
+                    project_uuid, stats["looked_up"], found.get("stored_bom", 0),
+                    found.get("stored_findings", 0), found.get("archived_boms", 0),
+                    stats.get("unknown", 0),
+                )
 
         await asyncio.to_thread(name_components)
         plan = await asyncio.to_thread(
@@ -2530,6 +2615,104 @@ class CacheManager:
 
         return await asyncio.to_thread(assemble)
 
+    async def _read_findings_list(
+        self, client: VulnerabilitySource, project_uuid: str
+    ) -> Tuple[Any, int]:
+        """A version's findings with complete analyses, and how many
+        analyses had to be read one by one.
+
+        A source that can leave the details out (``analysis_details=False``)
+        lists each analysis with its state and suppression only. Where that
+        equals the value DTVP last saw in the source or last exported for the
+        finding, the details come from that record: the source still holds
+        them, so reading them again costs a request and tells nothing new.
+        Only the other assessed findings are read one by one: those DTVP has
+        no record of (adoption) and those whose state or suppression changed
+        in the source. A change of the details alone in the source is seen
+        by the safety re-read, which reads every assessment
+        (``FULL_ANALYSIS_DETAILS``; ADR 0004, "Analysis details").
+        """
+        try:
+            parameters = inspect.signature(client.get_vulnerabilities).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "analysis_details" not in parameters or FULL_ANALYSIS_DETAILS.get():
+            return await client.get_vulnerabilities(project_uuid, cve=None), 0
+        findings = await client.get_vulnerabilities(
+            project_uuid, cve=None, analysis_details=False
+        )
+        if not isinstance(findings, list):
+            return findings, 0
+        wanted: List[Tuple[Dict[str, Any], Tuple[str, str, str]]] = []
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            key = self._finding_analysis_key(project_uuid, finding)
+            listed = finding.get("analysis")
+            listed = listed if isinstance(listed, dict) else {}
+            state = str(
+                listed.get("analysisState") or listed.get("state") or "NOT_SET"
+            )
+            suppressed = _get_analysis_suppressed(listed)
+            if key is None or (
+                state == "NOT_SET" and not suppressed
+            ) or any(
+                name in listed
+                for name in ("analysisDetails", "analysis_details", "detail")
+            ):
+                continue  # nothing assessed, or the list already has it all
+            known = self._known_source_value(key, state, suppressed)
+            if known is not None:
+                finding["analysis"] = {**listed, "analysisDetails": known}
+                continue
+            wanted.append((finding, key))
+        batch_size = 20
+        for start in range(0, len(wanted), batch_size):
+            batch = wanted[start : start + batch_size]
+            results = await asyncio.gather(
+                *[
+                    client.get_analysis(
+                        project_uuid=key[0],
+                        component_uuid=key[1],
+                        vulnerability_uuid=key[2],
+                    )
+                    for _finding, key in batch
+                ],
+                return_exceptions=True,
+            )
+            for (finding, key), analysis in zip(batch, results):
+                if isinstance(analysis, BaseException):
+                    logger.warning(
+                        "Could not read the analysis of %s/%s in %s: %s",
+                        key[1], key[2], project_uuid, analysis,
+                    )
+                    continue
+                if isinstance(analysis, dict):
+                    listed = finding.get("analysis")
+                    finding["analysis"] = {
+                        **(listed if isinstance(listed, dict) else {}),
+                        **analysis,
+                    }
+        return findings, len(wanted)
+
+    def _known_source_value(
+        self, key: AssessmentKey, state: str, suppressed: bool
+    ) -> Optional[str]:
+        """The details the source holds for a finding, when DTVP knows them:
+        the value it last read from the source or last exported, if that has
+        the listed state and suppression; else ``None``."""
+        overlay = self.assessment_outbox.get_overlay(key)
+        if overlay is None:
+            return None
+        for value in (overlay.get("remote"), overlay.get("base")):
+            if (
+                isinstance(value, dict)
+                and str(value.get("state") or "NOT_SET") == state
+                and bool(value.get("suppressed")) == suppressed
+            ):
+                return str(value.get("details") or "")
+        return None
+
     async def _read_texts_without_state(
         self,
         client: VulnerabilitySource,
@@ -2746,6 +2929,18 @@ class CacheManager:
     ) -> List[Dict[str, Any]]:
         return self.assessment_outbox.list_revisions(
             (project_uuid, component_uuid, vulnerability_uuid), limit=limit
+        )
+
+    def unknown_component_records(self, project_uuid: str) -> Dict[str, Dict[str, Any]]:
+        """Per vulnerability of a project version: the assessed gone findings
+        whose component DTVP never knew, and the findings of the same
+        vulnerability reported now (``same_issue.unknown_component_records``)."""
+        rows = self.finding_lifecycle.presence(project_uuid)
+        return unknown_component_records(
+            rows,
+            lambda row: self.assessment_outbox.get_overlay(
+                (project_uuid, row["component_uuid"], row["vulnerability_uuid"])
+            ),
         )
 
     def get_ticket_histories(self) -> Dict[AssessmentKey, List[Dict[str, Any]]]:

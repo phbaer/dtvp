@@ -93,7 +93,7 @@ describe('useTaskGroupWindows', () => {
             order: 'asc',
             offset: 0,
             limit: 2,
-            generation: 1,
+            generation: expect.any(Number),
         }, {
             signal: expect.any(AbortSignal),
         })
@@ -156,7 +156,7 @@ describe('useTaskGroupWindows', () => {
             sort: 'id',
             order: 'asc',
             limit: 25,
-            generation: 1,
+            generation: expect.any(Number),
             offset: 0,
             include_counts: false,
         }, {
@@ -187,7 +187,7 @@ describe('useTaskGroupWindows', () => {
             offset: 0,
             limit: 1,
             include_counts: true,
-            generation: 1,
+            generation: expect.any(Number),
         }, {
             signal: expect.any(AbortSignal),
         })
@@ -292,7 +292,7 @@ describe('useTaskGroupWindows', () => {
             cursor: 'cursor-1',
             limit: 1,
             include_counts: false,
-            generation: 2,
+            generation: expect.any(Number),
         }, {
             signal: expect.any(AbortSignal),
         })
@@ -343,5 +343,74 @@ describe('useTaskGroupWindows', () => {
 
         expect(groups.value.map(item => item.id)).toEqual(['CVE-new'])
         expect(taskWindows.windowLoading.value).toBe(false)
+    })
+
+    it('gives a remounted view a newer generation than the previous mount', async () => {
+        const api = await import('../api')
+        vi.mocked(api.getTaskVulnGroups).mockResolvedValue({
+            items: [], total: 0, filtered: 0, offset: 0, limit: 1, sort: 'id', order: 'asc',
+        })
+        const mount = () => useTaskGroupWindows({
+            currentTaskId: ref('task-1'),
+            groups: ref<GroupedVuln[]>([]),
+            query: computed(() => ({ sort: 'id', order: 'asc' })),
+            limit: 1,
+        })
+
+        await mount().loadWindow({ reset: true })
+        await mount().loadWindow({ reset: true })
+
+        const generations = vi.mocked(api.getTaskVulnGroups).mock.calls.map(call => call[1]?.generation as number)
+        expect(generations).toHaveLength(2)
+        expect(generations[1]).toBeGreaterThan(generations[0]!)
+    })
+
+    it('asks once more when the server reports the query as superseded', async () => {
+        const api = await import('../api')
+        const superseded = Object.assign(new Error('Request failed with status code 409'), {
+            response: { status: 409, data: { detail: 'Grouped query was superseded' } },
+        })
+        vi.mocked(api.getTaskVulnGroups)
+            .mockRejectedValueOnce(superseded)
+            .mockResolvedValueOnce({
+                items: [group('CVE-1')], total: 1, filtered: 1, offset: 0, limit: 1, sort: 'id', order: 'asc',
+            })
+        const groups = ref<GroupedVuln[]>([])
+        const taskWindows = useTaskGroupWindows({
+            currentTaskId: ref('task-1'),
+            groups,
+            query: computed(() => ({ sort: 'id', order: 'asc' })),
+            limit: 1,
+        })
+
+        await taskWindows.loadWindow({ reset: true })
+        await flushPromises()
+
+        const calls = vi.mocked(api.getTaskVulnGroups).mock.calls
+        expect(calls).toHaveLength(2)
+        expect(calls[1]![1]!.generation as number).toBeGreaterThan(calls[0]![1]!.generation as number)
+        expect(groups.value.map(item => item.id)).toEqual(['CVE-1'])
+        expect(taskWindows.windowError.value).toBe('')
+        expect(taskWindows.windowLoading.value).toBe(false)
+    })
+
+    it('shows the error when the retry is superseded as well', async () => {
+        const api = await import('../api')
+        const superseded = Object.assign(new Error('Request failed with status code 409'), {
+            response: { status: 409, data: { detail: 'Grouped query was superseded' } },
+        })
+        vi.mocked(api.getTaskVulnGroups).mockRejectedValue(superseded)
+        const taskWindows = useTaskGroupWindows({
+            currentTaskId: ref('task-1'),
+            groups: ref<GroupedVuln[]>([]),
+            query: computed(() => ({ sort: 'id', order: 'asc' })),
+            limit: 1,
+        })
+
+        await taskWindows.loadWindow({ reset: true })
+        await flushPromises()
+
+        expect(vi.mocked(api.getTaskVulnGroups)).toHaveBeenCalledTimes(2)
+        expect(taskWindows.windowError.value).toContain('409')
     })
 })

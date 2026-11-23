@@ -2281,8 +2281,10 @@ async def test_an_inactive_record_from_before_the_upgrade_is_carried_by_vulnerab
     assert manager.list_export_queue() == []
     if outcome == "undetermined":
         assert result.not_carried == 1
+        # Without the component's identity a UUID missing from the BOM proves
+        # no removal (it may have been recreated): the reason is undetermined.
         assert (row["status"], row["gone_reason"], row["carry_over"]) == (
-            "gone", "component_removed", "undetermined",
+            "gone", "undetermined", "undetermined",
         )
     else:
         # Another package: not carried. The record is followed all the same

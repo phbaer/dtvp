@@ -1809,3 +1809,17 @@ def test_a_dependency_track_finding_without_a_uuid_gets_a_stable_unique_key():
     first = keys()
     assert first == ["p1:c1:v1", "p1:c2:v1"]  # matrix, or the same composite
     assert keys() == first
+
+
+def test_parsed_blocks_are_the_callers_own_copies():
+    """Texts are parsed once and cached: a caller changing its blocks does
+    not change what the next caller reads."""
+    from dtvp.logic import parse_assessment_blocks
+
+    text = "--- [Team: Platform] [State: NOT_AFFECTED] [Assigned: ana] ---\nNot used.\n"
+    _shared, first = parse_assessment_blocks(text)
+    first[0]["state"] = "EXPLOITABLE"
+    first[0]["assigned"].append("bob")
+    _shared, second = parse_assessment_blocks(text)
+    assert second[0]["state"] == "NOT_AFFECTED"
+    assert "bob" not in second[0]["assigned"]

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component } from 'vue'
 import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment } from '../lib/api'
+import type { EarlierAssessment } from '../lib/api'
+import EarlierAssessments from './EarlierAssessments.vue'
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
@@ -2516,6 +2518,36 @@ const usePreviousTeamAssessment = (block: AssessmentBlock) => {
     formTouched.value = true
 }
 
+// No finding of the vulnerability has an assessment: offer what DTVP still
+// holds for gone findings of it in the same versions (EarlierAssessments).
+const assessmentEmpty = computed(() => allInstances.value.length > 0 && allInstances.value.every((instance: any) =>
+    String(instance.analysis_state || instance.analysisState || 'NOT_SET') === 'NOT_SET'
+    && !String(instance.analysis_details || instance.analysisDetails || '').trim()
+))
+const earlierFindings = computed(() => (props.group.affected_versions || []).flatMap((version: any) =>
+    (version.components || []).map((instance: any) => ({
+        project_uuid: String(instance.project_uuid || version.project_uuid || ''),
+        vulnerability_uuid: String(instance.vulnerability_uuid || ''),
+        project_version: String(instance.project_version || version.project_version || ''),
+    }))
+))
+/** Fill the form from an earlier assessment; nothing is saved. With a team
+ * open, that team's block if the record has one, else the decision. */
+const useEarlierAssessment = (entry: EarlierAssessment) => {
+    const teamKey = (name: string) => (normalizeTags([name], teamMapping?.value || {})[0] || name).toLocaleLowerCase()
+    const block = selectedTeam.value
+        ? entry.teams.find(team => teamKey(team.team) === teamKey(selectedTeam.value))
+        : undefined
+    state.value = block?.state || entry.state
+    justification.value = block?.justification || entry.justification || 'NOT_SET'
+    details.value = stripPendingReviewStatus(stripSsvcDocumentation(block?.details ?? entry.details ?? '')).trim()
+    if (!selectedTeam.value && entry.response && entry.response !== 'NOT_SET') {
+        response.value = entry.response
+        responseTouched.value = true
+    }
+    formTouched.value = true
+}
+
 const preparedAutomaticProposals = computed(() => prepareCodeAnalysisResults(
     codeAnalysisProposalRuns.value,
     triggeringTaggedComponents.value,
@@ -3342,24 +3374,31 @@ const teamBlockStateColor = (state?: string): string => {
                 class="grid gap-4 rounded border border-gray-800/80 bg-gray-950/30 p-3"
                 :class="isWorkspace ? '2xl:grid-cols-2' : 'lg:grid-cols-2'"
             >
-                <div v-if="triggeringTaggedComponents.length > 0" data-testid="triggering-team-components" class="space-y-2">
+                <div v-if="triggeringTaggedComponents.length > 0" data-testid="triggering-team-components" class="min-w-0 space-y-2">
                     <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Triggering team-mapped components</h4>
-                    <div class="flex flex-wrap gap-1.5">
+                    <div class="flex flex-wrap gap-1.5 overflow-x-auto pb-1">
                         <span
                             v-for="comp in triggeringTaggedComponents"
                             :key="comp.name"
-                            class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700"
+                            data-testid="triggering-team-component"
+                            :data-catch-all="comp.catchAll ? 'true' : undefined"
+                            class="inline-flex shrink-0 items-center whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-mono border"
+                            :class="comp.catchAll ? 'bg-amber-950/30 text-amber-100 border-amber-700/50' : 'bg-gray-800 text-gray-300 border-gray-700'"
+                            :title="comp.catchAll
+                                ? `Neither this component nor any component of its chain is in the team mapping, so the catch-all '*' gives the team ${comp.tag}. Add one of these names to the mapping to give it a team.`
+                                : undefined"
                         >
                             {{ comp.name }}
                             <span v-if="comp.versions.length" class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
-                            <span class="ml-2 text-[10px] font-normal text-blue-300">({{ comp.tag }})</span>
+                            <span v-if="comp.under?.length" class="ml-1 font-sans text-amber-200/70">under {{ comp.under.join(', ') }}</span>
+                            <span class="ml-2 text-[10px] font-normal" :class="comp.catchAll ? 'text-amber-300' : 'text-blue-300'">({{ comp.tag }}<template v-if="comp.catchAll">; no team mapping, catch-all '*'</template>)</span>
                         </span>
                     </div>
                 </div>
 
-                <div v-if="affectedTaggedComponents.length > 0" class="space-y-2">
+                <div v-if="affectedTaggedComponents.length > 0" class="min-w-0 space-y-2">
                     <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Affected components with team tags</h4>
-                    <div class="flex flex-wrap gap-1.5">
+                    <div class="flex flex-wrap gap-1.5 overflow-x-auto pb-1">
                         <span
                             v-for="comp in affectedTaggedComponents"
                             :key="comp.name"
@@ -3599,6 +3638,12 @@ const teamBlockStateColor = (state?: string): string => {
                                 <button type="button" :data-testid="`use-previous-team-${block.team}`" class="shrink-0 rounded border border-amber-500/40 px-2 py-1 font-semibold text-amber-100 hover:bg-amber-500/15" @click="usePreviousTeamAssessment(block)">Use as draft</button>
                             </div>
                         </div>
+
+                        <EarlierAssessments
+                            v-if="assessmentEmpty"
+                            :findings="earlierFindings"
+                            @use="useEarlierAssessment"
+                        />
 
                         <!-- Block header metadata (read-only) -->
                         <div v-if="teamBlockMeta(selectedTeam || 'General')" class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-gray-500">

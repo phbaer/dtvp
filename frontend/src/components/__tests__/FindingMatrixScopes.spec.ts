@@ -35,3 +35,19 @@ describe('FindingMatrix version scopes', () => {
         expect(badge(2).text()).toBe('two overrides')
     })
 })
+
+describe('FindingMatrix teams', () => {
+    it('shows each component\'s team, the catch-all one marked as such', () => {
+        const tagged = (component: string, tags: string[]) => ({ ...finding('6.15.0', component, ''), tags, analysis_state: 'NOT_SET' })
+        const wrapper = mount(FindingMatrix, {
+            props: { instances: [tagged('tar', ['Unknown']), tagged('lodash', ['S-Web'])] },
+            global: { provide: { teamMapping: { value: { '*': 'Unknown', lodash: 'S-Web' } } } },
+        })
+        const teams = wrapper.findAll('[data-testid="finding-matrix-team"]')
+        expect(teams.map(team => [team.text(), team.attributes('data-catch-all') ?? null])).toEqual([
+            ['S-Web', null],
+            ['Unknown · catch-all', 'true'],
+        ])
+        expect(teams[1].attributes('title')).toContain("catch-all '*'")
+    })
+})

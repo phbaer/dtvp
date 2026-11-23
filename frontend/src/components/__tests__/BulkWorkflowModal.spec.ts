@@ -99,6 +99,10 @@ describe('BulkWorkflowModal', () => {
             ['CVE-2026-1'],
             'preview-1',
             expect.any(Function),
+            undefined,
+            [],
+            {},
+            expect.any(Object),
         )
         expect(wrapper.get('[data-testid="bulk-workflow-completion"]').text()).toContain('2 applied')
         expect(wrapper.emitted('applied')).toHaveLength(1)
@@ -252,11 +256,68 @@ describe('BulkWorkflowModal', () => {
         await flushPromises()
         expect(mocks.buildBulkWorkflowDocument).toHaveBeenCalledWith(
             'automatic-assessments', 'task-1', { q: 'auto' }, ['CVE-AFFECTED'], 'preview-auto',
-            expect.any(Function),
+            expect.any(Function), undefined, {}, expect.any(Object),
         )
         expect(createObjectURL).toHaveBeenCalled()
         expect(click).toHaveBeenCalled()
         expect(revokeObjectURL).toHaveBeenCalledWith('blob:ticket')
+    })
+
+    it('reloads the preview after a selected group changed, keeps the other selections and names the changed group', async () => {
+        const item = (groupId: string) => ({ group_id: groupId, finding_count: 1, block_count: 1 })
+        const previewOf = (fingerprints: Record<string, string>, token: string) => ({
+            task_id: 'task-1',
+            workflow,
+            preview_token: token,
+            selectable_group_ids: ['CVE-A', 'CVE-B', 'CVE-C'],
+            items: ['CVE-A', 'CVE-B', 'CVE-C'].map(item),
+            group_fingerprints: fingerprints,
+            summary: { groups: 3 },
+        })
+        const before = { 'CVE-A': 'fa-1', 'CVE-B': 'fb-1', 'CVE-C': 'fc-1' }
+        mocks.previewBulkWorkflow
+            .mockResolvedValueOnce(previewOf(before, 'preview-1'))
+            // A background sync changed CVE-B in the meantime.
+            .mockResolvedValueOnce(previewOf({ ...before, 'CVE-B': 'fb-2' }, 'preview-2'))
+        mocks.applyBulkWorkflow.mockRejectedValueOnce(Object.assign(
+            new Error('2 selected group(s) changed since the preview'),
+            {
+                detail: {
+                    code: 'preview_changed',
+                    message: 'changed',
+                    changed_groups: ['CVE-B'],
+                    changes: { 'CVE-B': [{ path: 'finding_count', before: '1', after: '4' }] },
+                },
+            },
+        ))
+        const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+        await wrapper.setProps({ show: true })
+        await flushPromises()
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+        await flushPromises()
+        // The reviewer leaves CVE-C out; A and B stay selected.
+        await wrapper.get('[data-testid="bulk-workflow-item-CVE-C"]').trigger('click')
+        await flushPromises()
+
+        await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+        await flushPromises()
+
+        // The apply sent the fingerprints of the selected groups only.
+        expect(mocks.applyBulkWorkflow.mock.calls[0][3]).toEqual(['CVE-A', 'CVE-B'])
+        expect(mocks.applyBulkWorkflow.mock.calls[0][8]).toEqual({ 'CVE-A': 'fa-1', 'CVE-B': 'fb-1' })
+        // The items shown go with the fingerprints, for the diff of a refusal.
+        expect(Object.keys(mocks.applyBulkWorkflow.mock.calls[0][9])).toEqual(['CVE-A', 'CVE-B'])
+        // The preview was read again, and only the changed group is dropped from the selection.
+        expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(2)
+        expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-A"]').classes()).toContain('bg-blue-500/10')
+        expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-B"]').classes()).not.toContain('bg-blue-500/10')
+        expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-B"]').attributes('data-changed')).toBe('true')
+        expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-A"]').attributes('data-changed')).toBeUndefined()
+        expect(wrapper.get('[data-testid="bulk-workflow-changed"]').text()).toContain('1 selected group(s) changed since the preview: CVE-B (finding_count)')
+        expect(wrapper.get('[data-testid="bulk-workflow-changed"]').text()).toContain('the other selections are kept')
+        // The list is shown, not replaced by an error.
+        expect(wrapper.find('[data-testid="bulk-workflow-error"]').exists()).toBe(false)
+        expect(mocks.applyBulkWorkflow).toHaveBeenCalledTimes(1)
     })
 
     it('shows automatic-assessment discovery diagnostics for an empty preview', async () => {
@@ -474,7 +535,7 @@ describe('BulkWorkflowModal', () => {
             await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
             await flushPromises()
             // No opt-in is sent: the call has no list of included vulnerabilities.
-            expect(mocks.applyBulkWorkflow.mock.calls[0]).toHaveLength(6)
+            expect(mocks.applyBulkWorkflow.mock.calls[0]).toHaveLength(10)
         })
 
         it('sends the vulnerabilities whose new findings the reviewer included', async () => {
@@ -530,7 +591,7 @@ describe('BulkWorkflowModal', () => {
 
             const call = mocks.applyBulkWorkflow.mock.calls[0]
             expect(call[3]).toEqual(['CVE-2026-2'])
-            expect(call).toHaveLength(6)
+            expect(call).toHaveLength(10)
         })
 
         it('reports the new findings a run left unassessed', async () => {
@@ -784,7 +845,7 @@ describe('BulkWorkflowModal', () => {
             await flushPromises()
             expect(mocks.applyBulkWorkflow).toHaveBeenCalledWith(
                 'team-assessment-restore', 'task-1', {}, ['CVE-2099-0001'], 'token-source-1',
-                expect.any(Function), 'source-1',
+                expect.any(Function), 'source-1', [], {}, expect.any(Object),
             )
             // A finding saved after the preview is left as it is, and said so.
             expect(wrapper.get('[data-testid="bulk-workflow-changed-since-preview"]').text())

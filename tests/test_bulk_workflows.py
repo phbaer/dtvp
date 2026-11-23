@@ -228,31 +228,24 @@ def test_bulk_workflow_registry_and_preview_token_are_deterministic():
         plugin,
         task_id=context.task_id,
         filter_payload={"analysis": ["NOT_SET"]},
-        preview=preview,
     )
-    reordered = {**preview, "items": list(reversed(preview["items"]))}
+    # The token binds the workflow, the task and the filters, not the content:
+    # a background sync changes the content all the time.
     assert registry.get("example") is plugin
     assert first == build_preview_token(
         plugin,
         task_id=context.task_id,
         filter_payload={"analysis": ["NOT_SET"]},
-        preview=reordered,
     )
     assert first != build_preview_token(
         plugin,
         task_id=context.task_id,
         filter_payload={"analysis": ["EXPLOITABLE"]},
-        preview=preview,
     )
-    changed = {
-        **preview,
-        "items": [{**preview["items"][0], "target_state": "EXPLOITABLE"}, *preview["items"][1:]],
-    }
     assert first != build_preview_token(
         plugin,
-        task_id=context.task_id,
+        task_id="task-2",
         filter_payload={"analysis": ["NOT_SET"]},
-        preview=changed,
     )
 
 
@@ -2352,7 +2345,16 @@ def test_repair_does_not_refer_teams_to_a_pending_or_missing_global_assessment()
     pending = _repair_group(
         [("NOT_AFFECTED", f"{_GLOBAL}\n\n[Status: Pending Review]")] * 2, tags=["TeamB"],
     )
-    assert _repair(pending)[0]["items"] == []
+    # Nothing to write; the group is listed with the reason, not selectable.
+    preview, payloads, _ = _repair(pending)
+    assert payloads == []
+    [item] = preview["items"]
+    assert item["repairs"] == [] and item["repairable"] is False
+    assert item["review"] == [
+        "TeamB has not assessed this vulnerability yet; nothing to copy and the global "
+        "assessment is pending review, so no team can refer to it: open the vulnerability "
+        "to assess it"
+    ]
     unset = _GLOBAL.replace("[State: NOT_AFFECTED]", "[State: NOT_SET]")
     assert _repair(_repair_group([("NOT_SET", unset)] * 2, tags=["TeamB"]))[0]["items"] == []
     # Unknown ownership: there is no team to refer.
@@ -2473,7 +2475,13 @@ def test_repair_settles_when_the_rescoring_precedes_the_team_assessments():
     repaired = _apply_repair(group, payloads)
     repaired["list_metadata"]["lifecycle"] = "INCOMPLETE"
     again, payloads, _ = _repair(repaired, rules=rules)
-    assert again["items"] == [] and payloads == []
+    # Settled: nothing to write. TeamC never assessed, which only a person
+    # can do; the group is listed with that reason and is not selectable.
+    assert payloads == []
+    assert [(item["repairs"], item["repairable"], item["review"]) for item in again["items"]] == [
+        ([], False, ["TeamC has not assessed this vulnerability yet; nothing to copy: "
+                     "open the vulnerability to assess it"])
+    ]
 
 
 def test_repair_synchronization_keeps_and_copies_a_manual_rescoring():

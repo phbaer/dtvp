@@ -54,6 +54,32 @@ describe('assessmentSyncIssues', () => {
         expect(issues.map(issue => issue.code)).not.toContain('MISSING_GLOBAL_ASSESSMENT')
     })
 
+    it('counts an assessment under a team alias or another case for the team', () => {
+        const group = (team: string): GroupedVuln => ({
+            id: 'CVE-ALIAS',
+            tags: ['Core'],
+            affected_versions: [{
+                project_name: 'Example',
+                project_version: '1.0.0',
+                project_uuid: 'project-1',
+                components: [
+                    instance({
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: `--- [Team: ${team}] [State: NOT_AFFECTED] ---`,
+                    }),
+                    instance({ finding_uuid: 'finding-2' }),
+                ],
+            }],
+        })
+        const codes = (team: string, teamMapping?: Record<string, string | string[]>) =>
+            getGroupAssessmentSyncIssues(group(team), { lifecycle: 'INCOMPLETE', teamMapping })
+                .map(issue => issue.code)
+
+        expect(codes('DE-Core', { NodeJS: ['Core', 'DE-Core'] })).not.toContain('MISSING_TEAM_ASSESSMENTS')
+        expect(codes('core')).not.toContain('MISSING_TEAM_ASSESSMENTS')
+        expect(codes('K-Core')).toContain('MISSING_TEAM_ASSESSMENTS')
+    })
+
     it('shows the concrete conflicting states for an inconsistent assessment', () => {
         const group: GroupedVuln = {
             id: 'CVE-INCONSISTENT',

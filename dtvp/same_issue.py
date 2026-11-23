@@ -22,6 +22,12 @@ import re
 from typing import Any, Callable, Iterable, Mapping, Optional
 
 REASON_DESCRIPTION = "same description"
+# A gone finding whose component DTVP never knew (a row made for a record
+# from before tracking, on a component the source has since recreated) and a
+# reported finding of the same vulnerability in the same version: probably
+# the same finding on a recreated component. Only a person can tell; nothing
+# is exported for it, the vulnerability id is the same.
+REASON_UNKNOWN_COMPONENT = "same vulnerability, the gone finding's component is unknown"
 
 # A description this short says too little to tell two issues apart.
 MIN_DESCRIPTION_LENGTH = 40
@@ -118,10 +124,14 @@ class SameIssueIndex:
         self.aliases = aliases or {}
         self.reported_by_component: dict[str, list[Mapping[str, Any]]] = {}
         self.reported_by_package: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+        self.reported_by_vulnerability: dict[str, list[Mapping[str, Any]]] = {}
         for row in rows.values():
             if row.get("status") != "reported":
                 continue
             self.reported_by_component.setdefault(row["component_uuid"], []).append(row)
+            self.reported_by_vulnerability.setdefault(
+                str(row["vulnerability_uuid"]), []
+            ).append(row)
             package = _package_key(row)
             if package:
                 self.reported_by_package.setdefault(package, []).append(row)
@@ -149,6 +159,13 @@ class SameIssueIndex:
     def reason(self, left: Mapping[str, Any], right: Mapping[str, Any]) -> Optional[str]:
         """Why two finding rows are probably the same issue, or ``None``."""
         if left["vulnerability_uuid"] == right["vulnerability_uuid"]:
+            if (
+                _component_unknown(left)
+                and left.get("status") == "gone"
+                and right.get("status") == "reported"
+                and left["component_uuid"] != right["component_uuid"]
+            ):
+                return REASON_UNKNOWN_COMPONENT
             return None
         if self._is_alias(left, right):
             return None
@@ -165,6 +182,16 @@ class SameIssueIndex:
         """Reported findings a gone finding may be the same issue as: on its
         own component, or on one with the same package URL and version."""
         found = list(self.reported_by_component.get(row["component_uuid"], []))
+        if _component_unknown(row) and row.get("status") == "gone":
+            # The component is unknown: any reported finding of the same
+            # vulnerability in this version may be its successor.
+            found += [
+                other
+                for other in self.reported_by_vulnerability.get(
+                    str(row["vulnerability_uuid"]), []
+                )
+                if other["component_uuid"] != row["component_uuid"]
+            ]
         package = _package_key(row)
         if package:
             found += [
@@ -177,7 +204,13 @@ class SameIssueIndex:
         """The first reported finding a gone finding is probably the same
         issue as, with the reason."""
         for other in sorted(
-            self.candidates(row), key=lambda item: str(item.get("vuln_id") or "")
+            self.candidates(row),
+            key=lambda item: (
+                str(item.get("vuln_id") or ""),
+                str(item.get("component_name") or ""),
+                str(item.get("component_version") or ""),
+                str(item.get("component_uuid") or ""),
+            ),
         ):
             reason = self.reason(row, other)
             if reason:
@@ -217,6 +250,14 @@ class SameIssueIndex:
         return found
 
 
+def _component_unknown(row: Mapping[str, Any]) -> bool:
+    """Whether DTVP never learned which component a finding row was on."""
+    return not any(
+        str(row.get(name) or "").strip()
+        for name in ("component_identity", "component_purl", "component_name")
+    )
+
+
 def _package_key(row: Mapping[str, Any]) -> Optional[tuple[str, str]]:
     purl = str(row.get("component_purl") or "").strip().lower()
     version = str(row.get("component_version") or "").strip()
@@ -237,8 +278,137 @@ def confirmed_pairs(
         if not row.get("same_issue_confirmed_by") or not all(other_key):
             continue
         other = by_key.get(other_key)  # type: ignore[arg-type]
+        if other_key[1] == row["vulnerability_uuid"]:
+            # The same vulnerability on a recreated component: nothing to
+            # name, it is the same id.
+            continue
         if other is not None and other.get("vuln_id"):
             result.setdefault(key, set()).add(str(other["vuln_id"]))
         if row.get("vuln_id"):
             result.setdefault(other_key, set()).add(str(row["vuln_id"]))  # type: ignore[arg-type]
     return result
+
+
+# -- gone records whose component is unknown, per vulnerability ---------------
+
+UNKNOWN_READY = "ready"
+UNKNOWN_AMBIGUOUS = "ambiguous"
+UNKNOWN_CONFLICTING = "conflicting"
+
+
+def _blank(record: Optional[Mapping[str, Any]]) -> bool:
+    return (
+        record is None
+        or str(record.get("analysisState") or "NOT_SET") == "NOT_SET"
+        and not str(record.get("analysisDetails") or "").strip()
+    )
+
+
+def unknown_component_records(
+    rows: Mapping[tuple[str, str], Mapping[str, Any]],
+    record_of: Callable[[Mapping[str, Any]], Optional[Mapping[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    """Per vulnerability UUID of one project version: its gone findings whose
+    component DTVP never knew and that hold an assessment, and the findings of
+    the same vulnerability reported now (the candidates to carry it to).
+    Records that were superseded or cancelled are left out."""
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows.values():
+        if row.get("status") != "gone" or not _component_unknown(row):
+            continue
+        record = record_of(row)
+        if _blank(record) or (record or {}).get("sync_status") in ("superseded", "cancelled"):
+            continue
+        entry = result.setdefault(str(row["vulnerability_uuid"]), {
+            "vuln_id": row.get("vuln_id"), "gone": [], "candidates": [],
+        })
+        entry["gone"].append({
+            "component_uuid": row["component_uuid"],
+            "state": str(record["analysisState"]),
+            "details": str(record.get("analysisDetails") or ""),
+            "suppressed": bool(record.get("isSuppressed")),
+            "updated_at": record.get("updated_at"),
+            "record": dict(record),
+            "row": dict(row),
+        })
+    for vulnerability, entry in result.items():
+        gone = {item["component_uuid"] for item in entry["gone"]}
+        entry["candidates"] = sorted(
+            (
+                {
+                    "component_uuid": row["component_uuid"],
+                    "component_name": row.get("component_name"),
+                    "component_version": row.get("component_version"),
+                    "component_purl": row.get("component_purl"),
+                    "record": record_of(row),
+                }
+                for row in rows.values()
+                if row.get("status") == "reported"
+                and str(row["vulnerability_uuid"]) == vulnerability
+                and row["component_uuid"] not in gone
+            ),
+            key=lambda item: (
+                str(item["component_name"] or ""), str(item["component_version"] or ""),
+                str(item["component_uuid"]),
+            ),
+        )
+        entry["gone"].sort(key=lambda item: str(item["updated_at"] or ""), reverse=True)
+    return result
+
+
+def _exported_value(item: Mapping[str, Any]) -> tuple[str, bool, str]:
+    """What a gone record exports: state, suppression and text. The
+    justification and response are tags in the text, so the stripped text
+    covers them."""
+    return (item["state"], bool(item["suppressed"]), str(item["details"] or "").strip())
+
+
+def classify_unknown_component(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """What can be done with one vulnerability's gone records of unknown
+    component in a version:
+
+    - ``conflicting`` when they hold different states;
+    - ``ready`` with every candidate as a target when all records agree on
+      every exported field (state, justification, response, suppression and
+      text): it does not matter which component each was on;
+    - ``ready`` with the one target when the vulnerability is reported on one
+      component (or exactly one shares a package name or URL a gone record
+      knows, which a row of unknown component normally does not), copying
+      the newest record;
+    - else ``ambiguous``."""
+    states = {item["state"] for item in entry["gone"]}
+    candidates = list(entry["candidates"])
+    base = {
+        "vuln_id": entry.get("vuln_id"), "candidates": candidates, "gone": entry["gone"],
+        "agreeing": 0,
+    }
+    if len(states) > 1:
+        return {**base, "kind": UNKNOWN_CONFLICTING, "states": sorted(states)}
+    if not candidates:
+        return {**base, "kind": None}
+    agree = len({_exported_value(item) for item in entry["gone"]}) == 1
+    if len(candidates) > 1:
+        if agree:
+            return {
+                **base, "kind": UNKNOWN_READY, "targets": candidates,
+                "source": entry["gone"][0], "agreeing": len(entry["gone"]),
+            }
+        names = {
+            str(item["row"].get(name) or "").strip().lower()
+            for item in entry["gone"]
+            for name in ("component_name", "component_purl")
+        } - {""}
+        sharing = [
+            candidate for candidate in candidates
+            if names & {
+                str(candidate.get("component_name") or "").strip().lower(),
+                str(candidate.get("component_purl") or "").strip().lower(),
+            }
+        ]
+        if len(sharing) != 1:
+            return {**base, "kind": UNKNOWN_AMBIGUOUS}
+        candidates = sharing
+    return {
+        **base, "kind": UNKNOWN_READY, "targets": candidates[:1], "source": entry["gone"][0],
+        "agreeing": len(entry["gone"]) if agree else 0,
+    }

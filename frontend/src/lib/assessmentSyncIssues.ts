@@ -1,5 +1,7 @@
 import type { GroupedVuln, InconsistencyReason, Tags } from '../types'
 import {
+    assessedTeamKeys,
+    assessmentTeamKey,
     getAssessedTeams,
     getGroupInconsistencyReasons,
     getGroupLifecycle,
@@ -42,7 +44,10 @@ const incompleteIssues = (
     const assessedTeams = group.list_metadata?.assessed_teams
         ? new Set(group.list_metadata.assessed_teams)
         : getAssessedTeams(group)
-    const missingTeams = requiredTeams.filter(team => team.toLowerCase() !== 'unassigned' && !assessedTeams.has(team))
+    const assessedKeys = assessedTeamKeys(assessedTeams, teamMapping)
+    const missingTeams = requiredTeams.filter(team =>
+        assessmentTeamKey(team) !== 'unassigned' && !assessedKeys.has(assessmentTeamKey(team))
+    )
 
     if (missingTeams.length > 0) {
         issues.push({

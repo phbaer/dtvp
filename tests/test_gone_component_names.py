@@ -212,3 +212,26 @@ def test_an_archive_is_parsed_once_for_every_project_and_reads_are_bounded(tmp_p
         other, "p1", stored_bom=lambda: None, archive_dir=str(archives), max_archive_reads=0
     )
     assert len(reads) == other_reads  # every archive already parsed
+
+
+def test_stored_findings_name_a_component_and_the_lookup_is_counted(tmp_path):
+    """A gone finding's component may still have other findings: the stored
+    findings name it. The counts say where each was found and how many stay
+    without identity (their reason stays undetermined)."""
+    store = _store(tmp_path, "c-kept", "c-lost")
+    findings = [{"component": {"uuid": "c-kept", **LIB}, "vulnerability": {"uuid": "v2"}}]
+    stats = {}
+
+    filled = resolve_gone_component_names(
+        store, "p1", stored_bom=lambda: None, stored_findings=lambda: findings,
+        archive_dir=None, stats=stats,
+    )
+
+    assert filled == 1
+    assert stats == {"looked_up": 2, "found": {"stored_findings": 1}, "unknown": 1}
+    assert store.presence("p1")[("c-kept", "v1")]["component_name"] == "lib-a"
+    # Tried already: the next read looks up nothing.
+    again = {}
+    resolve_gone_component_names(store, "p1", stored_bom=lambda: None,
+                                 stored_findings=lambda: findings, archive_dir=None, stats=again)
+    assert again["looked_up"] == 0 and again["unknown"] == 1

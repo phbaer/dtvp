@@ -182,3 +182,52 @@ describe('useVulnDependencyInfo', () => {
         expect(info.visibleInstances.value).toHaveLength(2)
     })
 })
+
+describe('useVulnDependencyInfo with the catch-all team', () => {
+    // ViewPoint_Product 6.15.0 (2026-11-23): "stats-app" is not in the mapping
+    // (only "vp-stats-app" is), so tar gets the catch-all team "Unknown".
+    const group = (): GroupedVuln => ({
+        id: 'CVE-2024-28863',
+        tags: ['Unknown'],
+        affected_versions: [{
+            project_name: 'ViewPoint_Product',
+            project_version: '6.15.0',
+            project_uuid: 'p-6150',
+            components: [{
+                project_name: 'ViewPoint_Product',
+                project_uuid: 'p-6150',
+                component_name: 'tar',
+                component_version: '2.2.2',
+                component_uuid: 'c-tar',
+                vulnerability_uuid: 'v-tar',
+                finding_uuid: 'f-tar',
+                tags: ['Unknown'],
+                analysis_state: 'NOT_SET',
+                is_suppressed: false,
+                is_direct_dependency: false,
+                dependency_chains: ['tar -> node-gyp -> node-sass -> stats-app -> ViewPoint_Product'],
+            } as any],
+        }],
+    })
+
+    it('names the component and the top of the unmapped chain as what triggered the catch-all', () => {
+        const info = useVulnDependencyInfo({
+            group: computed(group),
+            teamMapping: ref({ '*': 'Unknown', 'vp-stats-app': 'S-Web' }),
+        })
+        expect(info.triggeringTaggedComponents.value).toEqual([
+            { name: 'stats-app', versions: [], tag: 'Unknown', catchAll: true, under: ['ViewPoint_Product 6.15.0'] },
+            { name: 'tar', versions: ['2.2.2'], tag: 'Unknown', catchAll: true, under: [] },
+        ])
+    })
+
+    it('says nothing about the catch-all for a team a mapping gives', () => {
+        const mapped = group()
+        mapped.affected_versions![0].components[0].tags = ['S-Web']
+        const info = useVulnDependencyInfo({
+            group: computed(() => mapped),
+            teamMapping: ref({ '*': 'Unknown', 'stats-app': 'S-Web' }),
+        })
+        expect(info.triggeringTaggedComponents.value.some(item => item.catchAll)).toBe(false)
+    })
+})

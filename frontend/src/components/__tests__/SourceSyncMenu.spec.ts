@@ -6,11 +6,14 @@ import * as liveEvents from '../../lib/eventStream'
 
 vi.mock('../../lib/api', () => ({
     getProjects: vi.fn(),
-    getSyncSource: vi.fn(),
+    getSyncStatus: vi.fn(),
     getSyncVersions: vi.fn(),
     requestSyncRead: vi.fn(),
     requestSourceAnalysis: vi.fn(),
     exportAssessments: vi.fn(),
+    getSyncProgress: vi.fn(),
+    cancelSync: vi.fn(),
+    resumeSync: vi.fn(),
 }))
 vi.mock('../../lib/eventStream', async () => {
     const { createFakeEventStreamModule } = await import('../../lib/__tests__/fakeEventStreamTestUtils')
@@ -19,12 +22,16 @@ vi.mock('../../lib/eventStream', async () => {
 
 const fakeStream = liveEvents as unknown as { emit: (type: string, data?: unknown) => void; reset: () => void }
 
-const open = async (canAnalyse = true, synced: unknown[] = []) => {
+const open = async (canAnalyse = true, synced: unknown[] = [], queue: unknown = null) => {
     vi.mocked(api.getProjects).mockResolvedValue([
         { uuid: 'p1', name: 'App', version: '1.0' },
         { uuid: 'p2', name: 'App', version: '2.0' },
     ] as any)
-    vi.mocked(api.getSyncSource).mockResolvedValue({ name: 'Dependency-Track', can_request_analysis: canAnalyse })
+    vi.mocked(api.getSyncStatus).mockResolvedValue({
+        source: { name: 'Dependency-Track', can_request_analysis: canAnalyse },
+        queue: queue as any,
+        last_success_at: '2026-11-23T08:00:00Z',
+    })
     vi.mocked(api.getSyncVersions).mockResolvedValue(synced as any)
     const wrapper = mount(SourceSyncMenu, { props: { projectName: 'App' } })
     await wrapper.get('[data-testid="source-sync-button"]').trigger('click')
@@ -36,6 +43,111 @@ describe('SourceSyncMenu', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         fakeStream.reset()
+        vi.mocked(api.getSyncProgress).mockResolvedValue(null)
+    })
+
+    it('shows the portfolio pass and the running reads live, in the toolbar and the panel', async () => {
+        const wrapper = await open()
+        expect(wrapper.find('[data-testid="source-sync-indicator"]').exists()).toBe(false)
+
+        fakeStream.emit('source.sync_progress', {
+            pass: { phase: 'reading', versions: 300, pages_read: 3, pages_total: 12 },
+            running: [{ uuid: 'p1', product: 'App', version: '1.0', phase: 'bom', seconds: 4.2 }],
+            queued: 5, requested: 5, ranges: null,
+        })
+        await flushPromises()
+        expect(wrapper.get('[data-testid="source-sync-indicator"]').text()).toBe('3/12')
+        const progress = wrapper.get('[data-testid="source-sync-progress"]').text()
+        expect(progress).toContain('Reading the portfolio (300 versions): page 3/12')
+        expect(progress).toContain('reading 1 version(s)')
+        expect(progress).toContain('5 waiting')
+        expect(wrapper.get('[data-testid="source-sync-running"]').text()).toContain('App 1.0: BOM · 4 s')
+
+        fakeStream.emit('source.portfolio_pass', { phase: 'done', unchanged: 288, changed: 12 })
+        fakeStream.emit('source.sync_progress', { pass: null, running: [], queued: 0, requested: 0, ranges: null })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="source-sync-indicator"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="source-sync-last-pass"]').text()).toContain('300 versions, 12 changed')
+        expect(wrapper.find('[data-testid="sync-cancel"]').exists()).toBe(false)
+        wrapper.unmount()
+    })
+
+    it('shows the last successful sync and why each queued version waits', async () => {
+        const wrapper = await open(true, [], {
+            total: 3,
+            items: [
+                { uuid: 'p1', product: 'App', version: '1.0', priority: 0, kinds: ['findings'], reason: 'request', requested: true },
+                { uuid: 'p2', product: 'App', version: '2.0', priority: 2, kinds: ['findings'], reason: 'change hint: bom', requested: false },
+            ],
+        })
+        expect(wrapper.get('[data-testid="sync-last-success"]').text()).toContain('Last successful sync:')
+        const queued = wrapper.findAll('[data-testid="sync-queued"]').map(item => item.text())
+        expect(queued[0]).toContain('request')
+        expect(queued[0]).toContain('(requested)')
+        expect(queued[1]).toContain('change hint: bom')
+        expect(wrapper.get('[data-testid="sync-queue"]').text()).toContain('and 1 more')
+        wrapper.unmount()
+    })
+
+    it('says whether the sync is active or idle without users', async () => {
+        const wrapper = await open()
+        fakeStream.emit('source.sync_progress', { pass: null, running: [], queued: 0, requested: 0, ranges: null, active: false })
+        await flushPromises()
+        expect(wrapper.get('[data-testid="sync-activity"]').text()).toContain('Idle (no users)')
+        fakeStream.emit('source.sync_progress', { pass: null, running: [], queued: 0, requested: 0, ranges: null, active: true })
+        await flushPromises()
+        expect(wrapper.get('[data-testid="sync-activity"]').text()).toBe('Active')
+        wrapper.unmount()
+    })
+
+    it('reads the queue again when its size changes while the menu is open', async () => {
+        const wrapper = await open(true, [], { total: 1, items: [] })
+        vi.mocked(api.getSyncStatus).mockClear()
+        fakeStream.emit('source.sync_progress', { pass: null, running: [], queued: 4, requested: 0, ranges: null })
+        await flushPromises()
+        expect(api.getSyncStatus).toHaveBeenCalledTimes(1)
+        wrapper.unmount()
+    })
+
+    it('cancels what runs and marks the cancelled versions', async () => {
+        vi.mocked(api.cancelSync).mockResolvedValue({ pass: true, requests: ['p2'], running: ['p1'], waiting: 27, paused: true })
+        const wrapper = await open()
+        fakeStream.emit('source.sync_progress', {
+            pass: { phase: 'reading', versions: 2, pages_read: 0, pages_total: null },
+            running: [], queued: 1, requested: 1, ranges: null,
+        })
+        await flushPromises()
+
+        await wrapper.get('[data-testid="sync-cancel"]').trigger('click')
+        await flushPromises()
+        expect(api.cancelSync).toHaveBeenCalledWith()
+        expect(wrapper.get('[data-testid="sync-message"]').text())
+            .toBe('Cancelled: pass, 1 running, 27 waiting, 1 request(s).')
+        expect(wrapper.get('[data-testid="sync-state-p1"]').text()).toBe('cancelled')
+        expect(wrapper.get('[data-testid="sync-state-p2"]').text()).toBe('cancelled')
+
+        vi.mocked(api.getSyncProgress).mockResolvedValue({
+            pass: null, running: [], queued: 0, requested: 0, ranges: null,
+            paused: { by: 'rita', until: '2026-11-24T00:00:00Z' },
+        })
+        fakeStream.emit('source.sync_cancelled', { settled: true })
+        await flushPromises()
+        expect(wrapper.get('[data-testid="source-sync-paused"]').text()).toContain('Sync paused after cancel')
+        expect(wrapper.find('[data-testid="sync-cancel"]').exists()).toBe(false)
+        vi.mocked(api.resumeSync).mockResolvedValue()
+        vi.mocked(api.getSyncProgress).mockResolvedValue({ pass: null, running: [], queued: 0, requested: 0, ranges: null, paused: null })
+        await wrapper.get('[data-testid="sync-resume"]').trigger('click')
+        await flushPromises()
+        expect(api.resumeSync).toHaveBeenCalled()
+        expect(wrapper.find('[data-testid="source-sync-paused"]').exists()).toBe(false)
+
+        fakeStream.emit('source.sync_progress', { pass: { phase: 'reading', versions: 2, pages_read: 0, pages_total: null }, running: [], queued: 0, requested: 0, ranges: null })
+        await flushPromises()
+        vi.mocked(api.cancelSync).mockRejectedValue({ response: { status: 403 } })
+        await wrapper.get('[data-testid="sync-cancel"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.get('[data-testid="sync-message"]').text()).toBe('Only reviewers can cancel.')
+        wrapper.unmount()
     })
 
     it('reads one version again and follows its progress from the events', async () => {

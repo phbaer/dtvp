@@ -10,6 +10,7 @@ import {
     uploadBulkWorkflowSource,
     readBulkWorkflowSourceHistory,
     type BulkWorkflowApplyResponse,
+    type BulkWorkflowErrorDetail,
     type BulkWorkflowFilters,
     type BulkWorkflowPreviewItem,
     type BulkWorkflowPreviewResponse,
@@ -48,6 +49,11 @@ const workflows = ref<BulkWorkflowSummaryItem[]>([])
 const selectedWorkflowId = ref('')
 const preview = ref<BulkWorkflowPreviewResponse | null>(null)
 const selectedIds = ref<Set<string>>(new Set())
+// Groups that changed since the preview was shown (after a refused apply).
+const changedGroupIds = ref<Set<string>>(new Set())
+// Said above the preview when the preview was reloaded after a change; kept
+// out of the error state, which replaces the preview list.
+const changeNotice = ref('')
 const appliedResult = ref<BulkWorkflowApplyResponse | null>(null)
 const activeFilters = ref<BulkWorkflowFilters>({})
 const documentLoading = ref(false)
@@ -335,6 +341,8 @@ const loadPreview = async (workflowId: string) => {
     preview.value = null
     selectedIds.value = new Set()
     includeNewIds.value = new Set()
+    changedGroupIds.value = new Set()
+    changeNotice.value = ''
     appliedResult.value = null
     ticketCopyState.value = {}
     error.value = ''
@@ -556,7 +564,9 @@ const exportTicketDocument = async () => {
             Array.from(selectedIds.value),
             preview.value.preview_token,
             updateOperationStatus,
-            ...sourceArgs(preview.value.workflow.id),
+            sourceArgs(preview.value.workflow.id)[0],
+            selectedFingerprints(),
+            selectedItems(),
         )
         const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }))
         const link = document.createElement('a')
@@ -571,18 +581,64 @@ const exportTicketDocument = async () => {
     }
 }
 
+// The fingerprints of the selected groups, as the preview showed them.
+const selectedFingerprints = (): Record<string, string> => {
+    const known = preview.value?.group_fingerprints || {}
+    return Object.fromEntries(
+        Array.from(selectedIds.value)
+            .filter(groupId => known[groupId] !== undefined)
+            .map(groupId => [groupId, known[groupId]]),
+    )
+}
+
+// The preview items of the selected groups, as shown (the server diffs them
+// when a selected group changed).
+const selectedItems = (): Record<string, BulkWorkflowPreviewItem> => {
+    const shown = preview.value?.items || []
+    return Object.fromEntries(
+        shown.filter(item => selectedIds.value.has(item.group_id)).map(item => [item.group_id, item]),
+    )
+}
+
+// Names each changed group with the fields that changed, e.g.
+// "CVE-2025-10256 (finding_count, repairs[])".
+const describeChanges = (changed: string[], changes: BulkWorkflowErrorDetail['changes'] = {}) =>
+    changed.map(groupId => {
+        const paths = (changes?.[groupId] || []).map(change => change.path)
+        return paths.length ? `${groupId} (${paths.slice(0, 4).join(', ')})` : groupId
+    }).join('; ')
+
+// A selected group changed since the preview: the preview is reloaded, the
+// selection of the groups that did not change is kept, and the changed ones
+// are named and marked.
+const reloadAfterChange = async (changed: string[], changes: BulkWorkflowErrorDetail['changes'] = {}) => {
+    const workflowId = preview.value?.workflow.id
+    if (!workflowId) return
+    const keptIds = Array.from(selectedIds.value).filter(id => !changed.includes(id))
+    const keptNew = Array.from(includeNewIds.value).filter(id => !changed.includes(id))
+    // The cached preview is the one that went stale.
+    previewCache.delete(previewCacheKey(workflowId))
+    await loadPreview(workflowId)
+    if (!preview.value) return
+    const selectable = new Set(preview.value.selectable_group_ids)
+    selectedIds.value = new Set(keptIds.filter(id => selectable.has(id)))
+    includeNewIds.value = new Set(keptNew.filter(id => selectedIds.value.has(id)))
+    changedGroupIds.value = new Set(changed)
+    changeNotice.value = changed.length
+        ? `${changed.length} selected group(s) changed since the preview: ${describeChanges(changed, changes)}. `
+            + 'The preview was reloaded and the other selections are kept; review the changed groups, then apply again.'
+        : ''
+}
+
 const applySelected = async () => {
     if (!props.taskId || !preview.value || selectedIds.value.size === 0) return
     processing.value = true
     error.value = ''
     operationMessage.value = ''
     operationProgress.value = 0
+    changeNotice.value = ''
     const includeNew = Array.from(includeNewIds.value).filter(id => selectedIds.value.has(id))
     const source = sourceArgs(preview.value.workflow.id)
-    // The list of included vulnerabilities is only sent when there is one.
-    const applyExtras = (
-        includeNew.length ? [source[0], includeNew] : source
-    ) as [string?, string[]?]
     try {
         const result = await applyBulkWorkflow(
             preview.value.workflow.id,
@@ -591,12 +647,19 @@ const applySelected = async () => {
             Array.from(selectedIds.value),
             preview.value.preview_token,
             updateOperationStatus,
-            ...applyExtras,
+            source[0],
+            includeNew,
+            selectedFingerprints(),
+            selectedItems(),
         )
         appliedResult.value = result
         emit('applied', result)
     } catch (err: any) {
-        error.value = err?.response?.data?.detail || err?.message || 'Bulk workflow failed.'
+        if (err?.detail?.code === 'preview_changed') {
+            await reloadAfterChange(err.detail.changed_groups || [], err.detail.changes || {})
+        } else {
+            error.value = err?.response?.data?.detail || err?.message || 'Bulk workflow failed.'
+        }
     } finally {
         processing.value = false
     }
@@ -713,6 +776,12 @@ watch(() => props.show, show => {
                             data-testid="bulk-workflow-source-warning"
                         >{{ warning }}</p>
                     </section>
+                    <p
+                        v-if="changeNotice"
+                        data-testid="bulk-workflow-changed"
+                        class="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+                        role="status"
+                    >{{ changeNotice }}</p>
                     <div v-if="loading" class="flex flex-1 items-center justify-center gap-3 text-sm font-semibold text-blue-200">
                         <Loader2 :size="22" class="animate-spin" />
                         {{ operationMessage || 'Preparing workflow preview' }}
@@ -912,7 +981,9 @@ watch(() => props.show, show => {
                                 :class="[
                                     itemSelectable(item) ? 'hover:bg-white/[0.04]' : 'cursor-default opacity-60',
                                     selectedIds.has(item.group_id) ? 'bg-blue-500/10' : '',
+                                    changedGroupIds.has(item.group_id) ? 'ring-1 ring-inset ring-amber-400/60 bg-amber-500/10' : '',
                                 ]"
+                                :data-changed="changedGroupIds.has(item.group_id) ? 'true' : undefined"
                                 :data-testid="`bulk-workflow-item-${item.group_id}`"
                                 @click="toggleItem(item)"
                                 @keydown.space.prevent="toggleItem(item)"

@@ -75,6 +75,7 @@ from .app_wiring import (
 from .access_token_routes import create_access_token_router
 from .access_token_services import access_token_store
 from .auth import (
+    add_request_listener,
     apply_session_refresh,
     auth_settings,
     get_current_user,
@@ -545,6 +546,9 @@ source_sync = SourceSync(
     source_state=source_state_tracker,
 )
 cache_manager.attach_scheduler(source_sync)
+# Every authenticated API request counts as use: the sync reads the source
+# only while DTVP is in use (ADR 0004, "Idle without users").
+add_request_listener(product_interest.note_request)
 export_state_producer = ExportStateProducer(event_hub, cache_manager)
 cache_refresh_producer = CacheRefreshProducer(
     event_hub, lambda: cache_manager.cache_meta.get("last_refreshed_at")
@@ -1276,6 +1280,7 @@ mcp_endpoint = McpEndpoint(
         token_store=access_token_store,
         get_dt_client=get_shared_client,
         logger=logger,
+        note_request=product_interest.note_request,
     )
 )
 # Registered before the frontend catch-all; answers 404 while tokens are

@@ -13,7 +13,7 @@ import {
     reasonKey,
     reasonLabel,
 } from '../lib/goneFindings'
-import type { GoneFinding, GoneFindingsOfVersion } from '../types'
+import type { GoneFinding, GoneFindingCandidate, GoneFindingsOfVersion } from '../types'
 
 // Findings Dependency-Track no longer reports, per version of the project.
 // By default only those that need a person: an assessment that did not
@@ -285,6 +285,35 @@ const applyToSameIssue = async (projectUuid: string, finding: GoneFinding) => {
         actionError.value = `The assessment could not be applied to ${guess.vuln_id || 'the other finding'}.`
     } finally {
         busy.value = false
+    }
+}
+
+// The same vulnerability on several components and the gone finding's own
+// component unknown: the reviewer chooses one, or explicitly all. Each is
+// confirmed, then applied, as one match at a time.
+const applyToCandidates = async (projectUuid: string, finding: GoneFinding, candidates: GoneFindingCandidate[]) => {
+    if (!candidates.length || busy.value) return
+    busy.value = true
+    actionError.value = ''
+    const done: string[] = []
+    try {
+        for (const candidate of candidates) {
+            await confirmGoneFindingSameIssue(
+                projectUuid, finding.component_uuid, finding.vulnerability_uuid,
+                candidate.component_uuid, candidate.vulnerability_uuid, true,
+            )
+            await applyGoneFindingToAlias(
+                projectUuid, finding.component_uuid, finding.vulnerability_uuid,
+                candidate.vulnerability_uuid, candidate.component_uuid,
+            )
+            done.push(candidate.component_uuid)
+        }
+        applied.value = new Set([...applied.value, `${finding.component_uuid}/${finding.vulnerability_uuid}`])
+    } catch {
+        actionError.value = `The assessment could not be applied to every chosen finding (${done.length} of ${candidates.length} done).`
+    } finally {
+        busy.value = false
+        await load()
     }
 }
 
@@ -684,13 +713,56 @@ onBeforeUnmount(() => {
                                                         >Applied, pending review</span>
                                                     </div>
                                                     <div
-                                                        v-if="finding.same_issue"
+                                                        v-if="finding.same_issue?.ambiguous"
+                                                        data-testid="gone-finding-candidates"
+                                                        class="mt-0.5 text-violet-200"
+                                                    >
+                                                        <div>
+                                                            {{ finding.same_issue.vuln_id }} is reported on
+                                                            {{ finding.same_issue.candidates?.length }} components of this version
+                                                            ({{ finding.same_issue.reason }}); choose where this assessment belongs:
+                                                        </div>
+                                                        <ul class="ml-3 list-disc">
+                                                            <li
+                                                                v-for="candidate in finding.same_issue.candidates || []"
+                                                                :key="candidate.component_uuid"
+                                                                data-testid="gone-finding-candidate"
+                                                                class="flex flex-wrap items-baseline gap-x-2"
+                                                            >
+                                                                <span>{{ candidate.component_name || candidate.component_uuid.slice(0, 8) }}{{
+                                                                    candidate.component_version ? ` ${candidate.component_version}` : '' }}: {{ candidate.state }}</span>
+                                                                <button
+                                                                    v-if="props.canAcknowledge && candidate.proposal"
+                                                                    type="button"
+                                                                    :disabled="busy"
+                                                                    data-testid="gone-finding-apply-candidate"
+                                                                    class="rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-white/10 disabled:opacity-50"
+                                                                    title="Confirm that this is the finding the assessment belongs to and copy it there, pending review"
+                                                                    @click="applyToCandidates(item.version.project_uuid, finding, [candidate])"
+                                                                >Confirm and apply here</button>
+                                                            </li>
+                                                        </ul>
+                                                        <button
+                                                            v-if="props.canAcknowledge && (finding.same_issue.candidates || []).some(c => c.proposal)"
+                                                            type="button"
+                                                            :disabled="busy"
+                                                            data-testid="gone-finding-apply-all-candidates"
+                                                            class="mt-0.5 rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-gray-200 hover:bg-white/10 disabled:opacity-50"
+                                                            title="Copy this assessment to every one of them, pending review"
+                                                            @click="applyToCandidates(item.version.project_uuid, finding, (finding.same_issue.candidates || []).filter(c => c.proposal))"
+                                                        >Apply to all {{ (finding.same_issue.candidates || []).filter(c => c.proposal).length }}</button>
+                                                    </div>
+                                                    <div
+                                                        v-else-if="finding.same_issue"
                                                         data-testid="gone-finding-same-issue"
                                                         class="mt-0.5 flex flex-wrap items-baseline gap-x-2"
                                                         :class="finding.same_issue.disagrees ? 'text-amber-200' : 'text-violet-200'"
                                                     >
                                                         <span>
-                                                            Probably the same as {{ finding.same_issue.vuln_id }} ({{ finding.same_issue.reason }}):
+                                                            Probably the same as {{ finding.same_issue.vuln_id }}{{
+                                                                finding.same_issue.component_name
+                                                                    ? ` on ${finding.same_issue.component_name}${finding.same_issue.component_version ? ` ${finding.same_issue.component_version}` : ''}`
+                                                                    : '' }} ({{ finding.same_issue.reason }}):
                                                             {{ finding.same_issue.state }}{{
                                                                 finding.same_issue.tickets.length ? ` (${finding.same_issue.tickets.join(', ')})` : '' }}{{
                                                                 finding.same_issue.disagrees ? ', a different assessment' : '' }}{{

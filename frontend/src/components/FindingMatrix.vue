@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, ref, type Ref } from 'vue'
+import { normalizeLegacyTags, wildcardTeams } from '../lib/dependency-team-selection'
 import { ChevronDown, ChevronRight, AlertTriangle } from '@lucide/vue'
 import { buildFindingMatrix, compareVariants, type MatrixVariant } from '../lib/findingMatrix'
 import { parseVersionOverride } from '../lib/assessment-helpers'
@@ -18,6 +19,20 @@ const emit = defineEmits<{
 }>()
 
 const matrix = computed(() => buildFindingMatrix(props.instances))
+
+// The team each component's findings belong to, as the findings carry it
+// (resolved from the BOM), including the mapping's catch-all ``*``.
+const teamMapping = inject<Ref<Record<string, string | string[]>>>('teamMapping', ref({}))
+const rowTeams = (instances: any[]) => {
+    const teams = new Map<string, string>()
+    for (const instance of instances) {
+        for (const team of normalizeLegacyTags(instance.tags, teamMapping.value || {})) {
+            if (!teams.has(team.toLocaleLowerCase())) teams.set(team.toLocaleLowerCase(), team)
+        }
+    }
+    const catchAll = wildcardTeams(teamMapping.value)
+    return [...teams.values()].sort().map(team => ({ team, catchAll: catchAll.has(team.toLocaleLowerCase()) }))
+}
 const comparison = computed(() => compareVariants(matrix.value.variants))
 const differingRows = computed(() => comparison.value.filter(row => row.differs))
 const hasDifferences = computed(() => matrix.value.variants.length > 1)
@@ -157,7 +172,7 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                             <th scope="row" class="px-3 py-1.5 font-normal">
                                 <button
                                     type="button"
-                                    class="flex items-center gap-1.5 text-left font-mono text-gray-200 hover:text-white"
+                                    class="flex items-center gap-1.5 whitespace-nowrap text-left font-mono text-gray-200 hover:text-white"
                                     :aria-expanded="expandedRows.has(row.key) ? 'true' : 'false'"
                                     :title="expandedRows.has(row.key) ? 'Hide the dependency chains' : 'Show how this component enters the product'"
                                     data-testid="finding-matrix-row-toggle"
@@ -168,6 +183,21 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                                     <span>{{ row.name }}</span>
                                     <span v-if="row.version" class="text-gray-500">@{{ row.version }}</span>
                                 </button>
+                                <span class="mt-0.5 flex flex-wrap gap-1 pl-[18px]">
+                                    <span
+                                        v-for="entry in rowTeams(row.instances)"
+                                        :key="entry.team"
+                                        data-testid="finding-matrix-team"
+                                        :data-catch-all="entry.catchAll ? 'true' : undefined"
+                                        class="whitespace-nowrap rounded border px-1 py-px text-[9px] font-semibold"
+                                        :class="entry.catchAll
+                                            ? 'border-amber-700/50 bg-amber-950/30 text-amber-200'
+                                            : 'border-blue-800/40 bg-blue-950/20 text-blue-300'"
+                                        :title="entry.catchAll
+                                            ? `No team mapping matches this component or its dependency chain; the catch-all '*' assigns ${entry.team}.`
+                                            : `Team ${entry.team}`"
+                                    >{{ entry.team }}<template v-if="entry.catchAll"> · catch-all</template></span>
+                                </span>
                             </th>
                             <td
                                 v-for="version in matrix.versions"
@@ -198,7 +228,9 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                         </tr>
                         <tr v-if="expandedRows.has(row.key)" class="border-t border-gray-800/60 bg-gray-950/40" data-testid="finding-matrix-chains">
                             <td :colspan="matrix.versions.length + 1" class="px-3 py-2">
-                                <VulnGroupCardDependencies :instances="row.instances" :embedded="true" :showTitle="false" />
+                                <div class="max-w-full overflow-x-auto">
+                                    <VulnGroupCardDependencies :instances="row.instances" :embedded="true" :showTitle="false" />
+                                </div>
                             </td>
                         </tr>
                     </template>

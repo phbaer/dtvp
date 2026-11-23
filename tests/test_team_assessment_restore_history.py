@@ -179,7 +179,8 @@ def test_the_history_task_reads_every_finding_in_view(
     applied = client.post(
         "/api/bulk-workflows/team-assessment-restore/apply",
         json={"task_id": task_id, "filters": {}, "source_id": body["source_id"],
-              "group_ids": ["GHSA-qxh6-94w6-9r5p"], "preview_token": preview["preview_token"]},
+              "group_ids": ["GHSA-qxh6-94w6-9r5p"], "preview_token": preview["preview_token"],
+                  "group_fingerprints": preview["group_fingerprints"]},
     )
     assert applied.status_code == 200, applied.text
     [pending] = main.cache_manager._load_pending_updates()

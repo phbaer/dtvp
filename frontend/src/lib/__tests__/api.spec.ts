@@ -168,6 +168,8 @@ describe('api.ts', () => {
             filters,
             group_ids: ['CVE-1'],
             preview_token: 'token-1',
+            group_fingerprints: {},
+            group_items: {},
         })
         expect(mocks.get).toHaveBeenNthCalledWith(2, '/bulk-workflows/tasks/operation-apply')
         expect(mocks.post).toHaveBeenNthCalledWith(4, '/bulk-workflows/automatic-assessments/document-task', {
@@ -175,6 +177,8 @@ describe('api.ts', () => {
             filters,
             group_ids: ['CVE-1'],
             preview_token: 'token-2',
+            group_fingerprints: {},
+            group_items: {},
         })
         expect(mocks.get).toHaveBeenNthCalledWith(3, '/bulk-workflows/tasks/operation-document')
     })
@@ -204,7 +208,8 @@ describe('api.ts', () => {
             task_id: 'task-1', filters: {}, source_id: 'source-1',
         })
         expect(mocks.post).toHaveBeenNthCalledWith(3, '/bulk-workflows/team-assessment-restore/apply-task', {
-            task_id: 'task-1', filters: {}, group_ids: ['CVE-1'], preview_token: 'token-1', source_id: 'source-1',
+            task_id: 'task-1', filters: {}, group_ids: ['CVE-1'], preview_token: 'token-1', group_fingerprints: {},
+            group_items: {}, source_id: 'source-1',
         })
         expect(mocks.post.mock.calls[3][1]).toMatchObject({ source_id: 'source-1' })
     })

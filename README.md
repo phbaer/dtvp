@@ -240,9 +240,11 @@ version is recorded in its sync state, with content digests:
 ([Sync state](docs/runtime.md#sync-state)). The browser announces the
 products its tabs show with `PUT /api/events/interest`
 ([Product interest](docs/runtime.md#product-interest)). A sync scheduler
-reads Dependency-Track in the background: watched products every two
-minutes, every other active version once and then on change signals, within
-one request budget shared with the export
+reads Dependency-Track in the background, and only while DTVP is in use: a
+version once, then on its change signals, a request, or when it is opened and
+was last read longer ago than the safety interval. Without users it reads
+only what the export and explicit requests need. All of it runs within one
+request budget shared with the export
 ([Sync scheduler](docs/runtime.md#sync-scheduler)). Reviewers can request a
 read now (`POST /api/sync/requests`), ask the source to analyse again
 (`POST /api/sync/analysis-requests`) and export now, from the project view's

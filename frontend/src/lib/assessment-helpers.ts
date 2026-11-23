@@ -229,6 +229,19 @@ const cloneAssessmentBlocks = (blocks: readonly AssessmentBlock[]): AssessmentBl
 export const assessmentTeamKey = (team: string | undefined | null): string =>
     String(team || '').trim().toLocaleLowerCase();
 
+/**
+ * The assessed teams as required teams name them: a block under a team's
+ * alias (an earlier name in the team mapping) counts for the team, and names
+ * match regardless of case and surrounding space.
+ */
+export const assessedTeamKeys = (
+    teams: Iterable<string>,
+    teamMapping?: Record<string, string | string[]>,
+): Set<string> => new Set(
+    normalizeTags([...teams].map(team => String(team || '').trim()), teamMapping as Record<string, any>)
+        .map(assessmentTeamKey)
+);
+
 export const markAssessmentBlocksHistorical = (fullText: string, teams: Iterable<string>): string => {
     const sourceKeys = new Set([...teams].map(assessmentTeamKey));
     if (!sourceKeys.size) return fullText;
@@ -1113,7 +1126,8 @@ const hasOpenTeamAssessmentFromSummary = (
     const assessableTeams = requiredTeams.filter(team => assessmentTeamKey(team) !== 'unassigned');
 
     if (assessableTeams.length > 0) {
-        const missingAssessment = assessableTeams.some(team => !summary.assessedTeams.has(team));
+        const assessedKeys = assessedTeamKeys(summary.assessedTeams, teamMapping);
+        const missingAssessment = assessableTeams.some(team => !assessedKeys.has(assessmentTeamKey(team)));
         const singleTeamGlobalAssessment = assessableTeams.length === 1
             && summary.hasGlobalAssessment
             && summary.assessedTeams.size === 0;
@@ -1288,7 +1302,11 @@ const getGroupLifecycleFromSummary = (
         return 'INCONSISTENT';
     }
 
-    const missingTeams = (assessableTeams || []).filter((t: string) => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
+    const assessedKeys = assessedTeamKeys(
+        blocks.filter(b => b.state !== 'NOT_SET').map(b => b.team),
+        teamMapping,
+    );
+    const missingTeams = (assessableTeams || []).filter((t: string) => !assessedKeys.has(assessmentTeamKey(t)));
 
     // Pending review always wins over legacy detection. If coverage is also
     // incomplete, keep the lifecycle in INCOMPLETE; the pending flag still

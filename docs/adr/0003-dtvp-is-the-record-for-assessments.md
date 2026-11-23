@@ -7,7 +7,7 @@
 | Decision status | Accepted (2026-11-18, repository owner) |
 | Implementation status | Partly implemented (2026-11-18); see [Implementation progress](#implementation-progress) |
 | Supersedes | The assessment merge and conflict handling of [ADR 0002](0002-local-first-database-with-import-and-export.md). Its database, export queue, history, and ports remain. |
-| Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md). Decisions 2 and 6 are amended by [ADR 0010](0010-version-overrides.md#amendments-to-adr-0003) (2026-11-20). Decision 3 is proposed to be amended by [ADR 0011](0011-check-the-sink-before-writing.md) (proposed 2026-11-23) |
+| Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md). Decisions 2 and 6 are amended by [ADR 0010](0010-version-overrides.md#amendments-to-adr-0003) (2026-11-20). Decision 3 is amended by [ADR 0011](0011-check-the-sink-before-writing.md) (2026-11-23) |
 
 ## Context
 
@@ -56,6 +56,10 @@ DTVP's markup out of the text, which is lossy.
    value, or none, DTVP's value is exported again. There are no conflicts and
    no resolution step. A value Dependency-Track repeatedly does not keep is
    reported as a failing export and retried with growing delay.
+   *Amended 2026-11-23 by [ADR 0011](0011-check-the-sink-before-writing.md):*
+   a missing value is exported again; a value DTVP did not write is held for
+   a reviewer instead of being overwritten (not implemented yet, planned for
+   2.1.0).
 4. **Assessments are stored as structured fields** (state, justification,
    response, suppression, rescoring, per-team assessments, reviewer, SSVC,
    tickets). The Dependency-Track text is generated from them on export.

@@ -460,6 +460,7 @@ def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_clie
                     "filters": {},
                     "group_ids": [group["id"]],
                     "preview_token": preview["preview_token"],
+                    "group_fingerprints": preview["group_fingerprints"],
                 },
             )
             assert response.status_code == 200

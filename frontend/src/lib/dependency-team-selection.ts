@@ -204,3 +204,11 @@ export const findTeamMappingEntryForComponent = (
         groupKnown,
     },
 )
+
+/** The teams the mapping's catch-all ``*`` gives a finding that no mapped
+ * component or chain reaches (for example "Unknown"), lower case. */
+export const wildcardTeams = (teamMapping: TeamMapping | undefined): Set<string> => {
+    const value = (teamMapping || {})['*']
+    const names = Array.isArray(value) ? value : value ? [value] : []
+    return new Set(names.map(name => String(name).trim().toLocaleLowerCase()).filter(Boolean))
+}

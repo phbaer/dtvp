@@ -29,7 +29,7 @@ from .cyclonedx_export import (
     valid_property_prefix,
     valid_ticket_prefix,
 )
-from .same_issue import SameIssueIndex, facts_by_uuid
+from .same_issue import REASON_UNKNOWN_COMPONENT, SameIssueIndex, facts_by_uuid
 from .finding_lifecycle_services import (
     ORIGIN_CARRIED_OVER_BY_ALIAS,
     ORIGIN_CARRIED_OVER_BY_SAME_ISSUE,
@@ -37,6 +37,7 @@ from .finding_lifecycle_services import (
     vuln_ids_by_uuid,
     alias_proposal,
     describe_gone_findings,
+    earlier_assessments,
 )
 from .gone_component_names import resolve_gone_component_names
 from .project_archive_services import get_project_archive_path
@@ -77,6 +78,9 @@ from .bulk_workflows.base import (
     BulkWorkflowContext,
     BulkWorkflowRegistry,
     build_preview_token,
+    diff_items,
+    preview_as_shown,
+    group_fingerprints,
 )
 from .bulk_workflows.team_assessment_restore import (
     create_team_assessment_restore_workflow,
@@ -229,6 +233,12 @@ class BulkWorkflowRequest(BaseModel):
 class BulkWorkflowApplyRequest(BulkWorkflowRequest):
     group_ids: list[str] = Field(default_factory=list)
     preview_token: str
+    # Per selected group, the fingerprint of its preview item as the preview
+    # showed it (``group_fingerprints`` of the preview response).
+    group_fingerprints: dict[str, str] = Field(default_factory=dict)
+    # The preview items the fingerprints were taken from: a refused apply
+    # reports which fields of a selected group changed (never used to write).
+    group_items: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # Selected groups whose new findings (added by a new project version)
     # are to be synchronized too. Nothing is copied onto them otherwise.
     include_new_findings: list[str] = Field(default_factory=list)
@@ -2192,6 +2202,9 @@ def _bulk_workflow_context(
             str(group_id) for group_id in getattr(req, "include_new_findings", None) or []
         ),
         stored_assessments=getattr(deps.cache_manager, "get_cached_assessments", None),
+        unknown_component_records=getattr(
+            deps.cache_manager, "unknown_component_records", None
+        ),
     )
 
 
@@ -2249,6 +2262,25 @@ async def _persist_local_assessment_payloads(
     and the rest is written: a bulk write never replaces a save made after
     its preview.
     """
+    # A payload may name its own origin (a carried assessment keeps the
+    # carry's origin, as when applied one by one); the rest are the
+    # workflow's. One write per origin.
+    by_origin: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for item in payloads:
+        by_origin.setdefault(str(item[1].pop("origin", None) or "bulk-workflow"), []).append(item)
+    if len(by_origin) > 1:
+        all_persisted: list[dict[str, Any]] = []
+        all_written: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        all_changed = 0
+        for origin, items in by_origin.items():
+            persisted, written, changed = await _persist_local_assessment_payloads(
+                deps, [(i, {**p, "origin": origin}) for i, p in items], author=author
+            )
+            all_persisted += persisted
+            all_written += written
+            all_changed += changed
+        return all_persisted, all_written, all_changed
+    origin = next(iter(by_origin), "bulk-workflow")
     expected: dict[tuple[str, str, str], int] = {}
     for _instance, payload in payloads:
         revision = payload.pop("expected_revision", None)
@@ -2266,7 +2298,7 @@ async def _persist_local_assessment_payloads(
                 persisted = await persist(
                     [payload for _instance, payload in remaining],
                     replace=True,
-                    origin="bulk-workflow",
+                    origin=origin,
                     author=author,
                     **({"expected_revisions": expected} if expected else {}),
                 )
@@ -2334,6 +2366,7 @@ def _update_bulk_workflow_task(
     progress: int | None = None,
     result: Any = None,
     error: str | None = None,
+    error_detail: Any = None,
     append_log: bool = True,
 ) -> None:
     now = datetime.now(timezone.utc)
@@ -2349,6 +2382,8 @@ def _update_bulk_workflow_task(
         task["result"] = result
     if error is not None:
         task["error"] = error
+    if error_detail is not None:
+        task["error_detail"] = error_detail
     task["updated_at"] = now
     if status in {"completed", "failed"}:
         task["completed_at"] = now
@@ -2358,6 +2393,74 @@ def _bulk_workflow_task_error(exc: Exception) -> str:
     if isinstance(exc, HTTPException):
         return str(exc.detail)
     return str(exc) or exc.__class__.__name__
+
+
+def check_preview(
+    plugin: Any,
+    req: BulkWorkflowApplyRequest,
+    filter_payload: dict[str, Any],
+    preview: dict[str, Any],
+    verb: str,
+) -> list[str]:
+    """The selected groups, if the preview still holds for them. The
+    task, filters and file must be those of the preview; each selected
+    group must still be selectable and unchanged since the preview
+    showed it. Other groups may have changed (the background sync writes
+    all the time): they are not checked."""
+    expected = build_preview_token(
+        plugin,
+        task_id=req.task_id,
+        filter_payload=filter_payload,
+    )
+    if req.preview_token != expected:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Bulk workflow preview is stale; reload it before {verb}.",
+        )
+    selected = list(dict.fromkeys(req.group_ids))
+    selectable = set(plugin.selectable_ids(preview))
+    current = group_fingerprints(preview)
+    given = req.group_fingerprints or {}
+    changed = [
+        group_id
+        for group_id in selected
+        if group_id not in selectable
+        or given.get(group_id) is None
+        or current.get(group_id) != given[group_id]
+    ]
+    if changed:
+        now_items = {
+            str(item.get("group_id") or item.get("id") or ""): item
+            for item in preview.get("items") or []
+        }
+        seen_items = req.group_items or {}
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "preview_changed",
+                "message": (
+                    f"{len(changed)} selected group(s) changed since the preview; "
+                    f"reload it before {verb}."
+                ),
+                "changed_groups": changed,
+                # Per changed group, the fields that differ from the item the
+                # preview showed (empty when the request did not send items).
+                "changes": {
+                    group_id: diff_items(seen_items.get(group_id), now_items.get(group_id))
+                    for group_id in changed
+                    if group_id in seen_items or group_id in now_items
+                },
+            },
+        )
+    return selected
+
+
+def _bulk_workflow_error_detail(exc: Exception) -> dict[str, Any] | None:
+    """The structured part of an error (e.g. the groups that changed since
+    the preview), for the client to act on."""
+    if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
+        return exc.detail
+    return None
 
 
 def _register_bulk_workflow_routes(
@@ -2431,8 +2534,8 @@ def _register_bulk_workflow_routes(
                 plugin,
                 task_id=req.task_id,
                 filter_payload=token_filters(req, source),
-                preview=preview,
             ),
+            "group_fingerprints": group_fingerprints(preview),
             "selectable_group_ids": plugin.selectable_ids(preview),
             **preview,
         }
@@ -2445,25 +2548,9 @@ def _register_bulk_workflow_routes(
         progress_callback: Callable[[int, int, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
         context, source = await workflow_context(plugin, req, user)
-        preview = await asyncio.to_thread(plugin.preview, context)
-        expected_token = build_preview_token(
-            plugin,
-            task_id=req.task_id,
-            filter_payload=token_filters(req, source),
-            preview=preview,
-        )
-        if req.preview_token != expected_token:
-            raise HTTPException(
-                status_code=409,
-                detail="Bulk workflow preview is stale; reload it before applying.",
-            )
-        selectable = set(plugin.selectable_ids(preview))
-        selected = list(dict.fromkeys(req.group_ids))
-        if not set(selected).issubset(selectable):
-            raise HTTPException(
-                status_code=409,
-                detail="One or more selected groups no longer match this workflow.",
-            )
+        # The check is against the preview as shown (see preview_as_shown).
+        shown = await asyncio.to_thread(plugin.preview, preview_as_shown(context))
+        selected = check_preview(plugin, req, token_filters(req, source), shown, "applying")
         payloads, skipped = await asyncio.to_thread(
             plugin.build_payloads,
             context,
@@ -2511,25 +2598,8 @@ def _register_bulk_workflow_routes(
                 status_code=409, detail="This bulk workflow does not provide a document"
             )
         context, source = await workflow_context(plugin, req, user)
-        preview = await asyncio.to_thread(plugin.preview, context)
-        expected_token = build_preview_token(
-            plugin,
-            task_id=req.task_id,
-            filter_payload=token_filters(req, source),
-            preview=preview,
-        )
-        if req.preview_token != expected_token:
-            raise HTTPException(
-                status_code=409,
-                detail="Bulk workflow preview is stale; reload it before exporting.",
-            )
-        selectable = set(plugin.selectable_ids(preview))
-        selected = list(dict.fromkeys(req.group_ids))
-        if not set(selected).issubset(selectable):
-            raise HTTPException(
-                status_code=409,
-                detail="One or more selected groups no longer match this workflow.",
-            )
+        shown = await asyncio.to_thread(plugin.preview, preview_as_shown(context))
+        selected = check_preview(plugin, req, token_filters(req, source), shown, "exporting")
         return await asyncio.to_thread(
             plugin.build_document,
             context,
@@ -2895,6 +2965,7 @@ def _register_bulk_workflow_routes(
                     message="Bulk workflow apply failed.",
                     progress=100,
                     error=_bulk_workflow_task_error(exc),
+                    error_detail=_bulk_workflow_error_detail(exc),
                 )
 
         deps.create_tracked_task(run_apply())
@@ -2950,6 +3021,7 @@ def _register_bulk_workflow_routes(
                     message="Ticket document export failed.",
                     progress=100,
                     error=_bulk_workflow_task_error(exc),
+                    error_detail=_bulk_workflow_error_detail(exc),
                 )
 
         deps.create_tracked_task(run_document())
@@ -3648,7 +3720,7 @@ def _register_gone_findings_routes(
             if logger is not None:
                 logger.exception("Could not name the vulnerabilities of %s", project_uuid)
 
-    same_issue_facts: dict[str, tuple[Any, dict[str, Any]]] = {}
+    same_issue_facts: dict[tuple[str, ...], tuple[Any, dict[str, Any]]] = {}
 
     def same_issue_index(
         project_uuid: str, aliases: dict[str, set[str]]
@@ -3665,12 +3737,16 @@ def _register_gone_findings_routes(
             stamp = tuple(
                 os.path.getmtime(path) if os.path.exists(path) else None for path in paths
             )
-            cached = same_issue_facts.get(project_uuid)
+            # Keyed by the files, not the project alone: the same project
+            # uuid under another data directory (another instance, a test)
+            # must not reuse these facts.
+            key = (*paths, project_uuid)
+            cached = same_issue_facts.get(key)
             if cached is None or cached[0] != stamp:
                 facts = facts_by_uuid(
                     DTClient.vulnerability_facts, *stored_sources(project_uuid)
                 )
-                same_issue_facts[project_uuid] = (stamp, facts)
+                same_issue_facts[key] = (stamp, facts)
             else:
                 facts = cached[1]
             return SameIssueIndex(
@@ -3709,6 +3785,40 @@ def _register_gone_findings_routes(
             "gone": {},
             "findings": [],
         }
+
+    @router.get("/project/{project_uuid}/earlier-assessments")
+    async def get_earlier_assessments(
+        project_uuid: str,
+        vulnerability_uuid: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """The assessments DTVP still holds for gone findings of a
+        vulnerability (and of its aliases) in a project version: a starting
+        point for a finding without an assessment. Nothing is applied; the
+        form saves through the normal flow."""
+        manager = deps.cache_manager
+        lifecycle = manager.finding_lifecycle
+        rows = await asyncio.to_thread(lifecycle.presence, project_uuid)
+        own = next(
+            (row for row in rows.values() if str(row["vulnerability_uuid"]) == vulnerability_uuid),
+            None,
+        )
+        alias_ids: set[str] = set()
+        vuln_id = str((own or {}).get("vuln_id") or "").strip().upper()
+        if vuln_id:
+            # Aliases from what is stored of the version; no source call.
+            aliases = await asyncio.to_thread(stored_aliases, project_uuid)
+            alias_ids = {alias for alias in aliases.get(vuln_id, set()) if alias != vuln_id}
+        entries = earlier_assessments(
+            rows,
+            lambda row: manager.assessment_outbox.get_overlay(
+                (project_uuid, row["component_uuid"], row["vulnerability_uuid"])
+            ),
+            vulnerability_uuid,
+            alias_ids,
+        )
+        return {"project_uuid": project_uuid, "vulnerability_uuid": vulnerability_uuid, "earlier": entries}
 
     @router.post("/gone-findings/acknowledge")
     async def acknowledge_gone_findings(
@@ -3832,7 +3942,15 @@ def _register_gone_findings_routes(
             raise HTTPException(
                 status_code=409, detail="The other finding is not the same vulnerability"
             )
-        if alias_component != request.component_uuid and (
+        # A gone finding whose component DTVP never knew, which a person
+        # confirmed to be this reported finding of the same vulnerability
+        # (the source recreated the component).
+        recreated_unknown = (
+            same_issue
+            and gone_row.get("same_issue_reason") == REASON_UNKNOWN_COMPONENT
+            and request.alias_vulnerability_uuid == request.vulnerability_uuid
+        )
+        if alias_component != request.component_uuid and not recreated_unknown and (
             not gone_row.get("component_purl")
             or any(
                 (gone_row.get(name) or None) != (alias_row.get(name) or None)

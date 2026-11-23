@@ -8,6 +8,11 @@ Sync work never renews a lease. The scheduler (ADR 0004 step 5) reads
 ``watched()`` together with its other interest sources.
 
 Leases are held in the process, like the event hub.
+
+Activity (ADR 0004 amendment of 2026-11-23, "Idle without users"): the
+scheduler reads the source only while someone uses DTVP, that is while a
+lease lives or an authenticated API or MCP request came within the watch TTL
+(``note_request``, ``active``).
 """
 
 from __future__ import annotations
@@ -52,6 +57,8 @@ class ProductInterest:
         self._clock = clock
         self._leases: dict[tuple[str, str], Lease] = {}
         self._lock = threading.Lock()
+        # When the last authenticated API or MCP request came.
+        self._last_request: float | None = None
 
     def _prune_locked(self, now: float) -> None:
         for key in [key for key, lease in self._leases.items() if lease.expires_at <= now]:
@@ -107,6 +114,37 @@ class ProductInterest:
         with self._lock:
             self._prune_locked(self._clock())
             return {product for lease in self._leases.values() for product in lease.products}
+
+    def note_request(self, user: str | None = None) -> None:
+        """An authenticated API or MCP request: DTVP is in use for the TTL."""
+        if user is None or str(user).strip():
+            with self._lock:
+                self._last_request = self._clock()
+
+    def active(self) -> bool:
+        """Whether someone uses DTVP: a live lease, or a request within the TTL."""
+        with self._lock:
+            now = self._clock()
+            self._prune_locked(now)
+            if self._leases:
+                return True
+            return self._last_request is not None and now - self._last_request < self.ttl_seconds
+
+    def activity(self) -> dict[str, object]:
+        """For the status: active or not, the live leases, and how long ago
+        the last authenticated request came."""
+        with self._lock:
+            now = self._clock()
+            self._prune_locked(now)
+            leases = len(self._leases)
+            last = self._last_request
+        ago = None if last is None else round(now - last, 1)
+        return {
+            "active": bool(leases) or (ago is not None and ago < self.ttl_seconds),
+            "leases": leases,
+            "last_request_seconds_ago": ago,
+            "ttl_seconds": self.ttl_seconds,
+        }
 
     def leases(self) -> list[Lease]:
         with self._lock:

@@ -4,7 +4,7 @@
 
 | | |
 | :--- | :--- |
-| Decision status | Proposed (2026-11-23) |
+| Decision status | Accepted (2026-11-23, repository owner) |
 | Implementation status | Not started; planned for 2.1.0 |
 | Related | [ADR 0003](0003-dtvp-is-the-record-for-assessments.md): **amends decision 3** ("Dependency-Track is a rendering target") and the overwrite described in [When Dependency-Track Holds Something Else](../import-export.md#when-dependency-track-holds-something-else). [ADR 0004](0004-background-sync-and-event-stream.md): the background sync reads conservatively (no polling, idle without users, amendment of 2026-11-23); this record makes correctness independent of how often it reads. |
 

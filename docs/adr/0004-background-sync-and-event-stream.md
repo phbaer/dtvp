@@ -157,6 +157,53 @@ version between 75 % and 100 % of the interval so they do not fall due at
 once; content digests find what changed. Watched products keep their
 intervals either way. The schedule below describes a source with hints.
 
+**No polling, idle without users** (amendment, decided 2026-11-23; amends user
+decisions 1 and 2 of 2026-11-20). Watched products are no longer read on
+intervals (`DTVP_SYNC_WATCHED_FINDINGS_SECONDS` retired, tolerated with a
+warning). A version is read when its change hint changes (BOM: all kinds;
+analysis: findings and vulnerability records), a person requests it, it is
+opened (interest begins) and its last read is older than the safety interval,
+it is imported the first time, or its stored findings are missing. A source
+without hints keeps its staggered intervals. The scheduler reads the source
+only while DTVP is in use: an interest lease, or an authenticated API or MCP
+request within `DTVP_SYNC_WATCH_TTL_SECONDS`. Idle, it reads no project list,
+plans no reads, runs no portfolio pass, no range reads and no safety
+re-reads; the export (with its echo handling) and explicit requests keep
+running. Coming into use reads the project list once at once, then only hint
+changes; the safety and unhinted intervals count only time in use. The state
+is in `GET /api/sync/status` (`activity`) and the Sync menu. Verified by
+`tests/test_sync_idle.py` and `tests/test_source_sync.py`.
+
+**Unchanged reads write no data** (amendment, 2026-11-23). A read whose findings
+say what the stored ones say changes nothing but read-time bookkeeping: the
+findings are not rewritten, the revisions are not bumped, and no grouped
+snapshot is built again. Order and the DT-moved risk scores are not a change
+(`same_findings`). Verified by `tests/test_unchanged_read.py`. A stored
+document that is missing is written again.
+
+**Queue reasons, last success and failure cleanup** (amendment, 2026-11-23).
+`GET /api/sync/status` gains `last_success_at` (the newest successful read of
+any version; the store already had it), `scheduler_state.queue` (the waiting
+versions with `reason`, `priority`, `kinds` and `requested`), and the
+reason in each version's row (`queued_reason`, migration
+`0010_sync_queue_reason.sql`) and sync log line. A version whose sync fails
+outside the source's calls drops its staged reads and settles, not counted as
+a failure. [Sync status fields](../runtime.md#sync-state).
+
+**Progress, cancelling and range reads** (amendment, 2026-11-22). A person
+sees what the sync does (`source.sync_progress`: the pass's pages, each
+running version's phase, what waits) and can cancel it
+(`POST /api/sync/cancel`: the pass, the waiting requests, the running
+syncs with their in-flight reads, and the waiting versions; staged reads
+are dropped, no failure is recorded) and the sync then pauses until Resume
+or the safety-re-read interval, a person's request still running. Each version sync and pass logs where its time went. The version
+ranges of the recommendation no longer run inside a version sync: they use
+only budget nobody else waits for, between syncs. A pass also starts for a
+request without waiting for the interval between passes, versions coming
+due while a pass runs wait for the next pass instead of being read one by
+one beside it, and a pass is chosen when it costs fewer pages than three
+requests per held version. Details in [Sync scheduler](../runtime.md#sync-scheduler).
+
 **Portfolio pass** (amendment, 2026-11-22). Reading many versions one by one
 is slow: a version costs a findings read, a vulnerability-records read and
 often a BOM read, each paced by the budget. A source that can list every
@@ -165,15 +212,21 @@ version's findings in one paginated read declares `BulkFindings`
 the last list took pages (at least five; at most one pass a minute), the
 scheduler holds them back and reads the list once instead. Each findings
 read of a version records a `portfolio_digest` of what such a list can show
-(finding keys, analysis state, details and suppression; migration
-`0009_sync_portfolio_digest.sql`). A held version whose share of the list
+(the keys of its unsuppressed findings and their analysis states; migration
+`0009_sync_portfolio_digest.sql`). Only fields both reads carry alike count:
+Dependency-Track 4.x builds both lists from `Finding`, whose analysis is only
+`state` and `isSuppressed`, and the project export leaves suppressed findings
+out. Details counted until 2026-11-23 and made every assessed version differ
+on every pass; digests of that kind count as missing and are seeded again
+from the stored findings. A version a pass could not settle is not put into
+another pass before its own read is done. A held version whose share of the list
 gives the same digest is marked checked: its findings count as read, the
 analysis hint seen as the pass started counts as read, and a request made
 before the pass is answered as done. The others, and versions without a
 digest yet, are read one by one as before. Not candidates: first imports
 (the list lacks what the version's own read stores) and the 12-hour safety
 re-read, which stays a full read because the list does not carry
-justification and response. Progress is in `source.portfolio_pass` events
+details, justification and response. Progress is in `source.portfolio_pass` events
 and `GET /api/sync/status` (`portfolio_pass`). A failed pass leaves the
 versions to be read one by one.
 
@@ -509,4 +562,5 @@ tab, and a 401 or an `auth` event signs every tab out.
 | 8 Other integrations | Not implemented |
 | Step 8, requests | Implemented 2026-11-22: `POST /api/sync/requests` (P0, persisted with `requested_at`, `requested_by`, `request_id`; repeats are one request; progress and outcome under `request` in `GET /api/sync/versions`, migration `0008_sync_request_outcome.sql`; reviewers only) and `POST /api/sync/analysis-requests` (optional `ports.AnalysisTrigger`, the Dependency-Track client asks for an analysis and the version is read when it is done); the project view's Sync menu with Export now; see [Manual requests](../runtime.md#manual-requests). `POST /api/export` returning 202, Reload, and archive restore through the export queue are open |
 | Amendment: portfolio pass | Implemented 2026-11-22: optional `BulkFindings` in `dtvp/ports.py`, the Dependency-Track client pages `GET /api/v1/finding`; `portfolio_digest` recorded at every findings read (`0009_sync_portfolio_digest.sql`); the scheduler settles unchanged versions from one list and reads only changed ones; `source.portfolio_pass` events, `portfolio_pass` in the status; `DTVP_SYNC_PORTFOLIO_PAGE_SIZE` |
+| Amendment: analysis details | Implemented 2026-11-23: a version's findings read lists state and suppression only (`analysis_details=False`, optional in `ports.VulnerabilitySource`); the details come from the record where the source's state and suppression equal the value DTVP last read or exported, and are read one by one only for adoptions and findings whose state or suppression changed; the safety re-read reads every assessment (`FULL_ANALYSIS_DETAILS`). The portfolio pass is chosen when it costs fewer pages than the due versions' own requests (one per due kind). See [Analysis details](../runtime.md#sync-scheduler) |
 | Amendment: optional change hints | Implemented 2026-11-22: `ChangeHints` in `dtvp/ports.py`, declared by the Dependency-Track client; without it, staggered regular re-reads (`DTVP_SYNC_UNHINTED_FINDINGS_SECONDS`); the sync table's hint columns renamed (`0007_neutral_change_hints.sql`); the grouped snapshot fingerprint and the summary index key read the neutral hint (`ports.change_hint`) |

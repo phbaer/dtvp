@@ -296,6 +296,18 @@ Opened, it shows a dialog above the page:
   (`VulnerabilityFacts`); no source call. A confirmation is kept with the
   finding, in the instance dump too, and exported (see
   [CycloneDX export](cyclonedx-export.md)).
+- **A gone finding whose component DTVP never knew:** a record from before
+  DTVP tracked findings, whose component Dependency-Track has since recreated
+  under a new UUID, cannot be carried over: nothing says which package it was
+  on. When the same vulnerability is reported in the same version, the gone
+  finding says "Probably the same as *id* on *component version* (same
+  vulnerability, the gone finding's component is unknown)". After **Confirm
+  same issue**, **Apply to *id*** copies the assessment to that finding,
+  pending review (origin `carried-over-by-same-issue`). Nothing is exported
+  for such a confirmation: the id is the same. When the vulnerability is
+  reported on more than one component of the version, DTVP picks none: the
+  gone finding lists every candidate with **Confirm and apply here**, and
+  **Apply to all N** applies to each of them explicitly.
 - Components of findings recorded before DTVP tracked findings are known only
   by their Dependency-Track UUID. When gone findings are shown, DTVP looks
   their name, version and package URL up once in local sources (the stored
@@ -497,6 +509,42 @@ label per applicable repair and count only the findings that change.
 | Remove references no team stands behind | A block under the name for components no team owns (the team mapping's `*`, or `Unassigned`) whose text is only `See global assessment.` | The block is removed. An assessment someone wrote under that name stays: it is the assessment of a component without a team, not a former team's |
 | Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |
 | Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
+
+**Unknown component** (never preselected) carries the assessment of a gone
+finding whose component DTVP never knew to the finding of the same
+vulnerability reported now in the same version, when that finding has no
+assessment. The preview names the state, teams and date of the gone record
+and the target. It is copied as the gone findings panel applies a confirmed
+match: pending review, origin `carried-over-by-same-issue`, the reviewer as
+author. A vulnerability reported on more than one component of the version
+gets the assessment on every unassessed candidate when all its gone records
+of unknown component agree on every exported field (state, justification,
+response, suppression and the text; the preview says "N earlier records
+agree, applied to all M candidates"; which record was on which component
+does not matter then). When their texts differ it is listed as ambiguous
+("choose in the gone findings panel"), and records with different states as
+conflicting; neither is applied. A finding saved since the preview is skipped, and a second run
+finds nothing left to carry.
+
+**Earlier assessments.** When no finding of a vulnerability has an
+assessment, its assessment form lists what DTVP still holds for gone findings
+of the same vulnerability (and of its aliases) in the same project versions:
+the component (or "unknown component"), state, justification, date and the
+start of the text. **Use this** fills the form (state, justification,
+response, text; with a team open, that team's block if the record has one)
+and saves nothing: the assessment is saved through the normal flow, so the
+usual review rules apply.
+
+An incomplete vulnerability whose missing team has no assessment anywhere
+cannot be completed by a repair: there is nothing to copy, and no approved
+global assessment to refer to. The preview lists it, not selectable, with
+the reason, for example "Core has not assessed this vulnerability yet;
+nothing to copy and the global assessment is pending review, so no team can
+refer to it: open the vulnerability to assess it". A team counts as having
+assessed when a current block carries its name or one of its aliases from
+the team mapping (the names after the first in a mapping entry), compared
+without case and surrounding space; the vulnerability list, the card's
+"Why synchronization is needed" and Repair use the same rule.
 
 Synchronize merges the current blocks only. A historical block is the record
 of one finding, for example a former team's assessment or a team assessment
@@ -733,10 +781,39 @@ fail with 409, with another reviewer's or an expired one with 404. The
 preview token includes the file's SHA-256, so a preview of one file cannot be
 applied with another.
 
+Before the apply, the preview is checked per group. The item of each selected
+group is compared in a canonical form: the same fields in any order (a list's
+order is how a read returned it, not a decision). Each apply and document
+request sends the fingerprints and the preview items of its selected groups
+(`group_fingerprints`, `group_items`); a refused apply reports, per changed
+group, the fields that differ (`changes`: `path`, `before`, `after`), which the
+dialog shows.
+
+In a repair preview, `finding_count` is the number of findings the repair
+would write to, not the number of the group's findings. It changes when a
+finding's assessment changes (a team saves one, or DT's analysis is imported
+by a sync), so a refused apply names `finding_count`, `repairs[]` and
+`requires_review` as they changed. A finding that a sync adds to a version is
+not part of the group until the group is built again, so it does not refuse
+an apply. The preview token binds
+the workflow version, the task, the filters and the file's SHA-256: a
+different task, filter or file is refused (409 "stale"). The content is not
+bound: the background sync writes between preview and apply all the time.
+Each preview response also carries `group_fingerprints`, a fingerprint of
+each group's preview item. The server recomputes the preview and
+compares only the selected groups. A group that changed, lost its
+selectability or has no fingerprint refuses the apply with 409 and a
+structured detail, `{"code": "preview_changed", "changed_groups": [...]}`;
+the task status carries the same under `error_detail`. Changes to groups
+outside the selection do not matter. The dialog then reloads the preview,
+keeps the selection of the other groups, marks the changed ones and says
+which they are; the reviewer applies again.
+
 Every candidate set is the intersection of all active project-list filters and
 the selected workflow's applicability rules. The dialog loads plug-in metadata
 first and prepares only the chosen preview. Preview tokens prevent applying a
-stale candidate set; prepared previews are reused while the dialog is open.
+stale candidate set (see above for what a refused apply does); prepared previews
+are reused while the dialog is open, and a refused apply reloads them.
 Every workflow's payload carries the revision of the finding it was built
 on (`expected_revision`). A finding whose stored assessment differs from what
 the workflow read, or whose revision changes before the write, is left out;
