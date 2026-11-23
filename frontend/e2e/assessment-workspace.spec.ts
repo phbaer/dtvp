@@ -89,6 +89,11 @@ async function mockShell(page: Page) {
     }));
     await page.route('**/api/events/poll*', route => route.fulfill(json({ boot_id: 'e2e', cursor: 'e2e:1', events: [], resync: null, more: false })));
     // The leader tab reports the products the tabs show (ADR 0004 step 4a).
+    // The Sync menu reads what the background sync does now.
+    await page.route('**/api/sync/status', route => route.fulfill(json({ scheduler_state: {
+        source: { name: 'Dependency-Track', can_request_analysis: true },
+        progress: { pass: null, running: [], queued: 0, requested: 0, ranges: null },
+    } })));
     await page.route('**/api/events/interest', route => route.fulfill({ status: 204, body: '' }));
     await page.route('**/api/projects/*/vulnerabilities/*/code-evidence**', route => route.fulfill(json({ items: [], withdrawn_count: 0 })));
 
