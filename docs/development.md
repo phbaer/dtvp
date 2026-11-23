@@ -97,6 +97,30 @@ builds the image as a check but does not publish it, and says so in a
 warning. Open the pull request from a branch of this repository to get a
 `pr-<number>` test image.
 
+## Release Planning
+
+Versions are planned in Forgejo
+([issues](https://git.baer.one/phbaer/dtvp/issues),
+[milestones](https://git.baer.one/phbaer/dtvp/milestones)), not in the
+repository:
+
+- Each planned version has a milestone (for example `2.0.0`) and one tracking
+  issue titled `Release <version>: <theme>` with a checklist of what it needs.
+  Larger tracks that span versions (for example the native matcher) get their
+  own tracking issue under the milestone where they start.
+- Every piece of planned work is either a checklist item in a tracking issue
+  or its own issue under the milestone, linked from the tracking issue. Items
+  that may move to a later version are marked *(decide)*.
+- A pull request names the issue or checklist item it delivers; tick the item
+  when it is merged. Moving work between versions means moving the issue or
+  item, not editing documents.
+- ADRs and design documents keep the decisions and step plans; the issues
+  link to them instead of copying them.
+- A version is released by a version pull request merged on its own once its
+  tracking issue is complete (CI tags every untagged version on `main`, see
+  [Toolchain and CI](#toolchain-and-ci)); then close the tracking issue and
+  the milestone.
+
 ## Split Backend And Frontend
 
 The [quick start](../README.md#quick-start) is preferred for normal work. To run processes separately,

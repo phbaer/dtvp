@@ -12,6 +12,8 @@ This repository uses a generic AI agent entry framework:
 - Do not add `Co-Authored-By` trailers to commit messages, and do not add
   "Generated with Claude Code" or any other AI-tool attribution to commits,
   pull requests, or comments.
+- Plan versions in Forgejo milestones and tracking issues, not in repository
+  files; see [Release planning](docs/development.md#release-planning).
 - Agentyzer is a standalone repository (https://git.baer.one/phbaer/agentyzer),
   usually checked out at `../agentyzer`. Inspect it for the analyzer's API shape
   and behavior; DTVP has no nested copy.
