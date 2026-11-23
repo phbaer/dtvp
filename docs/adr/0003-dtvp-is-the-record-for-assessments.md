@@ -7,7 +7,7 @@
 | Decision status | Accepted (2026-11-18, repository owner) |
 | Implementation status | Partly implemented (2026-11-18); see [Implementation progress](#implementation-progress) |
 | Supersedes | The assessment merge and conflict handling of [ADR 0002](0002-local-first-database-with-import-and-export.md). Its database, export queue, history, and ports remain. |
-| Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md). Decisions 2 and 6 are amended by [ADR 0010](0010-version-overrides.md#amendments-to-adr-0003) (2026-11-20) |
+| Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md). Decisions 2 and 6 are amended by [ADR 0010](0010-version-overrides.md#amendments-to-adr-0003) (2026-11-20). Decision 3 is proposed to be amended by [ADR 0011](0011-check-the-sink-before-writing.md) (proposed 2026-11-23) |
 
 ## Context
 
