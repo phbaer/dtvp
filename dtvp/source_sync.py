@@ -492,6 +492,10 @@ class SourceSync:
         # holds back, when the last one ended, and how many pages it read.
         self._pass: Optional[asyncio.Task] = None
         self._pass_holds: set[str] = set()
+        # Versions the last pass could not settle: read one by one, and not
+        # put into another pass until that read is done (else every pass
+        # re-lists the whole portfolio for the same few versions).
+        self._pass_judged: set[str] = set()
         self._pass_ended = float("-inf")
         self._pass_pages: Optional[int] = None
         self.pass_progress: Optional[dict[str, Any]] = None
@@ -926,12 +930,18 @@ class SourceSync:
         it catches what a portfolio list cannot show (justification and
         response)."""
         rows = {row["project_uuid"]: row for row in self.cache.sync_state.rows()}
+        # A judged version leaves the set once its own read took it off the
+        # queue.
+        self._pass_judged &= {
+            uuid for uuid in self.queue if uuid not in self.running
+        } | self.running
         return [
             uuid
             for uuid, item in self.queue.items()
             if KIND_FINDINGS in item.kinds
             and item.priority != P4_SAFETY
             and uuid not in self.running
+            and uuid not in self._pass_judged
             and (rows.get(uuid) or {}).get("last_success_at")
         ]
 
@@ -1047,6 +1057,7 @@ class SourceSync:
                 else:
                     reasons["changed"] = reasons.get("changed", 0) + 1
             reasons["unchanged"] = len(unchanged)
+            self._pass_judged |= set(candidates) - set(unchanged)
             timings["compare"] = time.perf_counter() - compare_started
             mark_started = time.perf_counter()
             answered = self.cache.sync_state.mark_checked(

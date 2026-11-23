@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from dtvp.dt_client import (
     DTClient,
@@ -620,3 +621,64 @@ async def test_the_source_and_id_are_url_encoded(dt_client, respx_mock):
     assert seen == [
         b"/api/v1/vulnerability/source/OSS%20INDEX/vuln/sonatype-2026%2F1%3Fx%23y"
     ]
+
+
+def _assessed_rows(count):
+    return [
+        {
+            "vulnerability": {"vulnId": f"CVE-{i}", "uuid": f"v{i}"},
+            "component": {"uuid": f"c{i}"},
+            "analysis": {"state": "NOT_AFFECTED", "isSuppressed": False},
+        }
+        for i in range(count)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_export_without_details_is_not_asked_for_again(dt_client, respx_mock):
+    """Dependency-Track 4.14's export carries only state and isSuppressed:
+    after the first read finds that out, reads go straight to the list."""
+    export = respx_mock.get("http://dt.example.com/api/v1/finding/project/u1/export").respond(
+        json={"findings": _assessed_rows(1)}
+    )
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(json=_assessed_rows(1))
+    respx_mock.get("http://dt.example.com/api/v1/analysis").respond(
+        json={"analysisState": "NOT_AFFECTED", "analysisDetails": "d", "isSuppressed": False}
+    )
+    await dt_client.get_vulnerabilities("u1")
+    findings = await dt_client.get_vulnerabilities("u1")
+    assert export.call_count == 1
+    assert findings[0]["analysis"]["analysisDetails"] == "d"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_read_leaves_no_analysis_request_unawaited(dt_client, respx_mock, recwarn):
+    """Seen in production: RuntimeWarning "coroutine 'DTClient.get_analysis'
+    was never awaited" when a read stopped after its first batch."""
+    import gc
+
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1/export").respond(status_code=404)
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(json=_assessed_rows(120))
+    calls = 0
+    created = 0
+
+    async def slow(*args):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(10)
+
+    def slow_analysis(*args):
+        nonlocal created
+        created += 1
+        return slow(*args)
+
+    dt_client.get_analysis = slow_analysis
+    read = asyncio.create_task(dt_client.get_vulnerabilities("u1"))
+    await asyncio.sleep(0.05)
+    read.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await read
+    gc.collect()
+    assert calls == 50
+    assert created == calls  # no request created that never ran
+    assert not [w for w in recwarn if "never awaited" in str(w.message)]

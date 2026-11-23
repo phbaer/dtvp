@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import inspect
 import math
 import re
@@ -214,6 +215,7 @@ _COMPARISON_IGNORED_TAGS = [
 ]
 
 
+@functools.lru_cache(maxsize=8192)
 def comparable_assessment_text(details: str) -> str:
     """The part of an assessment text that the findings of a vulnerability
     must agree on.

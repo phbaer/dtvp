@@ -12,18 +12,19 @@ from tests.test_source_sync import Source, _finding, _scheduler
 
 
 def _bulk_shape(finding, project_uuid):
-    """A finding as Dependency-Track's portfolio list gives it
-    (``Finding.QUERY_ALL_FINDINGS``): the analysis as state, detail and
-    isSuppressed, the project under the component."""
+    """A finding as Dependency-Track 4.14's portfolio list gives it
+    (``Finding.QUERY_ALL_FINDINGS`` through the ``Finding`` constructor):
+    the analysis only as ``state`` (absent without an analysis row) and
+    ``isSuppressed`` (false without one); no details, justification or
+    response. The project under the component."""
     analysis = finding.get("analysis") or {}
+    shaped = {"isSuppressed": bool(analysis.get("isSuppressed", False))}
+    if analysis.get("analysisState"):
+        shaped["state"] = analysis["analysisState"]
     return {
         "component": {**finding["component"], "project": project_uuid},
         "vulnerability": dict(finding["vulnerability"]),
-        "analysis": {
-            "state": analysis.get("analysisState"),
-            "detail": analysis.get("analysisDetails"),
-            "isSuppressed": analysis.get("isSuppressed", False),
-        },
+        "analysis": shaped,
     }
 
 
@@ -257,29 +258,122 @@ async def test_request_counts_for_a_large_portfolio(tmp_path):
 
 
 def test_the_digest_matches_a_versions_own_read_and_its_portfolio_share():
+    """The shapes Dependency-Track 4.14 really returns: a version's own read
+    is the project list enriched with each assessed finding's analysis read
+    (details, justification, response), the portfolio row has only state and
+    isSuppressed. Production saw every assessed version differ on every pass
+    while the details counted."""
     own = [
         {
-            "component": {"uuid": "c1"},
+            "component": {"uuid": "c1", "project": "p"},
             "vulnerability": {"uuid": "v1"},
             "analysis": {
                 "analysisState": "NOT_AFFECTED",
                 "analysisJustification": "CODE_NOT_REACHABLE",
                 "analysisResponse": "WILL_NOT_FIX",
                 "analysisDetails": " Not used. ",
-                "isSuppressed": True,
+                "analysisComments": [],
+                "isSuppressed": False,
             },
-        }
+        },
+        {   # never assessed: no analysis row
+            "component": {"uuid": "c2", "project": "p"},
+            "vulnerability": {"uuid": "v2"},
+            "analysis": {"isSuppressed": False},
+        },
+        {   # suppressed: in the list read, not in the project export
+            "component": {"uuid": "c3", "project": "p"},
+            "vulnerability": {"uuid": "v3"},
+            "analysis": {"analysisState": "FALSE_POSITIVE", "analysisDetails": "x", "isSuppressed": True},
+        },
     ]
     share = [
-        {
-            "component": {"uuid": "c1", "project": "p"},
-            "vulnerability": {"uuid": "v1"},
-            "analysis": {"state": "NOT_AFFECTED", "detail": "Not used.", "isSuppressed": True},
-        }
+        {"component": {"uuid": "c2", "project": "p"}, "vulnerability": {"uuid": "v2"},
+         "analysis": {"isSuppressed": False}},
+        {"component": {"uuid": "c1", "project": "p"}, "vulnerability": {"uuid": "v1"},
+         "analysis": {"state": "NOT_AFFECTED", "isSuppressed": False}},
+        {"component": {"uuid": "c3", "project": "p"}, "vulnerability": {"uuid": "v3"},
+         "analysis": {"state": "FALSE_POSITIVE", "isSuppressed": True}},
     ]
+    export_without_suppressed = own[:2]
     assert portfolio_digest(own) == portfolio_digest(share)
-    changed = [{**share[0], "analysis": {**share[0]["analysis"], "detail": "Used."}}]
+    assert portfolio_digest(export_without_suppressed) == portfolio_digest(share)
+    changed = [{**share[1], "analysis": {"state": "EXPLOITABLE", "isSuppressed": False}}, share[0]]
     assert portfolio_digest(changed) != portfolio_digest(own)
+    suppressed_now = [share[0], {**share[1], "analysis": {"state": "NOT_AFFECTED", "isSuppressed": True}}]
+    assert portfolio_digest(suppressed_now) != portfolio_digest(share)
+
+
+async def test_assessed_versions_are_settled_by_the_pass(tmp_path):
+    """Assessed findings with details in the version's own read are settled
+    by a portfolio list that carries no details."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=4)
+    source = BulkSource(versions=8)
+    for uuid, findings in source.findings.items():
+        findings[0] = {
+            **findings[0],
+            "analysis": {"analysisState": "NOT_AFFECTED", "analysisDetails": f"Not used in {uuid}.",
+                         "analysisJustification": "CODE_NOT_REACHABLE", "isSuppressed": False},
+        }
+    await _imported(scheduler, manager, source)
+
+    scheduler.request_reads([f"p{i}" for i in range(8)], by="rita")
+    for _ in range(3):
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+
+    assert source.portfolio_calls() == 1
+    assert source.synced() == []
+    await manager.close()
+
+
+async def test_a_digest_of_the_old_kind_is_seeded_again_and_settles(tmp_path):
+    """Digests recorded before this change never match a list: they count as
+    missing, are seeded from the stored findings, and the first pass
+    settles the unchanged versions."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=4)
+    source = BulkSource(versions=6)
+    await _imported(scheduler, manager, source)
+    connection = manager.store._connection()
+    with connection:
+        connection.execute("UPDATE sync_versions SET portfolio_digest = 'deadbeef'")
+
+    scheduler.request_reads([f"p{i}" for i in range(6)], by="rita")
+    for _ in range(3):
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+
+    assert source.portfolio_calls() == 1 and source.synced() == []
+    assert all(row["portfolio_digest"].startswith("p2:") for row in manager.sync_state.rows())
+    await manager.close()
+
+
+async def test_versions_a_pass_left_unsettled_are_not_listed_again_before_their_read(tmp_path):
+    """Production listed all 59 pages every minute while only a few of the
+    changed versions had been read in between."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=1)
+    source = BulkSource(versions=10)
+    await _imported(scheduler, manager, source)
+    for i in range(6):
+        source.findings[f"p{i}"].append(_finding(f"c{i}", "v9"))
+
+    scheduler.request_reads([f"p{i}" for i in range(10)], by="rita")
+    await scheduler.run_cycle(source)
+    await scheduler.drain()
+    assert source.portfolio_calls() == 1
+    assert scheduler._pass_judged == {f"p{i}" for i in range(6)}
+    # The next minute: the changed versions are still waiting for their read.
+    clock.advance(SourceSync.PASS_MIN_INTERVAL_SECONDS + 1)
+    scheduler._pass_ended -= SourceSync.PASS_MIN_INTERVAL_SECONDS + 1
+    await scheduler.run_cycle(source)
+    assert source.portfolio_calls() == 1
+    for _ in range(12):
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+    assert sorted(source.synced()) == [f"p{i}" for i in range(6)]
+    assert source.portfolio_calls() == 1
+    assert scheduler._pass_judged == set()
+    await manager.close()
 
 
 async def test_the_dependency_track_client_pages_the_portfolio_list():

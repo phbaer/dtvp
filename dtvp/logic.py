@@ -1,3 +1,4 @@
+import functools
 import json
 import logging
 import os
@@ -1349,7 +1350,30 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
     Parses assessment details string into shared text and a list of team blocks.
     Returns: (shared_text, blocks_list)
     Preserves entry order.
+
+    Parsed once per distinct text: a grouped snapshot reads the same texts
+    many times (every version of a finding, several passes per group). Each
+    caller gets its own copies of the blocks, which callers may change.
     """
+    if not details:
+        return "", []
+    if not isinstance(details, str):
+        return _parse_assessment_blocks_uncached(details)
+    shared, blocks = _parse_assessment_blocks_cached(details)
+    return shared, [
+        {key: (list(value) if isinstance(value, list) else dict(value) if isinstance(value, dict) else value)
+         for key, value in block.items()}
+        for block in blocks
+    ]
+
+
+@functools.lru_cache(maxsize=8192)
+def _parse_assessment_blocks_cached(details: str) -> Tuple[str, Tuple[Dict[str, Any], ...]]:
+    shared, blocks = _parse_assessment_blocks_uncached(details)
+    return shared, tuple(blocks)
+
+
+def _parse_assessment_blocks_uncached(details: str) -> Tuple[str, List[Dict[str, Any]]]:
     if not details:
         return "", []
 
@@ -1810,6 +1834,18 @@ def keep_team_records(stored: str, new: str, *, saved_team: Optional[str]) -> st
 
 
 def without_historical_blocks(details: str) -> str:
+    """See ``_without_historical_blocks``; parsed once per distinct text."""
+    if not isinstance(details, str):
+        return _without_historical_blocks(details)
+    return _without_historical_blocks_cached(details)
+
+
+@functools.lru_cache(maxsize=8192)
+def _without_historical_blocks_cached(details: str) -> str:
+    return _without_historical_blocks(details)
+
+
+def _without_historical_blocks(details: str) -> str:
     """``details`` without its historical team blocks.
 
     A historical block is a record, not the finding's decision: its

@@ -418,6 +418,12 @@ class DTClient:
         """
         export_url = f"{self.base_url}/api/v1/finding/project/{project_uuid}/export"
         try:
+            if getattr(self, "_export_lacks_details", False):
+                # Known from an earlier read: this server's export never
+                # carries the details (Dependency-Track 4.x builds it from
+                # ``Finding``, whose analysis is only state and suppression),
+                # so asking for it again only costs a request.
+                raise ValueError("Dependency-Track findings export omits details")
             export_response = await self.client.get(export_url)
             export_response.raise_for_status()
             export_payload = export_response.json()
@@ -439,6 +445,7 @@ class DTClient:
                 for finding in findings
                 if isinstance(finding.get("analysis"), dict)
             ):
+                self._export_lacks_details = True
                 raise ValueError(
                     "Dependency-Track findings export omits assessed finding details"
                 )
@@ -466,7 +473,7 @@ class DTClient:
         payload = response.json()
         findings = payload if isinstance(payload, list) else []
 
-        analysis_tasks = []
+        analysis_keys: list[tuple[str, str]] = []
         findings_to_enrich = []
         filtered_findings = []
 
@@ -497,18 +504,23 @@ class DTClient:
 
             if component_uuid and vulnerability_uuid and needs_enrichment:
                 findings_to_enrich.append(finding)
-                analysis_tasks.append(
-                    self.get_analysis(project_uuid, component_uuid, vulnerability_uuid)
-                )
+                analysis_keys.append((component_uuid, vulnerability_uuid))
 
-        if analysis_tasks:
+        if analysis_keys:
             # Execute analysis requests in batches to avoid overloading the client/connection pool
             # The client has a limit of 100 connections, so we batch safely below that.
             batch_size = 50
             results = []
 
-            for i in range(0, len(analysis_tasks), batch_size):
-                batch = analysis_tasks[i : i + batch_size]
+            # The requests of a batch are created only when it runs: created
+            # all up front, those of later batches were never awaited when an
+            # earlier one was cancelled (RuntimeWarning "coroutine
+            # 'DTClient.get_analysis' was never awaited").
+            for i in range(0, len(analysis_keys), batch_size):
+                batch = [
+                    self.get_analysis(project_uuid, component_uuid, vulnerability_uuid)
+                    for component_uuid, vulnerability_uuid in analysis_keys[i : i + batch_size]
+                ]
                 batch_results = await asyncio.gather(*batch, return_exceptions=True)
                 results.extend(batch_results)
 

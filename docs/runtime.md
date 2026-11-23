@@ -455,11 +455,13 @@ versions, at most one pass a minute, a request not waiting for that minute
 unless the last pass failed), use one portfolio-wide
 findings list instead of a read per version, for a source that offers it
 (`ports.BulkFindings`; Dependency-Track: `GET /api/v1/finding`, paged).
-A version whose findings, analysis states, details and suppression are as
-its last own read left them (`portfolio_digest`) is marked checked and its
-request answered as done; only the others are read one by one. First
-imports and the 12-hour safety re-read stay per version: the list has no
-justification or response. While a pass runs, the versions it covers wait;
+A version whose unsuppressed findings and their analysis states are as its
+last own read left them (`portfolio_digest`) is marked checked and its
+request answered as done; only the others are read one by one, and they are
+not put into another pass before that read is done. First imports and the
+12-hour safety re-read stay per version: the list has no details,
+justification or response, so an edit of the details alone in
+Dependency-Track shows with that re-read. While a pass runs, the versions it covers wait;
 `source.portfolio_pass` events (`started`, `reading` with pages read and
 total, `done` with unchanged and changed counts, or `failed`) and
 `portfolio_pass` in `GET /api/sync/status` show its progress. A failed pass

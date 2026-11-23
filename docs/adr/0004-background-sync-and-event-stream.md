@@ -178,15 +178,21 @@ version's findings in one paginated read declares `BulkFindings`
 the last list took pages (at least five; at most one pass a minute), the
 scheduler holds them back and reads the list once instead. Each findings
 read of a version records a `portfolio_digest` of what such a list can show
-(finding keys, analysis state, details and suppression; migration
-`0009_sync_portfolio_digest.sql`). A held version whose share of the list
+(the keys of its unsuppressed findings and their analysis states; migration
+`0009_sync_portfolio_digest.sql`). Only fields both reads carry alike count:
+Dependency-Track 4.x builds both lists from `Finding`, whose analysis is only
+`state` and `isSuppressed`, and the project export leaves suppressed findings
+out. Details counted until 2026-11-23 and made every assessed version differ
+on every pass; digests of that kind count as missing and are seeded again
+from the stored findings. A version a pass could not settle is not put into
+another pass before its own read is done. A held version whose share of the list
 gives the same digest is marked checked: its findings count as read, the
 analysis hint seen as the pass started counts as read, and a request made
 before the pass is answered as done. The others, and versions without a
 digest yet, are read one by one as before. Not candidates: first imports
 (the list lacks what the version's own read stores) and the 12-hour safety
 re-read, which stays a full read because the list does not carry
-justification and response. Progress is in `source.portfolio_pass` events
+details, justification and response. Progress is in `source.portfolio_pass` events
 and `GET /api/sync/status` (`portfolio_pass`). A failed pass leaves the
 versions to be read one by one.
 

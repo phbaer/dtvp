@@ -98,13 +98,27 @@ def findings_digests(findings: Any) -> tuple[str, str, dict[str, str]]:
     return _digest(identities), analyses, index
 
 
+# Bumped when the digest's fields change: a recorded digest of another
+# version counts as missing and is seeded again, so the change cannot make
+# every version look changed for good.
+PORTFOLIO_DIGEST_VERSION = "p2"
+
+
 def portfolio_digest(findings: Any) -> str:
     """What a portfolio-wide findings list can tell about a version: its
-    finding keys and, per finding, the analysis state, details and
-    suppression. Justification and response are left out, because the
-    portfolio list does not carry them (ADR 0004, "Portfolio pass"). The
-    same digest over a version's own findings read and over its share of a
-    portfolio list means nothing a portfolio list can see has changed."""
+    finding keys and, per finding, the analysis state and suppression.
+
+    Only fields both reads carry the same way count. Dependency-Track 4.x
+    builds both from ``Finding``, whose analysis holds only ``state`` and
+    ``isSuppressed`` (``Finding.QUERY`` and ``QUERY_ALL_FINDINGS``); the
+    details, justification and response of a version's own read come from
+    its per-finding analysis reads, which a portfolio list does not make.
+    Counting the details made every assessed version differ from its share
+    of the list on every pass (ADR 0004, "Portfolio pass"). Edits of the
+    details alone are seen by the regular full re-read. Suppressed findings
+    are left out: the project export leaves them out (``getFindings(project)``
+    is ``includeSuppressed=false``) while the list and the portfolio read
+    carry them, so a suppression shows as the finding leaving the digest."""
     items = []
     for finding in findings if isinstance(findings, list) else []:
         if not isinstance(finding, Mapping):
@@ -113,23 +127,16 @@ def portfolio_digest(findings: Any) -> str:
         if key is None:
             continue
         analysis = finding.get("analysis") if isinstance(finding.get("analysis"), Mapping) else {}
+        if analysis.get("isSuppressed", analysis.get("suppressed", False)):
+            continue
         items.append(
             (
                 key[0],
                 key[1],
                 str(analysis.get("analysisState") or analysis.get("state") or "NOT_SET"),
-                _text_hash(
-                    str(
-                        analysis.get("analysisDetails")
-                        or analysis.get("details")
-                        or analysis.get("detail")
-                        or ""
-                    ).strip()
-                ),
-                bool(analysis.get("isSuppressed", analysis.get("suppressed", False))),
             )
         )
-    return _digest(items)
+    return f"{PORTFOLIO_DIGEST_VERSION}:{_digest(sorted(items))}"
 
 
 def vulns_digest(vulns: Any) -> str:
@@ -695,9 +702,11 @@ class SyncStateStore:
         return kinds, first, generation
 
     def portfolio_digests(self) -> dict[str, Optional[str]]:
-        """Per version, the portfolio digest of its last findings read."""
+        """Per version, the portfolio digest of its last findings read; one
+        of an older digest version counts as none."""
+        prefix = f"{PORTFOLIO_DIGEST_VERSION}:"
         return {
-            str(row[0]): row[1]
+            str(row[0]): (row[1] if row[1] and str(row[1]).startswith(prefix) else None)
             for row in self._connection().execute(
                 "SELECT project_uuid, portfolio_digest FROM sync_versions"
             )
@@ -710,8 +719,12 @@ class SyncStateStore:
         with connection:
             connection.executemany(
                 "UPDATE sync_versions SET portfolio_digest = ? "
-                "WHERE project_uuid = ? AND portfolio_digest IS NULL",
-                [(digest, uuid) for uuid, digest in digests.items()],
+                "WHERE project_uuid = ? AND (portfolio_digest IS NULL "
+                "OR portfolio_digest NOT LIKE ?)",
+                [
+                    (digest, uuid, f"{PORTFOLIO_DIGEST_VERSION}:%")
+                    for uuid, digest in digests.items()
+                ],
             )
 
     def mark_checked(
