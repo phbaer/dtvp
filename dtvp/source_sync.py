@@ -511,6 +511,10 @@ class SourceSync:
         self._next_enrich = 0.0
         self.enrich_progress: Optional[dict[str, Any]] = None
         self._progress_sent = float("-inf")
+        # After a cancel: nothing new starts until Resume, the end of the
+        # pause, or a person's request (which runs on its own).
+        self.paused_until: Optional[float] = None
+        self.paused: Optional[dict[str, Any]] = None
         self._progress_pending: Optional[asyncio.TimerHandle] = None
 
     def limited(self, client: Any) -> LimitedSource:
@@ -645,6 +649,7 @@ class SourceSync:
         }
         queued: list[dict[str, Any]] = []
         dropped: list[str] = []
+        paused = self.is_paused()
         # When each version's findings were stored, in one query: a version
         # whose sync state says read but whose findings are missing or older
         # is read again (LocalStore.snapshot_times).
@@ -668,6 +673,11 @@ class SourceSync:
                     dropped.append(uuid)
                 continue
             priority, kinds = due
+            if paused and priority != P0_REQUEST:
+                if existing is not None and existing.priority != P0_REQUEST:
+                    del self.queue[uuid]
+                    dropped.append(uuid)
+                continue
             if existing is None:
                 self.queue[uuid] = SyncItem(uuid, priority, kinds, tick)
                 queued.append(row)
@@ -907,7 +917,7 @@ class SourceSync:
         limited = self.limited(client)
         self._start_export(limited)
         tick = self._monotonic()
-        if tick >= self._next_list_read:
+        if tick >= self._next_list_read and not self.is_paused():
             self._next_list_read = tick + self.cache.refresh_interval_seconds
             await self.cache._refresh_project_list(limited)
             self.mark_dirty()
@@ -1174,7 +1184,7 @@ class SourceSync:
             return
         if self.queue or self.running or (self._pass is not None and not self._pass.done()):
             return
-        if self._monotonic() < self._next_enrich:
+        if self._monotonic() < self._next_enrich or self.is_paused():
             return
         refresh = getattr(self.cache, "refresh_fixed_versions", None)
         if not callable(refresh):
@@ -1200,7 +1210,9 @@ class SourceSync:
             )
             self.enrich_progress = {"versions": len(rows), "checked": 0, "reads": 0}
             for row in rows:
-                if self.queue or self.running or (self._pass is not None and not self._pass.done()):
+                if self.queue or self.running or self.is_paused() or (
+                    self._pass is not None and not self._pass.done()
+                ):
                     break  # reads come first; the rest follows next time
                 if budget is not None and getattr(budget, "remaining", 1) <= 0:
                     break
@@ -1224,6 +1236,26 @@ class SourceSync:
             self.enrich_progress = None
             self._progress(force=True)
 
+    # -- pause -------------------------------------------------------------------
+
+    def is_paused(self) -> bool:
+        if self.paused_until is None:
+            return False
+        if self._monotonic() >= self.paused_until:
+            self.resume(by=None)  # the versions' normal schedule is back
+            return False
+        return True
+
+    def resume(self, *, by: Optional[str]) -> None:
+        """End the pause of a cancel: the versions are planned as usual."""
+        if self.paused_until is None:
+            return
+        self.paused_until = None
+        self.paused = None
+        logger.info("Sync resumed%s", f" by {by}" if by else "")
+        self._wake()
+        self._progress(force=True)
+
     # -- cancel ------------------------------------------------------------------
 
     CANCEL_SCOPES = ("pass", "requests", "running")
@@ -1234,7 +1266,7 @@ class SourceSync:
         each version keeps what it had). Nothing of it counts as a failure:
         no backoff, no breaker. Returns what was cancelled."""
         wanted = set(scope or self.CANCEL_SCOPES)
-        result: dict[str, Any] = {"pass": False, "requests": [], "running": []}
+        result: dict[str, Any] = {"pass": False, "requests": [], "running": [], "waiting": 0}
         if "pass" in wanted and self._pass is not None and not self._pass.done():
             self._pass.cancel()
             result["pass"] = True
@@ -1259,7 +1291,21 @@ class SourceSync:
                 cancel_fetches(result["running"])
             if self._enrich is not None and not self._enrich.done():
                 self._enrich.cancel()
-        if result["pass"] or result["requests"] or result["running"]:
+        if wanted >= set(self.CANCEL_SCOPES):
+            # Everything: drop what waits too, and pause, or the next tick
+            # plans the same due versions again and starts them (and a pass).
+            waiting = [uuid for uuid in self.queue if uuid not in self.running]
+            self.queue.clear()
+            self._pass_holds = set()
+            self.cache.sync_state.settle(waiting)
+            result["waiting"] = len(waiting)
+            self.paused_until = self._monotonic() + self.schedule.safety
+            self.paused = {
+                "by": by,
+                "until": (self._now() + timedelta(seconds=self.schedule.safety)).isoformat(),
+            }
+            result["paused"] = True
+        if result["pass"] or result["requests"] or result["running"] or result["waiting"]:
             logger.info(
                 "%s cancelled: %s",
                 by or "someone",
@@ -1268,6 +1314,7 @@ class SourceSync:
                         "the portfolio pass" if result["pass"] else "",
                         f"{len(result['requests'])} request(s)" if result["requests"] else "",
                         f"{len(result['running'])} running sync(s)" if result["running"] else "",
+                        f"{result['waiting']} waiting" if result["waiting"] else "",
                     ) if part
                 ),
             )
@@ -1275,6 +1322,23 @@ class SourceSync:
         self._update_backlog()
         self._publish("source.sync_cancelled", {**result, "by": by})
         self._progress(force=True)
+        # Once the cancelled tasks have stopped, the state they leave.
+        stopping = [
+            entry["task"] for entry in self._items.values()
+            if entry.get("task") is not None and not entry["task"].done()
+        ]
+        if self._pass is not None and not self._pass.done():
+            stopping.append(self._pass)
+        if stopping:
+            async def settled() -> None:
+                await asyncio.wait(stopping, timeout=10.0)
+                self._update_backlog()
+                self._progress(force=True)
+                self._publish("source.sync_cancelled", {**result, "by": by, "settled": True})
+
+            task = asyncio.create_task(settled())
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
         return result
 
     # -- progress ----------------------------------------------------------------
@@ -1304,6 +1368,7 @@ class SourceSync:
             "queued": len(self.queue),
             "requested": sum(1 for item in self.queue.values() if item.priority == P0_REQUEST),
             "ranges": self.enrich_progress,
+            "paused": self.paused if self.paused_until is not None else None,
         }
 
     def _progress(self, *, force: bool = False) -> None:
@@ -1429,6 +1494,10 @@ class SourceSync:
 
     def _update_backlog(self) -> None:
         backlog = len(self.queue) + len(self.running)
+        # The progress follows every change of the queue (planning, a pass,
+        # a cancel), not only a running sync's phases; throttled, and the
+        # last state is always sent.
+        self._progress()
         if backlog == self._backlog:
             return
         self._backlog = backlog

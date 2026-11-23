@@ -424,14 +424,25 @@ project version (`project_uuid`) or every active version of a product
   `cancelled`) and cancels the running version syncs together with their
   in-flight reads; their staged reads are dropped and each version keeps
   what it had. Nothing of it counts as a failure: no backoff, no breaker.
-  **Cancel** in the menu calls it while something runs.
+  Without a scope it also drops the waiting versions and **pauses** the
+  sync: no list read, no planning of due versions, no pass and no range
+  reads until `POST /api/sync/resume` (reviewers), or the safety-re-read
+  interval (`DTVP_SYNC_SAFETY_SECONDS`, 12 h) has passed; a reviewer's
+  request still runs. Otherwise the next tick would plan the same due
+  versions again and start them at once. The response counts what was
+  stopped (`pass`, `running`, `waiting`, `requests`); `progress.paused`
+  says until when. **Cancel** in the menu calls it while something runs;
+  the menu then shows "Sync paused after cancel" with **Resume**.
 
 **Progress and timings.** `source.sync_progress` (at most two a second,
 the last state always sent) and `scheduler_state.progress` in
 `GET /api/sync/status` carry what runs now: the portfolio pass with its
 pages, each running version with its phase (`preparing`, `findings`,
 `vulns`, `bom`, `commit`, `events`) and seconds, how many wait and how many
-of them are requests, and the version-range reads. The Sync button shows
+of them are requests, the version-range reads and the pause. It is sent on
+every change of the queue as well, and once more when a cancel has
+settled (`source.sync_cancelled` with `settled`), on which the menu reads
+the status again. The Sync button shows
 the pass's pages or the number of versions waiting; the menu shows the
 detail and the last pass's outcome. Every version sync logs one INFO line
 with its time per phase, its requests, the time spent waiting for the

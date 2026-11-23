@@ -347,4 +347,8 @@ async def test_the_cancel_route(tmp_path):
     ).status_code == 403
     status = client.get("/api/sync/status").json()["scheduler_state"]
     assert {"progress", "recent_syncs", "last_portfolio_pass"} <= set(status)
+    assert status["progress"]["paused"]["by"] == "rita"
+    assert _client(scheduler, manager, role="ANALYST").post("/api/sync/resume").status_code == 403
+    assert client.post("/api/sync/resume").json() == {"paused": False}
+    assert client.get("/api/sync/status").json()["scheduler_state"]["progress"]["paused"] is None
     await manager.close()

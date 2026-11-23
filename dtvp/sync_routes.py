@@ -129,6 +129,15 @@ def create_sync_router(
                 )
         return scheduler.cancel(scope, by=user)
 
+    @router.post("/sync/resume")
+    def resume(user: str = Depends(current_user_dependency)) -> dict[str, Any]:
+        """End the pause a cancel left (reviewers only)."""
+        require_reviewer(user)
+        if scheduler is None:
+            raise HTTPException(status_code=503, detail="The sync scheduler is not running")
+        scheduler.resume(by=user)
+        return {"paused": False}
+
     @router.get("/sync/versions")
     def get_sync_versions(
         product: Optional[str] = Query(None, max_length=512),

@@ -201,3 +201,88 @@ async def test_low_priority_requests_wait_for_the_others():
     await bucket.acquire()  # the burst is used up
     await asyncio.gather(low(), high("h1"), high("h2"))
     assert order == ["h1", "h2", "low"]
+
+
+async def test_after_a_cancel_the_last_progress_shows_what_is_left(tmp_path):
+    """Production: after a cancel the menu kept "reading 2 version(s) · 27
+    waiting". The last progress event must match the state once settled."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=2)
+
+    class Hanging(Source):
+        async def get_vulnerabilities(self, project_uuid, cve=None):
+            await asyncio.Event().wait()
+
+    source = Hanging()
+    source.projects += [
+        {"uuid": f"x{i}", "name": "Extra", "version": str(i), "active": True} for i in range(5)
+    ]
+    await scheduler.run_cycle(source, wait=False)
+    await asyncio.sleep(0.05)
+    scheduler.request_reads([f"x{i}" for i in range(5)], by="rita")
+    scheduler.plan()
+    assert len(scheduler.running) == 2 and scheduler.queue
+
+    scheduler.cancel(by="rita")
+    await scheduler.drain()
+    # Planning drops what is no longer due (no events of its own).
+    scheduler.queue.clear()
+    scheduler._update_backlog()
+    await asyncio.sleep(scheduler.PROGRESS_INTERVAL_SECONDS + 0.1)
+
+    last = hub.of("source.sync_progress")[-1]
+    assert last["running"] == [] and last["queued"] == 0
+    assert last == scheduler.progress()
+    assert any(e.get("settled") for e in hub.of("source.sync_cancelled"))
+    await manager.close()
+
+
+async def test_cancel_pauses_until_a_request_or_resume(tmp_path):
+    """Production: after Cancel the syncs started again at once, because
+    the due versions were planned again on the next tick."""
+    scheduler, manager, hub, clock = _scheduler(tmp_path, concurrency=2)
+
+    class Hanging(Source):
+        hang = True
+
+        async def get_vulnerabilities(self, project_uuid, cve=None):
+            if self.hang:
+                await asyncio.Event().wait()
+            return await super().get_vulnerabilities(project_uuid, cve)
+
+    source = Hanging()
+    source.projects += [
+        {"uuid": f"x{i}", "name": "Extra", "version": str(i), "active": True} for i in range(5)
+    ]
+    await scheduler.run_cycle(source, wait=False)
+    await asyncio.sleep(0.05)
+    waiting = len(scheduler.queue)
+    assert len(scheduler.running) == 2 and waiting == 5
+
+    result = scheduler.cancel(by="rita")
+    await scheduler.drain()
+    assert result["waiting"] == waiting and result["paused"] is True
+    source.hang = False
+    source.calls.clear()
+
+    for _ in range(10):  # several ticks, past the plan and list intervals
+        clock.advance(scheduler.PLAN_INTERVAL_SECONDS + 1)
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+    assert source.calls == [] and scheduler.running == set() and not scheduler.queue
+    assert scheduler.progress()["paused"]["by"] == "rita"
+    for row in manager.sync_state.rows():
+        assert int(row.get("consecutive_failures") or 0) == 0
+
+    # A person's request runs on its own; the pause stays for the rest.
+    scheduler.request_reads(["x1"], by="rita")
+    await scheduler.run_cycle(source)
+    await scheduler.drain()
+    assert source.synced() == ["x1"]
+    assert scheduler.is_paused()
+
+    scheduler.resume(by="rita")
+    for _ in range(4):
+        await scheduler.run_cycle(source)
+        await scheduler.drain()
+    assert len(set(source.synced())) > 1 and scheduler.progress()["paused"] is None
+    await manager.close()
