@@ -140,6 +140,7 @@ from .logic import (
     load_rescore_rules,
     load_team_groups,
     load_team_mapping,
+    load_team_mapping_document,
     load_user_roles,
     process_assessment_details,
 )
@@ -160,6 +161,7 @@ from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
 )
 from .settings_routes import create_settings_router
+from .team_mapping_report import create_report_service as create_mapping_report_service
 from .ssvc_enrichment_services import run_kev_refresh_loop
 from .startup_services import (
     StartupRuntimeTasks,
@@ -791,6 +793,7 @@ general_api_route_deps = build_general_api_route_deps(
     group_query_executor=group_query_executor,
     detail_executor=detail_executor,
     task_event_hub=task_event_hub,
+    load_team_mapping_document=lambda: load_team_mapping_document(),
 )
 # Opening a project, polling its task and MCP project tools renew interest.
 general_api_route_deps = dataclasses.replace(
@@ -867,6 +870,9 @@ api_router.include_router(
         client_dependency=get_client,
     )
 )
+mapping_report_service = create_mapping_report_service(
+    cache_manager, lambda: load_team_mapping()
+)
 api_router.include_router(
     create_settings_router(
         build_settings_route_deps(
@@ -882,6 +888,10 @@ api_router.include_router(
             get_user_roles_path=lambda: get_user_roles_path(),
             get_rescore_rules_path=lambda: get_rescore_rules_path(),
             write_settings_file=write_settings_file,
+            mapping_report=lambda **kwargs: mapping_report_service.current(**kwargs),
+            load_team_mapping_document=lambda: load_team_mapping_document(),
+            mapping_tree=lambda *args: mapping_report_service.tree(*args),
+            mapping_preview=lambda *args: mapping_report_service.preview(*args),
         ),
         forbidden_response=FORBIDDEN_RESPONSE,
         current_user_dependency=get_current_user,

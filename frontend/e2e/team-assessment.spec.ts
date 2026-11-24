@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 test.describe('Per-Team Assessment UI Flow', () => {
     test.beforeEach(async ({ page }) => {
@@ -102,6 +103,7 @@ test.describe('Per-Team Assessment UI Flow', () => {
         });
 
         // Mock Team Mapping
+        await routeMappingTeams(page, { 'frontend-lib': 'Frontend', 'backend-lib': 'Backend' });
         await page.route('**/api/settings/mapping', async (route) => {
             await route.fulfill({
                 status: 200,

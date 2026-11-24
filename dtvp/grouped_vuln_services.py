@@ -939,10 +939,13 @@ async def fetch_version_snapshot(
     full_vulns = full_vulns_result
     severity_counts = deps.merge_vulnerability_details(findings, full_vulns)
 
+    project_name = version_info.get("name")
     if isinstance(bom_result, Exception):
-        bom_cache = deps.bom_analysis_cache_cls({}, team_mapping)
+        bom_cache = deps.bom_analysis_cache_cls({}, team_mapping, project_name)
     else:
-        bom_cache = deps.bom_analysis_cache_cls(bom_result or {}, team_mapping)
+        bom_cache = deps.bom_analysis_cache_cls(
+            bom_result or {}, team_mapping, project_name
+        )
 
     return (
         {"version": version_info, "vulnerabilities": findings},

@@ -21,6 +21,10 @@ vi.mock('../../lib/api', () => ({
     getTeamMapping: vi.fn(),
     uploadTeamMapping: vi.fn(),
     updateTeamMapping: vi.fn(),
+    getTeamMappingTeams: vi.fn(() => Promise.resolve({ format: 'teams', teams: {}, warnings: [] })),
+    getTeamMappingReport: vi.fn(() => Promise.resolve({ status: 'ready', stale: false, built_at: null, error: null, report: null })),
+    getTeamMappingTree: vi.fn(),
+    previewTeamMapping: vi.fn(),
     getRescoreRules: vi.fn(),
     getPerformanceStatus: vi.fn(),
     uploadRescoreRules: vi.fn(),
@@ -161,31 +165,90 @@ describe('Settings.vue', () => {
         expect(wrapper.get('[data-testid="backend-runtime-panel"]').text()).toContain('Memory entries')
     })
 
-    it('documents deterministic team mapping selector syntax in the UI', async () => {
+    it('shows the team mapping editor on the Team Mapping tab', async () => {
         const wrapper = mount(Settings, {
             global: {
                 provide: {
                     user: mockUser,
                     realRole: computed(() => mockUser.value.role)
                 },
-                stubs: ['router-link']
+                stubs: { 'router-link': true, TeamMappingEditor: { template: '<div data-testid="team-mapping-editor-stub" />' } },
             }
         })
 
-        await wrapper.vm.$nextTick()
+        await flushPromises()
 
-        expect(wrapper.text()).toContain('deterministic SBOM selectors')
-        expect(wrapper.text()).toContain('purl::pkg:type/namespace/name')
-        expect(wrapper.text()).toContain('cs::name')
-        expect(wrapper.text()).toContain('nogroup::name')
-        expect(wrapper.text()).toContain('cs:name and nogroup:name are normal group:name selectors')
+        expect(wrapper.find('[data-testid="team-mapping-editor-stub"]').exists()).toBe(true)
+        // The team document feeds the team groups editor.
+        expect(api.getTeamMappingTeams).toHaveBeenCalled()
+    })
+
+    it('asks before leaving Team Mapping with unsaved changes', async () => {
+        const DirtyEditor = {
+            emits: ['dirty-change'],
+            mounted(this: any) { this.$emit('dirty-change', true) },
+            template: '<div data-testid="team-mapping-editor-stub" />',
+        }
+        const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+        const wrapper = mount(Settings, {
+            global: {
+                provide: { user: mockUser, realRole: computed(() => mockUser.value.role) },
+                stubs: { 'router-link': true, TeamMappingEditor: DirtyEditor },
+            }
+        })
+        await flushPromises()
+        const rolesTab = () => wrapper.findAll('button').find(button => button.text() === 'User Roles')!
+
+        await rolesTab().trigger('click')
+        await flushPromises()
+        expect(confirm).toHaveBeenCalledTimes(1)
+        expect(wrapper.find('[data-testid="team-mapping-editor-stub"]').exists()).toBe(true)
+
+        await rolesTab().trigger('click')
+        await flushPromises()
+        expect(confirm).toHaveBeenCalledTimes(2)
+        expect(wrapper.find('[data-testid="team-mapping-editor-stub"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('User Roles Configuration')
+        confirm.mockRestore()
+    })
+
+    it('offers every team of the team document, also teams without component entries', async () => {
+        vi.mocked(api.getTeamMappingTeams).mockResolvedValue({
+            format: 'teams',
+            teams: {
+                Core: { aliases: ['DE-Core'], components: ['core'] },
+                Events: { projects: ['eventserver'] },
+                Newcomers: {},
+                Unknown: { components: ['*'] },
+            },
+            warnings: [],
+        })
+        const wrapper = mount(Settings, {
+            global: {
+                provide: { user: mockUser, realRole: computed(() => mockUser.value.role) },
+                stubs: { 'router-link': true, TeamMappingEditor: true },
+            },
+        })
+        await flushPromises()
+        const teamGroupsTab = wrapper.findAll('button').find(button => button.text().includes('Team Groups'))
+        await teamGroupsTab?.trigger('click')
+        await wrapper.get('[data-testid="team-groups-json"]').setValue(JSON.stringify({ All: { teams: [], groups: [] } }))
+        await flushPromises()
+
+        const options = wrapper.findAll('[data-testid^="team-group-teams-"] option').map(option => option.text())
+        expect(options).toEqual(['Core', 'Events', 'Newcomers', 'Unknown'])
+        expect(options).not.toContain('DE-Core')
     })
 
     it('configures nested groups from canonical mapped teams', async () => {
-        vi.mocked(api.getTeamMapping).mockResolvedValue({
-            core: ['Core-MUC', 'Core Legacy'],
-            vendor: '3rd Party',
-            runtime: 'Runtime',
+        vi.mocked(api.getTeamMappingTeams).mockResolvedValue({
+            format: 'selectors',
+            teams: {
+                'Core-MUC': { aliases: ['Core Legacy'], components: ['core'] },
+                '3rd Party': { components: ['vendor'] },
+                Runtime: { components: ['runtime'] },
+            },
+            warnings: [],
         })
         vi.mocked(api.getTeamGroups).mockResolvedValue({
             'Core-MUC': {
@@ -262,35 +325,6 @@ describe('Settings.vue', () => {
         await flushPromises()
 
         expect(api.updateTeamGroups).toHaveBeenCalledWith(config)
-    })
-
-    it('keeps focus while editing a structured mapping component key', async () => {
-        const wrapper = mount(Settings, {
-            attachTo: document.body,
-            global: {
-                provide: {
-                    user: mockUser,
-                    realRole: computed(() => mockUser.value.role)
-                },
-                stubs: ['router-link']
-            }
-        })
-
-        await flushPromises()
-
-        const input = wrapper.get('input[placeholder="name, group:name, group/name, purl::pkg:type/namespace/name"]')
-        const inputElement = input.element as HTMLInputElement
-        inputElement.focus()
-        expect(document.activeElement).toBe(inputElement)
-
-        await input.setValue('component-with-focus')
-        await wrapper.vm.$nextTick()
-
-        expect(document.activeElement).toBe(inputElement)
-        expect(inputElement.value).toBe('component-with-focus')
-        expect(wrapper.get('textarea').element.value).toContain('component-with-focus')
-
-        wrapper.unmount()
     })
 
     it('loads and displays rescore rules in the editor', async () => {

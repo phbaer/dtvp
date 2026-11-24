@@ -1,4 +1,11 @@
 import type { Release } from './whatsNew';
+import type { TeamDocument } from './team-config';
+import type {
+    MappingPreview,
+    MappingTreeLevel,
+    TeamMappingReportResponse,
+    TeamMappingTeamsResponse,
+} from './team-mapping-insights';
 import axios from 'axios';
 import type { AxiosProgressEvent } from 'axios';
 import type {
@@ -1346,8 +1353,55 @@ export const uploadTeamMapping = async (file: File): Promise<{ status: string; m
     return res.data;
 };
 
-export const updateTeamMapping = async (mapping: Record<string, string | string[]>): Promise<{ status: string; message: string }> => {
+/** Saves the mapping: organised by team (``TeamDocument``) or, from older
+ * callers, the selector mapping; the server writes the team format. */
+export const updateTeamMapping = async (
+    mapping: Record<string, string | string[]> | TeamDocument,
+): Promise<{ status: string; message: string }> => {
     const res = await api.put('/settings/mapping', mapping);
+    return res.data;
+};
+
+/** The mapping organised by team; ``format`` says how the file is stored. */
+export const getTeamMappingTeams = async (): Promise<TeamMappingTeamsResponse> => {
+    const res = await api.get('/settings/mapping/teams');
+    return res.data;
+};
+
+/** The mapping report, built in the background (status building/ready/failed). */
+export const getTeamMappingReport = async (refresh = false): Promise<TeamMappingReportResponse> => {
+    const res = await api.get('/settings/mapping/report', { params: refresh ? { refresh: true } : {} });
+    return res.data;
+};
+
+/** One level of a version's BOM tree: the root, or the children of ``ref``.
+ * With ``draft`` (a mapping not saved yet) the owners are the draft's, and
+ * a node whose owner changes names the saved one (``saved_owner``). */
+export const getTeamMappingTree = async (
+    projectUuid: string,
+    ref?: string,
+    draft?: TeamDocument,
+): Promise<MappingTreeLevel> => {
+    if (draft) {
+        const res = await api.post('/settings/mapping/tree', {
+            project_uuid: projectUuid,
+            ...(ref === undefined ? {} : { ref }),
+            mapping: draft,
+        });
+        return res.data;
+    }
+    const res = await api.get('/settings/mapping/tree', {
+        params: ref === undefined ? { project_uuid: projectUuid } : { project_uuid: projectUuid, ref },
+    });
+    return res.data;
+};
+
+/** Findings that would change owner if ``mapping`` replaced the saved one. */
+export const previewTeamMapping = async (
+    mapping: TeamDocument | Record<string, string | string[]>,
+    projects?: string[],
+): Promise<MappingPreview> => {
+    const res = await api.post('/settings/mapping/preview', projects ? { mapping, projects } : { mapping });
     return res.data;
 };
 

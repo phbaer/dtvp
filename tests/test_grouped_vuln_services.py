@@ -46,7 +46,7 @@ def test_collect_version_snapshots_throttles_partial_publications():
         cache_manager=FakeCacheManager(),
         logger=None,
         tasks={},
-        bom_analysis_cache_cls=lambda bom, team_mapping: object(),
+        bom_analysis_cache_cls=lambda bom, team_mapping, project_name=None: object(),
         get_version_fetch_concurrency=lambda: 25,
         merge_vulnerability_details=lambda findings, full_vulns: {
             "HIGH": len(findings)
@@ -126,7 +126,7 @@ def test_partial_build_does_not_block_remaining_version_progress():
             cache_manager=FakeCacheManager(),
             logger=logging.getLogger(__name__),
             tasks=tasks,
-            bom_analysis_cache_cls=lambda bom, team_mapping: {},
+            bom_analysis_cache_cls=lambda bom, team_mapping, project_name=None: {},
             get_version_fetch_concurrency=lambda: 4,
             merge_vulnerability_details=lambda findings, full_vulns: {},
             sort_projects_by_version=lambda values: values,

@@ -10,6 +10,7 @@ import {
     getStatistics,
     getTaskStatistics,
     getTeamMapping,
+    getTeamMappingTeams,
     getTMRescoreProposals,
     startProjectArchiveExport,
     waitForProjectArchiveTask,
@@ -60,7 +61,8 @@ import {
 import { deriveVulnListFacetsFromTaskCounts } from '../lib/vulnListFacets'
 import { INCONSISTENCY_REASON_OPTIONS } from '../lib/inconsistency'
 import { resolveTeamTerm } from '../lib/teamSelection'
-import { buildTeamAliasGroups, resolveCanonicalTeamName } from '../lib/team-mapping'
+import { buildTeamAliasGroups, resolveCanonicalTeamName, type TeamRosterEntry } from '../lib/team-mapping'
+import { teamRosterFromDocument } from '../lib/team-config'
 import {
     AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
     AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
@@ -154,8 +156,12 @@ const {
 } = useCacheStatus()
 
 const teamMapping = ref<Record<string, string | string[]>>({})
-const teamAliasGroups = computed(() => buildTeamAliasGroups(teamMapping.value))
+// Every team with its aliases from the team document, also teams without
+// entries, which the selector mapping does not list.
+const teamRoster = ref<TeamRosterEntry[]>([])
+const teamAliasGroups = computed(() => buildTeamAliasGroups(teamMapping.value, teamRoster.value))
 provide('teamMapping', teamMapping)
+provide('teamRoster', teamRoster)
 
 const rescoreRules = ref<any>(null)
 provide('rescoreRules', rescoreRules)
@@ -209,6 +215,11 @@ const fetchTeamMapping = async () => {
         teamMapping.value = await getTeamMapping()
     } catch (err) {
         console.error('Failed to fetch team mapping:', err)
+    }
+    try {
+        teamRoster.value = teamRosterFromDocument((await getTeamMappingTeams()).teams)
+    } catch (err) {
+        console.error('Failed to fetch the teams of the team mapping:', err)
     }
 }
 
@@ -905,7 +916,7 @@ const localVisibleResultCounts = computed(() =>
     deriveVulnListResultCounts(listView.value.matchingItems, {
         versions: versionFilterList.value,
         terms: parsedSmartSearch.value.versionTerms,
-        teams: teamFilters.value.map(team => resolveCanonicalTeamName(teamMapping.value, team)),
+        teams: teamFilters.value.map(team => resolveCanonicalTeamName(teamMapping.value, team, teamRoster.value)),
     })
 )
 

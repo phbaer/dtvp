@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import ssvcModel from '../../dtvp/resources/ssvc/deployer-1.0.0.json' with { type: 'json' };
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 // One vulnerability whose findings have no assessment, on components
 // Dependency-Track recreated: DTVP still holds an assessment of a gone
@@ -68,6 +69,7 @@ async function mockShell(page: Page) {
         { name: 'TestProject', uuid: 'p1', version: '1.0', classifier: 'APPLICATION' },
         { name: 'TestProject', uuid: 'p2', version: '2.0', classifier: 'APPLICATION' },
     ])));
+    await routeMappingTeams(page, { 'lib-a': 'Security', worker: 'Security' });
     await page.route('**/api/settings/mapping', route => route.fulfill(json({ 'lib-a': 'Security', worker: 'Security' })));
     await page.route('**/api/settings/rescore-rules', route => route.fulfill(json({ transitions: [] })));
     await page.route('**/api/projects/*/tmrescore/proposals', route => route.fulfill(json({ proposals: {} })));

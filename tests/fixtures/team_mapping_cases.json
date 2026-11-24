@@ -1,0 +1,103 @@
+{
+  "_comment": "Shared by tests/test_team_mapping_project_selectors.py and frontend/src/lib/__tests__/team-mapping-shared-cases.spec.ts: the server and browser matchers must agree on every case.",
+  "parse": [
+    {"key": "core", "expect": {"name": "core"}},
+    {"key": "org.example:core", "expect": {"name": "core", "group": "org.example"}},
+    {"key": "@scope/widget", "expect": {"name": "widget", "group": "@scope"}},
+    {"key": "cs,nogroup::Core", "expect": {"name": "Core", "caseSensitive": true, "requireNoGroup": true}},
+    {"key": "purl::pkg:npm/core", "expect": {"name": "", "purl": "pkg:npm/core"}},
+    {"key": "cs:name", "expect": {"name": "name", "group": "cs"}},
+    {"key": "project:x", "expect": {"name": "x", "group": "project"}},
+    {"key": "*", "expect": {"wildcard": true}},
+    {"key": "project::eventserver", "expect": {"project": "eventserver", "projectFallback": true}},
+    {"key": "project:ViewPoint_Product::core", "expect": {"name": "core", "project": "ViewPoint_Product"}},
+    {"key": "project:P::org.x:core", "expect": {"name": "core", "group": "org.x", "project": "P"}},
+    {"key": "project:P::cs,nogroup::Core", "expect": {"name": "Core", "project": "P", "caseSensitive": true, "requireNoGroup": true}},
+    {"key": "project:P::purl::pkg:npm/x", "expect": {"name": "", "purl": "pkg:npm/x", "project": "P"}},
+    {"key": "foo::bar", "error": "Unknown modifier 'foo' before '::'"},
+    {"key": "::bar", "error": "Nothing before '::'; use a modifier such as cs, nogroup or purl"},
+    {"key": "cs,ci::bar", "error": "Modifiers cs and ci contradict each other"},
+    {"key": "purl,nogroup::pkg:npm/x", "error": "Modifier nogroup does not apply to a purl selector"},
+    {"key": "purl::npm/x", "error": "A purl selector needs a package URL starting with pkg:"},
+    {"key": "cs,project::X", "error": "'project::<name>' cannot be combined with other modifiers"},
+    {"key": "project::", "error": "'project::' needs a project name"},
+    {"key": "project: ::core", "error": "'project:<name>::' needs a project name"},
+    {"key": "project:P::*", "error": "Use 'project::P' for the project's own findings"},
+    {"key": "project:P::project::Q", "error": "A project selector cannot contain another project selector"},
+    {"key": "project:P::", "error": "The selector names no component"},
+    {"key": "", "error": "The key is empty"}
+  ],
+  "match": [
+    {
+      "name": "the precedence chain",
+      "mapping": {
+        "project:ViewPoint_Product::core": "VP Core",
+        "core": "Generic Core",
+        "vp-core": "Package Team",
+        "project::ViewPoint_Product": "ViewPoint",
+        "*": "Unknown"
+      },
+      "cases": [
+        {"identity": {"name": "core", "groupKnown": true}, "project": "ViewPoint_Product", "wildcard": true, "expect": "project:ViewPoint_Product::core"},
+        {"identity": {"name": "core", "groupKnown": true}, "project": "viewpoint_product", "wildcard": true, "expect": "project:ViewPoint_Product::core"},
+        {"identity": {"name": "core", "groupKnown": true}, "project": "Other", "wildcard": true, "expect": "core"},
+        {"identity": {"name": "core", "groupKnown": true}, "project": null, "wildcard": true, "expect": "core"},
+        {"identity": {"name": "x", "purl": "pkg:npm/vp-core@1.0.0", "groupKnown": true}, "project": "ViewPoint_Product", "wildcard": true, "expect": "vp-core"},
+        {"identity": {"name": "x", "groupKnown": true}, "project": "ViewPoint_Product", "wildcard": true, "expect": "project::ViewPoint_Product"},
+        {"identity": {"name": "x", "groupKnown": true}, "project": "VIEWPOINT_PRODUCT", "wildcard": true, "expect": "project::ViewPoint_Product"},
+        {"identity": {"name": "x", "groupKnown": true}, "project": "ViewPoint_Product", "wildcard": false, "expect": null},
+        {"identity": {"name": "x", "groupKnown": true}, "project": "Other", "wildcard": true, "expect": "*"},
+        {"identity": {"name": "x", "groupKnown": true}, "project": null, "wildcard": true, "expect": "*"}
+      ]
+    },
+    {
+      "name": "a project-scoped selector outranks more specific selectors without a project",
+      "mapping": {
+        "project:P::core": "Scoped",
+        "purl::pkg:npm/core": "Purl",
+        "npm:core": "Grouped"
+      },
+      "cases": [
+        {"identity": {"name": "core", "purl": "pkg:npm/core@1", "groupKnown": true}, "project": "P", "wildcard": false, "expect": "project:P::core"},
+        {"identity": {"name": "core", "purl": "pkg:npm/core@1", "groupKnown": true}, "project": "Q", "wildcard": false, "expect": "purl::pkg:npm/core"}
+      ]
+    },
+    {
+      "name": "a project-scoped selector also matches the package a purl names",
+      "mapping": {
+        "project:P::vp-stats-app": "Scoped",
+        "stats-app": "Own name"
+      },
+      "cases": [
+        {"identity": {"name": "stats-app", "purl": "pkg:npm/vp-stats-app@0.1.2", "groupKnown": true}, "project": "P", "wildcard": false, "expect": "stats-app"},
+        {"identity": {"name": "other", "purl": "pkg:npm/vp-stats-app@0.1.2", "groupKnown": true}, "project": "P", "wildcard": false, "expect": "project:P::vp-stats-app"},
+        {"identity": {"name": "other", "purl": "pkg:npm/vp-stats-app@0.1.2", "groupKnown": true}, "project": "Q", "wildcard": false, "expect": null}
+      ]
+    },
+    {
+      "name": "project-scoped selectors keep the modifiers and group rules",
+      "mapping": {
+        "project:P::cs::Core": "Exact",
+        "project:P::org.x:lib": "Grouped",
+        "project:P::nogroup::auth": "No group"
+      },
+      "cases": [
+        {"identity": {"name": "Core", "groupKnown": true}, "project": "P", "wildcard": false, "expect": "project:P::cs::Core"},
+        {"identity": {"name": "core", "groupKnown": true}, "project": "P", "wildcard": false, "expect": null},
+        {"identity": {"name": "lib", "group": "org.x", "groupKnown": true}, "project": "P", "wildcard": false, "expect": "project:P::org.x:lib"},
+        {"identity": {"name": "lib", "groupKnown": true}, "project": "P", "wildcard": false, "expect": null},
+        {"identity": {"name": "auth", "groupKnown": true}, "project": "P", "wildcard": false, "expect": "project:P::nogroup::auth"},
+        {"identity": {"name": "auth", "group": "g", "groupKnown": true}, "project": "P", "wildcard": false, "expect": null}
+      ]
+    },
+    {
+      "name": "a project fallback is never a component selector",
+      "mapping": {"project::P": "Project team"},
+      "cases": [
+        {"identity": {"name": "P", "groupKnown": true}, "project": "P", "wildcard": false, "expect": null},
+        {"identity": {"name": "P", "groupKnown": true}, "project": "P", "wildcard": true, "expect": "project::P"},
+        {"identity": {"name": "P", "groupKnown": true}, "project": "Q", "wildcard": true, "expect": null}
+      ]
+    }
+  ]
+}

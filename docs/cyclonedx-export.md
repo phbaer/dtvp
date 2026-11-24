@@ -152,7 +152,7 @@ the property prefix, and the DTVP version (`<prefix>:export`,
 
 ### Assessments Without A Team
 
-The team mapping names a fallback team (key `*`, for example `Unknown`) for
+The team mapping names a fallback team (the team owning `*`, for example `Unknown`) for
 components no team owns. An assessment under that name is not a team's:
 
 - its state is the property `<prefix>:unassigned_state`, as

@@ -443,6 +443,42 @@ class LocalStore:
         ).fetchall()
         return {str(row[0]): str(row[1]) for row in rows if row[0] and row[1]}
 
+    def bom_times(self) -> dict[str, str]:
+        """When each project's BOM was last stored."""
+        rows = self._connection().execute(
+            "SELECT project_uuid, updated_at FROM source_boms"
+        ).fetchall()
+        return {str(row[0]): str(row[1]) for row in rows if row[0] and row[1]}
+
+    def finding_components(self, project_uuid: str) -> list[dict[str, Any]] | None:
+        """The component of each stored finding of a project (UUID, name,
+        group, purl), without the rest of the payload; ``None`` when the
+        project's findings were never stored."""
+        connection = self._connection()
+        if connection.execute(
+            "SELECT 1 FROM source_snapshots WHERE kind = ? AND project_uuid = ?",
+            (KIND_FINDINGS, project_uuid),
+        ).fetchone() is None:
+            return None
+        rows = connection.execute(
+            """
+            SELECT component_uuid, component_name,
+                   json_extract(payload_json, '$.component.group'),
+                   json_extract(payload_json, '$.component.purl')
+            FROM source_findings WHERE project_uuid = ? ORDER BY position
+            """,
+            (project_uuid,),
+        ).fetchall()
+        return [
+            {
+                "uuid": row[0],
+                "name": row[1],
+                "group": row[2] if isinstance(row[2], str) else None,
+                "purl": row[3] if isinstance(row[3], str) else None,
+            }
+            for row in rows
+        ]
+
     def counts(self) -> dict[str, int]:
         connection = self._connection()
 

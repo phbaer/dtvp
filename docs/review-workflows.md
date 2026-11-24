@@ -542,7 +542,7 @@ the reason, for example "Core has not assessed this vulnerability yet;
 nothing to copy and the global assessment is pending review, so no team can
 refer to it: open the vulnerability to assess it". A team counts as having
 assessed when a current block carries its name or one of its aliases from
-the team mapping (the names after the first in a mapping entry), compared
+the team mapping (a team's `aliases`), compared
 without case and surrounding space; the vulnerability list, the card's
 "Why synchronization is needed" and Repair use the same rule.
 

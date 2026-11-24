@@ -25,8 +25,10 @@ def test_update_team_mapping(client, tmp_path):
             assert response.status_code == 200
             assert response.json()["status"] == "success"
 
-    assert json.loads(target.read_text()) == new_mapping
-    assert target.read_text() == json.dumps(new_mapping, indent=2)
+    # Written organised by team (ADR 0012).
+    stored = {"team1": {"components": ["comp1"]}, "team2": {"components": ["comp2"]}}
+    assert json.loads(target.read_text()) == stored
+    assert target.read_text() == json.dumps(stored, indent=2)
 
 
 def test_update_team_mapping_failure(client, tmp_path):
@@ -64,6 +66,7 @@ def test_update_team_groups_reviewer(client, tmp_path):
     with (
         patch("dtvp.main.get_user_role", return_value="REVIEWER"),
         patch("dtvp.main.load_team_mapping", return_value=team_mapping),
+        patch("dtvp.main.load_team_mapping_document", return_value=team_mapping),
         patch("dtvp.main.get_team_groups_path", return_value=str(target)),
     ):
         response = client.put("/api/settings/team-groups", json=groups)

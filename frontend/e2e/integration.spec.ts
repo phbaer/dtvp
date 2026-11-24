@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 test.describe('Project navigation with mocked backend', () => {
     test.beforeEach(async ({ page }) => {
@@ -208,6 +209,7 @@ test.describe('Project navigation with mocked backend', () => {
         });
 
         // Mock Team Mapping
+        await routeMappingTeams(page, { 'lib-a': 'Security', 'lib-b': 'Security' });
         await page.route('**/api/settings/mapping', async (route) => {
             await route.fulfill({
                 status: 200,

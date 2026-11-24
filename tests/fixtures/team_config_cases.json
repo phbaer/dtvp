@@ -1,0 +1,163 @@
+{
+  "_comment": "Team-format mapping documents: the errors a save reports and the selector mapping the matcher reads. Shared by tests/test_team_config.py and frontend/src/lib/__tests__/team-config.spec.ts.",
+  "cases": [
+    {
+      "name": "the documented example",
+      "document": {
+        "Core": {
+          "aliases": [
+            "DE-Core"
+          ],
+          "projects": [
+            "stats-srv",
+            "estservice"
+          ],
+          "components": [
+            "vp-stats-app",
+            "project:ViewPoint_Product::core"
+          ]
+        },
+        "3P": {
+          "aliases": [
+            "3rd Party"
+          ],
+          "components": [
+            "libtiff",
+            "purl::pkg:generic/ffmpeg"
+          ]
+        },
+        "Unknown": "*"
+      },
+      "errors": [],
+      "mapping": {
+        "vp-stats-app": [
+          "Core",
+          "DE-Core"
+        ],
+        "project:ViewPoint_Product::core": [
+          "Core",
+          "DE-Core"
+        ],
+        "project::stats-srv": [
+          "Core",
+          "DE-Core"
+        ],
+        "project::estservice": [
+          "Core",
+          "DE-Core"
+        ],
+        "libtiff": [
+          "3P",
+          "3rd Party"
+        ],
+        "purl::pkg:generic/ffmpeg": [
+          "3P",
+          "3rd Party"
+        ],
+        "*": "Unknown"
+      }
+    },
+    {
+      "name": "shorthand lists are components",
+      "document": {
+        "Web": [
+          "@scope/widget",
+          "cs::Core"
+        ],
+        "Ops": {
+          "projects": [
+            "eventserver"
+          ]
+        }
+      },
+      "errors": [],
+      "mapping": {
+        "@scope/widget": "Web",
+        "cs::Core": "Web",
+        "project::eventserver": "Ops"
+      }
+    },
+    {
+      "name": "a selector, a project and the catch-all owned twice",
+      "document": {
+        "A": {
+          "projects": [
+            "eventserver"
+          ],
+          "components": [
+            "libtiff",
+            "*"
+          ]
+        },
+        "B": {
+          "projects": [
+            "EventServer"
+          ],
+          "components": [
+            "libtiff",
+            "*"
+          ]
+        }
+      },
+      "errors": [
+        "Selector 'libtiff' is listed under teams 'A' and 'B'",
+        "'*' is owned by teams 'A' and 'B'; at most one team owns it",
+        "Project 'EventServer' is listed under teams 'A' and 'B'"
+      ]
+    },
+    {
+      "name": "aliases that clash with a team or another team's alias",
+      "document": {
+        "A": {
+          "aliases": [
+            "B",
+            "Shared"
+          ],
+          "components": [
+            "a"
+          ]
+        },
+        "B": {
+          "aliases": [
+            "shared"
+          ],
+          "components": [
+            "b"
+          ]
+        }
+      },
+      "errors": [
+        "Alias 'B' of team 'A' is the name of team 'B'",
+        "Alias 'shared' is listed for teams 'A' and 'B'"
+      ]
+    },
+    {
+      "name": "invalid selectors and fields",
+      "document": {
+        "A": {
+          "components": [
+            "foo::bar",
+            "project::"
+          ],
+          "owner": "x"
+        },
+        "B": {
+          "aliases": "not-a-list",
+          "components": [
+            "b"
+          ]
+        },
+        "a": [
+          "c"
+        ]
+      },
+      "errors": [
+        "Team 'A': unknown field 'owner'; use aliases, projects and components",
+        "Team 'B': aliases must be a list of strings",
+        "Teams 'A' and 'a' differ only by case",
+        "Team 'A': selector 'foo::bar': Unknown modifier 'foo' before '::'",
+        "Team 'A': selector 'project::': 'project::' needs a project name"
+      ]
+    }
+  ]
+}

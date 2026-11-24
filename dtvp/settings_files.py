@@ -14,6 +14,8 @@ from . import logic
 from .file_io_services import atomic_write_bytes, json_document_bytes
 from .rescore_rule_services import validate_rescore_rule_config
 from .team_group_services import validate_team_group_config
+from .team_config import is_team_format, team_config_errors
+from .team_mapping import team_mapping_key_errors
 
 Validator = Callable[[Any, Mapping[str, Any]], list[str]]
 
@@ -55,6 +57,17 @@ def validate_user_roles_config(config: Any) -> list[str]:
     ]
 
 
+def _team_mapping(parsed: Any, _context: Mapping[str, Any]) -> list[str]:
+    """Organised by team (``dtvp.team_config.team_config_errors``), or the
+    older selector format whose keys must be valid selectors: unknown or
+    contradicting modifiers are rejected, not read as names."""
+    if not isinstance(parsed, dict):
+        return ["Team mapping must be a JSON object"]
+    if is_team_format(parsed):
+        return team_config_errors(parsed)
+    return team_mapping_key_errors(parsed)
+
+
 def _team_groups(parsed: Any, context: Mapping[str, Any]) -> list[str]:
     return validate_team_group_config(parsed, context.get("team_mapping") or {})
 
@@ -73,7 +86,7 @@ SETTINGS_FILES: tuple[SettingsFile, ...] = (
     SettingsFile(
         "team_mapping",
         lambda: logic.get_team_mapping_path(),
-        _object("Team mapping must be a JSON object"),
+        _team_mapping,
     ),
     SettingsFile(
         "team_groups",

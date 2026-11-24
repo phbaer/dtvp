@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import ssvcModel from '../../dtvp/resources/ssvc/deployer-1.0.0.json' with { type: 'json' };
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 // ViewPoint_Product 6.15.0 (2026-11-23): tar reaches the product through
 // stats-app, which the team mapping does not know (only vp-stats-app), so the
@@ -61,6 +62,7 @@ async function mockShell(page: Page) {
         { name: 'TestProject', uuid: 'p1', version: '1.0', classifier: 'APPLICATION' },
         { name: 'TestProject', uuid: 'p2', version: '2.0', classifier: 'APPLICATION' },
     ])));
+    await routeMappingTeams(page, { '*': 'Unknown', 'vp-stats-app': 'S-Web' });
     await page.route('**/api/settings/mapping', route => route.fulfill(json({ '*': 'Unknown', 'vp-stats-app': 'S-Web' })));
     await page.route('**/api/settings/rescore-rules', route => route.fulfill(json({ transitions: [] })));
     await page.route('**/api/projects/*/tmrescore/proposals', route => route.fulfill(json({ proposals: {} })));

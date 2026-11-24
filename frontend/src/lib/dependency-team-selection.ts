@@ -16,6 +16,7 @@ export const getPrimaryTeamForComponent = (
     componentGroup?: string | null,
     groupKnown = false,
     componentPurl?: string | null,
+    projectName?: string | null,
 ): string => {
     return getPrimaryTeamForComponentFromMapping(
         componentName,
@@ -23,6 +24,7 @@ export const getPrimaryTeamForComponent = (
         componentGroup,
         groupKnown,
         componentPurl,
+        projectName,
     )
 }
 
@@ -41,9 +43,10 @@ export const normalizePath = (path: string): string => {
 export const getFirstMappedTeamOnPath = (
     parts: string[],
     teamMapping: TeamMapping | undefined,
+    projectName?: string | null,
 ): { team: string; component: string; index: number } | null => {
     for (let index = 1; index < parts.length; index += 1) {
-        const team = getPrimaryTeamForComponent(parts[index], teamMapping)
+        const team = getPrimaryTeamForComponent(parts[index], teamMapping, null, false, null, projectName)
         if (team) {
             return {
                 team,
@@ -75,9 +78,10 @@ const isSubsumedByEarlierMappedPath = (
     candidate: string[],
     other: string[],
     teamMapping: TeamMapping | undefined,
+    projectName?: string | null,
 ): boolean => {
-    const candidateMapped = getFirstMappedTeamOnPath(candidate, teamMapping)
-    const otherMapped = getFirstMappedTeamOnPath(other, teamMapping)
+    const candidateMapped = getFirstMappedTeamOnPath(candidate, teamMapping, projectName)
+    const otherMapped = getFirstMappedTeamOnPath(other, teamMapping, projectName)
     if (!candidateMapped || !otherMapped) return false
 
     const candidateSuffix = candidate.slice(candidateMapped.index)
@@ -96,6 +100,7 @@ export const selectRepresentativePaths = (
     paths: string[] | undefined,
     teamMapping: TeamMapping | undefined,
     limit: number = DEFAULT_REPRESENTATIVE_PATH_LIMIT,
+    projectName?: string | null,
 ): string[] => {
     const deduped = new Map<string, string[]>()
     for (const rawPath of paths || []) {
@@ -110,7 +115,7 @@ export const selectRepresentativePaths = (
     const unmappedPaths: string[][] = []
 
     for (const parts of deduped.values()) {
-        const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping)
+        const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping, projectName)
         if (!firstMapped) {
             unmappedPaths.push(parts)
             continue
@@ -122,7 +127,7 @@ export const selectRepresentativePaths = (
             continue
         }
 
-        const existingMapped = getFirstMappedTeamOnPath(existing, teamMapping)
+        const existingMapped = getFirstMappedTeamOnPath(existing, teamMapping, projectName)
         const shouldReplace = !existingMapped
             || firstMapped.index < existingMapped.index
             || (firstMapped.index === existingMapped.index && parts.length < existing.length)
@@ -142,14 +147,14 @@ export const selectRepresentativePaths = (
     const pruned = selected.filter((parts, index, allPaths) => {
         return !allPaths.some((otherParts, otherIndex) => {
             if (index === otherIndex) return false
-            return isSubsumedByEarlierMappedPath(parts, otherParts, teamMapping)
+            return isSubsumedByEarlierMappedPath(parts, otherParts, teamMapping, projectName)
         })
     })
 
     return pruned
         .sort((left, right) => {
-            const leftMapped = getFirstMappedTeamOnPath(left, teamMapping)
-            const rightMapped = getFirstMappedTeamOnPath(right, teamMapping)
+            const leftMapped = getFirstMappedTeamOnPath(left, teamMapping, projectName)
+            const rightMapped = getFirstMappedTeamOnPath(right, teamMapping, projectName)
             const leftIndex = leftMapped?.index ?? Number.MAX_SAFE_INTEGER
             const rightIndex = rightMapped?.index ?? Number.MAX_SAFE_INTEGER
             if (leftIndex !== rightIndex) return leftIndex - rightIndex
@@ -195,6 +200,7 @@ export const findTeamMappingEntryForComponent = (
     componentGroup?: string | null,
     groupKnown = false,
     componentPurl?: string | null,
+    projectName?: string | null,
 ) => findTeamMappingMatch(
     teamMapping,
     {
@@ -203,6 +209,8 @@ export const findTeamMappingEntryForComponent = (
         purl: componentPurl,
         groupKnown,
     },
+    false,
+    projectName,
 )
 
 /** The teams the mapping's catch-all ``*`` gives a finding that no mapped

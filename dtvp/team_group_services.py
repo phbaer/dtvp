@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .team_config import is_team_format, team_config_from_document
 from .team_mapping import normalize_team_values
 
 
@@ -9,9 +10,20 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def team_values(team_mapping: dict[str, Any] | None) -> list[Any]:
+    """``[team, *aliases]`` per mapping value; per team for a mapping
+    organised by team (which may list a team without any selector)."""
+    if is_team_format(team_mapping):
+        return [
+            [team.name, *team.aliases]
+            for team in team_config_from_document(team_mapping).teams
+        ]
+    return list((team_mapping or {}).values())
+
+
 def _team_alias_index(team_mapping: dict[str, Any] | None) -> dict[str, str]:
     aliases: dict[str, str] = {}
-    for raw_value in (team_mapping or {}).values():
+    for raw_value in team_values(team_mapping):
         values = normalize_team_values(raw_value)
         if not values:
             continue
@@ -24,7 +36,7 @@ def _team_alias_index(team_mapping: dict[str, Any] | None) -> dict[str, str]:
 def configured_team_names(team_mapping: dict[str, Any] | None) -> list[str]:
     """Return canonical configured team names in stable display order."""
     teams: dict[str, str] = {}
-    for raw_value in (team_mapping or {}).values():
+    for raw_value in team_values(team_mapping):
         values = normalize_team_values(raw_value)
         if not values:
             continue

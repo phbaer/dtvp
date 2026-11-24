@@ -1,6 +1,7 @@
 
 import { test, expect } from '@playwright/test';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 test.describe('Vulnerability View and Rescoring', () => {
     test.beforeEach(async ({ page }) => {
@@ -182,6 +183,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         });
 
         // Mock Team Mapping
+        await routeMappingTeams(page, { 'lib-a': 'Security' });
         await page.route('**/api/settings/mapping', async (route) => {
             await route.fulfill({
                 status: 200,

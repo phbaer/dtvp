@@ -16,19 +16,20 @@ import {
     updateRescoreRules,
     updateRoles,
     updateTeamGroups,
-    updateTeamMapping,
     uploadAutoAnalysisGuidance,
     uploadProjectArchiveImport,
     uploadRescoreRules,
     uploadRoles,
-    uploadTeamMapping,
     waitForProjectArchiveTask,
-    getTeamMapping,
+    getTeamMappingTeams,
     getRescoreRules,
 } from '../lib/api'
 import type { TeamGroupConfig } from '../lib/api'
 import AccessTokensPanel from '../components/AccessTokensPanel.vue'
 import ExportQueuePanel from '../components/ExportQueuePanel.vue'
+import TeamMappingEditor from '../components/team-mapping/TeamMappingEditor.vue'
+import { teamRosterFromDocument } from '../lib/team-config'
+import type { TeamRosterEntry } from '../lib/team-mapping'
 import type {
     BackendPerformanceStatus,
     ProjectArchiveApplyResult,
@@ -45,6 +46,16 @@ const activeTab = ref(route?.query?.tab === 'export' ? 'export' : 'mapping')
 watch(() => route?.query?.tab, (tab) => {
     if (tab === 'export') activeTab.value = 'export'
 })
+// Unsaved team mapping changes live in the editor, which closes with its
+// tab: switching away asks first.
+const mappingDirty = ref(false)
+const selectTab = (tab: string) => {
+    if (tab === activeTab.value) return
+    if (activeTab.value === 'mapping' && mappingDirty.value
+        && !window.confirm('Leave Team Mapping without saving? Your unsaved changes will be lost.')) return
+    if (activeTab.value === 'mapping') mappingDirty.value = false
+    activeTab.value = tab
+}
 // Access tokens are the only setting every user manages for themselves; the
 // other tabs configure the workspace and stay reviewer-only.
 const showTokens = computed(() => activeTab.value === 'tokens' || realRole?.value !== 'REVIEWER')
@@ -77,90 +88,10 @@ const loadRuntimeStatus = async () => {
     }
 }
 
-// Mapping state
-const fileInput = ref<HTMLInputElement | null>(null)
-const uploading = ref(false)
-const message = ref('')
-const error = ref('')
-const currentMapping = ref<Record<string, string | string[]> | null>(null)
-const mappingJson = ref('')
-interface MappingRow {
-    id: string
-    component: string
-    main: string
-    aliases: string
-}
-
-let nextMappingRowId = 1
-let lastJsonFromRows = ''
-let skipNextRowsSync = false
-const mappingRows = ref<MappingRow[]>([])
-const rawJsonError = ref('')
-const savingMapping = ref(false)
-
-const createMappingRow = (values: Omit<MappingRow, 'id'>): MappingRow => ({
-    id: `mapping-row-${nextMappingRowId++}`,
-    ...values,
-})
-
-const mappingToRows = (mapping: Record<string, string | string[]> | null) => {
-    if (!mapping) return []
-    return Object.entries(mapping)
-        .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-        .map(([component, value]) => {
-            if (Array.isArray(value)) {
-                return createMappingRow({
-                    component,
-                    main: value[0] || '',
-                    aliases: value.slice(1).join(', '),
-                })
-            }
-            return createMappingRow({
-                component,
-                main: value || '',
-                aliases: '',
-            })
-        })
-}
-
-const rowsToMapping = () => {
-    const mapping: Record<string, string | string[]> = {}
-    mappingRows.value.forEach((row) => {
-        if (!row.component.trim()) return
-        const component = row.component.trim()
-        const main = row.main.trim()
-        const aliases = row.aliases
-            .split(',')
-            .map((alias) => alias.trim())
-            .filter((alias) => alias)
-
-        if (!main && aliases.length === 0) {
-            return
-        }
-
-        if (aliases.length > 0) {
-            mapping[component] = [main, ...aliases]
-        } else {
-            mapping[component] = main
-        }
-    })
-    return mapping
-}
-
-const updateMappingJsonFromRows = () => {
-    lastJsonFromRows = JSON.stringify(rowsToMapping(), null, 2)
-    mappingJson.value = lastJsonFromRows
-    rawJsonError.value = ''
-}
-
-const addMappingRow = () => {
-    mappingRows.value.push(createMappingRow({ component: '', main: '', aliases: '' }))
-}
-
-const removeMappingRow = (index: number) => {
-    mappingRows.value.splice(index, 1)
-    updateMappingJsonFromRows()
-}
+// Every team of the team document (``GET /settings/mapping/teams``), also
+// one that owns only projects or nothing yet: the team groups editor offers
+// them. The mapping itself is edited in TeamMappingEditor.
+const teamRosterList = ref<TeamRosterEntry[]>([])
 
 // Team groups state
 interface TeamGroupRow {
@@ -245,14 +176,7 @@ const removeTeamGroupRow = (index: number) => {
 }
 
 const canonicalTeams = computed(() => {
-    const teams = new Map<string, string>()
-    Object.values(currentMapping.value || {}).forEach((value) => {
-        const primary = (Array.isArray(value) ? value[0] : value)?.trim()
-        if (primary && !teams.has(primary.toLowerCase())) {
-            teams.set(primary.toLowerCase(), primary)
-        }
-    })
-    return [...teams.values()].sort((left, right) => left.localeCompare(
+    return teamRosterList.value.map(team => team.name).sort((left, right) => left.localeCompare(
         right,
         undefined,
         { numeric: true, sensitivity: 'base' },
@@ -312,39 +236,11 @@ const archiveSnapshotsLoading = ref(false)
 
 const loadMapping = async () => {
     try {
-        currentMapping.value = await getTeamMapping()
-        mappingRows.value = mappingToRows(currentMapping.value)
-        mappingJson.value = JSON.stringify(currentMapping.value, null, 2)
+        teamRosterList.value = teamRosterFromDocument((await getTeamMappingTeams()).teams)
     } catch (e) {
         console.error("Failed to load mapping", e)
     }
 }
-
-watch(mappingRows, () => {
-    if (skipNextRowsSync) {
-        skipNextRowsSync = false
-        return
-    }
-    updateMappingJsonFromRows()
-}, { deep: true })
-
-watch(mappingJson, (value) => {
-    if (value === lastJsonFromRows) {
-        return
-    }
-    try {
-        const parsed = JSON.parse(value)
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            skipNextRowsSync = true
-            mappingRows.value = mappingToRows(parsed)
-            rawJsonError.value = ''
-        } else {
-            rawJsonError.value = 'Team mapping JSON must be an object with component keys.'
-        }
-    } catch (e: any) {
-        rawJsonError.value = e.message || 'Invalid JSON format'
-    }
-})
 
 watch(teamGroupRows, () => {
     if (skipNextTeamGroupRowsSync) {
@@ -429,61 +325,6 @@ const loadAutoGuidance = async () => {
         autoGuidanceJson.value = JSON.stringify(currentAutoGuidance.value, null, 2)
     } catch (e) {
         console.error("Failed to load auto-analysis guidance", e)
-    }
-}
-
-const handleFileUpload = async () => {
-    if (!fileInput.value?.files?.length) return
-
-    const file = fileInput.value.files[0]
-    if (!file) return
-
-    uploading.value = true
-    message.value = ''
-    error.value = ''
-
-    try {
-        const res = await uploadTeamMapping(file)
-        if (res.status === 'success') {
-             message.value = 'Mapping file uploaded successfully!'
-             // Reset input
-             if (fileInput.value) fileInput.value.value = ''
-             await loadMapping()
-        } else {
-             throw new Error(res.message)
-        }
-    } catch (err: any) {
-        error.value = err.message
-    } finally {
-        uploading.value = false
-    }
-}
-
-const saveMapping = async () => {
-    savingMapping.value = true
-    message.value = ''
-    error.value = ''
-
-    try {
-        let parsed = {}
-        try {
-            parsed = JSON.parse(mappingJson.value)
-        } catch (e) {
-            throw new Error("Invalid JSON format")
-        }
-
-        const res = await updateTeamMapping(parsed)
-        
-        if (res.status === 'success') {
-            message.value = res.message || 'Mapping saved successfully!'
-            await loadMapping()
-        } else {
-             throw new Error(res.message)
-        }
-    } catch (err: any) {
-        error.value = err.message
-    } finally {
-        savingMapping.value = false
     }
 }
 
@@ -788,42 +629,42 @@ watch(() => activeTab.value, (newTab) => {
     <div class="mb-6 flex flex-wrap border-b border-gray-700">
         <button 
             v-if="realRole === 'REVIEWER'"
-            @click="activeTab = 'mapping'"
+            @click="selectTab('mapping')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'mapping' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Team Mapping
         </button>
         <button
             v-if="user?.role === 'REVIEWER'"
-            @click="activeTab = 'team-groups'"
+            @click="selectTab('team-groups')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'team-groups' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Team Groups
         </button>
         <button 
             v-if="user?.role === 'REVIEWER'"
-            @click="activeTab = 'roles'"
+            @click="selectTab('roles')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'roles' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             User Roles
         </button>
         <button 
             v-if="user?.role === 'REVIEWER'"
-            @click="activeTab = 'rescore'"
+            @click="selectTab('rescore')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'rescore' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Rescore Rules
         </button>
         <button
             v-if="user?.role === 'REVIEWER'"
-            @click="activeTab = 'config'"
+            @click="selectTab('config')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'config' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Config
         </button>
         <button
             v-if="user?.role === 'REVIEWER'"
-            @click="activeTab = 'archives'"
+            @click="selectTab('archives')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-2', activeTab === 'archives' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             <Archive :size="14" />
@@ -831,20 +672,20 @@ watch(() => activeTab.value, (newTab) => {
         </button>
         <button
             v-if="user?.role === 'REVIEWER'"
-            @click="activeTab = 'export'"
+            @click="selectTab('export')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'export' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Export
         </button>
         <button
-            @click="activeTab = 'tokens'"
+            @click="selectTab('tokens')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', showTokens ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Access Tokens
         </button>
         <button
             v-if="user?.role === 'REVIEWER'"
-            @click="activeTab = 'runtime'"
+            @click="selectTab('runtime')"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'runtime' ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Runtime
@@ -992,116 +833,7 @@ watch(() => activeTab.value, (newTab) => {
     </div>
 
     <div v-if="activeTab === 'mapping' && realRole === 'REVIEWER'" class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
-        <h3 class="text-xl font-bold mb-4 text-gray-200">Team Mapping Configuration</h3>
-        
-        <div class="mb-6">
-             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Structured Editor</h4>
-             <p class="text-gray-400 mb-2 text-xs">
-                Configure component mappings using deterministic SBOM selectors: name, group:name or group/name, purl::pkg:type/namespace/name for package URLs, cs::name for case-sensitive matches, nogroup::name for known components without a group, and cs,nogroup::name for both. Single-colon keys such as cs:name and nogroup:name are normal group:name selectors. More specific selectors win. Aliases are only used to recognize legacy team tags and are not shown in the vulnerability header.
-            </p>
-            <div class="space-y-2 mb-4">
-                <div v-for="(row, index) in mappingRows" :key="row.id" class="grid gap-2 md:grid-cols-[2fr_1fr_1fr_auto] items-end">
-                    <div>
-                        <label class="text-xs text-gray-400">Component key</label>
-                        <input
-                            v-model="row.component"
-                            :data-testid="`team-mapping-component-${row.id}`"
-                            placeholder="name, group:name, group/name, purl::pkg:type/namespace/name"
-                            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-                        />
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-400">Main team tag</label>
-                        <input
-                            v-model="row.main"
-                            placeholder="Primary tag"
-                            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-                        />
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-400">Aliases</label>
-                        <input
-                            v-model="row.aliases"
-                            placeholder="alias1, alias2"
-                            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-                        />
-                    </div>
-                    <button
-                        type="button"
-                        @click="removeMappingRow(index)"
-                        class="self-end flex h-10 min-w-[2.5rem] items-center justify-center rounded bg-red-600 hover:bg-red-700 text-white transition-colors"
-                        title="Remove mapping row"
-                    >
-                        <X :size="14" />
-                    </button>
-                </div>
-                <button
-                    type="button"
-                    @click="addMappingRow"
-                    class="rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 transition-colors"
-                >
-                    Add component mapping
-                </button>
-            </div>
-
-             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Raw JSON Editor</h4>
-             <p class="text-gray-400 mb-2 text-xs">
-                Edit the underlying mapping JSON directly, or use the structured editor above.
-            </p>
-             <div class="relative">
-                <textarea 
-                    v-model="mappingJson"
-                    class="w-full h-64 bg-gray-900 p-4 rounded border border-gray-700 font-mono text-blue-300 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    spellcheck="false"
-                ></textarea>
-                <div class="absolute bottom-4 right-4 flex gap-2">
-                    <button 
-                        @click="saveMapping"
-                        :disabled="savingMapping"
-                        class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-4 rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                    >
-                        {{ savingMapping ? 'Saving...' : 'Save Changes' }}
-                    </button>
-                </div>
-             </div>
-             <div v-if="rawJsonError" class="mt-2 p-3 bg-red-900/30 border border-red-800 text-red-400 rounded text-xs">
-                 {{ rawJsonError }}
-             </div>
-        </div>
-
-        <div class="space-y-4 pt-6 border-t border-gray-700">
-            <div>
-                <label class="block text-sm font-semibold text-gray-300 mb-2">Or Upload Mapping File (JSON)</label>
-                <input 
-                    ref="fileInput"
-                    type="file" 
-                    accept=".json"
-                    class="block w-full text-sm text-gray-400
-                        file:mr-4 file:py-2 file:px-4
-                        file:rounded-full file:border-0
-                        file:text-sm file:font-semibold
-                        file:bg-blue-900 file:text-blue-200
-                        hover:file:bg-blue-800
-                        cursor-pointer"
-                />
-            </div>
-
-            <button 
-                @click="handleFileUpload"
-                :disabled="uploading"
-                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-                {{ uploading ? 'Uploading...' : 'Upload Mapping' }}
-            </button>
-            
-            <div v-if="message" class="p-3 bg-green-900/30 border border-green-800 text-green-400 rounded">
-                {{ message }}
-            </div>
-            
-            <div v-if="error" class="p-3 bg-red-900/30 border border-red-800 text-red-400 rounded">
-                {{ error }}
-            </div>
-        </div>
+        <TeamMappingEditor @saved="loadMapping" @dirty-change="mappingDirty = $event" />
     </div>
 
     <div

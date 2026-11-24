@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component, type Ref } from 'vue'
 import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment } from '../lib/api'
 import type { EarlierAssessment } from '../lib/api'
 import EarlierAssessments from './EarlierAssessments.vue'
@@ -18,7 +18,7 @@ import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAss
 import { isCodeAnalysisApplicable, buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
 import { evidenceIdsReferencedIn, unusableEvidenceId } from '../lib/codeEvidence'
 import { calculateScoreFromVector } from '../lib/cvss'
-import { buildTeamAliasGroups } from '../lib/team-mapping'
+import { buildTeamAliasGroups, type TeamRosterEntry } from '../lib/team-mapping'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssVectorDisplay from './CvssVectorDisplay.vue'
@@ -721,7 +721,8 @@ const activeTeamScope = dependencyInfo.activeTeam
 const getInstanceTeamKey = dependencyInfo.getInstanceTeamKey
 const instanceTeams = dependencyInfo.instanceTeams
 const effectiveTags = dependencyInfo.effectiveTags
-const teamAliasGroups = computed(() => buildTeamAliasGroups(teamMapping?.value || {}))
+const teamRoster = inject<Ref<TeamRosterEntry[]>>('teamRoster', ref([]))
+const teamAliasGroups = computed(() => buildTeamAliasGroups(teamMapping?.value || {}, teamRoster.value))
 const activeTeamScopeAliases = computed(() => activeTeamScope.value
     ? teamAliasGroups.value[activeTeamScope.value] || []
     : []

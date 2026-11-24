@@ -246,6 +246,7 @@ def build_general_api_route_deps(
     group_query_executor: Any = None,
     detail_executor: Any = None,
     task_event_hub: Any = None,
+    load_team_mapping_document: Callable[[], dict[str, Any]] | None = None,
 ) -> GeneralApiRouteDeps:
     return GeneralApiRouteDeps(
         cache_manager=cache_manager,
@@ -321,6 +322,7 @@ def build_general_api_route_deps(
         group_query_executor=group_query_executor,
         detail_executor=detail_executor,
         task_event_hub=task_event_hub,
+        load_team_mapping_document=load_team_mapping_document,
     )
 
 
@@ -512,6 +514,10 @@ def build_settings_route_deps(
     get_user_roles_path: Callable[[], str],
     get_rescore_rules_path: Callable[[], str],
     write_settings_file: Callable[..., str],
+    mapping_report: Callable[..., Any] | None = None,
+    load_team_mapping_document: Callable[[], dict[str, Any]] | None = None,
+    mapping_tree: Callable[..., Any] | None = None,
+    mapping_preview: Callable[..., Any] | None = None,
 ) -> SettingsRouteDeps:
     return SettingsRouteDeps(
         get_user_role=get_user_role,
@@ -526,6 +532,10 @@ def build_settings_route_deps(
         get_user_roles_path=get_user_roles_path,
         get_rescore_rules_path=get_rescore_rules_path,
         write_settings_file=write_settings_file,
+        mapping_report=mapping_report,
+        load_team_mapping_document=load_team_mapping_document,
+        mapping_tree=mapping_tree,
+        mapping_preview=mapping_preview,
     )
 
 

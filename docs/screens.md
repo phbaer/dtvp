@@ -167,9 +167,26 @@ The project sidebar provides compact counts and filterable state summaries witho
 
 ![Settings](screenshots/settings.png)
 
-Settings provide structured and raw editors for team mapping, including deterministic selectors for component names, groups, package URLs, case-sensitive matches, and no-group matches.
+Settings opens on **Team Mapping** for reviewers; see [Settings Team Mapping](#settings-team-mapping).
 
 Every user can open Settings for the **Access Tokens** tab, which creates and revokes personal tokens for AI agents and scripts and lists the changes made with them; see [AI and API access](ai-access.md). The remaining tabs are reviewer-only, including **Export**, which lists the assessments that have not reached Dependency-Track, shows why an export is failing, and exports or discards entries on request; see [Import and export](import-export.md).
+
+### Settings Team Mapping
+
+![Settings team mapping](screenshots/settings.png)
+
+The editor works on the mapping organised by team ([ADR 0012](adr/0012-team-centric-mapping.md); format and rules in [Team mapping](assessment-model.md#team-mapping-and-analyzer-guidance)) and on the [mapping report](assessment-model.md#team-mapping-report), which the server builds in the background from the stored BOMs and findings. One sentence says what the screen is for; the **?** next to the title opens the entry syntax. The status line says when the report was built, that it is out of date and being rebuilt (the previous one stays visible), or that it failed; **Rebuild** (or **Try again**) builds it again. While the report is missing, the numbers show "–" rather than 0.
+
+The overview shows four numbers, each opening its view: **Unowned findings** (on the catch-all, with "→ N after saving" once the draft changes it), **Owned by a team** (the share of findings), **Errors** (they block saving) and **Warnings**. Below it one view is shown at a time; the tabs follow the ARIA tabs pattern (arrow keys switch).
+
+- **Unowned** (the default) lists the project roots and topmost components above the findings on the catch-all across all projects, by unowned findings, with projects, versions and a suggested entry and why. A row the draft already gives to a team says so.
+- **Projects** lists the projects by unowned findings with their owned share, and opens on the one with the most. Picking a project shows the BOM tree of a version, loaded one level at a time, with each component's owner and why (own entry, inherited, the project, the catch-all; an icon and border tell them apart, not colour alone), its findings and those unowned. With unsaved changes the tree shows the draft's owners and marks a changed owner "was …". Components no dependency links to are listed under the root as unlinked (flat BOMs). The tree is an ARIA tree: one tab stop, arrow keys move, open and close, Home and End jump, Space or Enter (or a click) picks a component; **Assign the whole project…** picks the project.
+- Picking opens **Assign … to a team**: each pick with its suggested entry (the project for a root as `project::<project>`, the package its purl names, `group:name`, or `project:<project>::<name>` for a generic name), editable, and what it owns in words. The team is a combobox of the existing teams, found by name or former name, with **Create team …** for a new name. The effect (how many findings change owner, from which team to which, in which projects, against the saved mapping) is previewed as the draft changes. **Add to …** puts the entries into the team; a confirmation offers **Undo**, and the tree and the overview update.
+- **Teams** shows a collapsible card per team with its aliases, projects and component entries; search, a project filter and **Flagged entries only** narrow them. Each entry shows the components and projects it matches, the findings it owns and its flags; clicking it opens the projects view with its matches highlighted. Projects are added from the Dependency-Track project names, components with an autocomplete of stored names, groups and purls, and a live preview of what the typed entry matches and which more specific entries would win.
+- **Checks** groups the problems of the draft by kind, errors first, then by the findings concerned. Errors block saving: an entry, project or the catch-all under two teams (fix: **Keep in …**), invalid entries (fix: **Remove entry**), alias clashes. Warnings do not: projects with unowned findings (**Assign project…**), near-duplicates given to different teams such as `VPStatsApp` and `vp-stats-app` (fix: **… owns all**), duplicates up to case or form (fix: keep one), entries that never win and stale entries that match no stored component (fix: **Remove entry**), broad entries, and what converting an older file could not keep. Every item also jumps to its team, entry or project.
+- **Raw JSON** shows the draft as JSON, editable and checked the same way, and uploads a file in either format, which replaces the saved mapping and is stored organised by team.
+
+Nothing is saved until **Save team mapping**. With unsaved changes a bar stays at the bottom of the screen with their number, how many findings change owner, the errors blocking the save, **Review changes** (the changes per team and their effect), **Discard** (after a confirmation) and **Save team mapping**. Leaving the tab, the page or the browser tab with unsaved changes asks first. A file still in the older format shows a note and the bar, since saving writes it organised by team.
 
 ### Settings Access Tokens
 

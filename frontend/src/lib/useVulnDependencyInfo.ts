@@ -67,6 +67,7 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
                 instance.component_group,
                 'component_group' in instance,
                 instance.component_purl,
+                instance.project_name,
             )
             const mappedDirectTeam = directMapping?.tags[0] || ''
             // Grouped findings already carry ownership resolved from the full
@@ -174,14 +175,18 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
     const triggeringTaggedComponents = computed(() => {
         const taggedComponents = new Map<string, TaggedData>()
         const paths = visibleInstances.value.flatMap(instance => instance.dependency_chains || [])
-        const selectedPaths = selectRepresentativePaths(paths, teamMapping.value, 100)
+        // Project-scoped selectors need the project; the paths of several
+        // projects are read without one.
+        const projectNames = new Set(visibleInstances.value.map(instance => instance.project_name || ''))
+        const projectName = projectNames.size === 1 ? [...projectNames][0] : undefined
+        const selectedPaths = selectRepresentativePaths(paths, teamMapping.value, 100, projectName)
         const ownerTeams = new Set(visibleOwnership.value.flatMap(ownership =>
             ownership.teams.map(team => team.toLocaleLowerCase())
         ))
 
         for (const selectedPath of selectedPaths) {
             const parts = getPathParts(selectedPath)
-            const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping.value)
+            const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping.value, projectName)
             if (!firstMapped || !ownerTeams.has(firstMapped.team.toLocaleLowerCase())) continue
 
             const triggerName = firstMapped.component || 'Unknown'
@@ -226,7 +231,7 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
                 // Chains run from the component to the project: the top is
                 // the component right below the project.
                 const parts = getPathParts(path)
-                if (parts.length < 3 || getFirstMappedTeamOnPath(parts, teamMapping.value)) continue
+                if (parts.length < 3 || getFirstMappedTeamOnPath(parts, teamMapping.value, instance.project_name)) continue
                 const top = add(parts[parts.length - 2], tag)
                 top.under!.add(
                     [parts[parts.length - 1], instance.project_version || versionOf.get(instance)]

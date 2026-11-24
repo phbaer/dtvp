@@ -180,9 +180,18 @@ Statistics include donut charts with counts and percentages for severity,
 analysis states, and selectable team/group coverage. Project-review charts
 follow the current filters; the standalone Statistics page uses its project/ID scope.
 
-Team mapping accepts `group:name` and scoped `group/name` keys. A mapped
-component takes precedence over its mapped ancestors, even across alternate
-dependency paths; independent owners can both appear. The backend's
+The team mapping is organised by team: each team lists its aliases, the
+Dependency-Track projects it owns and component selectors (`name`,
+`group:name`, `purl::…`, `project:<project>::<selector>`); one team owns the
+catch-all `*` ([ADR 0012](docs/adr/0012-team-centric-mapping.md),
+[format](docs/assessment-model.md#team-mapping-and-analyzer-guidance)). A
+mapped component takes precedence over its mapped ancestors, even across
+alternate dependency paths; independent owners can both appear; a project's
+team owns what no component entry owns. Settings → Team Mapping opens on the
+unowned findings from a background report, with views for the projects and
+their BOM trees (each node's owner, including unsaved changes), the teams and
+the checks (with inline fixes); a save bar reviews, discards or saves the
+draft ([screen](docs/screens.md#settings-team-mapping)). The backend's
 resolved finding tags drive the list and detail views. Mapping edits rerun the
 project query so both views use the same ownership.
 

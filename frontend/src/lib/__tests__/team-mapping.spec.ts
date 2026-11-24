@@ -160,4 +160,30 @@ describe('team mapping selectors', () => {
         expect(resolveCanonicalTeamName(mapping, 'core alias')).toBe('CoreTeam')
         expect(ownKeysCalls).toBe(1)
     })
+
+    it('matches by the package name the purl names when the own name matches nothing', () => {
+        const mapping = {
+            'vp-stats-app': 'Core',
+            'org.keycloak:keycloak-core': 'Identity',
+            '@scope/widget': 'Web',
+            '*': 'Unknown',
+        }
+        const tags = (name: string, purl: string | null, includeWildcard = true) =>
+            getTeamMappingTags(mapping, { name, purl, groupKnown: true }, includeWildcard)
+
+        expect(tags('stats-app', 'pkg:npm/vp-stats-app@0.1.2')).toEqual(['Core'])
+        expect(tags('Keycloak Core', 'pkg:maven/org.keycloak/keycloak-core@26.0.5?type=jar')).toEqual(['Identity'])
+        expect(tags('widget-ui', 'pkg:npm/%40scope/widget@1.0.0')).toEqual(['Web'])
+        expect(tags('x', 'pkg:maven/org.other/vp-stats-app@1')).toEqual(['Unknown'])
+        expect(tags('stats-app', null)).toEqual(['Unknown'])
+        expect(tags('stats-app', 'pkg:npm/other@1', false)).toEqual([])
+    })
+
+    it('prefers the own name over the package name', () => {
+        expect(getTeamMappingTags(
+            { 'stats-app': 'Phoenix', 'vp-stats-app': 'Core' },
+            { name: 'stats-app', purl: 'pkg:npm/vp-stats-app@0.1.2', groupKnown: true },
+        )).toEqual(['Phoenix'])
+    })
 })
+

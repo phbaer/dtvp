@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 // The browser tests run against mocked API routes, not a backend, so the
 // agent evidence is seeded as the response of the evidence list route. The
@@ -91,6 +92,7 @@ test.describe('Code evidence from agents', () => {
                 }))),
             });
         });
+        await routeMappingTeams(page, { 'lib-a': 'Security' });
         await page.route('**/api/settings/mapping', route => route.fulfill({
             status: 200,
             contentType: 'application/json',

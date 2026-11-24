@@ -17,3 +17,4 @@ Decision status and implementation status are tracked separately in each record.
 | [0009: DTVP matches vulnerabilities itself from mirrored advisories](0009-native-vulnerability-matcher.md) | Accepted | Not started |
 | [0010: Version overrides of an assessment](0010-version-overrides.md) | Accepted; amends decisions 2 and 6 of 0003 | In progress (steps 0-6) |
 | [0011: Check the sink before writing; edits made there go to an inbox](0011-check-the-sink-before-writing.md) | Accepted; amends decision 3 of 0003 | Not started (planned for 2.1.0) |
+| [0012: The team mapping is organised by team](0012-team-centric-mapping.md) | Accepted | Implemented |

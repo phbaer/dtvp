@@ -385,8 +385,36 @@ CA store); do not disable certificate verification.
 
 ## Team Mapping And Analyzer Guidance
 
-`TEAM_MAPPING_PATH` defaults to `data/team_mapping.json` and is editable in
-Settings. Keys are deterministic CycloneDX component selectors:
+`TEAM_MAPPING_PATH` defaults to `data/team_mapping.json` and is edited in
+Settings → Team Mapping ([screen guide](screens.md#settings-team-mapping)).
+The file is organised by team ([ADR 0012](adr/0012-team-centric-mapping.md)):
+each team lists what it owns.
+
+```json
+{
+  "Core": {
+    "aliases": ["DE-Core"],
+    "projects": ["stats-srv", "estservice"],
+    "components": ["vp-stats-app", "project:ViewPoint_Product::core"]
+  },
+  "3P": {
+    "aliases": ["3rd Party"],
+    "components": ["libtiff", "purl::pkg:generic/ffmpeg"]
+  },
+  "Unknown": "*"
+}
+```
+
+| Field | Meaning |
+| :--- | :--- |
+| `aliases` | Former names of the team; legacy tags with these names count as the team |
+| `projects` | Dependency-Track project names (case-insensitive); the team owns the project's findings no component entry owns |
+| `components` | Component selectors (below); `*` makes the team the catch-all, at most one team owns it |
+
+A string or a list of strings is shorthand for `components`
+(`"Unknown": "*"`, `"Web": ["@scope/widget"]`). DTVP itself writes objects.
+
+Component selectors are deterministic CycloneDX selectors:
 
 | Selector | Match |
 | :--- | :--- |
@@ -397,17 +425,54 @@ Settings. Keys are deterministic CycloneDX component selectors:
 | `cs,purl::...` | Case-sensitive PURL |
 | `nogroup::name` | Only components known to have no group |
 | `cs,nogroup::name` | Case-sensitive no-group match |
-| `*` | Fallback team; never creates an automatic scan target |
+| `project:<project>::<selector>` | Any selector above, only inside that Dependency-Track project (case-insensitive), for example `project:ViewPoint_Product::core` or `project:P::purl::pkg:npm/x` |
+| `project::<project>` | The same as listing the project under `projects` |
+| `*` | Catch-all; never creates an automatic scan target |
 
-Single-colon keys such as `cs:name` are ordinary `group:name` selectors;
-modifiers require `::`. Precedence is PURL, grouped, no-group, plain name,
-case-sensitive specificity, exact case, then lexical key order. Mapping does
-not otherwise match BOM refs, Dependency-Track UUIDs, or component versions.
+Single-colon keys such as `cs:name` or `project:name` are ordinary
+`group:name` selectors; modifiers and project scopes require `::`.
 
-Values are either a primary team string or an array whose first entry is the
-primary label and remaining entries are historical aliases. Every authenticated
-user can read this ownership context so analyst views resolve the same teams as
-backend filters and automatic analysis; creating or changing mappings remains
+**Resolution.** A finding belongs to the nearest mapped component above it in
+the BOM (the component itself first). Whether a component is mapped is
+decided in this order:
+
+1. a selector scoped to the component's project, then the selectors without
+   a project; within each, PURL, grouped, no-group, plain name, then
+   case-sensitive, exact case and lexical key order;
+2. when nothing matches the component's own name, group or PURL, the same
+   selectors against the package its PURL names: the package name, with the
+   PURL namespace as the group. A BOM may name a component differently from
+   its package, for example `stats-app` for `pkg:npm/vp-stats-app@0.1.2`;
+   `vp-stats-app` then owns it. A match on the own name always wins.
+
+Only when no component of any chain is mapped does the project decide: the
+team listing the project (`projects`, or `project::<project>`), and last the
+team owning `*`. Mapping does not otherwise match BOM refs,
+Dependency-Track UUIDs, or component versions. The project name is the
+Dependency-Track project of the version; where it is not known (the
+dependency-chain endpoint), the BOM's root component names it.
+
+**Validation.** A save is refused, with messages naming the teams, when a
+selector or project is listed under two teams, `*` is owned twice, an alias
+equals another team or another team's alias, two team names differ only by
+case, a selector has an unknown or contradicting modifier (`foo::bar`,
+`cs,ci::x`, `purl,nogroup::...`), or a value is malformed. Weak spots (stale,
+broad, shadowed and near-duplicate entries) are warnings in the editor and do
+not block a save.
+
+**The older format** maps selectors to teams (`{"vp-stats-app": "Core",
+"core-lib": ["Core", "DE-Core"], "*": "Unknown"}`, the first name the team,
+the rest aliases). It still loads unchanged. A file is read as organised by
+team when a value is an object or a team owns `*`; otherwise as selector
+keys. The editor shows such a file by team (each key under its primary team,
+aliases merged; an alias claimed by two teams stays with the first and is
+reported) and saves it in the team format; so does every save or upload
+through the API.
+
+Every authenticated user can read the mapping (`GET /api/settings/mapping`
+returns the selector mapping the matcher reads, `GET
+/api/settings/mapping/teams` the document by team) and the
+[mapping report](#team-mapping-report); creating or changing mappings remains
 reviewer-only.
 
 Ownership follows dependency direction: a mapped component takes precedence
@@ -416,6 +481,46 @@ Independent mapped branches may still contribute multiple teams. The
 backend's per-finding tags are the authoritative ownership result; the browser
 uses them for team labels and filtering context. Mapping edits start a fresh
 project query rather than deriving new owners from dependency path text.
+
+### Team Mapping Report
+
+`GET /api/settings/mapping/report` is built in the background from the
+stored BOMs and findings of the versions active in the source
+(`sync_versions.active_in_dt`, not gone; the stored project list when the
+sync state lists none), by `dtvp/team_mapping_report.py`. A request never
+waits: `status` is `building` (with the previous report, `stale` when its
+inputs changed), `ready` or `failed`. The report is rebuilt when the mapping
+or a version's stored BOM or findings change; `?refresh=true` (reviewers)
+rebuilds it now. It holds:
+
+- totals and, per project, its versions, findings, findings on `*` and the
+  project's entry;
+- findings owned per entry (selector, `project::<project>`, `*`);
+- the findings falling to `*` by project root and by the topmost component
+  of their chains (a direct child of the root, or the top of a chain that
+  does not reach it), with projects, versions and a suggested entry: the
+  project for a root, the package a PURL names, `group:name`, or
+  `project:<project>::<name>` for names without PURL or group;
+- near-duplicate entries that give nearly the same name (case, separators
+  and the PURL's type ignored) to different teams;
+- an inventory of the stored components per project (name, group, PURL,
+  findings below them), at most 40,000 entries, for autocomplete and the
+  editor's live preview.
+
+`GET /api/settings/mapping/tree?project_uuid=&ref=` returns one level of a
+version's BOM tree (the root, or the children of `ref`) with every node's
+owner (team and why: its own entry, inherited from the mapped components
+above it, the project's entry, or `*`) and its findings; components no
+dependency links to are listed under the root (flat BOMs).
+`POST /api/settings/mapping/tree` (reviewers) takes `project_uuid`, an
+optional `ref` and a draft `mapping` in either format and returns the same
+level as the draft would own it; a node whose owner differs under the saved
+mapping carries that one as `saved_owner`. The editor uses it to show unsaved
+changes in the tree.
+`POST /api/settings/mapping/preview` (reviewers) takes a draft mapping in
+either format, optionally `projects`, and returns how many findings would
+change owner, from which team to which, by project. Both use the slim
+version models the report keeps in memory.
 
 `TEAM_GROUPS_PATH` defaults to `data/team_groups.json` and is also editable in
 Settings. Each group has explicit direct `teams` and nested `groups`, so an

@@ -90,6 +90,8 @@ const getTeamNames = (name: string): string[] => getTeamMappingTags(
     name,
     groupKnown: false,
   },
+  false,
+  props.projectName,
 )
 
 const getTeamLabel = (teamNames: string[]): string => {
@@ -114,7 +116,7 @@ const uniquePathCount = computed(() => {
 })
 
 const selectedPaths = computed(() => {
-  return selectRepresentativePaths(props.paths, teamMappingRecord.value, REPRESENTATIVE_PATH_LIMIT)
+  return selectRepresentativePaths(props.paths, teamMappingRecord.value, REPRESENTATIVE_PATH_LIMIT, props.projectName)
 })
 
 const graphRows = computed(() => {
@@ -124,7 +126,7 @@ const graphRows = computed(() => {
     .map((parts) => ({
       key: parts.join(' -> '),
       parts,
-      firstMapped: getFirstMappedTeamOnPath(parts, teamMappingRecord.value),
+      firstMapped: getFirstMappedTeamOnPath(parts, teamMappingRecord.value, props.projectName),
     }))
 })
 

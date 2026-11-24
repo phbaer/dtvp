@@ -340,7 +340,7 @@ def test_summary_task_seeds_from_persistent_summary_index():
         cache_manager=FakeCacheManager(),
         logger=main.logger,
         tasks=tasks,
-        bom_analysis_cache_cls=lambda bom, team_mapping: {},
+        bom_analysis_cache_cls=lambda bom, team_mapping, project_name=None: {},
         get_version_fetch_concurrency=lambda: 1,
         merge_vulnerability_details=lambda findings, full_vulns: {
             "HIGH": len(findings)
@@ -452,8 +452,10 @@ def test_upload_mapping(client, tmp_path):
             assert response.status_code == 200
             assert response.json()["status"] == "success"
 
-    # Stored byte for byte.
-    assert target.read_bytes() == mapping_content
+    # Stored organised by team (ADR 0012).
+    import json
+
+    assert json.loads(target.read_text()) == {"team": {"components": ["comp"]}}
 
 
 def test_upload_mapping_failure(client, tmp_path):

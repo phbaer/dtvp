@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 // Restore team assessments from a Dependency-Track export, with every API
 // call mocked: upload, preview with the source id, apply with it.
@@ -57,6 +58,7 @@ test.describe('Bulk Changes: restore team assessments from an export', () => {
                 list_metadata: { lifecycle: 'ASSESSED' },
             }],
         });
+        await routeMappingTeams(page, {});
         await page.route('**/api/settings/mapping', route => route.fulfill({
             status: 200, contentType: 'application/json', body: JSON.stringify({}),
         }));

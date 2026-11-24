@@ -126,6 +126,7 @@ from .task_group_query_services import (
     split_query_values,
 )
 from .team_group_services import (
+    team_values,
     canonical_team_group_structure,
     resolve_team_groups,
 )
@@ -295,6 +296,17 @@ class GeneralApiRouteDeps:
     group_query_executor: Any = None
     detail_executor: Any = None
     task_event_hub: Any = None
+    # The team mapping as stored (``logic.load_team_mapping_document``): it
+    # lists every team, also one without entries, for team groups and
+    # aliases. ``None`` reads them from ``load_team_mapping``.
+    load_team_mapping_document: Optional[Callable[[], dict[str, Any]]] = None
+
+
+def _team_document(deps: Any, team_mapping: dict[str, Any]) -> dict[str, Any]:
+    """The mapping that names every team: the stored document, or the
+    selector mapping where the deps do not offer it."""
+    load = getattr(deps, "load_team_mapping_document", None)
+    return load() if callable(load) else team_mapping
 
 
 _TASK_SNAPSHOT_REFRESH_LOCK = threading.RLock()
@@ -1771,8 +1783,9 @@ def _assessment_filter_ids(
 
 
 def _team_alias_map(team_mapping: dict[str, Any]) -> dict[str, str]:
+    """Team or alias (lower case) to its team, from either mapping format."""
     aliases: dict[str, str] = {}
-    for raw_value in team_mapping.values():
+    for raw_value in team_values(team_mapping):
         values = raw_value if isinstance(raw_value, list) else [raw_value]
         teams = [
             str(value or "").strip()
@@ -1853,9 +1866,11 @@ def _task_group_query_context(
     assessment_revision = _assessment_metadata_revision(
         deps.code_analysis_result_store
     )
+    team_document = _team_document(deps, team_mapping)
     config_digest = _stable_query_context_digest(
         rescore_rules,
         team_mapping,
+        team_document,
         team_group_config,
     )
     cache_key = (id(group_index), assessment_revision, config_digest)
@@ -1882,11 +1897,11 @@ def _task_group_query_context(
         try:
             team_groups = resolve_team_groups(
                 team_group_config,
-                team_mapping,
+                team_document,
             )
             team_group_structure = canonical_team_group_structure(
                 team_group_config,
-                team_mapping,
+                team_document,
             )
         except ValueError as exc:
             deps.logger.warning(
@@ -1909,7 +1924,7 @@ def _task_group_query_context(
             ),
             "assessment_records": assessment_records,
             "assessment_facets": assessment_facets,
-            "team_aliases": _team_alias_map(team_mapping),
+            "team_aliases": _team_alias_map(team_document),
             "team_groups": team_groups,
             "team_group_structure": team_group_structure,
         }
@@ -2074,7 +2089,8 @@ def _filter_bulk_workflow_task_groups(
     load_team_mapping = getattr(deps, "load_team_mapping", None)
     team_mapping = load_team_mapping() if callable(load_team_mapping) else {}
     filtered_summaries = _filter_bulk_workflow_groups(
-        summary_index, base_filters, team_aliases=_team_alias_map(team_mapping),
+        summary_index, base_filters,
+        team_aliases=_team_alias_map(_team_document(deps, team_mapping)),
     )
     full_group_lookup = task.get("_full_result_by_id")
     if not isinstance(full_group_lookup, dict):

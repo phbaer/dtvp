@@ -123,6 +123,7 @@ def _find_team_mapping_match_for_component(
     component_purl: Any = None,
     *,
     group_known: bool = False,
+    project: Any = None,
 ):
     return find_team_mapping_match(
         team_mapping,
@@ -137,6 +138,7 @@ def _find_team_mapping_match_for_component(
             group_known=group_known,
         ),
         include_wildcard=False,
+        project=str(project).strip() if project not in (None, "") else None,
     )
 
 
@@ -269,6 +271,7 @@ def select_auto_analysis_targets(
             component_group,
             component_purl,
             group_known="component_group" in instance,
+            project=instance.get("project_name"),
         )
         team = match.tags[0] if match and match.tags else ""
         if team:
@@ -293,6 +296,7 @@ def select_auto_analysis_targets(
                     team_mapping,
                     part,
                     group_known=False,
+                    project=instance.get("project_name"),
                 )
                 team = match.tags[0] if match and match.tags else ""
                 if team:
@@ -1109,6 +1113,7 @@ def _collect_cached_version_snapshots(
         bom_cache_map[project_uuid] = deps.bom_analysis_cache_cls(
             bom or {},
             team_mapping,
+            version.get("name"),
         )
 
     return combined_data, bom_cache_map

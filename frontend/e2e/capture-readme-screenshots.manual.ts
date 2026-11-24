@@ -1,4 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import { mockTeamMappingApi } from './helpers/team-mapping'
+import { routeMappingTeams } from './helpers/mapping-teams'
 import ssvcModel from '../../dtvp/resources/ssvc/deployer-1.0.0.json' with { type: 'json' }
 
 const mockProjects = [
@@ -591,19 +593,21 @@ async function mockCommonShell(page: Page) {
         })
     })
 
+    const selectorMapping = {
+        'platform-gateway': ['PlatformTeam', 'LegacyPlatformAlias'],
+        'service-shell': ['PlatformTeam', 'OldShellTeam'],
+        'api-gateway': ['EdgeTeam', 'LegacyEdgeAlias'],
+        'parser-wrapper': ['RuntimeTeam', 'LegacyRuntimeAlias'],
+        'validation-core': ['RuntimeTeam', 'HistoricRuntimeAlias'],
+        'frontend-shell': ['UXTeam', 'LegacyUXAlias'],
+        '*': 'Unassigned',
+    }
+    await routeMappingTeams(page, selectorMapping)
     await page.route('**/api/settings/mapping', async (route) => {
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({
-                'platform-gateway': ['PlatformTeam', 'LegacyPlatformAlias'],
-                'service-shell': ['PlatformTeam', 'OldShellTeam'],
-                'api-gateway': ['EdgeTeam', 'LegacyEdgeAlias'],
-                'parser-wrapper': ['RuntimeTeam', 'LegacyRuntimeAlias'],
-                'validation-core': ['RuntimeTeam', 'HistoricRuntimeAlias'],
-                'frontend-shell': ['UXTeam', 'LegacyUXAlias'],
-                '*': 'Unassigned',
-            }),
+            body: JSON.stringify(selectorMapping),
         })
     })
 
@@ -1477,11 +1481,25 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture settings screenshot', async ({ page }) => {
+        await mockTeamMappingApi(page, [], { catchAll: false })
+        await page.setViewportSize({ width: 1440, height: 1400 })
         await page.goto('/settings')
-        await page.waitForLoadState('networkidle')
-        await expect(page.getByText('Team Mapping Configuration')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('team-mapping-editor')).toBeVisible({ timeout: 10000 })
         await expect(page.getByRole('button', { name: 'User Roles' })).toBeVisible({ timeout: 10000 })
-        await expect(page.locator('textarea')).toBeVisible({ timeout: 10000 })
+        // The projects view with a component picked, the team chosen and
+        // the effect previewed, and a fix applied before (the save bar).
+        await page.getByRole('tab', { name: /Checks/ }).click()
+        await page.getByTestId('check-group-stale').getByRole('button', { name: 'Remove entry' }).first().click()
+        await page.getByRole('tab', { name: /Projects/ }).click()
+        await page.getByTestId('coverage-project-ViewPoint_Product').click()
+        const core = page.getByRole('treeitem', { name: /^core,/ })
+        await core.click()
+        await core.press('ArrowRight')
+        await expect(page.getByTestId('coverage-node-zlib')).toBeVisible({ timeout: 10000 })
+        await page.getByRole('combobox', { name: 'Team' }).fill('Core')
+        await page.getByRole('combobox', { name: 'Team' }).press('Enter')
+        await expect(page.getByTestId('assign-preview-result')).toContainText('change owner', { timeout: 10000 })
+        await expect(page.getByTestId('team-mapping-save-bar')).toContainText('change owner', { timeout: 10000 })
 
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/settings.png')
     })

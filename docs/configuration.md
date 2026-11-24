@@ -53,7 +53,7 @@ means the integration or override is disabled.
 | `DTVP_GROUP_POSTPROCESS_MAX_PENDING` | Post-processing jobs admitted behind active workers before async backpressure | `2` |
 | `DTVP_GROUP_DETAIL_WORKERS` | Reserved workers for full vulnerability detail hydration | `2` |
 | `DTVP_GROUP_DETAIL_MAX_PENDING` | Detail hydration jobs admitted before async backpressure | `8` |
-| `TEAM_MAPPING_PATH` | Component ownership mapping | `data/team_mapping.json` |
+| `TEAM_MAPPING_PATH` | Team mapping, organised by team ([format](assessment-model.md#team-mapping-and-analyzer-guidance)) | `data/team_mapping.json` |
 | `TEAM_GROUPS_PATH` | Nested team-group definitions | `data/team_groups.json` |
 | `USER_ROLES_PATH` | User-to-role mapping | `data/user_roles.json` |
 | `RESCORE_RULES_PATH` | CVSS transition rules | `data/rescore_rules.json` |

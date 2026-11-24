@@ -20,11 +20,13 @@ from .assessment_restore_services import (
     build_missing_rescoring_vector_restore_candidate,
     refresh_group_restore_metadata,
 )
+from .team_config import selector_mapping
 from .team_mapping import (
     ComponentIdentity,
     compile_team_mapping,
     find_team_mapping_match,
     get_team_mapping_tags,
+    project_fallback_match,
 )
 from .severity_services import SEVERITIES, original_severity
 from .ssvc_services import (
@@ -174,7 +176,9 @@ STATE_PRIORITY = {
 }
 
 
-def load_team_mapping(path: str = None) -> Dict[str, str]:
+def load_team_mapping_document(path: str = None) -> Dict[str, Any]:
+    """The team mapping file as stored: organised by team, or the older
+    selector format (``dtvp.team_config``)."""
     if path is None:
         path = get_team_mapping_path()
 
@@ -182,10 +186,17 @@ def load_team_mapping(path: str = None) -> Dict[str, str]:
         return {}
     try:
         with open(path, "r") as f:
-            return json.load(f)
+            payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
     except Exception as e:
         logger.warning(f"Failed to load team mapping from {path}: {e}")
         return {}
+
+
+def load_team_mapping(path: str = None) -> Dict[str, Any]:
+    """The selector mapping the matcher reads (``selector -> team`` or
+    ``[team, *aliases]``), from a file of either format."""
+    return selector_mapping(load_team_mapping_document(path))
 
 
 def load_team_groups(path: str = None) -> Dict[str, Any]:
@@ -325,9 +336,24 @@ class BOMAnalysisCache:
     Caches analysis data for a specific BOM to avoid re-parsing for every vulnerability.
     """
 
-    def __init__(self, bom: Dict[str, Any], mapping: Dict[str, str]):
+    def __init__(
+        self,
+        bom: Dict[str, Any],
+        mapping: Dict[str, str],
+        project_name: Optional[str] = None,
+    ):
         self.bom = bom
         self.mapping = compile_team_mapping(mapping)
+        # The Dependency-Track project the BOM belongs to, for
+        # ``project:<name>::`` and ``project::<name>`` selectors. Without one
+        # given, the BOM's root component names it (Dependency-Track exports
+        # the project as the root).
+        root_name = ((bom or {}).get("metadata") or {}).get("component") or {}
+        self.project_name = (
+            str(project_name).strip()
+            if project_name not in (None, "")
+            else str(root_name.get("name") or "").strip() or None
+        )
         self.parent_map = build_parent_map(bom)
         self.comp_map = {}  # ref -> comp
 
@@ -436,6 +462,7 @@ class BOMAnalysisCache:
                 component_purl,
                 group_known=group_known,
                 include_wildcard=include_wildcard,
+                project=self.project_name,
             )
         )
         self.direct_tags_cache[cache_key] = tags
@@ -608,7 +635,8 @@ class BOMAnalysisCache:
             match = find_team_mapping_match(
                 self.mapping,
                 ComponentIdentity(name=component_name or "", purl=component_purl),
-            )
+                project=self.project_name,
+            ) or project_fallback_match(self.mapping, self.project_name)
             return [match.key] if match else []
         if target_ref in self.owner_mapping_keys_cache:
             return list(self.owner_mapping_keys_cache[target_ref])
@@ -623,9 +651,15 @@ class BOMAnalysisCache:
                     purl=self._get_component_purl(owner_ref),
                     group_known=True,
                 ),
+                project=self.project_name,
             )
             if match and match.key not in keys:
                 keys.append(match.key)
+        if not keys:
+            # No component owns it: the project's ``project::`` entry does.
+            fallback = project_fallback_match(self.mapping, self.project_name)
+            if fallback is not None:
+                keys.append(fallback.key)
         self.owner_mapping_keys_cache[target_ref] = tuple(keys)
         return keys
 
@@ -728,6 +762,42 @@ class BOMAnalysisCache:
         if not target_ref:
             return component_purl
         return self._get_component_purl(target_ref) or component_purl
+
+    def resolve_owner(
+        self,
+        component_uuid: str,
+        component_name: str,
+        component_purl: Optional[str] = None,
+    ) -> Tuple[str, List[str], Optional[str]]:
+        """How a finding's owner is found: ``("component", tags, ref)`` when
+        a mapped component of its chain owns it, ``("project", ...)`` for the
+        project's ``project::`` entry, ``("wildcard", ...)`` for ``*`` and
+        ``("none", [], ref)`` without any. ``ref`` is the component's BOM ref,
+        ``None`` when the BOM does not contain it."""
+        target_ref = self.get_target_ref(component_uuid, component_name, component_purl)
+        if target_ref:
+            tags = self._get_tags_for_ref(target_ref)
+        else:
+            tags = list(
+                self._get_direct_tags(
+                    component_name,
+                    component_purl=component_purl,
+                    group_known=False,
+                )
+            )
+        if tags:
+            return "component", tags, target_ref
+        fallback = project_fallback_match(self.mapping, self.project_name)
+        if fallback is not None:
+            return "project", list(fallback.tags), target_ref
+        wildcard = find_team_mapping_match(
+            self.mapping,
+            ComponentIdentity(name=component_name or ""),
+            include_wildcard=True,
+        )
+        if wildcard is not None and wildcard.selector.wildcard:
+            return "wildcard", list(wildcard.tags), target_ref
+        return "none", [], target_ref
 
     def get_tags_only(
         self,
@@ -848,11 +918,18 @@ def group_vulnerabilities(
 
     mapping = load_team_mapping()
 
+    project_names = {
+        (entry.get("version") or {}).get("uuid"): (entry.get("version") or {}).get("name")
+        for entry in versions_data
+    }
+
     # Pre-process BOMs
     bom_processors = processed_boms.copy()
     for proj_uuid, bom in project_boms.items():
         if proj_uuid not in bom_processors:
-            bom_processors[proj_uuid] = BOMAnalysisCache(bom, mapping)
+            bom_processors[proj_uuid] = BOMAnalysisCache(
+                bom, mapping, project_names.get(proj_uuid)
+            )
 
     groups = {}  # Key: canonical_id -> Group Data
 
@@ -925,7 +1002,7 @@ def group_vulnerabilities(
         processor = bom_processors.get(proj_uuid)
         if not processor:
             # Just in case it wasn't in processed_boms AND wasn't in project_boms
-            processor = BOMAnalysisCache({}, mapping)
+            processor = BOMAnalysisCache({}, mapping, version_info.get("name"))
             bom_processors[proj_uuid] = processor
 
         for finding in vulns:

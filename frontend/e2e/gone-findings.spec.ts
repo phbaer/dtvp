@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
+import { routeMappingTeams } from './helpers/mapping-teams';
 
 // Findings Dependency-Track no longer reports, shown on the project view.
 // Synthetic data only.
@@ -91,6 +92,7 @@ test.describe('Gone findings', () => {
         ])));
         await page.route('**/api/tasks/group-vulns*', route => route.fulfill(json({ task_id: 'task-gone' })));
         await mockGroupedVulnTask(page, { taskId: 'task-gone', groups: [] });
+        await routeMappingTeams(page, {});
         await page.route('**/api/settings/mapping', route => route.fulfill(json({})));
         await page.route('**/api/settings/rescore-rules', route => route.fulfill(json({ transitions: [] })));
         await page.route('**/api/projects/*/tmrescore/proposals', route => route.fulfill(json({
