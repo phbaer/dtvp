@@ -195,9 +195,12 @@ draft ([screen](docs/screens.md#settings-team-mapping)). The backend's
 resolved finding tags drive the list and detail views. Mapping edits rerun the
 project query so both views use the same ownership.
 
-From a 1280px wide viewport the vulnerability detail can open a full-screen
-[assessment workspace](docs/screens.md#assessment-workspace) with the context
-beside the assessment form.
+The assessment form starts with a short
+[summary of the vulnerability](docs/screens.md#assessment-tab): the start of
+the description, affected components, attack conditions, CWE, fix advice and
+references. From a 1280px wide viewport the vulnerability detail can open a
+full-screen [assessment workspace](docs/screens.md#assessment-workspace) with
+the context beside the assessment form.
 
 After an upgrade DTVP shows [what's new](docs/screens.md#whats-new) since the
 version a user last saw: a large dialog for a new major version, a small one

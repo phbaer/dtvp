@@ -55,6 +55,32 @@ _CVSS_BASE_METRIC_KEYS = {
 }
 
 
+def _text_or_none(value: Any) -> Optional[str]:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def vulnerability_cwes(vulnerability: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The CWEs of a Dependency-Track vulnerability as ``{"id", "name"}``,
+    from ``cwes`` or, in older records, ``cweId`` and ``cweName``; unique
+    and in the source's order."""
+    entries = vulnerability.get("cwes") or []
+    if not entries and vulnerability.get("cweId") is not None:
+        entries = [{"cweId": vulnerability.get("cweId"), "name": vulnerability.get("cweName")}]
+    result: List[Dict[str, Any]] = []
+    seen: Set[int] = set()
+    for entry in entries:
+        value = entry.get("cweId") if isinstance(entry, dict) else entry
+        if not str(value or "").strip().isdigit():
+            continue
+        cwe_id = int(str(value).strip())
+        if cwe_id in seen:
+            continue
+        seen.add(cwe_id)
+        name = _text_or_none(entry.get("name")) if isinstance(entry, dict) else None
+        result.append({"id": cwe_id, "name": name})
+    return result
+
 def _metric_key(token: str) -> str:
     """Extract the metric key from a CVSS token like ``AV:N`` → ``AV``."""
     return token.split(":")[0]
@@ -1033,6 +1059,8 @@ def group_vulnerabilities(
                     "id": canonical_id,
                     "title": vuln.get("title"),
                     "description": vuln.get("description"),
+                    "cwes": vulnerability_cwes(vuln),
+                    "recommendation": _text_or_none(vuln.get("recommendation")),
                     "severity": vuln.get("severity"),
                     "original_severity": source_severity,
                     "cvss_score": new_cvss_score,
@@ -1050,6 +1078,13 @@ def group_vulnerabilities(
                     "assessment_restore_status": None,
                 }
             else:
+                # Aliases of one issue: take what the first record lacked.
+                if not groups[canonical_id].get("cwes"):
+                    groups[canonical_id]["cwes"] = vulnerability_cwes(vuln)
+                if not groups[canonical_id].get("recommendation"):
+                    groups[canonical_id]["recommendation"] = _text_or_none(
+                        vuln.get("recommendation")
+                    )
                 if SEVERITIES.index(source_severity) < SEVERITIES.index(groups[canonical_id]["original_severity"]):
                     groups[canonical_id]["original_severity"] = source_severity
                 # Update base CVSS to maximum

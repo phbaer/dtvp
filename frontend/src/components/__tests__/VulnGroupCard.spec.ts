@@ -37,7 +37,8 @@ vi.mock('../../lib/api', async () => {
         offset: 0
     }),
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
-    getKnownUsers: vi.fn(() => Promise.resolve([]))
+    getKnownUsers: vi.fn(() => Promise.resolve([])),
+    deleteAssessment: vi.fn(() => Promise.resolve([])),
     }
 })
 
@@ -393,8 +394,8 @@ describe('VulnGroupCard', () => {
         ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
         await wrapper.vm.$nextTick()
 
-        expect(wrapper.get('[data-testid="assessment-completeness"]').text())
-            .toContain('Assessment is ready to submit')
+        // Nothing is missing: the hint goes away, the button says the rest.
+        expect(wrapper.find('[data-testid="assessment-completeness"]').exists()).toBe(false)
         expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled'))
             .toBeUndefined()
         expect(wrapper.get('[data-testid="assessment-submit-button"]').text())
@@ -672,6 +673,174 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Threat model reduces exposure for the reviewed deployment.')
     })
 
+    it('summarises the vulnerability at the top of the Assessment tab', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    description: [
+                        'A **crafted** document makes the parser read past its buffer.<script>alert(1)</script>',
+                        '',
+                        ...Array.from({ length: 4 }, (_, index) => `Paragraph ${index + 2} explains more.`).flatMap(line => [line, '']),
+                    ].join('\n'),
+                    cwes: [{ id: 125, name: 'Out-of-bounds Read' }],
+                    recommendation: 'Upgrade to **2.0**.',
+                },
+            },
+            global: { provide: { user: ref({ role: 'ANALYST', username: 'analyst' }) } },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        const assessmentTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await flushPromises()
+
+        const review = wrapper.get(`#vuln-${mockGroup.id}-detail-panel-review`)
+        const about = review.get('[data-testid="vuln-about"]')
+        // First in the form, before the scope and the decision.
+        expect(review.element.querySelector('[data-testid="vuln-about"]')!
+            .compareDocumentPosition(review.get('[data-testid="assessment-decision-section"]').element)
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(about.get('[data-testid="vuln-about-toggle"]').attributes('aria-expanded')).toBe('true')
+        expect(about.get('[data-testid="vuln-about-title"]').text()).toBe('Test Vulnerability')
+
+        // Plain text, sanitised: no markup, no script text.
+        const description = about.get('[data-testid="vuln-about-description"]')
+        expect(description.text()).toContain('A crafted document makes the parser read past its buffer.')
+        expect(description.text()).not.toContain('**')
+        expect(description.text()).not.toContain('alert')
+        expect(description.element.querySelector('script, strong')).toBeNull()
+        expect(description.classes()).toContain('line-clamp-3')
+        const more = about.get('[data-testid="vuln-about-more"]')
+        expect(more.text()).toBe('Show more')
+        await more.trigger('click')
+        expect(description.classes()).not.toContain('line-clamp-3')
+        expect(more.text()).toBe('Show less')
+        expect(more.attributes('aria-expanded')).toBe('true')
+
+        expect(about.get('[data-testid="vuln-about-affects"]').text()).toContain('lib 1.0')
+        expect(about.get('[data-testid="vuln-about-affects"]').text()).toContain('in version 1.0')
+        expect(about.get('[data-testid="vuln-about-attack"]').text())
+            .toContain('network, low complexity, no privileges, no user interaction')
+        expect(about.get('[data-testid="vuln-about-cwe"]').text()).toContain('CWE-125 Out-of-bounds Read')
+        expect(about.get('[data-testid="vuln-about-fix"] dd').text()).toBe('Upgrade to 2.0.')
+        expect(about.findAll('a').map(link => link.text())).toEqual(['NVD', 'MITRE'])
+
+        // The block folds to one line.
+        await about.get('[data-testid="vuln-about-toggle"]').trigger('click')
+        expect(about.find('[data-testid="vuln-about-description"]').exists()).toBe(false)
+        expect(about.text()).toContain('Test Vulnerability')
+    })
+
+    it('lists the team-mapped components once and notes the team filter only when it hides findings', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup, activeTeamFilter: 'Security' },
+            global: {
+                provide: {
+                    user: ref({ role: 'ANALYST', username: 'analyst' }),
+                    teamMapping: ref({ lib: ['Security'] }),
+                },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const whereFound = wrapper.get('[data-testid="where-found"]')
+        const mapped = whereFound.findAll('[data-testid="triggering-team-component"]')
+        expect(mapped).toHaveLength(1)
+        expect(mapped[0].text()).toMatch(/^lib\s*@1\.0\s*\(Security\)$/)
+        expect(whereFound.text()).not.toContain('Affected components with team tags')
+        // Every finding belongs to the filtered team: nothing to say.
+        expect(wrapper.find('[data-testid="vulnerability-team-scope"]').exists()).toBe(false)
+        // Explanations are tooltips (and screen-reader descriptions), not subtitles.
+        expect(whereFound.find('header p').exists()).toBe(false)
+        expect(whereFound.get('[data-testid="detail-section-help"]').attributes('title'))
+            .toContain('Every affected component by project version')
+    })
+
+    it('shows the generated text read-only instead of an editable raw text', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        group.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+        group.affected_versions[0].components[0].analysis_details =
+            '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'reviewer' }) } },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.text()).not.toContain('Raw Assessment Text')
+        const generated = wrapper.get('[data-testid="generated-assessment-text"]')
+        const toggle = generated.get('[data-testid="generated-assessment-text-toggle"]')
+        expect(toggle.attributes('aria-expanded')).toBe('false')
+        expect(generated.find('[data-testid="generated-assessment-text-body"]').exists()).toBe(false)
+        await toggle.trigger('click')
+        const body = generated.get('[data-testid="generated-assessment-text-body"]')
+        expect(body.element.tagName).toBe('PRE')
+        expect(body.text()).toContain('[Team: General] [State: NOT_AFFECTED]')
+        // Read-only: nothing to type into, and showing it changes nothing.
+        expect(generated.find('textarea, input[type="text"]').exists()).toBe(false)
+        expect((wrapper.vm as any).hasUnsavedDraft).toBe(false)
+
+        await generated.get('[data-testid="copy-generated-assessment-text"]').trigger('click')
+        await flushPromises()
+        expect(clipboardWriteText).toHaveBeenCalledWith(expect.stringContaining('[Team: General] [State: NOT_AFFECTED]'))
+        expect(generated.get('[data-testid="copy-generated-assessment-text"]').text()).toBe('Copied')
+    })
+
+    it('clears the open team assessment from the More menu after a confirmation', async () => {
+        const { deleteAssessment } = await import('../../lib/api')
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        group.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+        group.affected_versions[0].components[0].analysis_details =
+            '--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: analyst] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: {
+                provide: { user: ref({ role: 'ANALYST', username: 'analyst' }), teamMapping: ref({ lib: ['Security'] }) },
+                stubs: { teleport: true },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        const assessmentTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await flushPromises()
+        expect((wrapper.vm as any).selectedTeam).toBe('Security')
+
+        await wrapper.get('[data-testid="assessment-more-button"]').trigger('click')
+        await wrapper.get('[data-testid="assessment-clear-button"]').trigger('click')
+        const dialog = wrapper.get('[data-testid="clear-assessment-modal"]')
+        expect(dialog.text()).toContain('Only the Security assessment')
+        expect(dialog.get('[data-testid="clear-applies-to"]').text()).toContain('the finding of lib in version 1.0')
+        expect(dialog.find('[data-testid="clear-all"]').exists()).toBe(false)
+
+        await dialog.get('[data-testid="clear-confirm"]').trigger('click')
+        await flushPromises()
+        expect(deleteAssessment).toHaveBeenCalledWith(expect.any(Array), 'Security')
+        expect(wrapper.find('[data-testid="clear-assessment-modal"]').exists()).toBe(false)
+    })
+
+    it('puts the reviewer decision before CVSS and SSVC', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'reviewer' }) } },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const decision = wrapper.get('#analysis-state-select').element
+        const cvss = wrapper.get('[data-testid="global-cvss-rescoring"]').element
+        expect(decision.compareDocumentPosition(cvss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        // Reviewers have nothing missing to submit: no hint.
+        expect(wrapper.find('[data-testid="assessment-completeness"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Global Assessment')
+    })
+
     it('shows mapped overview context and enables code analysis for analysts', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
@@ -730,7 +899,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         const proposal = wrapper.get('[data-testid="automatic-assessment-proposal"]')
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component for Security:')
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component:')
         expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('lib')
         expect(proposal.text()).toContain('Analyzer proposal')
         expect(proposal.text()).toContain('Reachable parser use.')
@@ -804,13 +973,17 @@ describe('VulnGroupCard', () => {
         await assessmentTab?.trigger('click')
         await wrapper.vm.$nextTick()
 
+        // One compact line: each team's state, the analyzer fallback marked.
         const summary = wrapper.get('[data-testid="effective-team-assessment-summary"]')
-        expect(summary.text()).toContain('Security')
-        expect(summary.text()).toContain('Team assessment')
-        expect(summary.text()).toContain('Runtime')
-        expect(summary.text()).toContain('Analyzer fallback')
-        expect(summary.text()).toContain('Worst: NOT AFFECTED')
-        expect(summary.text()).not.toContain('Worst: EXPLOITABLE')
+        const teams = summary.findAll('[data-testid="effective-team-assessment"]')
+        expect(teams.map(team => team.findAll('span').map(part => part.text()).join(' '))).toEqual([
+            'Security not affected',
+            'Runtime not affected (analyzer)',
+        ])
+        expect(teams[0].attributes('title')).toBe('Team assessment')
+        expect(teams[1].attributes('title')).toContain('Analyzer fallback')
+        expect(summary.text()).toContain('Worst: not affected')
+        expect(summary.text()).not.toContain('exploitable')
 
         await summary.get('[data-testid="use-effective-assessment-summary"]').trigger('click')
         await wrapper.vm.$nextTick()
@@ -818,6 +991,72 @@ describe('VulnGroupCard', () => {
         expect((wrapper.vm as any).details).toContain('Assessed Teams: Runtime, Security')
         expect((wrapper.vm as any).details).not.toContain('Manual Security rationale.')
         expect((wrapper.vm as any).details).not.toContain('Automatic Runtime result.')
+    })
+
+    it('keeps a reviewer on the Global form they chose, with a team filter and an edited team draft', async () => {
+        const runtimeComponent = {
+            ...mockComponents[0],
+            component_name: 'worker',
+            component_uuid: 'c2',
+            finding_uuid: 'f2',
+            tags: ['Runtime'],
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    affected_versions: [{
+                        ...mockGroup.affected_versions[0],
+                        components: [mockComponents[0], runtimeComponent],
+                    }],
+                },
+                activeTeamFilter: 'Security',
+            },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER', username: 'reviewer' }),
+                    teamMapping: ref({ lib: ['Security'], worker: ['Runtime'] }),
+                },
+            },
+        })
+        const vm = wrapper.vm as any
+        const globalTab = () => wrapper.findAll('[data-testid="assessment-scope"] button').find(button => button.text().trim() === 'Global')!
+        const tab = (name: string) => wrapper.findAll('[role="tab"]').find(candidate => candidate.text().includes(name))!
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await tab('Assessment').trigger('click')
+        await flushPromises()
+        // The team filter preselects the team on first open.
+        expect(vm.selectedTeam).toBe('Security')
+
+        await wrapper.get('#analysis-details-textarea').setValue('Security draft.')
+        expect(vm.formTouched).toBe(true)
+
+        await globalTab().trigger('click')
+        await flushPromises()
+        expect(vm.selectedTeam).toBe('')
+        expect(globalTab().attributes('aria-pressed')).toBe('true')
+        expect(wrapper.find('[data-testid="global-cvss-rescoring"]').exists()).toBe(true)
+        expect((wrapper.get('#analysis-details-textarea').element as HTMLTextAreaElement).value).not.toBe('Security draft.')
+
+        // Another detail tab and back does not override the choice.
+        await tab('Context').trigger('click')
+        await tab('Assessment').trigger('click')
+        await flushPromises()
+        expect(vm.selectedTeam).toBe('')
+
+        // Back to the team: its draft is still there.
+        await wrapper.findAll('[data-testid="review-team-tab"]').find(button => button.text() === 'Security')!.trigger('click')
+        await flushPromises()
+        expect(vm.selectedTeam).toBe('Security')
+        expect((wrapper.get('#analysis-details-textarea').element as HTMLTextAreaElement).value).toBe('Security draft.')
+
+        // A change of the team filter preselects again.
+        await globalTab().trigger('click')
+        await flushPromises()
+        await wrapper.setProps({ activeTeamFilter: 'Runtime' })
+        await flushPromises()
+        expect(vm.selectedTeam).toBe('Runtime')
     })
 
     it('scopes vulnerability component context to the selected team', async () => {
@@ -871,7 +1110,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         expect(wrapper.get('[data-testid="assessment-team-scope"]').text())
-            .toContain('Assessment scope: Security · other teams are hidden')
+            .toContain('Other teams are hidden by the team filter')
         expect((wrapper.vm as any).selectedTeam).toBe('Security')
         expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text()))
             .toEqual(['Security'])
@@ -925,7 +1164,7 @@ describe('VulnGroupCard', () => {
         await wrapper.findAll('[data-testid="review-team-tab"]')
             .find(tab => tab.text() === 'Runtime')
             ?.trigger('click')
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component for Runtime:')
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component:')
         expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('worker')
 
         await wrapper.get('[data-testid="toggle-assessment-team-scope"]').trigger('click')
@@ -1624,7 +1863,7 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
         await flushPromises()
 
-        const vectorInput = wrapper.findAll('input[type="text"]')[0]
+        const vectorInput = wrapper.find('#cvss-vector-input')
 
         ;(wrapper.vm as any).state = 'NOT_AFFECTED'
         await wrapper.vm.$nextTick()
@@ -1800,7 +2039,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).not.toContain('Suppress')
         await wrapper.get('[data-testid="assessment-more-button"]').trigger('click')
         expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Suppress in Dependency-Track')
-        expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Delete assessment')
+        expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Clear assessment')
     })
 
     it('lets a reviewer approve a pending assessment in one step', async () => {
@@ -2277,8 +2516,26 @@ describe('VulnGroupCard', () => {
             expect(reviewShown(wrapper)).toBe(true)
             expect(wrapper.get('[data-testid="workspace-assessment-heading"]').text()).toContain('Assessment')
             expect(wrapper.get(`#vuln-${mockGroup.id}-detail-panel-review`).attributes('role')).toBe('region')
-            expect(wrapper.text()).toContain('The context is on the left; save with the action bar above.')
+            // The one-time instruction is a tooltip on the heading.
+            expect(wrapper.get('[data-testid="workspace-assessment-heading"]').attributes('title'))
+                .toBe('The context is on the left; save with the action bar above.')
             expect(wrapper.get('[data-testid="vulnerability-assessments"]').text()).not.toContain('Assessment tab')
+        })
+
+        it('folds the vulnerability summary in the workspace, where the context shows the description', async () => {
+            const wrapper = await mountCard()
+
+            const about = assessmentPane(wrapper).get('[data-testid="vuln-about"]')
+            const toggle = about.get('[data-testid="vuln-about-toggle"]')
+            expect(toggle.attributes('aria-expanded')).toBe('false')
+            expect(about.text()).toContain('Test Vulnerability')
+            expect(about.find('[data-testid="vuln-about-description"]').exists()).toBe(false)
+            await toggle.trigger('click')
+            expect(about.get('[data-testid="vuln-about-description"]').text()).toBe('A bad vulnerability')
+
+            // Back in tab mode it is open again.
+            await wrapper.setProps({ workspace: false })
+            expect(wrapper.get('[data-testid="vuln-about-toggle"]').attributes('aria-expanded')).toBe('true')
         })
 
         it('keeps tab mode as it was when the workspace is closed', async () => {
@@ -2582,7 +2839,7 @@ describe('VulnGroupCard', () => {
                 ['generic modal', () => { vm.genericModal.show = true }, () => { vm.genericModal.show = false }],
                 ['conflict modal', () => { vm.showConflictModal = true }, () => { vm.showConflictModal = false }],
                 ['calculator modal', () => { vm.showCalculatorModal = true }, () => { vm.showCalculatorModal = false }],
-                ['delete modal', () => { vm.showDeleteModal = true }, () => { vm.showDeleteModal = false }],
+                ['clear modal', () => { vm.showClearModal = true }, () => { vm.showClearModal = false }],
                 ['review modal', () => { vm.reviewModal.show = true }, () => { vm.reviewModal.show = false }],
                 ['more menu', () => { vm.showMoreMenu = true }, () => { vm.showMoreMenu = false }],
             ]

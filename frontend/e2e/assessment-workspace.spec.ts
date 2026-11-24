@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import ssvcModel from '../../dtvp/resources/ssvc/deployer-1.0.0.json' with { type: 'json' };
 import { mockGroupedVulnTask } from './helpers/grouped-task';
 import { routeMappingTeams } from './helpers/mapping-teams';
@@ -23,6 +23,8 @@ const workspaceGroup = {
     description: Array.from({ length: 12 }, (_, index) =>
         `Paragraph ${index + 1} of the advisory. A crafted document makes the parser read past its buffer, which can leak memory or crash the process.`,
     ).join('\n\n'),
+    cwes: [{ id: 125, name: 'Out-of-bounds Read' }],
+    recommendation: 'Upgrade the parser to 3.0.',
     severity: 'HIGH',
     cvss: 9.8,
     cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
@@ -234,6 +236,123 @@ test.describe('Assessment workspace', () => {
 
         expect(errors).toEqual([]);
     });
+
+    test('summarises the vulnerability above the form, folded in the workspace', async ({ page }) => {
+        const errors = collectConsoleErrors(page);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const inspector = await selectVulnerability(page);
+
+        // The Assessment tab starts with the summary, open, then the decision.
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        const about = inspector.getByTestId('vuln-about');
+        await expect(about).toBeVisible();
+        await expect(about.getByTestId('vuln-about-title')).toHaveText('Parser vulnerability');
+        const description = about.getByTestId('vuln-about-description');
+        await expect(description).toContainText('Paragraph 1 of the advisory.');
+        const clamped = await description.evaluate(element => element.scrollHeight > element.clientHeight + 1);
+        expect(clamped).toBe(true);
+        await about.getByTestId('vuln-about-more').click();
+        await expect(about.getByTestId('vuln-about-more')).toHaveText('Show less');
+        expect(await description.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+        await expect(about.getByTestId('vuln-about-cwe')).toContainText('CWE-125 Out-of-bounds Read');
+        await expect(about.getByTestId('vuln-about-fix')).toContainText('Upgrade the parser to 3.0.');
+        await expect(about.getByTestId('vuln-about-attack')).toContainText('network, low complexity, no privileges, no user interaction');
+        await expect(about.getByTestId('vuln-about-affects')).toContainText('in 2 versions');
+
+        // In the workspace the context shows the description; the summary is one line.
+        await inspector.getByTestId('workspace-toggle').click();
+        const workspace = page.getByRole('dialog', { name: `Assessment workspace for ${workspaceGroup.id}` });
+        await expect(workspace).toBeVisible();
+        const folded = workspace.getByTestId('vuln-about');
+        await expect(folded.getByTestId('vuln-about-toggle')).toHaveAttribute('aria-expanded', 'false');
+        await expect(folded).toContainText('Parser vulnerability');
+        await expect(folded.getByTestId('vuln-about-description')).toHaveCount(0);
+        await expect(workspace.getByTestId('assessment-decision-section')).toBeInViewport();
+        await folded.getByTestId('vuln-about-toggle').click();
+        await expect(folded.getByTestId('vuln-about-description')).toBeVisible();
+
+        expect(errors).toEqual([]);
+    });
+
+    test('a reviewer switches team to Global and back with a team filter and an edited draft', async ({ page }) => {
+        const errors = collectConsoleErrors(page);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto('/project/TestProject?teams=Security');
+        const row = page.locator(`.vuln-card[data-group-id="${workspaceGroup.id}"]`);
+        await expect(row).toBeVisible({ timeout: 20000 });
+        await row.click();
+        const inspector = page.getByTestId('vuln-detail-inspector');
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+
+        const scope = inspector.getByTestId('assessment-scope');
+        const globalTab = scope.getByRole('button', { name: 'Global', exact: true });
+        const teamTab = scope.getByTestId('review-team-tab').filter({ hasText: 'Security' });
+        // The team filter preselects its team on first open.
+        await expect(teamTab).toHaveAttribute('aria-pressed', 'true');
+        const details = inspector.locator('#analysis-details-textarea');
+        await details.fill('Security draft.');
+
+        await globalTab.click();
+        await expect(globalTab).toHaveAttribute('aria-pressed', 'true');
+        await expect(inspector.getByTestId('global-cvss-rescoring')).toBeVisible();
+        await expect(details).not.toHaveValue('Security draft.');
+        // It stays there: no snap back after a moment, nor after another tab.
+        await page.waitForTimeout(300);
+        await expect(globalTab).toHaveAttribute('aria-pressed', 'true');
+        await inspector.getByRole('tab', { name: /Context/ }).click();
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        await expect(globalTab).toHaveAttribute('aria-pressed', 'true');
+
+        // In the workspace too.
+        await inspector.getByTestId('workspace-toggle').click();
+        const workspace = page.getByRole('dialog', { name: `Assessment workspace for ${workspaceGroup.id}` });
+        await expect(workspace).toBeVisible();
+        await expect(workspace.getByTestId('assessment-scope').getByRole('button', { name: 'Global', exact: true }))
+            .toHaveAttribute('aria-pressed', 'true');
+
+        // Back to the team: its draft is kept.
+        await workspace.getByTestId('assessment-scope').getByTestId('review-team-tab').filter({ hasText: 'Security' }).click();
+        await expect(workspace.locator('#analysis-details-textarea')).toHaveValue('Security draft.');
+        expect(errors).toEqual([]);
+    });
+
+    for (const width of [1280, 1440, 1920]) {
+        test(`shows every CVSS vector and metric without clipping at ${width}px`, async ({ page }, testInfo) => {
+            await page.setViewportSize({ width, height: 1000 });
+            const inspector = await selectVulnerability(page);
+            await inspector.getByRole('tab', { name: /Assessment/ }).click();
+            // The stored assessment has loaded into the form before the edit.
+            await expect(inspector.locator('#analysis-details-textarea')).toHaveValue('The parser is not shipped.');
+            await page.waitForLoadState('networkidle');
+            await inspector.locator('#cvss-vector-input')
+                .fill('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:L/MAC:H/MPR:H/MUI:R/MC:L/MI:L/CR:H/IR:M/AR:L');
+
+            const unclipped = async (scope: Locator, name: string) => {
+                const display = scope.getByTestId('cvss-vector-display');
+                await expect(display.getByTestId('cvss-vector-row')).toHaveCount(2);
+                await display.scrollIntoViewIfNeeded();
+                await display.screenshot({ path: testInfo.outputPath(`${name}-${width}.png`) });
+                // Nothing overflows the display, and every section lies inside it.
+                expect(await display.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+                const box = (await display.boundingBox())!;
+                for (const section of await display.getByTestId('cvss-metric-section').all()) {
+                    const inner = (await section.boundingBox())!;
+                    expect(inner.x).toBeGreaterThanOrEqual(box.x - 1);
+                    expect(inner.x + inner.width).toBeLessThanOrEqual(box.x + box.width + 1);
+                }
+                for (const row of await display.getByTestId('cvss-vector-row').all()) {
+                    expect(await row.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+                }
+                await expect(display.getByTestId('cvss-metric-section')).toHaveCount(2);
+            };
+            await unclipped(inspector, 'card');
+
+            await inspector.getByTestId('workspace-toggle').click();
+            const workspace = page.getByRole('dialog', { name: `Assessment workspace for ${workspaceGroup.id}` });
+            await expect(workspace).toBeVisible();
+            await unclipped(workspace, 'workspace');
+        });
+    }
 
     test('keeps Tab inside the workspace', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });

@@ -57,10 +57,6 @@ describe('assessmentSubmission', () => {
             originalScore: null,
             currentUser: 'reviewer',
             isApprove: true,
-            showRawEdit: false,
-            rawDetailsTouched: false,
-            rawDetails: '',
-            mergedAssessmentFullText: stored,
             suppressed: false,
             force: false,
         })
@@ -107,10 +103,6 @@ describe('assessmentSubmission', () => {
             originalScore: null,
             currentUser: 'bob',
             isApprove: false,
-            showRawEdit: false,
-            rawDetailsTouched: false,
-            rawDetails: '',
-            mergedAssessmentFullText: stored,
             suppressed: false,
             force: false,
         })
@@ -154,10 +146,6 @@ describe('assessmentSubmission', () => {
             originalScore: null,
             currentUser: 'reviewer',
             isApprove: false,
-            showRawEdit: false,
-            rawDetailsTouched: false,
-            rawDetails: '',
-            mergedAssessmentFullText: '',
             suppressed: false,
             force: false,
         })
@@ -242,10 +230,6 @@ describe('assessmentSubmission', () => {
             initialScore: null,
             currentUser: 'bob',
             isApprove: false,
-            showRawEdit: false,
-            rawDetailsTouched: false,
-            rawDetails: '',
-            mergedAssessmentFullText: previous,
             suppressed: false,
             force: false,
         })
@@ -259,7 +243,7 @@ describe('assessmentSubmission', () => {
         expect(prepared.payload).not.toHaveProperty('approve')
     })
 
-    it('uses sanitized raw text and clears original analysis on force overwrite', () => {
+    it('builds the payload from the form fields alone and clears original analysis on force overwrite', () => {
         const prepared = prepareAssessmentSubmission({
             allInstances: instances,
             originalAnalysis: {
@@ -267,14 +251,14 @@ describe('assessmentSubmission', () => {
             },
             selectedTeam: '',
             state: 'NOT_AFFECTED',
-            details: 'Ignored form details',
+            details: 'Form details',
             justification: 'CODE_NOT_PRESENT',
             currentAssigned: [],
             evidenceReviewed: false,
             versionCoverageChecked: false,
             ticket: '',
             teamDrafts: new Map(),
-            isReviewer: false,
+            isReviewer: true,
             pendingVector: '',
             pendingScore: null,
             initialVector: '',
@@ -283,14 +267,11 @@ describe('assessmentSubmission', () => {
             originalScore: null,
             currentUser: 'reviewer',
             isApprove: true,
-            showRawEdit: true,
-            rawDetailsTouched: true,
-            rawDetails: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] [Justification: CODE_NOT_PRESENT] ---\nRaw details',
-            mergedAssessmentFullText: 'previous text',
             suppressed: true,
             force: true,
         })
 
+        // No input takes a hand-edited text any more.
         expect(prepared.reviewText).toContain('--- [Team: General] [State: NOT_AFFECTED]')
         expect(prepared.finalState).toBe('NOT_AFFECTED')
         expect(prepared.payload.justification).toBe('CODE_NOT_PRESENT')
@@ -299,10 +280,9 @@ describe('assessmentSubmission', () => {
         expect(prepared.payload.suppressed).toBe(true)
         expect(prepared.payload.team).toBeUndefined()
         expect(prepared.payload.fields).toEqual(expect.objectContaining({
-            pending_review: false,
             teams: [expect.objectContaining({
                 team: 'General', state: 'NOT_AFFECTED', assessed_by: 'reviewer',
-                justification: 'CODE_NOT_PRESENT', details: 'Raw details',
+                justification: 'CODE_NOT_PRESENT', details: 'Form details',
             })],
         }))
     })
@@ -435,10 +415,6 @@ describe('assessmentSubmission', () => {
         originalScore: null,
         currentUser: 'bob',
         isApprove: false,
-        showRawEdit: false,
-        rawDetailsTouched: false,
-        rawDetails: '',
-        mergedAssessmentFullText: '',
         suppressed: false,
         force: false,
     })

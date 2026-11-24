@@ -455,9 +455,14 @@ describe('VulnGroupCard Branch Coverage', () => {
         expect((wrapper.vm as any).displayState).toBe('INCONSISTENT')
         ;(wrapper.vm as any).expanded = true
         await wrapper.vm.$nextTick()
-        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Why manual resolution is needed')
-        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Analysis states differ')
-        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Exploitable, Not Affected')
+        // Why it is inconsistent is said once, in the banner above the tabs.
+        expect(wrapper.find('[data-testid="assessment-sync-reasons"]').exists()).toBe(false)
+        expect(wrapper.text()).not.toContain('Why manual resolution is needed')
+        const banner = wrapper.get('[data-testid="card-differences-banner"]')
+        expect(banner.text()).toContain('Why this is inconsistent')
+        expect(banner.text()).toContain('Analysis states differ')
+        expect(banner.text()).toContain('Exploitable, Not Affected')
+        expect(wrapper.text().match(/Analysis states differ/g)).toHaveLength(1)
         expect(wrapper.find('[data-testid="sync-all-assessments"]').exists()).toBe(false)
         expect(wrapper.text()).not.toContain('Apply worst assessment')
 

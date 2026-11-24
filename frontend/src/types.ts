@@ -194,6 +194,10 @@ export interface GroupedVuln {
     automatic_assessment_rescore?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO' | 'NO_RESCORE' | 'UNSCORED' | null;
     title?: string;
     description?: string;
+    /** The advisory's CWEs, as Dependency-Track holds them. */
+    cwes?: Array<{ id: number; name?: string | null }>;
+    /** The advisory source's remediation advice, plain text. */
+    recommendation?: string | null;
     severity?: string;
     cvss?: number;
     cvss_score?: number;

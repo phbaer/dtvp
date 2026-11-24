@@ -6,6 +6,7 @@ import VulnGroupCard from '../VulnGroupCard.vue'
 // Mock icons
 vi.mock('@lucide/vue', () => ({
     ChevronDown: { template: '<span />' },
+    Info: { template: '<span />' },
     ChevronUp: { template: '<span />' },
     Shield: { template: '<span />' },
     Calculator: { template: '<span />' },

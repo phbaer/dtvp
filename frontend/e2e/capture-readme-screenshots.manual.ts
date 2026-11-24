@@ -845,7 +845,14 @@ async function mockCommonShell(page: Page) {
                     {
                         id: 'CVE-2024-9999',
                         title: 'Critical dependency issue in shared parser',
-                        description: 'A grouped vulnerability with direct and transitive dependencies across several versions.',
+                        description: [
+                            'A crafted document makes `shared-parser` read past the end of its input buffer while it resolves nested entity references.',
+                            'An unauthenticated remote attacker who can submit documents to a service using the parser can leak process memory or crash the process.',
+                            '',
+                            'Versions before 4.3.0 are affected. The `platform-gateway` bundles the parser directly; other components reach it transitively.',
+                        ].join('\n'),
+                        cwes: [{ id: 125, name: 'Out-of-bounds Read' }],
+                        recommendation: 'Upgrade shared-parser to 4.3.0 or later, or disable entity resolution in the parser configuration.',
                         severity: 'CRITICAL',
                         cvss: 9.8,
                         cvss_score: 9.8,
@@ -994,6 +1001,7 @@ async function mockCommonShell(page: Page) {
                         id: 'CVE-2024-3001',
                         title: 'Pending review — analyst assessment awaiting reviewer approval',
                         description: 'Analyst submitted an assessment that requires reviewer approval before it becomes effective.',
+                        cwes: [{ id: 400, name: 'Uncontrolled Resource Consumption' }],
                         severity: 'HIGH',
                         cvss: 7.5,
                         cvss_score: 7.5,
@@ -1450,7 +1458,8 @@ test.describe('Capture README screenshots', () => {
         const card = await openProjectCard(page, 'CVE-2024-9999')
         const workspace = await openWorkspace(card)
         // The analyst's team is preselected on the form beside the context.
-        await expect(workspace.getByTestId('assessment-team-scope')).toContainText('PlatformTeam')
+        await expect(workspace.getByTestId('review-team-tab')).toHaveText(['PlatformTeam'])
+        await expect(workspace.getByTestId('assessment-team-scope')).toContainText('Other teams are hidden')
         await expect(workspace.getByTestId('workspace-context-pane').getByTestId('where-found')).toBeVisible()
 
         await captureWorkspace(workspace, '../docs/screenshots/assessment-workspace.png')
@@ -1467,9 +1476,23 @@ test.describe('Capture README screenshots', () => {
         await expect(workspace.getByTestId('assessment-approve-button')).toHaveText('Approve')
         const evidence = workspace.getByTestId('workspace-context-pane').getByTestId('vulnerability-assessments')
         await expect(evidence).toContainText('EdgeTeam')
-        await evidence.evaluate(element => element.scrollIntoView({ block: 'start' }))
+        await expect(evidence).toBeInViewport()
 
         await captureWorkspace(workspace, '../docs/screenshots/assessment-workspace-approval.png')
+    })
+
+    test('capture assessment workspace differences screenshot', async ({ page }) => {
+        await page.setViewportSize({ width: 1800, height: 1100 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        const workspace = await openWorkspace(card)
+        // The comparison opens in the context pane; the form stays beside it.
+        await workspace.getByTestId('card-differences-open').click()
+        await expect(workspace.getByTestId('finding-differences')).toBeVisible({ timeout: 10000 })
+
+        await captureWorkspace(workspace, '../docs/screenshots/assessment-workspace-differences.png')
     })
 
     test('capture statistics screenshot', async ({ page }) => {
@@ -1924,6 +1947,43 @@ test.describe('Capture README screenshots', () => {
         await expect(card.getByTestId('ticket-requirement-badge')).toHaveText('Required', { timeout: 10000 })
 
         await captureWithPadding(card, '../docs/screenshots/vuln-card-review-context.png')
+    })
+
+    test('capture team assessment tab screenshot', async ({ page }) => {
+        await page.route('**/auth/me', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ username: 'analyst', role: 'ANALYST' }),
+        }))
+        await page.setViewportSize({ width: 1600, height: 1600 })
+        await page.goto('/project/TestProject?teams=PlatformTeam&lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await selectDetailTab(card, 'Assessment')
+        await expect(card.getByTestId('assessment-decision-section')).toBeVisible({ timeout: 10000 })
+
+        await captureWithPadding(card, '../docs/screenshots/vuln-card-team-assessment.png')
+    })
+
+    test('capture clear assessment dialog screenshot', async ({ page }) => {
+        await page.route('**/auth/me', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ username: 'analyst', role: 'ANALYST' }),
+        }))
+        await page.setViewportSize({ width: 1600, height: 1000 })
+        await page.goto('/project/TestProject?teams=PlatformTeam&lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await selectDetailTab(card, 'Assessment')
+        await card.getByTestId('assessment-more-button').click()
+        await card.getByTestId('assessment-clear-button').click()
+        const dialog = page.getByTestId('clear-assessment-modal').locator(':scope > div').first()
+        await expect(dialog).toContainText('Only the PlatformTeam assessment')
+
+        await captureWithPadding(dialog, '../docs/screenshots/clear-assessment.png')
     })
 
     test('capture code analysis dashboard screenshot', async ({ page }) => {

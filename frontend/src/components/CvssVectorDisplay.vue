@@ -226,36 +226,17 @@ const cvssMetrics = computed<CvssSection[] | null>(() => {
   })
 })
 
-// Flat list of all metric keys across sections, and helpers for the unified table
-const allMetricKeys = computed(() => {
-  if (!cvssMetrics.value) return [] as string[]
-  return cvssMetrics.value.flatMap(s => s.keys)
-})
-
-// Track which column indices start a new section (for left padding separator)
-const sectionStartIndices = computed(() => {
-  if (!cvssMetrics.value) return new Set<number>()
-  const starts = new Set<number>()
-  let col = 0
-  for (const s of cvssMetrics.value) {
-    starts.add(col)
-    col += s.keys.length
-  }
-  return starts
-})
-
-function isSectionStart(ki: number): boolean {
-  return sectionStartIndices.value.has(ki)
-}
-
-function sectionIndexAt(ki: number): number {
-  let idx = 0
-  for (const start of sectionStartIndices.value) {
-    if (start === ki) return idx
-    if (start < ki) idx++
-  }
-  return idx
-}
+/**
+ * The sections with the metrics any vector has, each with only those keys.
+ * The breakdown is a set of small tables that wrap onto the next line, so
+ * nothing is cut off in a narrow column.
+ */
+const visibleSections = computed(() => (cvssMetrics.value || [])
+  .map(section => ({
+    title: section.title,
+    keys: section.keys.filter(key => section.rows.some(row => row.metricsByKey.has(key))),
+  }))
+  .filter(section => section.keys.length > 0))
 
 function dangerCellClass(danger: 'high' | 'medium' | 'low'): string {
   switch (danger) {
@@ -315,87 +296,80 @@ const themeMap: Record<string, { border: string, bg: string, text: string, label
 </script>
 
 <template>
-  <div v-if="vectors.length" class="bg-gray-850 rounded border border-gray-700 p-2 overflow-x-auto">
-    <table class="border-spacing-0" style="border-collapse: collapse">
-      <thead>
-        <!-- Section titles row -->
-        <tr>
-          <th></th>
-          <th class="text-[9px] font-bold uppercase tracking-wider text-gray-600 text-left pr-3 pb-1">Vectors</th>
-          <template v-if="cvssMetrics">
-            <th v-for="(section, si) in cvssMetrics" :key="'title-'+section.title"
-              :colspan="section.keys.length"
-              class="text-[9px] font-bold uppercase tracking-wider text-gray-600 text-left pb-1"
-              :class="si > 0 ? 'pl-3' : 'pl-2'"
-            >{{ section.title }}</th>
-          </template>
-        </tr>
-        <!-- Column headers row -->
-        <tr>
-          <th class="pr-1"></th>
-          <th class="pr-3"></th>
-          <template v-if="cvssMetrics">
-            <th v-for="(key, ki) in allMetricKeys" :key="'hdr-'+key"
-              class="text-[8px] font-semibold uppercase tracking-wider text-gray-600/80 text-center pb-0.5"
-              :class="isSectionStart(ki) ? (sectionIndexAt(ki) > 0 ? 'pl-3' : 'pl-2') : 'pl-px'"
+  <div v-if="vectors.length" class="min-w-0 space-y-2 rounded border border-gray-700 bg-gray-850 p-2" data-testid="cvss-vector-display">
+    <!-- One line per vector; a long vector wraps instead of being cut off. -->
+    <div class="space-y-1" data-testid="cvss-vector-rows">
+      <div
+        v-for="(entry, idx) in vectors"
+        :key="idx"
+        data-testid="cvss-vector-row"
+        class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5"
+      >
+        <span class="w-16 shrink-0 text-[9px] font-bold uppercase" :class="themeMap[entry.theme].label">{{ entry.label }}</span>
+        <!-- Breaks after a "/" where it must; copying gives the plain vector. -->
+        <span class="min-w-0 font-mono text-[10px] tracking-tight [overflow-wrap:anywhere]" :class="themeMap[entry.theme].text" data-testid="cvss-vector-text"><template v-for="(part, pi) in entry.vector.split('/')" :key="pi">{{ pi ? '/' : '' }}{{ part }}<wbr /></template></span>
+        <span
+          v-if="vectorScores[idx]"
+          class="shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em]"
+          :class="severityClasses[vectorScores[idx]!.severity]"
+        >{{ vectorScores[idx]!.score }} {{ vectorScores[idx]!.severity }}</span>
+        <span
+          v-if="hasModifiers(entry.vector)"
+          class="shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em]"
+          :class="entry.theme === 'purple' ? 'border-purple-800 bg-purple-950 text-purple-200'
+            : entry.theme === 'teal' ? 'border-teal-800 bg-teal-950 text-teal-200'
+            : 'border-gray-700 bg-gray-800 text-gray-400'"
+        >env.</span>
+        <span
+          v-if="entry.adjusted"
+          class="shrink-0 rounded-full border border-amber-800 bg-amber-950 px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] text-amber-200"
+        >adj.</span>
+      </div>
+    </div>
+
+    <!-- The metrics by section: small tables that wrap as a whole. -->
+    <div v-if="visibleSections.length" class="flex flex-wrap gap-x-4 gap-y-2" data-testid="cvss-metric-sections">
+      <table
+        v-for="section in visibleSections"
+        :key="section.title"
+        data-testid="cvss-metric-section"
+        class="border-spacing-0"
+        style="border-collapse: collapse"
+      >
+        <caption class="pb-1 text-left text-[9px] font-bold uppercase tracking-wider text-gray-500">{{ section.title }}</caption>
+        <thead>
+          <tr>
+            <th v-if="vectors.length > 1" class="pr-1"><span class="sr-only">Vector</span></th>
+            <th
+              v-for="key in section.keys"
+              :key="key"
+              scope="col"
+              class="pb-0.5 pl-px text-center text-[8px] font-semibold uppercase tracking-wider text-gray-500"
               style="min-width: 28px"
             >{{ key }}</th>
-          </template>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="(entry, idx) in vectors"
-          :key="idx"
-          class="whitespace-nowrap group"
-        >
-          <!-- Label -->
-          <td class="text-[9px] font-bold uppercase pr-1 align-middle py-0.5 text-right w-16 pt-2"
-            :class="themeMap[entry.theme].label"
-          >{{ entry.label }}</td>
-          <!-- Vector string + badges -->
-          <td class="px-0.5 pr-3 align-middle py-0.5">
-            <span class="inline-flex items-center gap-1.5">
-              <span
-                class="font-mono text-[10px] tracking-tight"
-                :class="themeMap[entry.theme].text"
-              >{{ entry.vector }}</span>
-              <span
-                v-if="vectorScores[idx]"
-                class="rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] shrink-0"
-                :class="severityClasses[vectorScores[idx]!.severity]"
-              >{{ vectorScores[idx]!.score }} {{ vectorScores[idx]!.severity }}</span>
-              <span
-                v-if="hasModifiers(entry.vector)"
-                class="rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] shrink-0"
-                :class="entry.theme === 'purple' ? 'border-purple-800 bg-purple-950 text-purple-200'
-                  : entry.theme === 'teal' ? 'border-teal-800 bg-teal-950 text-teal-200'
-                  : 'border-gray-700 bg-gray-800 text-gray-400'"
-              >env.</span>
-              <span
-                v-if="entry.adjusted"
-                class="rounded-full border border-amber-800 bg-amber-950 px-1.5 py-0.5 text-[8px] uppercase tracking-[0.1em] text-amber-200 shrink-0"
-              >adj.</span>
-            </span>
-          </td>
-          <!-- Metric cells — compact colored blocks -->
-          <template v-if="cvssMetrics">
-            <td v-for="(key, ki) in allMetricKeys" :key="'m-'+key"
-              class="align-middle py-0.5"
-              :class="isSectionStart(ki) ? (sectionIndexAt(ki) > 0 ? 'pl-3' : 'pl-2') : 'pl-px'"
-            >
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(entry, idx) in vectors" :key="idx">
+            <th
+              v-if="vectors.length > 1"
+              scope="row"
+              class="pr-1 text-right text-[8px] font-bold uppercase"
+              :class="themeMap[entry.theme].label"
+            >{{ entry.label }}</th>
+            <td v-for="key in section.keys" :key="key" class="py-0.5 pl-px align-middle">
               <div
                 v-if="metricForRow(idx, key)"
-                class="flex items-center justify-center rounded-sm text-[9px] font-bold font-mono cursor-default"
+                class="flex cursor-default items-center justify-center rounded-sm font-mono text-[9px] font-bold"
                 style="min-width: 28px; height: 18px"
                 :class="dangerCellClass(metricForRow(idx, key)!.danger)"
-                :title="`${metricForRow(idx, key)!.label}: ${metricForRow(idx, key)!.value}`"
+                :title="`${entry.label}: ${metricForRow(idx, key)!.label}: ${metricForRow(idx, key)!.value}`"
               >{{ metricForRow(idx, key)!.short }}</div>
-              <div v-else class="flex items-center justify-center text-gray-700/50 text-[9px]" style="min-width: 28px; height: 18px">·</div>
+              <div v-else class="flex items-center justify-center text-[9px] text-gray-700/50" style="min-width: 28px; height: 18px">·</div>
             </td>
-          </template>
-        </tr>
-      </tbody>
-    </table>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>

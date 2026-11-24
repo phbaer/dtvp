@@ -777,6 +777,8 @@ def summarize_grouped_vulnerabilities(
                 "id",
                 "title",
                 "description",
+                "cwes",
+                "recommendation",
                 "severity",
                 "original_severity",
                 "ssvc_summary",

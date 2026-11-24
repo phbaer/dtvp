@@ -46,10 +46,6 @@ interface PrepareAssessmentSubmissionInput {
     originalScore?: number | null
     currentUser: string
     isApprove: boolean
-    showRawEdit: boolean
-    rawDetailsTouched: boolean
-    rawDetails: string
-    mergedAssessmentFullText: string
     suppressed: boolean
     force: boolean
 }
@@ -314,50 +310,40 @@ export const prepareAssessmentSubmission = (
         originalScore: input.originalScore,
     })
 
-    let reviewText: string
-    let aggregatedState: string
-    // Whether this save decides the response: a reviewer's Global save, or
-    // a reviewer's edit of the whole text, where it is the tag left there.
-    let sendsResponse = input.isReviewer && input.response !== undefined
+    // Whether this save decides the response: a reviewer's Global save.
+    const sendsResponse = input.isReviewer && input.response !== undefined
 
-    if (input.showRawEdit && input.rawDetailsTouched && input.rawDetails !== input.mergedAssessmentFullText) {
-        const sanitized = sanitizeAssessmentDetails(input.rawDetails)
-        reviewText = sanitized.text
-        aggregatedState = sanitized.aggregatedState
-        sendsResponse = input.isReviewer
-    } else {
-        let mergedText = currentFullDetails
-        let mergedState = ''
-        for (const [teamName, draft] of nextDrafts.entries()) {
-            if (teamName !== targetTeam && !changesOtherTeam(mergedText, teamName, draft, input.takeoverSources)) {
-                continue
-            }
-            const result = mergeTeamAssessment(
-                mergedText,
-                teamName,
-                draft.state,
-                cleanStructuredAssessmentDetails(draft.details),
-                input.currentUser,
-                draft.justification,
-                teamName === targetTeam ? rescoredTags : undefined,
-                !input.isApprove,
-                draft.assigned,
-                {
-                    evidenceReviewed: draft.evidenceReviewed,
-                    versionCoverageChecked: draft.versionCoverageChecked,
-                    ticket: draft.ticket,
-                    copiedFrom: input.takeoverSources?.get(teamName),
-                },
-            )
-            mergedText = result.text
-            mergedState = result.aggregatedState
+    let mergedText = currentFullDetails
+    let mergedState = ''
+    for (const [teamName, draft] of nextDrafts.entries()) {
+        if (teamName !== targetTeam && !changesOtherTeam(mergedText, teamName, draft, input.takeoverSources)) {
+            continue
         }
-        if (sendsResponse) {
-            mergedText = setAssessmentResponse(mergedText, input.response)
-        }
-        reviewText = mergedText
-        aggregatedState = mergedState || 'NOT_SET'
+        const result = mergeTeamAssessment(
+            mergedText,
+            teamName,
+            draft.state,
+            cleanStructuredAssessmentDetails(draft.details),
+            input.currentUser,
+            draft.justification,
+            teamName === targetTeam ? rescoredTags : undefined,
+            !input.isApprove,
+            draft.assigned,
+            {
+                evidenceReviewed: draft.evidenceReviewed,
+                versionCoverageChecked: draft.versionCoverageChecked,
+                ticket: draft.ticket,
+                copiedFrom: input.takeoverSources?.get(teamName),
+            },
+        )
+        mergedText = result.text
+        mergedState = result.aggregatedState
     }
+    if (sendsResponse) {
+        mergedText = setAssessmentResponse(mergedText, input.response)
+    }
+    let reviewText = mergedText
+    const aggregatedState = mergedState || 'NOT_SET'
 
     reviewText = markAssessmentBlocksHistorical(reviewText, input.takeoverSources?.values() || [])
     const sanitized = sanitizeAssessmentDetails(reviewText)

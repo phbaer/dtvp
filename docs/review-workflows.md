@@ -186,9 +186,9 @@ The detail workspace provides:
 
 | Tab | Purpose |
 | :--- | :--- |
-| Context | Three ordered sections: advisory and references; where it was found, a matrix of components by project versions with the assessment state of each finding and the dependency chains of a component behind its row; existing assessment evidence |
+| Context | Three ordered sections: advisory and references; where it was found, a matrix of components by project versions with each component's team, the assessment state of each finding and the dependency chains of a component behind its row, and below it the team-mapped components that give those teams; existing assessment evidence |
 | Code Evidence | One list of analyzer runs and agent evidence grouped by component, with source filters; a row opens a reader with provenance, sanitised Markdown, collapsed technical details, and a separate "Apply to the assessment" box; Run analysis and More in the header; the worst case of the latest analyzer results at the bottom. See [Code evidence reader](screens.md#code-evidence-reader) |
-| Assessment | Consistent scope and decision/rationale sections, saved with the actions in the sticky bar; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage; inconsistent team decisions remain explicit for manual resolution; global CVSS/rescoring controls |
+| Assessment | A short summary of the vulnerability (start of the description, affected components and versions, attack conditions from the CVSS vector, CWE, the source's fix advice, references), then the Global or team tabs and the decision and rationale, saved with the actions in the sticky bar; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage, with its reasons; why the vulnerability is inconsistent is stated once, in the banner above the tabs; global CVSS/rescoring controls |
 
 From a 1280px wide viewport the detail can also open as a full-screen
 [assessment workspace](screens.md#assessment-workspace): the Context or Code
@@ -386,8 +386,8 @@ many words: `POST /api/assessment` accepts `approve: true` from reviewers, and
 refuses it from anyone else (403). Everything else keeps a pending assessment
 pending, whoever does it:
 
-- a reviewer's **Save** of a pending assessment, in the form or as whole text;
-- a reviewer's deletion of a team's or the General assessment, as long as a
+- a reviewer's **Save** of a pending assessment;
+- a reviewer's clear of a team's or the General assessment, as long as a
   decision remains;
 - **Repair Assessments**, including its Synchronize stage, which carries the
   pending status to every finding it writes.
@@ -415,9 +415,19 @@ Component ownership is edited in Settings → Team Mapping, not in the card. A
 vulnerability whose components belong to no team offers the team `Unassigned`,
 so it can be assessed without a mapping.
 
-The "More" menu next to Save holds the rarely used actions: deleting the
-assessment and, for reviewers on the Global assessment, suppressing the
-finding in Dependency-Track. A suppressed vulnerability carries a `Suppressed`
+The "More" menu next to Save holds the rarely used actions: **Clear
+assessment…** and, for reviewers on the Global assessment, suppressing the
+finding in Dependency-Track. Clearing removes the open team's assessment (or,
+on the Global tab, the Global one; reviewers can also clear the whole
+assessment) after a confirmation that names the findings, components and
+versions. It is a new revision without a decision or text, exported, so
+Dependency-Track is cleared too; analysts' clears leave what remains pending
+review, and the history keeps the previous assessment. See
+[Clearing an assessment](import-export.md#clearing-an-assessment).
+
+The assessment text stored and exported is generated from the form's fields.
+It cannot be edited as a whole; reviewers can read it, and copy it, under
+**Show generated text** below the decision. A suppressed vulnerability carries a `Suppressed`
 chip in its header.
 
 CVSS and rescoring controls appear in the reviewer-only Global subview of
@@ -451,7 +461,10 @@ An active Team filter establishes the card's assessment context immediately.
 Analysts see and edit only that team's Assessment subview. Reviewers start in
 the same focused view, retain direct access to Global, and can explicitly show
 all other teams when a cross-team review is needed; returning to the focused
-view restores the exact filtered team. Analyst submission requires a mapped
+view restores the exact filtered team. The filter preselects its team only
+when the vulnerability is opened or the filter changes: a tab the user picks,
+Global included, stays chosen, with every team draft kept, through saves,
+other detail tabs and the assessment workspace. Analyst submission requires a mapped
 team, a non-empty analysis
 state and details, and a justification for `NOT_AFFECTED`; the action is
 explicitly labeled as a submission for reviewer approval. Assessment contains
@@ -463,7 +476,7 @@ switching a vulnerability prompts the user to save, discard, or keep editing.
 A save cannot lose another team's assessment: an assessed block the saved
 text leaves out, other than the saved team's own, is kept as historical, and a
 team save keeps the General assessment (see
-[Assessment model](assessment-model.md)). Only the delete action removes a
+[Assessment model](assessment-model.md)). Only the clear action removes a
 block. A save that changes only a ticket, the evidence or version checks, or
 the assignees keeps the block's assessor, date and reviewer; an approval still
 records the approving reviewer.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderSafeMarkdown, safeLinkUrl } from '../safeMarkdown'
+import { markdownToPlainText, renderSafeMarkdown, safeLinkUrl } from '../safeMarkdown'
 
 const render = (markdown: string) => {
     const host = document.createElement('div')
@@ -41,5 +41,21 @@ describe('safe Markdown', () => {
         expect(html.querySelector('pre code')?.textContent).toContain('code()')
         expect(html.querySelector('ul li')?.textContent).toBe('item')
         expect(html.querySelector('p code')?.textContent).toBe('inline')
+    })
+
+    it('reduces Markdown to plain text, one line per block, without markup', () => {
+        const text = markdownToPlainText([
+            '# Heading',
+            '',
+            'A **crafted** document   makes the [parser](https://example.org) fail.<script>alert(1)</script><img src=x onerror=alert(1)>',
+            '',
+            '- first',
+            '- second',
+        ].join('\n'))
+        expect(text).toBe('Heading\nA crafted document makes the parser fail.\nfirst\nsecond')
+        expect(text).not.toMatch(/[<>]/)
+        expect(markdownToPlainText('')).toBe('')
+        // A single line break inside a paragraph does not start a line.
+        expect(markdownToPlainText('one\ntwo\n\nthree')).toBe('one two\nthree')
     })
 })

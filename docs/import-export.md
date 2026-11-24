@@ -21,7 +21,7 @@ else.
 - [Import](#import)
 - [Export](#export)
 - [When Dependency-Track Holds Something Else](#when-dependency-track-holds-something-else)
-- [Deleting An Assessment](#deleting-an-assessment)
+- [Clearing An Assessment](#clearing-an-assessment)
 - [Findings That Disappear](#findings-that-disappear)
 - [History](#history)
 - [Sync Status Values](#sync-status-values)
@@ -225,35 +225,38 @@ Earlier versions compared both sides and held such findings as conflicts;
 findings in conflict at the time of the upgrade keep the DTVP value, which is
 exported.
 
-## Deleting An Assessment
+## Clearing An Assessment
 
-Deleting is an explicit operation, so that it can be told apart from
+Clearing is an explicit operation, so that it can be told apart from
 Dependency-Track merely reporting nothing (which DTVP repairs by exporting the
-assessment again). In the **Assessment** tab of a vulnerability, the delete
-button next to Save offers:
+assessment again). In the **Assessment** tab of a vulnerability, **More** →
+**Clear assessment…** in the action bar offers, after a confirmation that
+names the findings, components and versions it applies to:
 
 - **Only the open team's assessment** (or the General assessment, on the
   General tab). The other teams' text, and the team's own historical
   assessments, are kept exactly as they were; only when historical
-  assessments are all the team has are they deleted. Deleting the
-  General assessment also removes the SSVC decision and the response stored
+  assessments are all the team has are they deleted. Clearing the
+  General (Global) assessment also removes the SSVC decision and the response stored
   with it.
 - **The whole assessment**: every team, the General assessment, rescoring,
   SSVC, and suppression. The vulnerability is open again.
 
-A deletion applies to all findings of the vulnerability, is a new revision
-with origin `assessment-deletion`, and is exported like any change, so the
-assessment is removed from Dependency-Track as well. The deleted text stays in
-the history.
+A clear applies to all findings of the vulnerability and is a new revision
+(origin `assessment-deletion`, shown as "Cleared" in the history) without a
+decision or text for what was cleared: clearing everything leaves the state
+Not set and the text empty. It is exported like any change, so the assessment
+is cleared in Dependency-Track as well. The previous assessment stays in the
+history; there is no separate undo.
 
-Any user can delete a team's assessment; what remains is marked pending
-review when an analyst did it. Deleting the General assessment or the whole
-assessment requires the reviewer role. Access tokens and MCP agents cannot
-delete.
+Any user can clear a team's assessment; what remains of the assessment is
+marked pending review when an analyst did it. Clearing the General assessment
+or the whole assessment requires the reviewer role. Access tokens and MCP
+agents cannot clear.
 
 `POST /api/assessment/delete` takes `instances` and `team` (a team name,
 `"General"`, or `null` for everything). It answers 422 when there is nothing
-to delete and 409 when a finding changed in the meantime.
+to clear and 409 when a finding changed in the meantime.
 
 ## Reading A Dependency-Track Export Back
 

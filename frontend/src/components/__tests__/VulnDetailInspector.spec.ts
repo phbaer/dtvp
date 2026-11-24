@@ -166,13 +166,13 @@ describe('VulnDetailInspector assessment workspace', () => {
         menu.remove()
 
         const card = inspector.findComponent(VulnGroupCard).vm as any
-        card.showDeleteModal = true
+        card.showClearModal = true
         await flushPromises()
         expect(card.hasOpenOverlay()).toBe(true)
         pressEscape(heading)
         await flushPromises()
         expect(aside().dataset.workspace).toBe('open')
-        card.showDeleteModal = false
+        card.showClearModal = false
         await flushPromises()
 
         // The first Esc closes the More menu, a second leaves the workspace.

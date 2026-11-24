@@ -7,7 +7,7 @@ import type { Instance } from '../types'
 
 const props = defineProps<{
     instances: Instance[]
-    /** Bumped by the parent after a save, delete, or conflict resolution. */
+    /** Bumped by the parent after a save, a clear, or conflict resolution. */
     refreshKey?: number
 }>()
 
@@ -18,7 +18,7 @@ const ORIGIN_LABELS: Record<string, string> = {
     'individual-assessment': 'Saved',
     'mcp-assessment': 'Saved by an agent',
     'bulk-workflow': 'Bulk change',
-    'assessment-deletion': 'Deleted',
+    'assessment-deletion': 'Cleared',
     'export-discarded': 'Export discarded, previous value restored',
     'import': 'Changed in Dependency-Track',
     'conflict-resolution': 'Conflict resolved',

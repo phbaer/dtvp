@@ -175,6 +175,9 @@ test.describe('Catch-all team', () => {
         await expect(catchAll).toContainText("Unknown; no team mapping, catch-all '*'");
         await expect(triggering.filter({ hasText: 'tar' }).first()).toHaveAttribute('data-catch-all', 'true');
 
+        // One list of mapped components; the matrix carries each component's team.
+        await expect(whereFound.getByText('Affected components with team tags')).toHaveCount(0);
+
         // Long names scroll instead of being cut off.
         const list = whereFound.getByTestId('triggering-team-components').locator('div').first();
         expect(await list.evaluate(element => getComputedStyle(element).overflowX)).toBe('auto');

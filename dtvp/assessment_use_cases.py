@@ -759,10 +759,10 @@ async def delete_assessment(
     reviewer = role.upper() == "REVIEWER"
     if (team is None or team.strip().casefold() == "general") and not reviewer:
         raise AssessmentPermissionError(
-            "Only reviewers can delete the General assessment or a whole assessment"
+            "Only reviewers can clear the Global assessment or a whole assessment"
         )
     if team is not None and not team.strip():
-        raise AssessmentValidationError("Name the team whose assessment to delete")
+        raise AssessmentValidationError("Name the team whose assessment to clear")
     keyed = [instance for instance in instances if assessment_key(instance) is not None]
     if not keyed or len(keyed) != len(instances):
         raise AssessmentValidationError(
@@ -817,7 +817,7 @@ async def delete_assessment(
             )
         )
     if not payloads:
-        raise AssessmentValidationError("There is no such assessment to delete")
+        raise AssessmentValidationError("There is no such assessment to clear")
 
     try:
         persisted = await deps.cache_manager.persist_assessment_updates(

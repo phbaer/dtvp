@@ -13,6 +13,7 @@ vi.mock('../../lib/api', () => ({
 // Mock Icons
 vi.mock('@lucide/vue', () => ({
     ChevronDown: { template: '<span />' },
+    Info: { template: '<span />' },
     ChevronUp: { template: '<span />' },
     Shield: { template: '<span />' },
     Calculator: { template: '<span />' },

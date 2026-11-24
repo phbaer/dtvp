@@ -44,3 +44,28 @@ export const renderSafeMarkdown = (markdown: string): string => {
     }
     return template.innerHTML
 }
+
+const BLOCK_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TR', 'PRE', 'BLOCKQUOTE', 'HR', 'BR'])
+
+/**
+ * The text of Markdown, for a summary shown as plain text: rendered through
+ * the same allow-list as renderSafeMarkdown, then reduced to its text, one
+ * line per block. Never returns markup; callers interpolate it as text.
+ */
+export const markdownToPlainText = (markdown: string): string => {
+    const template = document.createElement('template')
+    template.innerHTML = renderSafeMarkdown(markdown)
+    // Line breaks inside a block are soft: only blocks start a new line.
+    const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        node.textContent = (node.textContent || '').replace(/\s+/g, ' ')
+    }
+    for (const element of Array.from(template.content.querySelectorAll('*'))) {
+        if (BLOCK_TAGS.has(element.tagName)) element.after('\n')
+    }
+    return (template.content.textContent || '')
+        .split('\n')
+        .map(line => line.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .join('\n')
+}

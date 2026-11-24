@@ -7,7 +7,11 @@
     "cvssV3BaseScore": 10.0,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
     "description": "Log4j JNDI remote code execution vulnerability.",
-    "recommendation": "Upgrade to Log4j 2.17.1 or later."
+    "recommendation": "Upgrade to Log4j 2.17.1 or later.",
+    "cwes": [
+      { "cweId": 917, "name": "Improper Neutralization of Special Elements used in an Expression Language Statement ('Expression Language Injection')" },
+      { "cweId": 502, "name": "Deserialization of Untrusted Data" }
+    ]
   },
   {
     "uuid": "e5781a7b-0346-4927-991c-7033580539f5",
@@ -27,7 +31,8 @@
     "cvssV3BaseScore": 9.8,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "description": "Jackson-databind deserialization vulnerability.",
-    "recommendation": "Upgrade jackson-databind to 2.9.9.1 or later."
+    "recommendation": "Upgrade jackson-databind to 2.9.9.1 or later.",
+    "cwes": [{ "cweId": 502, "name": "Deserialization of Untrusted Data" }]
   },
   {
     "uuid": "a7781a7b-0346-4927-991c-7033580539f7",

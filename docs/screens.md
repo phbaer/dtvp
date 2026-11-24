@@ -61,15 +61,25 @@ The lifecycle view shows Open, Incomplete, Conflicting, Ready for approval, and 
 
 ![Vulnerability card overview](screenshots/vuln-card-overview.png)
 
-The Context tab uses three clearly separated sections in a fixed reading order: advisory description and references; where the vulnerability was found, as a matrix of components by project versions with the assessment state of each finding (a component row opens its dependency chains); and the existing assessment evidence.
+The Context tab uses three clearly separated sections in a fixed reading order: advisory description and references; where the vulnerability was found, as a matrix of components by project versions with each component's team and the assessment state of each finding (a component row opens its dependency chains); and the existing assessment evidence. Below the matrix, **Team-mapped components** names the components whose team mapping gives those teams: the affected component itself, one above it in a dependency chain, or the catch-all `*`. A note on the team filter appears only when it hides findings. What a section is for is in the tooltip of the info icon next to its title (and read out by screen readers), not in a subtitle.
+
+### Assessment Tab
+
+![Assessment tab of a team](screenshots/vuln-card-team-assessment.png)
+
+The Assessment tab starts with **About this vulnerability**: the title, the first three lines of the description as plain text (sanitised like the Context rendering; **Show more** expands it in place) and the key facts on one line: the affected components and versions in scope, what an attacker needs according to the CVSS vector (for example "network, low complexity, no privileges, no user interaction"), the CWE, the source's fix advice and the references. The block folds to one line. Below it are the Global and team tabs with the component of the selected team and who assessed it last, then the decision and rationale. On the Global tab, reviewers see one line with each team's state ("PlatformTeam in triage", an analyzer fallback marked "(analyzer)", a team without either "missing"), the worst of them and **Use for Global**; more than six teams fold behind "+N more". Below the decision, **Show generated text** (reviewers, collapsed) shows the stored text read-only with **Copy**; it is generated from the fields and is what is exported, so it is not editable. **More** → **Clear assessment…** in the action bar clears the open team's or the Global assessment, or the whole of it (see [Review workflows](review-workflows.md)), after a confirmation naming the findings, components and versions.
+
+![Clear assessment](screenshots/clear-assessment.png) While something required is missing, the decision section says what ("Still needed to submit: analysis details"); the Submit button is enabled once nothing is missing. The CWE and the fix advice are the ones Dependency-Track serves with the finding (`cwes`, `recommendation` of each grouped vulnerability).
 
 ### Assessment Workspace
 
 ![Assessment workspace](screenshots/assessment-workspace.png)
 
-From a viewport of 1280px, the header of the vulnerability detail has a workspace button next to Close. It opens the same card full screen, with the context on the left and the assessment form always visible on the right; the action bar with Save or Submit, Approve, Reload and More spans both columns. The left pane shows the differences banner and either Context or Code Evidence, chosen by the two remaining tabs. The two panes scroll on their own, so the evidence can be read while the decision, rationale and review checks are filled in.
+From a viewport of 1280px, the header of the vulnerability detail has a workspace button next to Close. It opens the same card full screen, with the context on the left and the assessment form always visible on the right; the action bar with Save or Submit, Approve, Reload and More spans both columns. The left pane shows the differences banner and either Context or Code Evidence, chosen by the two remaining tabs. The two panes scroll on their own, so the evidence can be read while the decision, rationale and review checks are filled in. The form starts with the heading that carries its status (its tooltip says that the context is on the left and saving is in the action bar) and the vulnerability summary folded to one line, since the Context pane shows the full description; one click opens it.
 
 Show differences opens the comparison in the left pane. Apply, Adopt, Use for all findings and the analyzer's apply actions fill the form without changing the left pane: the decision section scrolls into view and is briefly highlighted.
+
+![Assessment workspace with the differences shown](screenshots/assessment-workspace-differences.png)
 
 ![Assessment workspace for approval](screenshots/assessment-workspace-approval.png)
 
@@ -103,13 +113,13 @@ The expanded assessment form supports assigning users with known-user suggestion
 
 ![Review context](screenshots/vuln-card-review-context.png)
 
-The Assessment tab uses the same section hierarchy as Context and Code Evidence: first confirm the Global or team scope, then complete the decision and rationale. With a Team filter, analysts see only that team's subview; reviewers start focused on it and can explicitly reveal Global and all-team controls. Team subviews present the latest scoped analyzer result as an optional proposal, while saved or manually edited team assessments remain authoritative. The reviewer-only Global subview summarizes the worst effective state across team decisions and analyzer fallbacks, and also contains CVSS and rescoring so the score and assessment can be evaluated together. Ticket references are marked required only when the current rescored severity is High or Critical.
+The Assessment tab uses the same section hierarchy as Context and Code Evidence: the vulnerability summary, the Global or team tabs (on Global, the one-line team summary), then the decision and rationale. With a Team filter, analysts see only that team's subview ("Other teams are hidden by the team filter"); reviewers start focused on it and can explicitly reveal Global and all-team controls with **Show all teams**. Team subviews present the latest scoped analyzer result as an optional proposal, while saved or manually edited team assessments remain authoritative. The reviewer-only Global subview summarizes the worst effective state across team decisions and analyzer fallbacks, and also contains CVSS and rescoring, after the decision fields, so the score and assessment can be evaluated together. Ticket references are marked required only when the current rescored severity is High or Critical.
 
 ### Conflicting Assessment
 
 ![Conflicting assessment](screenshots/inconsistent-assessment.png)
 
-A banner above the tabs (at the top of the context pane in the [assessment workspace](#assessment-workspace)) states why the vulnerability is inconsistent and what each team decided. Existing assessment evidence in Context shows the conflicting team blocks.
+A banner above the tabs (at the top of the context pane in the [assessment workspace](#assessment-workspace)) states why the vulnerability is inconsistent and what each team decided. It is the only place that says so; the Global form does not repeat it. Existing assessment evidence in Context shows the conflicting team blocks.
 
 ### Differences Between Findings
 
@@ -127,7 +137,7 @@ Rescored vulnerabilities show the original CVSS score, the contextual score, and
 
 ![Global review CVSS and rescoring](screenshots/vuln-card-cvss-rescoring.png)
 
-The Global subview of Assessment contains the vector editor, visual calculator entry point, current vector comparison, tmrescore reasoning, and analyzer CVSS notes when present.
+The Global subview of Assessment contains the vector editor, visual calculator entry point, current vector comparison, tmrescore reasoning, and analyzer CVSS notes when present. The comparison lists each vector (original, proposed, rescored) on its own line with its score, breaking a long vector after a "/", and below it one small table per metric group (Exploitability, Impact, and the groups the vectors use), which wrap onto the next line in a narrow column instead of being cut off.
 
 ### CVSS Calculator
 

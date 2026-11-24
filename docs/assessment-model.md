@@ -87,14 +87,14 @@ aggregate state follows these rules:
   in the frontend).
 - A save never drops another team's assessment. When the text a save writes
   leaves out an assessed block (a state) of a team other than the saved one,
-  for example because the client's view lacked it or a raw-text edit removed
+  for example because the client's view lacked it or an API client's text removed
   it, the server keeps that block as `[Historical: yes]` with every tag and
   its text; it no longer counts toward coverage or state. A block without a
   decision that still tracks work (a text, ticket, assignees, evidence or
   coverage) stays as it is, open. A save that sends only historical records
   of a team keeps that team's current block current, unless the save took
   the team's assessment over (`Copied From`): then it is retired. Only the
-  saved team's own block, and the explicit delete action, remove a block. A
+  saved team's own block, and the explicit clear action, remove a block. A
   team save never removes the General assessment: left out, it is kept
   unchanged and still counts.
 - A historical block is a record, never a team's current assessment. A team
@@ -102,7 +102,7 @@ aggregate state follows these rules:
   repair kept its former assessment) gets its new assessment as a block of
   its own beside it; a save never overwrites or drops a historical block, the
   saved team's own included, and one the saved text leaves out is put back.
-  Deleting a team's assessment removes its current block and keeps its
+  Clearing a team's assessment removes its current block and keeps its
   historical ones, unless they are all the team has.
 - A save that is not an approval keeps a block's `[Assessed By]`, `[Date]`
   and `[Reviewed By]` when it changes only the block's ticket, evidence,
@@ -172,7 +172,7 @@ Who changes it:
 | Reviewer, `fields` without `response` | Each finding keeps its own |
 | Reviewer, text with `response` beside it (General assessment) | Set; `NOT_SET` removes it |
 | Any other save: analysts, team saves as text, MCP agents | Each finding keeps its own, whatever the request's text or fields say |
-| Deleting the General assessment, or the whole assessment | Removed |
+| Clearing the General assessment, or the whole assessment | Removed |
 | Bulk workflows (apply automatic assessments, repair) | Each finding keeps its own; a finding without one takes the response the vulnerability's other findings agree on |
 
 The stored record decides what "its own" is, not the text a client says it
@@ -208,7 +208,7 @@ export come with the later steps of the
   (`null` without one), in `GET /api/assessments/fields`.
 - **Read only.** Every save, team or General, every bulk workflow
   (Synchronize, Combine and repair, automatic assessments, restores), a
-  deletion (a whole delete keeps the tags only) and an MCP save keep each
+  clear (clearing everything keeps the tags only) and an MCP save keep each
   finding's marker as stored. A save may repeat the finding's marker or send
   none; any other marker is refused with 422. Agent text and copied text
   cannot contain the tags.

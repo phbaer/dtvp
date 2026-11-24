@@ -1235,6 +1235,7 @@ export const updateAssessment = async (payload: AssessmentPayload) => {
  * Delete one team's assessment of the given findings (`"General"` for the
  * global one), or with `null` the whole assessment. Exported like a save.
  */
+/** Clears one team's assessment ("General" for the Global one), or all of it with `null`. */
 export const deleteAssessment = async (instances: any[], team: string | null) => {
     const res = await api.post('/assessment/delete', { instances, team });
     return res.data;

@@ -6,7 +6,7 @@ import EarlierAssessments from './EarlierAssessments.vue'
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Trash2, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Eraser, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
 
 import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { AMBIGUOUS_SCOPE, BASE_SCOPE, getAssessmentScopes } from '../lib/assessmentScopes'
@@ -30,12 +30,14 @@ import CalculatorModal from './CalculatorModal.vue'
 import SsvcCalculator from './SsvcCalculator.vue'
 import { summarizeSsvc, ssvcReviewText, stripSsvcDocumentation, type SsvcSelection } from '../lib/ssvc'
 import ConflictResolutionModal from './ConflictResolutionModal.vue'
-import DeleteAssessmentModal from './DeleteAssessmentModal.vue'
+import ClearAssessmentModal from './ClearAssessmentModal.vue'
 import AssessmentHistory from './AssessmentHistory.vue'
 import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
 import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
 import DetailSection from './DetailSection.vue'
+import VulnAboutSummary from './VulnAboutSummary.vue'
+import { sortVersions } from '../lib/version'
 import type { CodeAnalysisAssessResponse, CodeAnalysisCvssAdjustment } from '../lib/api'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 
@@ -193,6 +195,11 @@ const responseTouched = ref(false)
 const suppressed = ref(false)
 const selectedTeam = ref('')
 const showAllAssessmentTeams = ref(false)
+// Set once the user picks the Global or a team tab (or an action moves to
+// Global for them). From then on the team filter no longer preselects its
+// team over that choice; a change of the filter or of the vulnerability
+// starts over.
+const teamTabChosen = ref(false)
 const scopedCodeAnalysisAvailable = ref(false)
 // Removed onlyTargetSelectedTeam - team selection now automatically targets team instances
 const updating = ref(false)
@@ -237,10 +244,11 @@ const emitRefreshedAssessment = () => {
     })
 }
 
-// Explicit deletion of one team's assessment or the whole assessment.
-const showDeleteModal = ref(false)
-const deletingAssessment = ref(false)
-const deleteAssessmentError = ref('')
+// Clearing one team's assessment, the Global one, or the whole assessment:
+// a new revision without a decision or text for that scope, exported.
+const showClearModal = ref(false)
+const clearingAssessment = ref(false)
+const clearAssessmentError = ref('')
 const historyRefreshKey = ref(0)
 const assessedTeamNames = computed(() => {
     const names = new Map<string, string>()
@@ -284,6 +292,7 @@ const differingFindingCount = computed(() => visibleInstances.value.length - Mat
     ...groupedAssessments.value.map(assessment => assessment.instances.length),
 ))
 const inconsistencyIssues = computed(() => assessmentSyncIssues.value.filter(issue => issue.kind === 'inconsistent'))
+const incompleteIssues = computed(() => assessmentSyncIssues.value.filter(issue => issue.kind === 'incomplete'))
 /**
  * The team assessments that count: historical records are listed in
  * mergedAssessmentData too, but they are not any team's current decision.
@@ -346,27 +355,27 @@ const canChangeSuppression = computed(() => (
 ))
 const suppressedInstanceCount = computed(() => allInstances.value.filter(instance => instance.is_suppressed).length)
 
-const openDeleteModal = () => {
-    deleteAssessmentError.value = ''
-    showDeleteModal.value = true
+const openClearModal = () => {
+    clearAssessmentError.value = ''
+    showClearModal.value = true
 }
 
-const confirmDeleteAssessment = async (team: string | null) => {
-    if (deletingAssessment.value) return
-    deletingAssessment.value = true
-    deleteAssessmentError.value = ''
+const confirmClearAssessment = async (team: string | null) => {
+    if (clearingAssessment.value) return
+    clearingAssessment.value = true
+    clearAssessmentError.value = ''
     try {
         await deleteAssessment(allInstances.value, team)
-        showDeleteModal.value = false
+        showClearModal.value = false
         await refreshDetails()
         historyRefreshKey.value += 1
         emitRefreshedAssessment()
     } catch (err: any) {
-        deleteAssessmentError.value = err?.response?.status === 409
+        clearAssessmentError.value = err?.response?.status === 409
             ? 'The assessment changed while this dialog was open. Reload and try again.'
-            : err?.response?.data?.detail || err?.message || 'The assessment could not be deleted.'
+            : err?.response?.data?.detail || err?.message || 'The assessment could not be cleared.'
     } finally {
-        deletingAssessment.value = false
+        clearingAssessment.value = false
     }
 }
 
@@ -428,9 +437,8 @@ const latestCodeAnalysisCvssAdjustment = ref<CodeAnalysisCvssAdjustment | null>(
 const latestCodeAnalysisCvssComponents = ref<string[]>([])
 
 const isInternalUpdate = ref(false)
-const showRawEdit = ref(false)
-const rawDetails = ref('')
-const rawDetailsTouched = ref(false)
+const showGeneratedText = ref(false)
+const generatedTextCopyState = ref<'idle' | 'copied' | 'error'>('idle')
 const evidenceReviewed = ref(false)
 const versionCoverageChecked = ref(false)
 const ticketReference = ref('')
@@ -636,7 +644,7 @@ const hasOpenOverlay = () => Boolean(
     genericModal.value.show
     || showConflictModal.value
     || showCalculatorModal.value
-    || showDeleteModal.value
+    || showClearModal.value
     || reviewModal.value.show
     || showMoreMenu.value
 )
@@ -659,7 +667,6 @@ const discardUnsavedDraft = () => {
     teamDrafts.value.clear()
     takeoverSources.value.clear()
     formTouched.value = false
-    rawDetailsTouched.value = false
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
@@ -670,7 +677,6 @@ const discardUnsavedDraft = () => {
     assigneeSuggestionsVisible.value = false
     showConflictModal.value = false
     updateFormFromGroup(true)
-    rawDetails.value = mergedAssessmentData.value.fullText
 }
 
 const handleModalResponse = (value: boolean | 'discard') => {
@@ -1404,10 +1410,7 @@ const openApproval = async () => {
     await whenDetailsLoaded()
     if (!canApprove.value) return
     if (!reviewVisible.value) setDetailTab('review', true)
-    if (selectedTeam.value) {
-        selectedTeam.value = ''
-        await nextTick()
-    }
+    if (selectedTeam.value) await moveToGlobalForm()
     if (!hasSavedGlobalAssessment.value && !formTouched.value && effectiveAssessmentWorst.value) {
         await applyEffectiveAssessmentSummary()
         approvalPrefilled.value = true
@@ -1840,6 +1843,7 @@ let forcingGlobalForm = false
 
 /** Switches to the Global form and waits until the switch has settled. */
 const moveToGlobalForm = async () => {
+    teamTabChosen.value = true
     forcingGlobalForm = true
     try {
         selectedTeam.value = ''
@@ -1876,11 +1880,22 @@ const handleApplyAllAssessment = async (assessmentDetails: string, assessmentSta
     }
 }
 
-const toggleRawEdit = () => {
-    showRawEdit.value = !showRawEdit.value
-    rawDetailsTouched.value = false
-    if (showRawEdit.value) {
-        rawDetails.value = mergedAssessmentData.value.fullText
+/** The stored text of the findings, as the server generated it. */
+const generatedAssessmentText = computed(() => mergedAssessmentData.value.fullText.trim())
+const copyGeneratedText = async () => {
+    generatedTextCopyState.value = 'idle'
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(generatedAssessmentText.value)
+        } else {
+            copyTextWithFallback(generatedAssessmentText.value)
+        }
+        generatedTextCopyState.value = 'copied'
+        globalThis.setTimeout(() => {
+            if (generatedTextCopyState.value === 'copied') generatedTextCopyState.value = 'idle'
+        }, 2000)
+    } catch {
+        generatedTextCopyState.value = 'error'
     }
 }
 
@@ -1922,6 +1937,7 @@ watch(selectedTeam, (_newTeam, oldTeam) => {
 
 watch(() => props.group.id, () => {
     takeoverSources.value.clear()
+    teamTabChosen.value = false
 })
 
 watch(() => props.group, () => {
@@ -1934,6 +1950,7 @@ watch(formTouched, (touched) => {
     if (
         !touched
         && !forcingGlobalForm
+        && !teamTabChosen.value
         && reviewVisible.value
         && activeTeamScope.value
         && !showAllAssessmentTeams.value
@@ -1943,12 +1960,6 @@ watch(formTouched, (touched) => {
     }
 })
 
-// Keep raw details in sync with the merged assessment data when not manually edited
-watch(() => mergedAssessmentData.value.fullText, (newText) => {
-    if (showRawEdit.value && !rawDetailsTouched.value) {
-        rawDetails.value = newText
-    }
-})
 
 
 watch(expanded, (isOpen) => {
@@ -2165,10 +2176,6 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             originalScore: props.group.cvss_score ?? props.group.cvss ?? null,
             currentUser,
             isApprove,
-            showRawEdit: showRawEdit.value,
-            rawDetailsTouched: rawDetailsTouched.value,
-            rawDetails: rawDetails.value,
-            mergedAssessmentFullText: mergedAssessmentData.value.fullText,
             suppressed: suppressed.value,
             force,
         })
@@ -2330,7 +2337,7 @@ const assessmentScoreTitle = computed(() => {
     const vector = pendingVector.value || props.group.rescored_vector || props.group.cvss_vector || ''
     return vector ? `CVSS vector: ${vector}` : 'No CVSS vector available'
 })
-const hasUnsavedDraft = computed(() => formTouched.value || rawDetailsTouched.value || ssvcTouched.value || responseTouched.value)
+const hasUnsavedDraft = computed(() => formTouched.value || ssvcTouched.value || responseTouched.value)
 const assessmentMissingFields = computed(() => {
     if (isReviewer.value) return []
     const missing: string[] = []
@@ -2346,7 +2353,7 @@ const canApplyAssessment = computed(() => (
     !updating.value
     && !loadingDetails.value
     && totalTargeted.value > 0
-    && (formTouched.value || rawDetailsTouched.value || ((ssvcTouched.value || responseTouched.value) && !selectedTeam.value))
+    && (formTouched.value || ((ssvcTouched.value || responseTouched.value) && !selectedTeam.value))
     && assessmentMissingFields.value.length === 0
 ))
 const assessmentActionLabel = computed(() => {
@@ -2419,6 +2426,7 @@ const detailTabPanelId = (tab: DetailTab) => `vuln-${props.group.id}-detail-pane
 
 /** Preselects the team the user is scoped to, as opening the Assessment tab does. */
 const autoSelectReviewTeam = () => {
+    if (teamTabChosen.value) return
     const matchingTeam = (
         activeTeamScope.value && !showAllAssessmentTeams.value
             ? scopedAssessmentTeam.value
@@ -2478,7 +2486,6 @@ const revealAssessmentForm = async () => {
 const toggleWorkspace = () => emit('toggle-workspace')
 
 const uniqueComponents = dependencyInfo.uniqueComponents
-const affectedTaggedComponents = dependencyInfo.affectedTaggedComponents
 const triggeringTaggedComponents = dependencyInfo.triggeringTaggedComponents
 const normalizedTags = dependencyInfo.normalizedTags
 const UNASSIGNED_TEAM = 'Unassigned'
@@ -2692,6 +2699,23 @@ const effectiveTeamAssessments = computed<EffectiveTeamAssessment[]>(() => allAs
     }
     return { team, state: 'NOT_SET', justification: 'NOT_SET', details: '', source: 'missing' }
 }))
+// The compact summary names a few teams and folds the rest.
+const EFFECTIVE_TEAMS_SHOWN = 6
+const showAllEffectiveTeams = ref(false)
+const shownEffectiveTeamAssessments = computed(() => (
+    showAllEffectiveTeams.value
+        ? effectiveTeamAssessments.value
+        : effectiveTeamAssessments.value.slice(0, EFFECTIVE_TEAMS_SHOWN)
+))
+const hiddenEffectiveTeamCount = computed(() => (
+    effectiveTeamAssessments.value.length - shownEffectiveTeamAssessments.value.length
+))
+const effectiveSourceLabel = (source: string) => (
+    source === 'team' ? 'Team assessment'
+        : source === 'automatic' ? 'Analyzer fallback: the team has no assessment yet'
+            : 'No team assessment and no analyzer proposal'
+)
+const stateWords = (value: string) => value.replaceAll('_', ' ').toLowerCase()
 const effectiveAssessmentWorst = computed(() => effectiveTeamAssessments.value
     .filter(assessment => assessment.state !== 'NOT_SET')
     .sort((left, right) => (STATE_PRIORITY[left.state] ?? 10) - (STATE_PRIORITY[right.state] ?? 10))[0] || null)
@@ -2855,7 +2879,6 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
     teamDrafts.value.clear()
     takeoverSources.value.clear()
     formTouched.value = false
-    rawDetailsTouched.value = false
     // What was stored is what the form shows from here on. A choice made
     // on the Global form and not saved there yet stays.
     if (!selectedTeam.value || !responseTouched.value) {
@@ -2924,6 +2947,7 @@ const handleAssessmentUpdateError = async (err: any) => {
 }
 
 const toggleAssessmentTeamScope = () => {
+    teamTabChosen.value = false
     showAllAssessmentTeams.value = !showAllAssessmentTeams.value
     if (!showAllAssessmentTeams.value && scopedAssessmentTeam.value) {
         selectedTeam.value = scopedAssessmentTeam.value
@@ -2931,6 +2955,7 @@ const toggleAssessmentTeamScope = () => {
 }
 
 watch(activeTeamScope, () => {
+    teamTabChosen.value = false
     showAllAssessmentTeams.value = false
     scopedCodeAnalysisAvailable.value = false
     if (activeTeamScope.value) {
@@ -2958,6 +2983,38 @@ watch(isWorkspace, (open, wasOpen) => {
 const teamBlockMeta = (team: string): AssessmentBlock | undefined => {
     return activeAssessmentBlocks.value.find(b => b.team === team)
 }
+
+/** The user picks the Global ('') or a team tab; that choice stays. */
+const chooseTeamTab = (team: string) => {
+    teamTabChosen.value = true
+    selectedTeam.value = team
+}
+
+/** Every component of the vulnerability, for the clear confirmation. */
+const allComponentNames = computed(() => Array.from(new Set(
+    allInstances.value.map(instance => instance.component_name).filter(Boolean),
+)).sort())
+
+/** The saved block of the Global or team assessment being edited. */
+const selectedBlockMeta = computed(() => teamBlockMeta(selectedTeam.value || 'General'))
+const selectedBlockMetaText = computed(() => {
+    const block = selectedBlockMeta.value
+    if (!block) return ''
+    const user = block.user && block.user.toLowerCase() !== 'unknown' ? `Assessed by ${block.user}` : ''
+    const date = block.timestamp ? new Date(block.timestamp).toLocaleDateString() : ''
+    return [user, date].filter(Boolean).join(', ')
+})
+
+/** Project versions of the findings in scope, newest first. */
+const visibleProjectVersions = computed(() => {
+    const visible = new Set<unknown>(visibleInstances.value)
+    return sortVersions(Array.from(new Set(
+        (props.group.affected_versions || [])
+            .filter(version => version.components?.some(component => visible.has(component)))
+            .map(version => version.project_version)
+            .filter((version): version is string => !!version),
+    )), true)
+})
 
 const teamBlockStateColor = (state?: string): string => {
     if (!state || state === 'NOT_SET') return 'bg-gray-500'
@@ -3210,10 +3267,10 @@ const teamBlockStateColor = (state?: string): string => {
                                 role="menuitem"
                                 :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
                                 class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-red-300 hover:bg-red-950/50 disabled:cursor-not-allowed disabled:opacity-40"
-                                data-testid="assessment-delete-button"
-                                @click="showMoreMenu = false; openDeleteModal()"
+                                data-testid="assessment-clear-button"
+                                @click="showMoreMenu = false; openClearModal()"
                             >
-                                <Trash2 :size="12" /> Delete assessment…
+                                <Eraser :size="12" /> Clear assessment…
                             </button>
                         </div>
                     </div>
@@ -3310,9 +3367,8 @@ const teamBlockStateColor = (state?: string): string => {
             role="tabpanel"
         >
             <DetailSection
-                step="Context · 1"
                 title="Description & references"
-                description="Understand the advisory before evaluating where it appears in this project."
+                help="Understand the advisory before evaluating where it appears in this project."
             >
                 <h5 v-if="group.title && group.title !== group.id" class="mb-2 text-base font-semibold text-gray-100">{{ group.title }}</h5>
                 <div
@@ -3337,9 +3393,8 @@ const teamBlockStateColor = (state?: string): string => {
             </DetailSection>
 
             <DetailSection
-                step="Context · 2"
                 title="Where it was found"
-                description="Every affected component by project version, with the assessment of each finding. Open a component to see how it enters the product."
+                help="Every affected component by project version, with its team and the assessment of each finding. Open a component to see how it enters the product."
                 data-testid="where-found"
                 bodyClass="space-y-3"
             >
@@ -3352,7 +3407,7 @@ const teamBlockStateColor = (state?: string): string => {
                 />
 
                 <div
-                    v-if="activeTeamScope"
+                    v-if="activeTeamScope && hiddenTeamScopeInstanceCount"
                     data-testid="vulnerability-team-scope"
                     class="flex flex-wrap items-center justify-between gap-2 rounded border border-blue-800/40 bg-blue-950/20 px-3 py-2 text-[11px] text-blue-200"
                 >
@@ -3370,55 +3425,47 @@ const teamBlockStateColor = (state?: string): string => {
                     No components in this vulnerability currently resolve to {{ activeTeamScope }}.
                 </div>
 
+            <!-- The matrix shows each component's team; this says which
+                 mapped component gives it: the component itself, one above
+                 it in a chain, or the catch-all. -->
             <div
-                v-if="triggeringTaggedComponents.length > 0 || affectedTaggedComponents.length > 0"
-                class="grid gap-4 rounded border border-gray-800/80 bg-gray-950/30 p-3"
-                :class="isWorkspace ? '2xl:grid-cols-2' : 'lg:grid-cols-2'"
+                v-if="triggeringTaggedComponents.length > 0"
+                data-testid="triggering-team-components"
+                class="min-w-0 space-y-2 rounded border border-gray-800/80 bg-gray-950/30 p-3"
             >
-                <div v-if="triggeringTaggedComponents.length > 0" data-testid="triggering-team-components" class="min-w-0 space-y-2">
-                    <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Triggering team-mapped components</h4>
-                    <div class="flex flex-wrap gap-1.5 overflow-x-auto pb-1">
-                        <span
-                            v-for="comp in triggeringTaggedComponents"
-                            :key="comp.name"
-                            data-testid="triggering-team-component"
-                            :data-catch-all="comp.catchAll ? 'true' : undefined"
-                            class="inline-flex shrink-0 items-center whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-mono border"
-                            :class="comp.catchAll ? 'bg-amber-950/30 text-amber-100 border-amber-700/50' : 'bg-gray-800 text-gray-300 border-gray-700'"
-                            :title="comp.catchAll
-                                ? `Neither this component nor any component of its chain is in the team mapping, so the catch-all '*' gives the team ${comp.tag}. Add one of these names to the mapping to give it a team.`
-                                : undefined"
-                        >
-                            {{ comp.name }}
-                            <span v-if="comp.versions.length" class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
-                            <span v-if="comp.under?.length" class="ml-1 font-sans text-amber-200/70">under {{ comp.under.join(', ') }}</span>
-                            <span class="ml-2 text-[10px] font-normal" :class="comp.catchAll ? 'text-amber-300' : 'text-blue-300'">({{ comp.tag }}<template v-if="comp.catchAll">; no team mapping, catch-all '*'</template>)</span>
-                        </span>
-                    </div>
+                <h5 class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    Team-mapped components
+                    <span
+                        class="inline-flex cursor-help normal-case tracking-normal"
+                        title="The components whose team mapping assigns the teams above: the affected component itself or a component above it in a dependency chain. Without a mapping the catch-all '*' assigns the team."
+                    >
+                        <Info :size="11" aria-hidden="true" />
+                    </span>
+                </h5>
+                <div class="flex flex-wrap gap-1.5 overflow-x-auto pb-1">
+                    <span
+                        v-for="comp in triggeringTaggedComponents"
+                        :key="comp.name"
+                        data-testid="triggering-team-component"
+                        :data-catch-all="comp.catchAll ? 'true' : undefined"
+                        class="inline-flex shrink-0 items-center whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-mono border"
+                        :class="comp.catchAll ? 'bg-amber-950/30 text-amber-100 border-amber-700/50' : 'bg-gray-800 text-gray-300 border-gray-700'"
+                        :title="comp.catchAll
+                            ? `Neither this component nor any component of its chain is in the team mapping, so the catch-all '*' gives the team ${comp.tag}. Add one of these names to the mapping to give it a team.`
+                            : undefined"
+                    >
+                        {{ comp.name }}
+                        <span v-if="comp.versions.length" class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
+                        <span v-if="comp.under?.length" class="ml-1 font-sans text-amber-200/70">under {{ comp.under.join(', ') }}</span>
+                        <span class="ml-2 text-[10px] font-normal" :class="comp.catchAll ? 'text-amber-300' : 'text-blue-300'">({{ comp.tag }}<template v-if="comp.catchAll">; no team mapping, catch-all '*'</template>)</span>
+                    </span>
                 </div>
-
-                <div v-if="affectedTaggedComponents.length > 0" class="min-w-0 space-y-2">
-                    <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Affected components with team tags</h4>
-                    <div class="flex flex-wrap gap-1.5 overflow-x-auto pb-1">
-                        <span
-                            v-for="comp in affectedTaggedComponents"
-                            :key="comp.name"
-                            class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700"
-                        >
-                            {{ comp.name }}
-                            <span v-if="comp.versions.length" class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
-                            <span class="ml-2 text-[10px] font-normal text-blue-300">({{ comp.tag }})</span>
-                        </span>
-                    </div>
-                </div>
-
             </div>
             </DetailSection>
 
             <DetailSection
-                step="Context · 3"
                 title="Existing assessment evidence"
-                :description="isWorkspace
+                :help="isWorkspace
                     ? 'Read-only evidence already stored for findings in the current component scope. Create or change the assessment in the form on the right.'
                     : 'Read-only evidence already stored for findings in the current component scope. Create or change the assessment in the Assessment tab.'"
                 bodyClass="space-y-3"
@@ -3488,6 +3535,7 @@ const teamBlockStateColor = (state?: string): string => {
             ref="workspaceHeadingEl"
             data-testid="workspace-assessment-heading"
             tabindex="-1"
+            title="The context is on the left; save with the action bar above."
             class="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-100 outline-none"
         >
             <ShieldCheck :size="13" aria-hidden="true" />
@@ -3507,37 +3555,18 @@ const teamBlockStateColor = (state?: string): string => {
             class="space-y-3"
             :role="isWorkspace ? 'region' : 'tabpanel'"
         >
-            <div class="rounded-lg border border-blue-800/40 bg-blue-950/10 px-4 py-3">
-                <h3 class="flex items-center gap-2 text-sm font-bold text-blue-100">
-                    <Shield :size="15" class="text-blue-400" />
-                    Assessment
-                </h3>
-                <p class="mt-1 max-w-4xl text-xs leading-relaxed text-gray-500">
-                    {{ isWorkspace
-                        ? 'The context is on the left; save with the action bar above.'
-                        : 'Confirm the scope, record the decision and rationale, then complete the review checks before saving or submitting.' }}
-                </p>
-            </div>
-            <div
-                v-if="!isReviewer"
-                data-testid="assessment-completeness"
-                class="rounded border px-3 py-2.5 text-xs"
-                :class="assessmentMissingFields.length
-                    ? 'border-amber-700/40 bg-amber-950/20 text-amber-100'
-                    : 'border-green-700/40 bg-green-950/20 text-green-100'"
-            >
-                <div class="font-bold">
-                    {{ assessmentMissingFields.length ? 'Assessment needs input' : 'Assessment is ready to submit' }}
-                </div>
-                <div class="mt-1 opacity-75">
-                    <template v-if="assessmentMissingFields.length">
-                        Complete {{ assessmentMissingFields.join(', ') }}.
-                    </template>
-                    <template v-else>
-                        Review the team, state, justification, and details before submitting for review.
-                    </template>
-                </div>
-            </div>
+            <VulnAboutSummary
+                :vulnId="group.id"
+                :title="group.title"
+                :description="group.description"
+                :cwes="group.cwes"
+                :recommendation="group.recommendation"
+                :cvssVector="group.cvss_vector"
+                :components="uniqueComponents"
+                :projectVersions="visibleProjectVersions"
+                :links="externalLinks"
+                :collapsed="isWorkspace"
+            />
             <div
                 v-if="codeAnalysisDraftApplied"
                 data-testid="code-analysis-draft-banner"
@@ -3546,81 +3575,94 @@ const teamBlockStateColor = (state?: string): string => {
                 {{ codeAnalysisDraftSummary || 'Code analysis draft loaded into the assessment fields.' }}
                 Review and {{ isReviewer ? 'save' : 'submit' }} when ready.
             </div>
-            <div class="h-fit space-y-5">
-                    <!-- Team Tabs -->
-                    <DetailSection
-                        step="Assessment · 1"
-                        :title="selectedTeam ? `Team Assessment: ${selectedTeam}` : isReviewer ? 'Global Assessment' : 'Team Assessment'"
-                        :description="selectedTeam ? `Editing the ${selectedTeam} team assessment.` : isReviewer ? 'Editing the global assessment.' : 'Select the team assessment to edit.'"
+            <div class="h-fit space-y-4">
+                    <!-- Who assesses: the Global or a team assessment. The tabs
+                         are the heading; the scope note only says what the team
+                         filter hides. -->
+                    <section
+                        data-testid="assessment-scope"
+                        class="rounded-lg border border-gray-700/70 bg-gray-900/45 px-4 pb-3 pt-2"
+                        :aria-labelledby="`vuln-${group.id}-assessment-scope-heading`"
                     >
-                        <div
-                            v-if="activeTeamScope"
-                            data-testid="assessment-team-scope"
-                            class="mb-2 flex flex-wrap items-center justify-between gap-2 rounded border border-blue-800/40 bg-blue-950/20 px-3 py-2 text-[11px] text-blue-200"
-                        >
-                            <span>
-                                Assessment scope: <strong>{{ activeTeamScope }}</strong>
-                                <template v-if="!isReviewer"> · other teams are hidden</template>
-                            </span>
-                            <button
-                                v-if="isReviewer"
-                                type="button"
-                                data-testid="toggle-assessment-team-scope"
-                                class="rounded border border-blue-700/60 bg-blue-900/30 px-2 py-1 font-semibold text-blue-100 transition-colors hover:bg-blue-900/55"
-                                @click="toggleAssessmentTeamScope"
+                        <h4 :id="`vuln-${group.id}-assessment-scope-heading`" class="sr-only">
+                            {{ selectedTeam ? `Team Assessment: ${selectedTeam}` : isReviewer ? 'Global Assessment' : 'Team Assessment' }}
+                        </h4>
+                        <div class="flex flex-wrap items-end justify-between gap-x-3 gap-y-1 border-b border-gray-700">
+                            <div class="flex flex-wrap gap-0">
+                                <button
+                                    v-if="isReviewer"
+                                    @click="chooseTeamTab('')"
+                                    :aria-pressed="!selectedTeam ? 'true' : 'false'"
+                                    :class="[
+                                        '-mb-px px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
+                                        !selectedTeam
+                                            ? 'border-purple-500 text-purple-300 bg-purple-950/20'
+                                            : 'border-transparent text-gray-500 hover:text-gray-300'
+                                    ]"
+                                >
+                                    Global
+                                    <span v-if="teamBlockMeta('General')" class="ml-1 inline-block w-1.5 h-1.5 rounded-full" :class="teamBlockStateColor(teamBlockMeta('General')!.state)"></span>
+                                </button>
+                                <button
+                                    v-for="team in teamTabs"
+                                    :key="team"
+                                    data-testid="review-team-tab"
+                                    @click="chooseTeamTab(team)"
+                                    :aria-pressed="selectedTeam === team ? 'true' : 'false'"
+                                    :class="[
+                                        '-mb-px px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
+                                        selectedTeam === team
+                                            ? 'border-blue-500 text-blue-300 bg-blue-950/20'
+                                            : 'border-transparent text-gray-500 hover:text-gray-300'
+                                    ]"
+                                >
+                                    {{ team }}
+                                    <span v-if="assessedTeams.has(team)" class="ml-1 inline-block w-1.5 h-1.5 rounded-full" :class="teamBlockStateColor(teamBlockMeta(team)?.state)"></span>
+                                </button>
+                            </div>
+                            <div
+                                v-if="activeTeamScope"
+                                data-testid="assessment-team-scope"
+                                class="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-blue-200/70"
                             >
-                                {{ showAllAssessmentTeams ? `Focus ${activeTeamScope}` : 'Show all teams' }}
-                            </button>
-                        </div>
-                        <div class="flex flex-wrap gap-0 border-b border-gray-700">
-                            <button
-                                v-if="isReviewer"
-                                @click="selectedTeam = ''"
-                                :class="[
-                                    'px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
-                                    !selectedTeam
-                                        ? 'border-purple-500 text-purple-300 bg-purple-950/20'
-                                        : 'border-transparent text-gray-500 hover:text-gray-300'
-                                ]"
-                            >
-                                Global
-                                <span v-if="teamBlockMeta('General')" class="ml-1 inline-block w-1.5 h-1.5 rounded-full" :class="teamBlockStateColor(teamBlockMeta('General')!.state)"></span>
-                            </button>
-                            <button
-                                v-for="team in teamTabs"
-                                :key="team"
-                                data-testid="review-team-tab"
-                                @click="selectedTeam = team"
-                                :class="[
-                                    'px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
-                                    selectedTeam === team
-                                        ? 'border-blue-500 text-blue-300 bg-blue-950/20'
-                                        : 'border-transparent text-gray-500 hover:text-gray-300'
-                                ]"
-                            >
-                                {{ team }}
-                                <span v-if="assessedTeams.has(team)" class="ml-1 inline-block w-1.5 h-1.5 rounded-full" :class="teamBlockStateColor(teamBlockMeta(team)?.state)"></span>
-                            </button>
+                                <span v-if="!isReviewer" :title="`The team filter shows only ${activeTeamScope}.`">
+                                    Other teams are hidden by the team filter
+                                </span>
+                                <button
+                                    v-if="isReviewer"
+                                    type="button"
+                                    data-testid="toggle-assessment-team-scope"
+                                    class="rounded border border-blue-700/60 bg-blue-900/30 px-2 py-0.5 font-semibold text-blue-100 transition-colors hover:bg-blue-900/55"
+                                    @click="toggleAssessmentTeamScope"
+                                >
+                                    {{ showAllAssessmentTeams ? `Focus ${activeTeamScope}` : 'Show all teams' }}
+                                </button>
+                            </div>
                         </div>
 
                         <div
-                            v-if="selectedTeam"
-                            data-testid="assessment-team-components"
-                            class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]"
+                            v-if="selectedTeam || selectedBlockMetaText"
+                            class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-500"
                         >
-                            <span class="font-semibold uppercase tracking-wide text-gray-500">
-                                {{ selectedAssessmentTeamComponents.length === 1 ? 'Component' : 'Components' }} for {{ selectedTeam }}:
-                            </span>
                             <span
-                                v-for="component in selectedAssessmentTeamComponents"
-                                :key="component"
-                                class="rounded border border-blue-800/60 bg-blue-950/30 px-1.5 py-0.5 font-mono text-blue-200"
+                                v-if="selectedTeam"
+                                data-testid="assessment-team-components"
+                                class="flex flex-wrap items-center gap-1.5"
                             >
-                                {{ component }}
+                                <span>{{ selectedAssessmentTeamComponents.length === 1 ? 'Component' : 'Components' }}:</span>
+                                <span
+                                    v-for="component in selectedAssessmentTeamComponents"
+                                    :key="component"
+                                    class="rounded border border-blue-800/60 bg-blue-950/30 px-1.5 py-0.5 font-mono text-blue-200"
+                                >
+                                    {{ component }}
+                                </span>
+                                <span v-if="selectedAssessmentTeamComponents.length === 0" class="text-amber-300">
+                                    No mapped component
+                                </span>
                             </span>
-                            <span v-if="selectedAssessmentTeamComponents.length === 0" class="text-amber-300">
-                                No mapped component
-                            </span>
+                            <!-- Block header metadata (read-only) -->
+                            <span v-if="selectedBlockMetaText" data-testid="assessment-block-meta">{{ selectedBlockMetaText }}</span>
                         </div>
 
                         <div
@@ -3646,16 +3688,6 @@ const teamBlockStateColor = (state?: string): string => {
                             @use="useEarlierAssessment"
                         />
 
-                        <!-- Block header metadata (read-only) -->
-                        <div v-if="teamBlockMeta(selectedTeam || 'General')" class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-gray-500">
-                            <span v-if="teamBlockMeta(selectedTeam || 'General')!.user && teamBlockMeta(selectedTeam || 'General')!.user.toLowerCase() !== 'unknown'">
-                                Assessed by <span class="text-gray-400">{{ teamBlockMeta(selectedTeam || 'General')!.user }}</span>
-                            </span>
-                            <span v-if="teamBlockMeta(selectedTeam || 'General')!.timestamp">
-                                {{ new Date(teamBlockMeta(selectedTeam || 'General')!.timestamp!).toLocaleDateString() }}
-                            </span>
-                        </div>
-
                         <div
                             v-if="approvalPrefilled && !selectedTeam"
                             data-testid="approval-prefilled-note"
@@ -3665,58 +3697,69 @@ const teamBlockStateColor = (state?: string): string => {
                             The Global decision below is taken over from the team assessments, with the rescoring rule for that state applied.
                             Nothing is saved until you press Approve.
                         </div>
+                        <!-- What each team decided, on one line: the worst state
+                             is what the Global decision takes over. -->
                         <div
                             v-if="isReviewer && !selectedTeam && effectiveTeamAssessments.length"
                             data-testid="effective-team-assessment-summary"
-                            class="mt-3 border-l-2 border-purple-500/60 bg-purple-950/10 px-3 py-2.5"
+                            class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]"
                         >
-                            <div class="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                    <div class="text-[9px] font-bold uppercase tracking-wider text-purple-300">Effective team summary</div>
-                                    <div class="mt-0.5 text-xs text-gray-400">
-                                        Team assessments take precedence; the latest analyzer proposal fills only missing teams.
-                                    </div>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <span v-if="effectiveAssessmentWorst" class="text-[10px] text-gray-500">
-                                        Worst: <strong class="text-gray-200">{{ effectiveAssessmentWorst.state.replaceAll('_', ' ') }}</strong>
-                                    </span>
-                                    <button
-                                        v-if="effectiveAssessmentWorst"
-                                        type="button"
-                                        data-testid="use-effective-assessment-summary"
-                                        class="rounded bg-purple-700/70 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-purple-600"
-                                        @click="applyEffectiveAssessmentSummary"
-                                    >
-                                        Use for global assessment
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="mt-2 divide-y divide-gray-800/70">
-                                <div
-                                    v-for="assessment in effectiveTeamAssessments"
-                                    :key="assessment.team"
-                                    class="flex flex-wrap items-center justify-between gap-2 py-1.5 text-[10px]"
+                            <span
+                                class="inline-flex cursor-help items-center gap-1 text-gray-500"
+                                title="Team assessments take precedence; the latest analyzer proposal fills only missing teams."
+                            >
+                                Teams
+                                <Info :size="11" aria-hidden="true" />
+                                <span class="sr-only">Team assessments take precedence; the latest analyzer proposal fills only missing teams.</span>
+                            </span>
+                            <span
+                                v-for="assessment in shownEffectiveTeamAssessments"
+                                :key="assessment.team"
+                                data-testid="effective-team-assessment"
+                                class="inline-flex items-center gap-1"
+                                :title="effectiveSourceLabel(assessment.source)"
+                            >
+                                <span class="font-semibold text-gray-300">{{ assessment.team }}</span>
+                                <span v-if="assessment.source !== 'missing'" class="text-gray-400">{{ stateWords(assessment.state) }}</span>
+                                <span v-if="assessment.source === 'automatic'" class="text-cyan-300">(analyzer)</span>
+                                <span v-else-if="assessment.source === 'missing'" class="italic text-gray-600">missing</span>
+                            </span>
+                            <button
+                                v-if="hiddenEffectiveTeamCount"
+                                type="button"
+                                data-testid="effective-team-assessment-more"
+                                class="text-cyan-300 hover:text-cyan-200"
+                                @click="showAllEffectiveTeams = true"
+                            >
+                                +{{ hiddenEffectiveTeamCount }} more
+                            </button>
+                            <span v-if="effectiveAssessmentWorst" class="ml-auto flex items-center gap-2">
+                                <span class="text-gray-500">Worst: <strong class="text-gray-200">{{ stateWords(effectiveAssessmentWorst.state) }}</strong></span>
+                                <button
+                                    type="button"
+                                    data-testid="use-effective-assessment-summary"
+                                    class="rounded bg-purple-700/70 px-2 py-1 text-[10px] font-bold text-white hover:bg-purple-600"
+                                    @click="applyEffectiveAssessmentSummary"
                                 >
-                                    <span class="font-semibold text-gray-300">{{ assessment.team }}</span>
-                                    <span class="flex items-center gap-2">
-                                        <span :class="assessment.source === 'team' ? 'text-blue-300' : assessment.source === 'automatic' ? 'text-cyan-300' : 'text-gray-600'">
-                                            {{ assessment.source === 'team' ? 'Team assessment' : assessment.source === 'automatic' ? 'Analyzer fallback' : 'Missing' }}
-                                        </span>
-                                        <span class="font-semibold text-gray-400">{{ assessment.state.replaceAll('_', ' ') }}</span>
-                                    </span>
-                                </div>
-                            </div>
+                                    Use for Global
+                                </button>
+                            </span>
                         </div>
-                    </DetailSection>
+                    </section>
 
                     <DetailSection
-                        step="Assessment · 2"
                         title="Decision & rationale"
-                        description="Set the assessment state, justification, technical rationale, ownership, and any reviewer-only rescoring context."
+                        help="Set the assessment state, justification, technical rationale, ownership, and any reviewer-only rescoring context."
                         data-testid="assessment-decision-section"
                         :class="formHighlight ? 'ring-2 ring-indigo-400' : ''"
                     >
+                    <p
+                        v-if="assessmentMissingFields.length"
+                        data-testid="assessment-completeness"
+                        class="mb-3 text-[11px] text-amber-200/90"
+                    >
+                        Still needed to submit: {{ assessmentMissingFields.join(', ') }}.
+                    </p>
                     <div
                         v-if="selectedTeam && selectedAutomaticProposal"
                         data-testid="automatic-assessment-proposal"
@@ -3770,6 +3813,153 @@ const teamBlockStateColor = (state?: string): string => {
                     <p v-if="ssvcTouched && selectedTeam" class="mb-3 text-xs text-amber-300">Unsaved SSVC changes: return to the global assessment to save them.</p>
                     <p v-if="responseTouched && selectedTeam" class="mb-3 text-xs text-amber-300" data-testid="unsaved-response-hint">Unsaved response: return to the global assessment to save it.</p>
                     <div :class="isReviewer && !selectedTeam ? (isWorkspace ? 'grid items-start gap-4' : 'grid items-start gap-4 xl:grid-cols-2') : ''">
+                        <!-- Assessment Section (Reviewer Global or Team Selected) -->
+                        <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
+                            <div class="space-y-3">
+                                <div>
+                                    <label id="analysis-state-label" for="analysis-state-select" class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
+                                    <CustomSelect
+                                        id="analysis-state-select"
+                                        aria-labelledby="analysis-state-label"
+                                        :modelValue="state"
+                                        @update:modelValue="state = $event; formTouched = true; markSelectedTeamAssessmentManual()"
+                                        :options="ANALYSIS_STATES"
+                                        size="sm"
+                                    />
+                                </div>
+
+                                <div v-if="state === 'NOT_AFFECTED'">
+                                    <label id="justification-label" for="justification-select" class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
+                                    <CustomSelect
+                                        id="justification-select"
+                                        aria-labelledby="justification-label"
+                                        :modelValue="justification"
+                                        @update:modelValue="justification = $event; formTouched = true; markSelectedTeamAssessmentManual()"
+                                        :options="JUSTIFICATION_OPTIONS"
+                                        size="sm"
+                                    />
+                                </div>
+
+                                <!-- The response is the Global assessment's: one value for the finding. -->
+                                <div v-if="!selectedTeam && isReviewer" data-testid="analysis-response-field">
+                                    <label id="response-label" for="response-select" class="block text-xs font-semibold text-gray-400 mb-1">Response</label>
+                                    <CustomSelect
+                                        id="response-select"
+                                        aria-labelledby="response-label"
+                                        :modelValue="response"
+                                        @update:modelValue="changeResponse($event)"
+                                        :options="RESPONSE_OPTIONS"
+                                        size="sm"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label for="analysis-details-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
+                                    <textarea
+                                        id="analysis-details-textarea"
+                                        v-model="details"
+                                        @input="formTouched = true; markSelectedTeamAssessmentManual()"
+                                        placeholder="Technical details..."
+                                        class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
+                                    ></textarea>
+                                </div>
+
+                                <!-- Assignees -->
+                                <div>
+                                    <label for="assigned-users-input" class="block text-xs font-semibold text-gray-400 mb-1">Assigned Users</label>
+                                    <div class="flex flex-wrap gap-1 mb-1.5">
+                                        <span
+                                            v-for="assignee in currentAssigned"
+                                            :key="assignee"
+                                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium"
+                                        >
+                                            {{ assignee }}
+                                            <button @click="removeAssignee(assignee)" class="hover:text-white text-blue-300/70 leading-none cursor-pointer">&times;</button>
+                                        </span>
+                                    </div>
+                                    <div class="relative">
+                                        <input
+                                            id="assigned-users-input"
+                                            v-model="assigneeInput"
+                                            @input="onAssigneeInput"
+                                            @keydown.enter.prevent="addAssigneeFromInput"
+                                            @keydown.tab.prevent="addAssigneeFromInput"
+                                            type="text"
+                                            placeholder="Type username and press Enter..."
+                                            class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs"
+                                            @blur="assigneeSuggestionsVisible = false"
+                                        />
+                                        <div v-if="assigneeSuggestionsVisible && filteredUserSuggestions.length > 0"
+                                             class="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded shadow-lg max-h-32 overflow-y-auto">
+                                            <button
+                                                v-for="suggestion in filteredUserSuggestions"
+                                                :key="suggestion"
+                                                @mousedown.prevent="selectAssigneeSuggestion(suggestion)"
+                                                class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-blue-500/20 hover:text-blue-200 transition-colors cursor-pointer"
+                                            >
+                                                {{ suggestion }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-if="isReviewer" data-testid="review-context" class="rounded border border-gray-700 bg-gray-900/45 p-3">
+                                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                        <h5 class="text-xs font-bold uppercase tracking-wider text-gray-400">Review Context</h5>
+                                        <span
+                                            class="text-[10px] font-semibold"
+                                            :class="ticketReferenceMissing ? 'text-amber-300' : 'text-gray-500'"
+                                        >
+                                            {{ reviewContextRequiredCompleted }}/{{ reviewContextRequiredTotal }} required
+                                        </span>
+                                    </div>
+                                    <div class="grid gap-2 sm:grid-cols-2">
+                                        <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
+                                            <input
+                                                v-model="evidenceReviewed"
+                                                type="checkbox"
+                                                class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
+                                                @change="formTouched = true"
+                                            />
+                                            Evidence reviewed
+                                        </label>
+                                        <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
+                                            <input
+                                                v-model="versionCoverageChecked"
+                                                type="checkbox"
+                                                class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
+                                                @change="formTouched = true"
+                                            />
+                                            Version coverage checked
+                                        </label>
+                                        <label class="sm:col-span-2">
+                                            <span class="mb-1 flex flex-wrap items-center justify-between gap-2">
+                                                <span class="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Ticket reference</span>
+                                                <span
+                                                    data-testid="ticket-requirement-badge"
+                                                    class="rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                                                    :class="isTicketReferenceRequired
+                                                        ? 'border-amber-700/50 bg-amber-950/30 text-amber-200'
+                                                        : 'border-gray-700 bg-gray-950/50 text-gray-500'"
+                                                >
+                                                    {{ isTicketReferenceRequired ? 'Required' : 'Optional' }}
+                                                </span>
+                                            </span>
+                                            <input
+                                                v-model="ticketReference"
+                                                type="text"
+                                                placeholder="e.g. SEC-1234 or remediation ticket"
+                                                :aria-required="isTicketReferenceRequired ? 'true' : 'false'"
+                                                class="w-full rounded border bg-gray-950 px-2 py-1.5 text-xs text-gray-200 focus:border-blue-500"
+                                                :class="ticketReferenceMissing ? 'border-amber-600/80' : 'border-gray-700'"
+                                                @input="formTouched = true"
+                                            />
+                                            <span class="mt-1 block text-[10px] text-gray-600">{{ ticketRequirementHelp }}</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <section
                             v-if="isReviewer && !selectedTeam"
                             data-testid="global-cvss-rescoring"
@@ -3925,153 +4115,6 @@ const teamBlockStateColor = (state?: string): string => {
                                 :allow-autofill="!ssvcTouched && savedSsvc.status === 'UNASSESSED'" @update:model-value="changeSsvc" />
                         </section>
 
-                        <!-- Assessment Section (Reviewer Global or Team Selected) -->
-                        <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
-                            <div class="space-y-3">
-                                <div>
-                                    <label id="analysis-state-label" for="analysis-state-select" class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
-                                    <CustomSelect
-                                        id="analysis-state-select"
-                                        aria-labelledby="analysis-state-label"
-                                        :modelValue="state"
-                                        @update:modelValue="state = $event; formTouched = true; markSelectedTeamAssessmentManual()"
-                                        :options="ANALYSIS_STATES"
-                                        size="sm"
-                                    />
-                                </div>
-
-                                <div v-if="state === 'NOT_AFFECTED'">
-                                    <label id="justification-label" for="justification-select" class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
-                                    <CustomSelect
-                                        id="justification-select"
-                                        aria-labelledby="justification-label"
-                                        :modelValue="justification"
-                                        @update:modelValue="justification = $event; formTouched = true; markSelectedTeamAssessmentManual()"
-                                        :options="JUSTIFICATION_OPTIONS"
-                                        size="sm"
-                                    />
-                                </div>
-
-                                <!-- The response is the Global assessment's: one value for the finding. -->
-                                <div v-if="!selectedTeam && isReviewer" data-testid="analysis-response-field">
-                                    <label id="response-label" for="response-select" class="block text-xs font-semibold text-gray-400 mb-1">Response</label>
-                                    <CustomSelect
-                                        id="response-select"
-                                        aria-labelledby="response-label"
-                                        :modelValue="response"
-                                        @update:modelValue="changeResponse($event)"
-                                        :options="RESPONSE_OPTIONS"
-                                        size="sm"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label for="analysis-details-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
-                                    <textarea
-                                        id="analysis-details-textarea"
-                                        v-model="details"
-                                        @input="formTouched = true; markSelectedTeamAssessmentManual()"
-                                        placeholder="Technical details..."
-                                        class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
-                                    ></textarea>
-                                </div>
-
-                                <!-- Assignees -->
-                                <div>
-                                    <label for="assigned-users-input" class="block text-xs font-semibold text-gray-400 mb-1">Assigned Users</label>
-                                    <div class="flex flex-wrap gap-1 mb-1.5">
-                                        <span
-                                            v-for="assignee in currentAssigned"
-                                            :key="assignee"
-                                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium"
-                                        >
-                                            {{ assignee }}
-                                            <button @click="removeAssignee(assignee)" class="hover:text-white text-blue-300/70 leading-none cursor-pointer">&times;</button>
-                                        </span>
-                                    </div>
-                                    <div class="relative">
-                                        <input
-                                            id="assigned-users-input"
-                                            v-model="assigneeInput"
-                                            @input="onAssigneeInput"
-                                            @keydown.enter.prevent="addAssigneeFromInput"
-                                            @keydown.tab.prevent="addAssigneeFromInput"
-                                            type="text"
-                                            placeholder="Type username and press Enter..."
-                                            class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs"
-                                            @blur="assigneeSuggestionsVisible = false"
-                                        />
-                                        <div v-if="assigneeSuggestionsVisible && filteredUserSuggestions.length > 0"
-                                             class="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded shadow-lg max-h-32 overflow-y-auto">
-                                            <button
-                                                v-for="suggestion in filteredUserSuggestions"
-                                                :key="suggestion"
-                                                @mousedown.prevent="selectAssigneeSuggestion(suggestion)"
-                                                class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-blue-500/20 hover:text-blue-200 transition-colors cursor-pointer"
-                                            >
-                                                {{ suggestion }}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div v-if="isReviewer" data-testid="review-context" class="rounded border border-gray-700 bg-gray-900/45 p-3">
-                                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                        <h5 class="text-xs font-bold uppercase tracking-wider text-gray-400">Review Context</h5>
-                                        <span
-                                            class="text-[10px] font-semibold"
-                                            :class="ticketReferenceMissing ? 'text-amber-300' : 'text-gray-500'"
-                                        >
-                                            {{ reviewContextRequiredCompleted }}/{{ reviewContextRequiredTotal }} required
-                                        </span>
-                                    </div>
-                                    <div class="grid gap-2 sm:grid-cols-2">
-                                        <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
-                                            <input
-                                                v-model="evidenceReviewed"
-                                                type="checkbox"
-                                                class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
-                                                @change="formTouched = true"
-                                            />
-                                            Evidence reviewed
-                                        </label>
-                                        <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
-                                            <input
-                                                v-model="versionCoverageChecked"
-                                                type="checkbox"
-                                                class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
-                                                @change="formTouched = true"
-                                            />
-                                            Version coverage checked
-                                        </label>
-                                        <label class="sm:col-span-2">
-                                            <span class="mb-1 flex flex-wrap items-center justify-between gap-2">
-                                                <span class="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Ticket reference</span>
-                                                <span
-                                                    data-testid="ticket-requirement-badge"
-                                                    class="rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
-                                                    :class="isTicketReferenceRequired
-                                                        ? 'border-amber-700/50 bg-amber-950/30 text-amber-200'
-                                                        : 'border-gray-700 bg-gray-950/50 text-gray-500'"
-                                                >
-                                                    {{ isTicketReferenceRequired ? 'Required' : 'Optional' }}
-                                                </span>
-                                            </span>
-                                            <input
-                                                v-model="ticketReference"
-                                                type="text"
-                                                placeholder="e.g. SEC-1234 or remediation ticket"
-                                                :aria-required="isTicketReferenceRequired ? 'true' : 'false'"
-                                                class="w-full rounded border bg-gray-950 px-2 py-1.5 text-xs text-gray-200 focus:border-blue-500"
-                                                :class="ticketReferenceMissing ? 'border-amber-600/80' : 'border-gray-700'"
-                                                @input="formTouched = true"
-                                            />
-                                            <span class="mt-1 block text-[10px] text-gray-600">{{ ticketRequirementHelp }}</span>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
 
                     <!-- No-Team Section (Prompt for non-reviewers) -->
@@ -4085,61 +4128,64 @@ const teamBlockStateColor = (state?: string): string => {
                         </p>
                     </div>
 
-                    <div v-if="isReviewer && (!activeTeamScope || showAllAssessmentTeams || !selectedTeam)">
+                    <!-- The stored text is generated from the fields above; it
+                         is shown read-only, for checking what is exported. -->
+                    <div v-if="isReviewer && generatedAssessmentText" data-testid="generated-assessment-text">
                         <button
-                            @click="toggleRawEdit"
-                            class="text-xs text-gray-500 hover:text-gray-300 transition-colors cursor-pointer flex items-center gap-1"
+                            type="button"
+                            data-testid="generated-assessment-text-toggle"
+                            class="flex cursor-pointer items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-300"
+                            :aria-expanded="showGeneratedText ? 'true' : 'false'"
+                            @click="showGeneratedText = !showGeneratedText"
                         >
-                            <ChevronDown v-if="!showRawEdit" :size="12" />
+                            <ChevronDown v-if="!showGeneratedText" :size="12" />
                             <ChevronUp v-else :size="12" />
-                            Raw Assessment Text
+                            Show generated text
                         </button>
-                        <div v-if="showRawEdit" class="mt-1">
-                            <textarea
-                                v-model="rawDetails"
-                                @input="rawDetailsTouched = true; formTouched = true"
-                                class="w-full p-2 rounded bg-gray-900 border border-gray-700 text-gray-300 text-xs font-mono h-32 resize-y"
-                            ></textarea>
-                            <p class="text-[10px] text-gray-600 mt-0.5">Edit the full structured assessment text. Changes here override block-level edits on submit.</p>
+                        <div v-if="showGeneratedText" class="mt-1 space-y-1">
+                            <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] text-gray-600">
+                                <span>As stored and exported to Dependency-Track; generated from the assessment fields, read-only.</span>
+                                <button
+                                    type="button"
+                                    data-testid="copy-generated-assessment-text"
+                                    class="rounded border border-gray-700 px-2 py-0.5 font-semibold text-gray-300 hover:bg-gray-800"
+                                    @click="copyGeneratedText"
+                                >
+                                    {{ generatedTextCopyState === 'copied' ? 'Copied' : generatedTextCopyState === 'error' ? 'Copy failed' : 'Copy' }}
+                                </button>
+                            </div>
+                            <pre
+                                data-testid="generated-assessment-text-body"
+                                class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-800 bg-gray-950/60 p-2 font-mono text-[11px] text-gray-400"
+                            >{{ generatedAssessmentText }}</pre>
                         </div>
                     </div>
 
 
+                    <!-- Why the coverage is incomplete, with the repair. Why it is
+                         inconsistent is said once, in the banner above the tabs. -->
                     <div
-                        v-if="isReviewer && !selectedTeam && mergedAssessmentData.blocks.length > 0 && (assessmentSyncIssues.length > 0 || displayState === 'INCOMPLETE')"
+                        v-if="isReviewer && !selectedTeam && mergedAssessmentData.blocks.length > 0 && displayState === 'INCOMPLETE'"
                         class="pt-2 border-t border-gray-700 mt-2"
                     >
                         <div
-                            v-if="assessmentSyncIssues.length > 0"
+                            v-if="incompleteIssues.length > 0"
                             data-testid="assessment-sync-reasons"
-                            class="mb-2 rounded border p-2.5"
-                            :class="displayState === 'INCONSISTENT'
-                                ? 'border-indigo-500/30 bg-indigo-950/20'
-                                : 'border-amber-600/30 bg-amber-950/20'"
+                            class="mb-2 rounded border border-amber-600/30 bg-amber-950/20 p-2.5"
                         >
-                            <div
-                                class="mb-1.5 text-[10px] font-black uppercase tracking-widest"
-                                :class="displayState === 'INCONSISTENT' ? 'text-indigo-300' : 'text-amber-400'"
-                            >
-                                {{ displayState === 'INCONSISTENT'
-                                    ? 'Why manual resolution is needed'
-                                    : 'Why synchronization is needed' }}
+                            <div class="mb-1.5 text-[10px] font-black uppercase tracking-widest text-amber-400">
+                                Why synchronization is needed
                             </div>
                             <div
-                                v-for="issue in assessmentSyncIssues"
+                                v-for="issue in incompleteIssues"
                                 :key="issue.code"
-                                class="text-[11px] leading-relaxed"
-                                :class="issue.kind === 'inconsistent' ? 'text-indigo-100/80' : 'text-amber-100/80'"
+                                class="text-[11px] leading-relaxed text-amber-100/80"
                             >
-                                <span
-                                    class="font-bold"
-                                    :class="issue.kind === 'inconsistent' ? 'text-indigo-300' : 'text-amber-300'"
-                                >{{ issue.label }}:</span>
+                                <span class="font-bold text-amber-300">{{ issue.label }}:</span>
                                 {{ issue.detail }}
                             </div>
                         </div>
                         <button
-                            v-if="displayState === 'INCOMPLETE'"
                             data-testid="sync-all-assessments"
                             @click="syncAllAssessments"
                             class="w-full mb-2 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-500 border border-yellow-600/50 font-bold py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
@@ -4151,9 +4197,8 @@ const teamBlockStateColor = (state?: string): string => {
                     </DetailSection>
 
                     <DetailSection
-                        step="Assessment · 3"
                         title="History"
-                        description="Every version of this assessment recorded in DTVP: who changed it, when, and how, including deletions and values adopted from Dependency-Track."
+                        help="Every version of this assessment recorded in DTVP: who changed it, when, and how, including deletions and values adopted from Dependency-Track."
                         data-testid="assessment-history-section"
                     >
                         <AssessmentHistory :instances="allInstances" :refresh-key="historyRefreshKey" />
@@ -4191,16 +4236,18 @@ const teamBlockStateColor = (state?: string): string => {
       @force-overwrite="() => handleUpdate(true)"
     />
 
-    <DeleteAssessmentModal
-      :show="showDeleteModal"
+    <ClearAssessmentModal
+      :show="showClearModal"
       :team="selectedTeam"
       :assessed-teams="assessedTeamNames"
       :is-reviewer="isReviewer"
       :finding-count="allInstances.length"
-      :busy="deletingAssessment"
-      :error="deleteAssessmentError"
-      @close="showDeleteModal = false"
-      @confirm="confirmDeleteAssessment"
+      :versions="sortedAffectedProjectVersions"
+      :components="allComponentNames"
+      :busy="clearingAssessment"
+      :error="clearAssessmentError"
+      @close="showClearModal = false"
+      @confirm="confirmClearAssessment"
     />
 
     <GenericModal

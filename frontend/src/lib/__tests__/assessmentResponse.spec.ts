@@ -154,10 +154,6 @@ describe('the analysis response in a save', () => {
         originalScore: null,
         currentUser: 'rita',
         isApprove: true,
-        showRawEdit: false,
-        rawDetailsTouched: false,
-        rawDetails: '',
-        mergedAssessmentFullText: '',
         suppressed: false,
         force: false,
         ...overrides,
@@ -189,15 +185,5 @@ describe('the analysis response in a save', () => {
         const analyst = prepare({ isReviewer: false, selectedTeam: 'Core', details: 'Confirmed.', response: 'ROLLBACK', isApprove: false })
         expect(analyst.payload.fields).not.toHaveProperty('response')
         expect(parseAssessmentResponse(analyst.finalText)).toBe('UPDATE')
-    })
-
-    it('takes the tag of a text the reviewer edited as a whole', () => {
-        const raw = `[Response: CAN_NOT_FIX]\n\n${GENERAL}`
-        const edited = prepare({ showRawEdit: true, rawDetailsTouched: true, rawDetails: raw, response: 'UPDATE' })
-        expect(edited.payload.fields?.response).toBe('CAN_NOT_FIX')
-        const removed = prepare({ showRawEdit: true, rawDetailsTouched: true, rawDetails: GENERAL, response: 'UPDATE' })
-        expect(removed.payload.fields).toHaveProperty('response', null)
-        const analyst = prepare({ isReviewer: false, showRawEdit: true, rawDetailsTouched: true, rawDetails: raw })
-        expect(analyst.payload.fields).not.toHaveProperty('response')
     })
 })

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AssessmentHistory from '../AssessmentHistory.vue'
-import DeleteAssessmentModal from '../DeleteAssessmentModal.vue'
+import ClearAssessmentModal from '../ClearAssessmentModal.vue'
 import { seenAnalysis } from '../../lib/assessmentSubmission'
 import * as api from '../../lib/api'
 
@@ -104,7 +104,7 @@ describe('AssessmentHistory', () => {
         await flushPromises()
 
         const entry = wrapper.get('[data-testid="assessment-history-entry"]')
-        expect(entry.text()).toContain('Deleted')
+        expect(entry.text()).toContain('Cleared')
         expect(entry.text()).toContain('by rita')
         await entry.get('[data-testid="assessment-history-entry-toggle"]').trigger('click')
         expect(entry.text()).toContain('(No assessment text)')
@@ -127,51 +127,55 @@ describe('AssessmentHistory', () => {
     })
 })
 
-describe('DeleteAssessmentModal', () => {
-    const mountModal = (props: Record<string, unknown>) => mount(DeleteAssessmentModal, {
-        props: { show: false, team: 'Team A', assessedTeams: ['General', 'Team A'], isReviewer: false, findingCount: 2, ...props } as any,
+describe('ClearAssessmentModal', () => {
+    const mountModal = (props: Record<string, unknown>) => mount(ClearAssessmentModal, {
+        props: { show: false, team: 'Team A', assessedTeams: ['General', 'Team A'], isReviewer: false, findingCount: 2, versions: ['1.0', '2.0'], components: ['lib-a'], ...props } as any,
         global: { stubs: { teleport: true } },
     })
 
-    it('lets an analyst delete only the open team assessment', async () => {
+    it('lets an analyst clear only the open team assessment, saying for which findings and versions', async () => {
         const wrapper = mountModal({})
         await wrapper.setProps({ show: true })
 
-        expect(wrapper.find('[data-testid="delete-scope"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="delete-all"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="clear-scope"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="clear-all"]').exists()).toBe(false)
         expect(wrapper.text()).toContain('Only the Team A assessment')
-        expect(wrapper.text()).toContain('all 2 findings')
-        expect(wrapper.text()).toContain('removed from Dependency-Track as well')
+        expect(wrapper.get('[data-testid="clear-applies-to"]').text())
+            .toContain('all 2 findings of lib-a in versions 1.0, 2.0')
+        expect(wrapper.text()).toContain('Dependency-Track is cleared as well')
+        expect(wrapper.text()).toContain('What remains of the assessment goes to review')
+        expect(wrapper.text()).toContain('Clear assessment')
 
-        await wrapper.get('[data-testid="delete-confirm"]').trigger('click')
+        await wrapper.get('[data-testid="clear-confirm"]').trigger('click')
         expect(wrapper.emitted('confirm')).toEqual([['Team A']])
     })
 
-    it('lets a reviewer delete the General assessment or everything', async () => {
+    it('lets a reviewer clear the Global assessment or everything', async () => {
         const wrapper = mountModal({ team: '', isReviewer: true })
         await wrapper.setProps({ show: true })
-        expect(wrapper.text()).toContain('Only the General assessment')
-        expect(wrapper.text()).toContain('SSVC decision stored with it is removed too')
+        expect(wrapper.text()).toContain('Only the Global assessment')
+        expect(wrapper.text()).toContain('The SSVC decision and the response stored with it are removed too')
+        expect(wrapper.text()).not.toContain('goes to review')
 
-        await wrapper.get('[data-testid="delete-all"]').setValue(true)
-        await wrapper.get('[data-testid="delete-confirm"]').trigger('click')
+        await wrapper.get('[data-testid="clear-all"]').setValue(true)
+        await wrapper.get('[data-testid="clear-confirm"]').trigger('click')
         expect(wrapper.emitted('confirm')).toEqual([[null]])
     })
 
-    it('offers nothing an analyst may not delete and shows server errors', async () => {
-        const wrapper = mountModal({ team: '', error: 'There is no such assessment to delete' })
+    it('offers nothing an analyst may not clear and shows server errors', async () => {
+        const wrapper = mountModal({ team: '', error: 'There is no such assessment to clear' })
         await wrapper.setProps({ show: true })
 
-        expect(wrapper.get('[data-testid="delete-nothing"]').text()).toContain('only reviewers can delete the General assessment')
-        expect(wrapper.get('[data-testid="delete-confirm"]').attributes('disabled')).toBeDefined()
+        expect(wrapper.get('[data-testid="clear-nothing"]').text()).toContain('only reviewers can clear the Global assessment')
+        expect(wrapper.get('[data-testid="clear-confirm"]').attributes('disabled')).toBeDefined()
         expect(wrapper.get('[role="alert"]').text()).toContain('no such assessment')
     })
 
     it('defaults to the whole assessment when the open team has none', async () => {
         const wrapper = mountModal({ team: 'Team Z', isReviewer: true })
         await wrapper.setProps({ show: true })
-        expect(wrapper.find('[data-testid="delete-scope"]').exists()).toBe(false)
-        await wrapper.get('[data-testid="delete-confirm"]').trigger('click')
+        expect(wrapper.find('[data-testid="clear-scope"]').exists()).toBe(false)
+        await wrapper.get('[data-testid="clear-confirm"]').trigger('click')
         expect(wrapper.emitted('confirm')).toEqual([[null]])
     })
 })
