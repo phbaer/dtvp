@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import StatsSidebar, { type FilterState } from '../StatsSidebar.vue'
+import StatsSidebar from '../StatsSidebar.vue'
+import type { FilterState } from '../../lib/projectVulnFilterPresets'
 import type { TaskVulnGroupListCounts } from '../../lib/api'
 
 const filters = (): FilterState => ({

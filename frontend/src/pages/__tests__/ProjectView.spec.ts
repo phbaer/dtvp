@@ -659,7 +659,7 @@ describe('ProjectView.vue', () => {
             .find(button => button.text().trim().startsWith(label))?.text() || ''
         expect(buttonText('Open')).toMatch(/Open\s+1/)
         expect(buttonText('Assessed')).toMatch(/Assessed\s+0/)
-        expect(buttonText('Mismatch')).toMatch(/Mismatch\s+0/)
+        expect(buttonText('CVSS version mismatch')).toMatch(/CVSS version mismatch\s+0/)
         expect(buttonText('Direct')).toMatch(/Direct\s+1/)
         expect(buttonText('Transitive')).toMatch(/Transitive\s+0/)
 

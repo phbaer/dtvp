@@ -40,7 +40,7 @@ describe('ProjectView Sorting Extra', () => {
         ]
         vi.mocked(api.getGroupedVulns).mockResolvedValue(mockVulns as any)
 
-        router.push('/project/test')
+        router.push('/project/test?awaiting_review=false')
         await router.isReady()
 
         const wrapper = mount(ProjectView, {

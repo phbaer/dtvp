@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import StatsSidebar, { type FilterOption, type FilterState, type TeamEntry } from '../StatsSidebar.vue'
+import StatsSidebar, { type TeamEntry } from '../StatsSidebar.vue'
+import type { FilterOption, FilterState } from '../../lib/projectVulnFilterPresets'
 import type { TaskVulnGroupListCounts } from '../../lib/api'
 
 const filters = (): FilterState => ({
@@ -136,22 +137,68 @@ describe('StatsSidebar team filter', () => {
         document.body.innerHTML = ''
     })
 
-    it('shows selectable workflow views and identifies custom status selections', async () => {
+    it('offers presets for the common jobs and marks the one in effect', async () => {
         const options = ['OPEN', 'INCOMPLETE', 'READY_FOR_APPROVAL', 'ASSESSED']
             .map(value => ({ value, label: value, color: 'bg-blue-500' }))
         const wrapper = mountSidebar(resultCounts, options)
-        const analyst = wrapper.get('[data-testid="workflow-view-analyst-work"]')
-        const approval = wrapper.get('[data-testid="workflow-view-approval"]')
+        const preset = (key: string) => wrapper.get(`[data-testid="filter-preset-${key}"]`)
+        const lastUpdate = () => wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState
         expect(wrapper.text()).toContain('Custom selection')
-        await analyst.trigger('click')
-        expect((wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState).lifecycleFilters)
-            .toEqual(['OPEN', 'INCOMPLETE'])
-        await wrapper.setProps({ filters: { ...filters(), lifecycleFilters: ['OPEN', 'INCOMPLETE'] } })
-        expect(analyst.attributes('aria-pressed')).toBe('true')
+
+        await preset('needs-assessment').trigger('click')
+        expect(lastUpdate().lifecycleFilters).toEqual(['OPEN', 'INCOMPLETE'])
+        expect(lastUpdate().awaitingReviewOnly).toBe(false)
+        await wrapper.setProps({ filters: lastUpdate() })
+        expect(preset('needs-assessment').attributes('aria-pressed')).toBe('true')
         expect(wrapper.text()).not.toContain('Custom selection')
-        await approval.trigger('click')
-        expect((wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState).lifecycleFilters)
-            .toEqual(['READY_FOR_APPROVAL'])
+
+        await preset('awaiting-review').trigger('click')
+        expect(lastUpdate()).toMatchObject({
+            lifecycleFilters: ['OPEN', 'INCOMPLETE', 'READY_FOR_APPROVAL', 'ASSESSED'],
+            awaitingReviewOnly: true,
+            newFindingsOnly: false,
+        })
+        await wrapper.setProps({ filters: lastUpdate() })
+        expect(preset('awaiting-review').attributes('aria-pressed')).toBe('true')
+        expect(wrapper.get('[data-testid="filter-awaiting-review"]').attributes('aria-pressed')).toBe('true')
+
+        await preset('new-findings').trigger('click')
+        expect(lastUpdate()).toMatchObject({ awaitingReviewOnly: false, newFindingsOnly: true })
+        await preset('all').trigger('click')
+        expect(lastUpdate()).toMatchObject({ awaitingReviewOnly: false, newFindingsOnly: false, inconsistencyReasonFilters: [] })
+        wrapper.unmount()
+    })
+
+    it('counts the status and analysis chips from the facets, which respect Awaiting review', async () => {
+        const options = ['OPEN', 'INCOMPLETE', 'READY_FOR_APPROVAL', 'ASSESSED']
+            .map(value => ({ value, label: value, color: 'bg-blue-500' }))
+        const wrapper = mountSidebar(resultCounts, options)
+        await wrapper.setProps({
+            analysisOptions: [{ value: 'NOT_AFFECTED', label: 'NOT_AFFECTED', color: 'bg-green-500' }, { value: 'NOT_SET', label: 'NOT_SET', color: 'bg-gray-500' }],
+            filters: { ...filters(), awaitingReviewOnly: true },
+            facetCounts: {
+                ...resultCounts,
+                awaiting_review: 2,
+                lifecycle: { OPEN: 0, INCOMPLETE: 1, INCONSISTENT: 0, READY_FOR_APPROVAL: 1, ASSESSED: 0 },
+                analysis: { NOT_AFFECTED: 2, NOT_SET: 0 },
+            },
+        })
+        const chip = (label: string) => wrapper.findAll('button').find(button => button.text().startsWith(label))!.text()
+        expect(chip('OPEN')).toMatch(/OPEN\s*0/)
+        expect(chip('INCOMPLETE')).toMatch(/INCOMPLETE\s*1/)
+        expect(chip('READY_FOR_APPROVAL')).toMatch(/READY_FOR_APPROVAL\s*1/)
+        expect(chip('ASSESSED')).toMatch(/ASSESSED\s*0/)
+        expect(chip('NOT_AFFECTED')).toMatch(/NOT_AFFECTED\s*2/)
+        expect(chip('NOT_SET')).toMatch(/NOT_SET\s*0/)
+        wrapper.unmount()
+    })
+
+    it('toggles awaiting review with its facet count', async () => {
+        const wrapper = mountSidebar({ ...resultCounts, awaiting_review: 4 })
+        const toggle = wrapper.get('[data-testid="filter-awaiting-review"]')
+        expect(toggle.text()).toMatch(/Awaiting review only\s*4/)
+        await toggle.trigger('click')
+        expect((wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState).awaitingReviewOnly).toBe(true)
         wrapper.unmount()
     })
 

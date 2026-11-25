@@ -573,9 +573,29 @@ describe('vulnListIndex', () => {
         expect(withNew.hasNewFindings).toBe(true)
         expect(without.hasNewFindings).toBe(false)
         expect(parseVulnSearchQuery('has:new_findings').newFindingsOnly).toBe(true)
+        expect(parseVulnSearchQuery('has:awaiting_review').awaitingReviewOnly).toBe(true)
+        expect(parseVulnSearchQuery('has:pending_review').awaitingReviewOnly).toBe(true)
         expect(parseVulnSearchQuery('has:no_rescore').newFindingsOnly).toBeFalsy()
         expect(matchesSmartSearch(withNew, 'has:new')).toBe(true)
         expect(matchesSmartSearch(without, 'has:new')).toBe(false)
+    })
+
+    it('filters vulnerabilities awaiting review, whatever their lifecycle', () => {
+        const incompletePending = buildVulnListItem(makeGroup({ list_metadata: { lifecycle: 'INCOMPLETE', is_pending: true } }), {})
+        const ready = buildVulnListItem(makeGroup({ list_metadata: { lifecycle: 'NEEDS_APPROVAL', is_pending: true } }), {})
+        const assessed = buildVulnListItem(makeGroup({ list_metadata: { lifecycle: 'ASSESSED', is_pending: false } }), {})
+        const filters = compileVulnListFilters({
+            awaitingReviewOnly: true,
+            dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'],
+            tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
+            automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+        })
+        expect(matchesCompiledListFilters(assessed, { ...filters, awaitingReviewOnly: false })).toBe(true)
+        expect(matchesCompiledListFilters(incompletePending, filters)).toBe(true)
+        expect(matchesCompiledListFilters(ready, filters)).toBe(true)
+        expect(matchesCompiledListFilters(assessed, filters)).toBe(false)
+        expect(matchesSmartSearch(incompletePending, 'has:awaiting_review')).toBe(true)
+        expect(matchesSmartSearch(assessed, 'has:review')).toBe(false)
     })
 
     it('parses broad smart search terms and typed filter tokens', () => {
@@ -741,7 +761,11 @@ describe('vulnListIndex', () => {
         }
         expect(parseVulnSearchQuery('lifecycle:conflicting').lifecycleTerms).toEqual(['INCONSISTENT'])
         expect(parseVulnSearchQuery('lifecycle:inconsistent').chips[0]?.label).toBe('Lifecycle: conflicting')
-        expect(parseVulnSearchQuery('lifecycle:needs_approval').lifecycleTerms).toEqual(['READY_FOR_APPROVAL'])
+        // "Needs approval" meant any pending review: Awaiting review.
+        expect(parseVulnSearchQuery('lifecycle:needs_approval').lifecycleTerms).toEqual([])
+        expect(parseVulnSearchQuery('lifecycle:needs_approval').awaitingReviewOnly).toBe(true)
+        expect(parseVulnSearchQuery('state:pending').awaitingReviewOnly).toBe(true)
+        expect(parseVulnSearchQuery('state:ready_for_approval').lifecycleTerms).toEqual(['READY_FOR_APPROVAL'])
         expect(parseVulnSearchQuery('lifecycle:legacy').lifecycleTerms).toEqual(['ASSESSED'])
     })
 

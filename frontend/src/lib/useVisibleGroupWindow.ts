@@ -146,5 +146,13 @@ export function useVisibleGroupWindow<T>({
         virtualPaddingBottom,
         scrollContainer,
         resetVisibleItems,
+        /** Puts the list at ``top`` and updates the rendered window at once. */
+        scrollToTop: (top: number) => {
+            const element = scrollContainer.value
+            if (!element) return
+            element.scrollTop = Math.max(0, top)
+            handleScroll()
+        },
+        estimatedItemHeight: effectiveItemHeight,
     }
 }

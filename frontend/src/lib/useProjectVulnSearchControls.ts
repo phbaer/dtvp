@@ -85,6 +85,7 @@ export const buildProjectVulnSearchCompletionOptions = ({
         createSearchCompletionOption('cvss_mismatch', 'CVSS mismatch', 'Has'),
         createSearchCompletionOption('no_rescore', 'No rescore', 'Has'),
         createSearchCompletionOption('new_findings', 'New findings', 'Has'),
+        createSearchCompletionOption('awaiting_review', 'Awaiting review', 'Has'),
     ]
     const cvssOptions = [
         createSearchCompletionOption('mismatch', 'Mismatch', 'CVSS'),

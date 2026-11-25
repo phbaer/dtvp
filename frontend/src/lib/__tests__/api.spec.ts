@@ -75,11 +75,24 @@ describe('api.ts', () => {
         const listener = vi.fn()
         globalThis.addEventListener(EVIDENCE_UPDATED_EVENT, listener)
         try {
-            const result = { sources: [], suggestion: null }
+            const result = {
+                enabled: true,
+                sources: [
+                    { source: 'CISA KEV', cve: 'CVE-2026-1234', status: 'ok', value: 'A' },
+                    { source: 'CISA Vulnrichment', cve: 'CVE-2026-1234', status: 'not_found' },
+                ],
+                suggestion: null,
+            }
             mocks.get.mockResolvedValueOnce({ data: result })
-            await expect(getSsvcExploitation(['CVE-2026-1234'], true)).resolves.toBe(result)
+            await expect(getSsvcExploitation(['cve-2026-1234'], true)).resolves.toBe(result)
             expect(listener).toHaveBeenCalledTimes(1)
-            expect(mocks.get.mock.lastCall?.[1].params.toString()).toBe('cve=CVE-2026-1234&refresh=true')
+            // The list compares the flags with the row's evidence.
+            expect(listener.mock.lastCall?.[0].detail).toEqual({ cves: ['CVE-2026-1234'], sources: ['KEV'] })
+            // Nothing to tell when the lookup is off or found no source.
+            mocks.get.mockResolvedValueOnce({ data: { enabled: false, sources: [], suggestion: null } })
+            await getSsvcExploitation(['CVE-2026-1234'])
+            expect(listener).toHaveBeenCalledTimes(1)
+            expect(mocks.get.mock.calls[0]?.[1].params.toString()).toBe('cve=cve-2026-1234&refresh=true')
             expect(mocks.post).not.toHaveBeenCalled()
             mocks.get.mockRejectedValueOnce(new Error('offline'))
             await expect(getSsvcExploitation(['CVE-2026-1234'])).rejects.toThrow('offline')

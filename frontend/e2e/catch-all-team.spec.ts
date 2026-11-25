@@ -146,7 +146,8 @@ const collectConsoleErrors = (page: Page) => {
 };
 
 async function selectVulnerability(page: Page) {
-    await page.goto('/project/TestProject');
+    // A reviewer starts on Awaiting review; this test needs every vulnerability.
+    await page.goto('/project/TestProject?awaiting_review=false');
     const row = page.locator(`.vuln-card[data-group-id="${workspaceGroup.id}"]`);
     await expect(row).toBeVisible({ timeout: 20000 });
     await row.click();

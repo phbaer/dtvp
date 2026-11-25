@@ -356,6 +356,7 @@ class McpToolService:
         teams: list[str] | None = None,
         severity: list[str] | None = None,
         analysis_state: list[str] | None = None,
+        awaiting_review: bool = False,
         limit: int = 25,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -373,6 +374,7 @@ class McpToolService:
                 teams=[str(v) for v in teams or []],
                 original_severity=[str(v).upper() for v in severity or []],
                 analysis=[str(v).upper() for v in analysis_state or []],
+                awaiting_review=bool(awaiting_review),
                 limit=limit,
                 offset=offset,
                 include_counts=False,
@@ -1104,6 +1106,7 @@ def build_mcp_server(service: McpToolService) -> Any:
         teams: list[str] | None = None,
         severity: list[str] | None = None,
         analysis_state: list[str] | None = None,
+        awaiting_review: bool = False,
         limit: int = 25,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -1112,9 +1115,11 @@ def build_mcp_server(service: McpToolService) -> Any:
         lifecycle: OPEN, INCOMPLETE, INCONSISTENT, NEEDS_APPROVAL, ASSESSED.
         severity (before rescoring): CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN.
         analysis_state: NOT_SET, IN_TRIAGE, EXPLOITABLE, NOT_AFFECTED,
-        FALSE_POSITIVE, RESOLVED. Values within a filter are alternatives;
-        different filters must all match. Returns at most 100 rows per call;
-        page with offset.
+        FALSE_POSITIVE, RESOLVED. awaiting_review: only vulnerabilities with
+        an assessment submitted for review and not yet approved (rows with
+        pending_review), whatever their lifecycle. Values within a filter are
+        alternatives; different filters must all match. Returns at most 100
+        rows per call; page with offset.
         """
         return await call(
             ctx,
@@ -1125,6 +1130,7 @@ def build_mcp_server(service: McpToolService) -> Any:
             teams=teams,
             severity=severity,
             analysis_state=analysis_state,
+            awaiting_review=awaiting_review,
             limit=limit,
             offset=offset,
         )

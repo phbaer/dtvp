@@ -303,7 +303,8 @@ test.describe('Project navigation with mocked backend', () => {
         // 3. Check for URL change
         await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/, { timeout: 15000 });
 
-        // All statuses are selected initially.
+        // Reviewers start on Awaiting review; All shows every status.
+        await page.getByTestId('filter-preset-all').click();
         await expect(page.getByText('CVE-2021-44228')).toBeVisible({ timeout: 30000 });
         await expect(page.getByText('CVE-2025-INCOMPLETE')).toBeVisible();
         await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCOMPLETE' }).getByTestId('lifecycle-badge')).toHaveText('Incomplete');
@@ -317,11 +318,15 @@ test.describe('Project navigation with mocked backend', () => {
         await expect(vulnCard).toBeVisible({ timeout: 10000 });
         await expect(vulnCard.getByTestId('lifecycle-badge')).toBeVisible();
         await expect(vulnCard.getByTestId('instance-count')).toBeVisible();
-        await page.getByTestId('workflow-view-analyst-work').click();
+        await page.getByTestId('filter-preset-needs-assessment').click();
         await expect(page.getByText('CVE-2025-INCOMPLETE')).toBeVisible();
         await expect(page.getByText('CVE-2025-INCONSISTENT')).toBeVisible();
         await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCONSISTENT' }).getByTestId('lifecycle-badge')).toHaveText('Conflicting');
-        await page.getByTestId('workflow-view-approval').click();
+        // Only Ready for approval.
+        const sidebar = page.getByTestId('stats-sidebar');
+        await sidebar.getByRole('button', { name: /^Ready for approval\s/i }).click();
+        await sidebar.getByRole('button', { name: /^Open\s/ }).click();
+        await sidebar.getByRole('button', { name: /^Incomplete\s/ }).click();
         await expect(page.getByText('CVE-2025-INCONSISTENT')).toHaveCount(0);
     });
 

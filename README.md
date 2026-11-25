@@ -144,11 +144,17 @@ constraints, and CI conventions.
 | **Ready for approval** | Complete, consistent assessments await reviewer sign-off |
 | **Assessed** | Complete with no pending approval; includes legacy assessments |
 
-Analysts start with the **Analyst work** view (Open and Incomplete, including
-Conflicting); reviewers start with **All statuses** and can use **Approval queue**
-for ready findings. Untouched defaults follow role changes; custom status choices
-stay selected. Conflicting findings retain their badge and require repair before
-approval.
+**Quick views** cover the common jobs: **Needs my assessment** (Open and
+Incomplete, including Conflicting; with teams selected, their assessment is
+missing), **Awaiting review** (every assessment submitted and not yet approved,
+including a team's submission while other teams are still open, and proposals
+saved pending review; `awaiting_review=true`), **Conflicting**, **New findings**
+and **All**. Analysts start with Needs my assessment, reviewers with Awaiting review.
+Untouched defaults follow role changes; custom status choices stay selected.
+Conflicting findings retain their badge and require repair before approval.
+After an approval or save the list refreshes in place; when the selected
+vulnerability leaves it, the next one is selected
+([stable list](docs/screens.md#stable-list)).
 
 Select one or more **Teams** to enable **Assessment for selected teams**:
 **Not recorded** finds a missing assessment among responsible selected teams;
@@ -161,8 +167,11 @@ Plain search still matches team names, without selecting teams. `team:` tokens
 resolve to visible team selections; ambiguous matches require a choice.
 Filters combine with AND across categories and OR within a category. Option
 counts exclude their own category; result totals and bulk actions include all
-filters. Specialist controls live under **More filters**. Selections persist in
-shared URLs; Reset clears filters. Legacy assessments retain a **Legacy** badge.
+filters. Specialist controls live under **More filters**; the threat-model and
+automatic-assessment filters sit in its legacy section until their removal in
+2.1.0. Selections persist in shared URLs (retired parameters of saved links are
+mapped; see [filters](docs/review-workflows.md#project-review)); Reset clears
+filters. Legacy assessments retain a **Legacy** badge.
 Combined Team and Version selections require team ownership in one of the
 selected project versions; ownership in another release does not match.
 

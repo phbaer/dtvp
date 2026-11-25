@@ -114,6 +114,7 @@ export interface VulnListFilterInput {
     cvssVersionMismatchOnly?: boolean
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
+    awaitingReviewOnly?: boolean
     attributionAgeDays?: number | string | null
     attributionAgeMode?: 'older' | 'younger'
 }
@@ -147,6 +148,7 @@ export interface CompiledVulnListFilters {
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
+    awaitingReviewOnly?: boolean
     attributionAgeActive: boolean
     attributionAgeCutoffMs: number | null
     attributionAgeMode: 'older' | 'younger'
@@ -289,6 +291,7 @@ type SmartSearchField =
     | 'tmrescore'
     | 'cvss'
     | 'findings'
+    | 'review'
 
 export interface SmartSearchChip {
     field: SmartSearchField
@@ -313,6 +316,7 @@ export interface ParsedVulnSearchQuery {
     cvssMismatchOnly: boolean
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
+    awaitingReviewOnly?: boolean
 }
 
 const emptyParsedSearch = (raw = ''): ParsedVulnSearchQuery => ({
@@ -331,6 +335,7 @@ const emptyParsedSearch = (raw = ''): ParsedVulnSearchQuery => ({
     cvssMismatchOnly: false,
     notRescoredOnly: false,
     newFindingsOnly: false,
+    awaitingReviewOnly: false,
 })
 
 const tokenizeSearchQuery = (query: string): string[] => {
@@ -362,15 +367,15 @@ const lifecycleAlias = (value: string): string | null => {
         INCOMPLETE: 'INCOMPLETE',
         INCONSISTENT: 'INCONSISTENT',
         CONFLICTING: 'INCONSISTENT',
-        NEEDS_APPROVAL: 'READY_FOR_APPROVAL',
-        NEEDS_REVIEW: 'READY_FOR_APPROVAL',
-        PENDING: 'READY_FOR_APPROVAL',
-        PENDING_REVIEW: 'READY_FOR_APPROVAL',
         READY_FOR_APPROVAL: 'READY_FOR_APPROVAL',
         APPROVAL_READY: 'READY_FOR_APPROVAL',
     }
     return aliases[normalized] || null
 }
+
+// "Needs approval" and "pending review" meant any pending review: Awaiting review.
+const isAwaitingReviewAlias = (value: string) =>
+    ['NEEDS_APPROVAL', 'NEEDS_REVIEW', 'PENDING', 'PENDING_REVIEW', 'AWAITING_REVIEW', 'AWAITING'].includes(upperKey(value))
 
 const analysisAlias = (value: string): string | null => {
     const normalized = upperKey(value)
@@ -472,6 +477,11 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 break
             }
             case 'lifecycle': {
+                if (isAwaitingReviewAlias(rawValue)) {
+                    parsed.awaitingReviewOnly = true
+                    addChip('review', 'Awaiting review', 'awaiting-review')
+                    break
+                }
                 const lifecycle = lifecycleAlias(rawValue)
                 if (lifecycle) {
                     pushUnique(parsed.lifecycleTerms, lifecycle)
@@ -481,6 +491,11 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
             }
             case 'analysis':
             case 'state': {
+                if (isAwaitingReviewAlias(rawValue)) {
+                    parsed.awaitingReviewOnly = true
+                    addChip('review', 'Awaiting review', 'awaiting-review')
+                    break
+                }
                 const lifecycle = lifecycleAlias(rawValue)
                 const analysis = analysisAlias(rawValue)
                 if (lifecycle) {
@@ -519,6 +534,9 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 } else if (['NEW', 'NEW_FINDING', 'NEW_FINDINGS'].includes(normalized)) {
                     parsed.newFindingsOnly = true
                     addChip('findings', 'Has: new findings', 'new')
+                } else if (['AWAITING_REVIEW', 'PENDING_REVIEW', 'REVIEW'].includes(normalized)) {
+                    parsed.awaitingReviewOnly = true
+                    addChip('review', 'Has: awaiting review', 'awaiting-review')
                 }
                 break
             }
@@ -946,6 +964,7 @@ export function compileVulnListFilters(
         cvssVersionMismatchOnly: !!filters.cvssVersionMismatchOnly,
         notRescoredOnly: !!filters.notRescoredOnly,
         newFindingsOnly: !!filters.newFindingsOnly,
+        awaitingReviewOnly: !!filters.awaitingReviewOnly,
         attributionAgeActive: filters.attributionAgeDays != null,
         attributionAgeCutoffMs: normalizedAgeDays == null ? null : nowMs - normalizedAgeDays * DAY_MS,
         attributionAgeMode: filters.attributionAgeMode || 'older',
@@ -1079,6 +1098,9 @@ export function matchesSmartSearch(
     if (parsed.newFindingsOnly && !item.hasNewFindings) {
         return false
     }
+    if (parsed.awaitingReviewOnly && !item.isPending) {
+        return false
+    }
 
     return true
 }
@@ -1164,6 +1186,10 @@ export function matchesCompiledListFilters(
     }
 
     if (filters.newFindingsOnly && !item.hasNewFindings) {
+        return false
+    }
+
+    if (filters.awaitingReviewOnly && !item.isPending) {
         return false
     }
 

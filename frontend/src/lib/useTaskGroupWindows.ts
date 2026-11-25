@@ -10,6 +10,8 @@ type MaybePromise<T> = T | Promise<T>
 // mounts and tabs, not per mount: a remounted page that started again at 1
 // lost every request to the previous mount's still running one (409).
 let lastGeneration = 0
+// The server's largest page (GET /tasks/{id}/groups, ``limit``).
+const MAX_WINDOW_LIMIT = 1000
 export function nextGeneration(): number {
     lastGeneration = Math.max(lastGeneration + 1, Date.now())
     return lastGeneration
@@ -159,11 +161,19 @@ export function useTaskGroupWindows({
         partialVersionsTotal.value = status.partial_total_versions ?? partialVersionsTotal.value
     }
 
-    const loadWindow = async (options: { reset?: boolean, retried?: boolean } = {}) => {
+    /**
+     * Loads the first window again (``reset``, the default) or the next one.
+     * ``keepPosition`` refreshes in place: the rows already loaded are asked
+     * for again (up to the server's page limit), the list is not cleared
+     * first, and the visible window and scroll position stay; the caller
+     * keeps the selection steady (listSelectionAnchor).
+     */
+    const loadWindow = async (options: { reset?: boolean, retried?: boolean, keepPosition?: boolean } = {}) => {
         const taskId = currentTaskId.value
         if (!taskId) return
 
         const shouldReset = options.reset !== false
+        const keepPosition = shouldReset && options.keepPosition === true
         const querySnapshot: TaskVulnGroupListQuery = { ...query.value }
         const shouldDeferCounts = shouldReset && (
             typeof deferCountsOnReset === 'function'
@@ -171,7 +181,7 @@ export function useTaskGroupWindows({
                 : deferCountsOnReset
         )
         if (shouldReset) {
-            windowLoading.value = true
+            if (!keepPosition) windowLoading.value = true
             windowError.value = ''
             if (shouldDeferCounts) counts.value = null
         } else {
@@ -186,7 +196,7 @@ export function useTaskGroupWindows({
         generation = nextGeneration()
         const pageQuery: TaskVulnGroupListQuery = {
             ...querySnapshot,
-            limit,
+            limit: keepPosition ? Math.min(MAX_WINDOW_LIMIT, Math.max(limit, groups.value.length)) : limit,
             generation,
         }
         if (shouldReset) {
@@ -223,7 +233,7 @@ export function useTaskGroupWindows({
             partialPublishInProgress.value = !!window.partial_publish_in_progress
             versionsCompleted.value = window.versions_completed ?? versionsCompleted.value
             versionsTotal.value = window.versions_total ?? versionsTotal.value
-            if (shouldReset) onResetVisibleItems?.()
+            if (shouldReset && !keepPosition) onResetVisibleItems?.()
             if (shouldDeferCounts) {
                 void refreshCounts(taskId, querySnapshot, activeRequestId)
             }

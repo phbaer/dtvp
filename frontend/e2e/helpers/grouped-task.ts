@@ -42,7 +42,9 @@ const countsForGroups = (groups: GroupedTaskItem[]) => {
     const team_tags: Record<string, { open: number; assessed: number }> = {};
     const analysis: Record<string, number> = {};
     const dependency_relationship = { direct: 0, transitive: 0, unknown: 0 };
+    let awaiting_review = 0;
     for (const group of groups) {
+        if (group.list_metadata?.is_pending) awaiting_review++;
         for (const key of Object.keys(lifecycle)) if (matchesLifecycle(group, [key])) lifecycle[key]!++;
         const state = group.list_metadata?.technical_state || 'NOT_SET';
         analysis[state] = (analysis[state] || 0) + 1;
@@ -55,7 +57,7 @@ const countsForGroups = (groups: GroupedTaskItem[]) => {
             else count.open++;
         }
     }
-    return { total: groups.length, lifecycle, analysis, dependency_relationship, tags, team_tags, cvss_version_mismatch: 0 };
+    return { total: groups.length, lifecycle, analysis, dependency_relationship, tags, team_tags, cvss_version_mismatch: 0, awaiting_review };
 };
 
 export async function mockGroupedVulnTask(
@@ -76,6 +78,7 @@ export async function mockGroupedVulnTask(
         const team = (url.searchParams.get('team') || '').toLowerCase();
         const teamAssessment = url.searchParams.get('team_assessment') || 'ANY';
         const selectedTeams = [...url.searchParams.getAll('teams'), ...(team ? [team] : [])].map(name => name.toLowerCase());
+        const awaitingReview = url.searchParams.get('awaiting_review') === 'true';
         const textTerms = (url.searchParams.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean);
         const filteredGroups = groups.filter(group => {
             const tags = (group.tags || []).map((tag: string) => tag.toLowerCase());
@@ -88,6 +91,7 @@ export async function mockGroupedVulnTask(
             const selected = tags.filter((tag: string) => tag !== 'unassigned' && selectedTeams.includes(tag));
             const status = !selected.length ? null : selected.some((tag: string) => !assessed.has(tag)) ? 'MISSING' : 'DOCUMENTED';
             if (selectedTeams.length && teamAssessment !== 'ANY' && status !== teamAssessment) return false;
+            if (awaitingReview && !group.list_metadata?.is_pending) return false;
             return matchesLifecycle(group, lifecycleFilters);
         });
         const requestedOffset = url.searchParams.get('cursor') || url.searchParams.get('offset') || '0';

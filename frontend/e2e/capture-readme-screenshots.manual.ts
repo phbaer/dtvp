@@ -1177,6 +1177,7 @@ async function mockCommonShell(page: Page) {
             unknown: 0,
         },
         cvss_version_mismatch: 0,
+        awaiting_review: 1,
         ids: Object.fromEntries(docsGroupedVulns.map((group) => [group.id, 1])),
         versions: { '1.0.0': 1, '1.1.0': 1, '2.0.0': docsGroupedVulns.length },
         tags: { PlatformTeam: 4, EdgeTeam: 2, RuntimeTeam: 1, UXTeam: 2 },
@@ -1208,7 +1209,35 @@ async function mockCommonShell(page: Page) {
         'Processed version 2.0.0 (3/3)...',
         'Grouping vulnerabilities...',
     ]
-    const docsTaskWindowResponse = (url: URL, items = docsGroupedVulns) => {
+    // Status and analysis state of each fixture vulnerability, as the cards
+    // show them; the mock counts the listed ones the way the server does.
+    const docsListStates: Record<string, [string, string]> = {
+        'CVE-2024-9999': ['INCONSISTENT', 'IN_TRIAGE'],
+        'CVE-2023-1111': ['OPEN', 'NOT_SET'],
+        'CVE-2022-5555': ['ASSESSED', 'NOT_AFFECTED'],
+        'CVE-2024-3001': ['NEEDS_APPROVAL', 'FALSE_POSITIVE'],
+        'CVE-2024-4002': ['INCOMPLETE', 'IN_TRIAGE'],
+        'CVE-2024-5003': ['INCONSISTENT', 'IN_TRIAGE'],
+        'CVE-2024-6004': ['ASSESSED', 'NOT_AFFECTED'],
+    }
+    const statusCountsFor = (items: any[]) => {
+        const lifecycle: Record<string, number> = { OPEN: 0, ASSESSED: 0, ASSESSED_LEGACY: 0, INCOMPLETE: 0, INCONSISTENT: 0, NEEDS_APPROVAL: 0, READY_FOR_APPROVAL: 0 }
+        const analysis: Record<string, number> = { NOT_SET: 0, EXPLOITABLE: 0, IN_TRIAGE: 0, RESOLVED: 0, FALSE_POSITIVE: 0, NOT_AFFECTED: 0 }
+        for (const item of items) {
+            const [status, state] = docsListStates[item.id] || ['OPEN', 'NOT_SET']
+            lifecycle[status] = (lifecycle[status] || 0) + 1
+            if (status === 'NEEDS_APPROVAL') lifecycle.READY_FOR_APPROVAL! += 1
+            analysis[state] = (analysis[state] || 0) + 1
+        }
+        return { lifecycle, analysis }
+    }
+    const isAwaitingReview = (group: any) => group.list_metadata?.is_pending
+        ?? (group.affected_versions || []).some((version: any) => (version.components || [])
+            .some((component: any) => String(component.analysis_details || '').includes('[Status: Pending Review]')))
+    const docsTaskWindowResponse = (url: URL, allItems = docsGroupedVulns) => {
+        const items = url.searchParams.get('awaiting_review') === 'true'
+            ? allItems.filter(isAwaitingReview)
+            : allItems
         const automaticAssessmentFilter = url.searchParams.getAll('automatic_assessment')
         const filteredItems = automaticAssessmentFilter.includes('WITH_AUTOMATIC_ASSESSMENT') &&
             !automaticAssessmentFilter.includes('WITHOUT_AUTOMATIC_ASSESSMENT')
@@ -1219,6 +1248,7 @@ async function mockCommonShell(page: Page) {
                 : items
         const filteredCounts = {
             ...docsGroupCounts,
+            ...statusCountsFor(filteredItems),
             total: filteredItems.length,
             automatic_assessment: automaticAssessmentCountsFor(filteredItems),
         }
@@ -1712,6 +1742,36 @@ test.describe('Capture README screenshots', () => {
         await captureWithPadding(sidebar, '../docs/screenshots/statistics-sidebar.png', 0)
     })
 
+    test('capture filter sidebar and drawer screenshots', async ({ page }) => {
+        await page.setViewportSize({ width: 1800, height: 2200 })
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+        await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
+        await page.waitForTimeout(500)
+
+        const sidebar = page.getByTestId('stats-sidebar')
+        await captureWithPadding(sidebar, '../docs/screenshots/filter-sidebar.png', 0)
+
+        await sidebar.getByText('More filters', { exact: true }).click()
+        await page.waitForTimeout(300)
+        await captureWithPadding(sidebar, '../docs/screenshots/filter-sidebar-more.png', 0)
+        await sidebar.getByText('More filters', { exact: true }).click()
+
+        // The reviewer's preset: everything submitted and not yet approved.
+        await sidebar.getByTestId('filter-preset-awaiting-review').click()
+        await expect(page.getByTestId('project-toolbar').getByText('Awaiting review', { exact: true })).toBeVisible({ timeout: 10000 })
+        await page.waitForTimeout(500)
+        await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/filter-awaiting-review.png')
+        await sidebar.getByTestId('filter-preset-all').click()
+
+        // Below the rail breakpoint the same panel opens as a drawer.
+        await page.setViewportSize({ width: 900, height: 1300 })
+        await page.getByTitle('Open filters').click()
+        await expect(page.locator('aside').getByTestId('stats-sidebar')).toBeVisible({ timeout: 10000 })
+        await page.waitForTimeout(300)
+        await page.screenshot({ path: '../docs/screenshots/filter-drawer.png' })
+    })
+
     test('capture assignee filter screenshot', async ({ page }) => {
         await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
@@ -1739,6 +1799,7 @@ test.describe('Capture README screenshots', () => {
 
         const sidebar = page.getByTestId('stats-sidebar')
         await sidebar.getByText('More filters', { exact: true }).click()
+        await sidebar.getByText('Legacy analysis filters', { exact: true }).click()
         await expect(sidebar.getByText('Automatic Assessment', { exact: true })).toBeVisible({ timeout: 10000 })
 
         const automaticAssessmentFilters = sidebar
@@ -1746,7 +1807,7 @@ test.describe('Capture README screenshots', () => {
             .locator('..')
         const missingButton = automaticAssessmentFilters.getByRole('button', { name: /^missing\b/i })
         await missingButton.click()
-        await expect(page.getByText('Auto: available', { exact: true })).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('Automatic assessment: available', { exact: true })).toBeVisible({ timeout: 10000 })
         await expect(autoCard).toBeVisible({ timeout: 10000 })
         await page.waitForTimeout(500)
 

@@ -330,8 +330,12 @@ test.describe('Vulnerability View and Rescoring', () => {
         await page.reload();
         await expect(coverage).toHaveValue('DOCUMENTED');
         await expect(page.locator('.vuln-card')).toHaveCount(1);
-        await page.getByTestId('workflow-view-all').click();
-        await expect(page.locator('.vuln-card')).toHaveCount(4);
+        // The All preset sets every status and clears the selected teams'
+        // assessment restriction; the team selection stays.
+        await page.getByTestId('filter-preset-all').click();
+        await expect(coverage).toHaveValue('ANY');
+        await expect.poll(() => new URL(page.url()).searchParams.getAll('teams')).toEqual(['Security']);
+        await expect(page.locator('.vuln-card')).toHaveCount(5);
     });
 
     test('ambiguous team tokens require an explicit choice', async ({ page }) => {
@@ -346,13 +350,17 @@ test.describe('Vulnerability View and Rescoring', () => {
         await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
     });
 
-    test('reviewers start with all statuses and can explicitly select approval-ready work', async ({ page }) => {
+    test('reviewers start on Awaiting review and can explicitly select approval-ready work', async ({ page }) => {
         await page.goto('/project/TestProject');
         const cards = page.locator('.vuln-card');
         const ready = cards.filter({ hasText: 'CVE-READY' });
         await expect(ready.getByTestId('lifecycle-badge')).toHaveText('Ready for approval');
+        await expect(page.getByTestId('filter-preset-awaiting-review')).toHaveAttribute('aria-pressed', 'true');
+        await page.getByTestId('filter-preset-all').click();
         await expect(cards).toHaveCount(5);
-        await page.getByTestId('workflow-view-approval').click();
+        const sidebar = page.getByTestId('stats-sidebar');
+        for (const status of [/^Open\s/, /^Assessed\s/]) await sidebar.getByRole('button', { name: status }).click();
+        await sidebar.getByRole('button').and(sidebar.getByTitle('Missing assessment coverage or conflicting data that needs repair', { exact: true })).click();
         await expect(cards).toHaveCount(1);
         await expect(page.getByRole('button', { name: /^Needs Approval/ })).toHaveCount(0);
         await expect(page.getByRole('button', { name: /^Assessed \(Legacy\)/ })).toHaveCount(0);
@@ -360,7 +368,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         await page.getByRole('button').and(page.getByTitle('Missing assessment coverage or conflicting data that needs repair', { exact: true })).click();
         await expect(cards.filter({ hasText: 'CVE-PARTIAL' }).getByTestId('lifecycle-badge')).toHaveText('Incomplete');
         await expect(cards).toHaveCount(2);
-        await page.getByRole('button', { name: /^Ready for Approval\s/ }).click();
+        await page.getByRole('button', { name: /^Ready for approval\s/i }).click();
         await expect(ready).toHaveCount(0);
         await expect(cards).toHaveCount(1);
 

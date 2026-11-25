@@ -168,6 +168,7 @@ describe('useProjectVulnFilters', () => {
                 cvss_mismatch: 'true',
                 not_rescored: 'true',
                 new_findings: 'true',
+                awaiting_review: 'true',
                 attributed_before_days: '14',
                 attribution_mode: 'younger',
                 sort: 'id',
@@ -201,6 +202,8 @@ describe('useProjectVulnFilters', () => {
         expect(filters.filterUrl.value).toContain('not_rescored=true')
         expect(filters.newFindingsOnly.value).toBe(true)
         expect(filters.filterUrl.value).toContain('new_findings=true')
+        expect(filters.awaitingReviewOnly.value).toBe(true)
+        expect(filters.filterUrl.value).toContain('awaiting_review=true')
         expect(filters.attributionAgeDays.value).toBe(14)
         expect(filters.attributionAgeMode.value).toBe('younger')
         expect(filters.sortBy.value).toBe('id')
@@ -369,5 +372,124 @@ describe('useProjectVulnFilters', () => {
         expect(query.order).toBe('desc')
 
         wrapper.unmount()
+    })
+
+    it('keeps awaiting review in the address bar and the copied link alike', async () => {
+        vi.useFakeTimers()
+        const { filters, wrapper, router } = mountHarness({ role: 'ANALYST' })
+        await nextTick()
+        expect(filters.awaitingReviewOnly.value).toBe(false)
+        filters.handleFilterUpdate({ ...filters.filterState.value, awaitingReviewOnly: true })
+        expect(filters.filterUrl.value).toContain('awaiting_review=true')
+        await vi.advanceTimersByTimeAsync(250)
+        const query = router.replace.mock.lastCall![0].query
+        expect(query.awaiting_review).toBe('true')
+        // The link is built from the same query as the address bar.
+        const linkParams = new URL(filters.filterUrl.value).searchParams
+        expect(Object.fromEntries(linkParams)).toEqual(Object.fromEntries(
+            Object.entries(query).map(([key, value]) => [key, Array.isArray(value) ? String(value.at(-1)) : String(value)]),
+        ))
+        filters.resetFilters()
+        expect(filters.awaitingReviewOnly.value).toBe(false)
+        expect(filters.filterUrl.value).not.toContain('awaiting_review')
+        vi.useRealTimers()
+        wrapper.unmount()
+    })
+
+    it('maps retired parameters of saved links to their replacements', async () => {
+        vi.useFakeTimers()
+        const { filters, wrapper, router } = mountHarness({
+            role: 'REVIEWER',
+            query: {
+                tag: 'Platform',
+                cve: 'CVE-2026-1',
+                auto_assessment: 'with_automatic_assessment',
+                age_days: '30',
+                lifecycle: ['READY_FOR_APPROVAL', 'CONFLICTING'],
+            },
+        })
+        await nextTick()
+        expect(filters.teamFilters.value).toEqual(['Platform'])
+        expect(filters.idFilter.value).toBe('CVE-2026-1')
+        expect(filters.selectedAutomaticAssessmentFilters.value).toEqual(['WITH_AUTOMATIC_ASSESSMENT'])
+        expect(filters.attributionAgeDays.value).toBe(30)
+        expect(filters.lifecycleFilters.value).toEqual(['READY_FOR_APPROVAL', 'INCOMPLETE'])
+        // An old link with other filters and no awaiting_review: off, also for reviewers.
+        expect(filters.awaitingReviewOnly.value).toBe(false)
+        filters.handleFilterUpdate({ ...filters.filterState.value, sortBy: 'id' })
+        await vi.advanceTimersByTimeAsync(250)
+        const query = router.replace.mock.lastCall![0].query
+        expect(query).toMatchObject({ teams: ['Platform'], id: 'CVE-2026-1', attributed_before_days: '30' })
+        for (const retired of ['tag', 'cve', 'auto_assessment', 'age_days']) expect(query).not.toHaveProperty(retired)
+        vi.useRealTimers()
+        wrapper.unmount()
+    })
+
+    it('maps an old needs-approval link to Awaiting review', async () => {
+        const { filters, wrapper } = mountHarness({ role: 'ANALYST', query: { lifecycle: 'NEEDS_APPROVAL' } })
+        await nextTick()
+        expect(filters.awaitingReviewOnly.value).toBe(true)
+        expect(filters.lifecycleFilters.value).toEqual(['OPEN', 'INCOMPLETE', 'READY_FOR_APPROVAL', 'ASSESSED'])
+        expect(filters.filterUrl.value).toContain('awaiting_review=true')
+        expect(filters.filterUrl.value).not.toContain('NEEDS_APPROVAL')
+        wrapper.unmount()
+        // Combined with another status it was an OR; the nearest status stays.
+        const mixed = mountHarness({ role: 'ANALYST', query: { lifecycle: ['OPEN', 'NEEDS_APPROVAL'] } })
+        await nextTick()
+        expect(mixed.filters.awaitingReviewOnly.value).toBe(false)
+        expect(mixed.filters.lifecycleFilters.value).toEqual(['OPEN', 'READY_FOR_APPROVAL'])
+        mixed.wrapper.unmount()
+    })
+
+    it('starts reviewers on Awaiting review as a role default that explicit choices override', async () => {
+        vi.useFakeTimers()
+        const { filters, wrapper, router, role } = mountHarness({ role: 'REVIEWER' })
+        await nextTick()
+        expect(filters.awaitingReviewOnly.value).toBe(true)
+        expect(filters.defaultAwaitingReviewOnly.value).toBe(true)
+        // Written while on, so a reload with the sort in the URL keeps it.
+        expect(filters.filterUrl.value).toContain('awaiting_review=true')
+
+        // Untouched, it follows the role.
+        role.value = 'ANALYST'
+        await nextTick()
+        expect(filters.awaitingReviewOnly.value).toBe(false)
+        role.value = 'REVIEWER'
+        await nextTick()
+        expect(filters.awaitingReviewOnly.value).toBe(true)
+
+        // Turned off by the reviewer: explicit, survives a role change and the URL.
+        filters.handleFilterUpdate({ ...filters.filterState.value, awaitingReviewOnly: false })
+        await vi.advanceTimersByTimeAsync(250)
+        expect(router.replace.mock.lastCall![0].query.awaiting_review).toBe('false')
+        role.value = 'ANALYST'
+        await nextTick()
+        role.value = 'REVIEWER'
+        await nextTick()
+        expect(filters.awaitingReviewOnly.value).toBe(false)
+
+        // Reset returns to the role default.
+        filters.resetFilters()
+        expect(filters.awaitingReviewOnly.value).toBe(true)
+        vi.useRealTimers()
+        wrapper.unmount()
+
+        const analyst = mountHarness({ role: 'ANALYST' })
+        await nextTick()
+        expect(analyst.filters.awaitingReviewOnly.value).toBe(false)
+        expect(analyst.filters.filterUrl.value).not.toContain('awaiting_review')
+        analyst.wrapper.unmount()
+    })
+
+    it('reads the reviewer default from a URL that holds only the sort, and off from an explicit one', async () => {
+        const sortOnly = mountHarness({ role: 'REVIEWER', query: { sort: 'id', order: 'asc' } })
+        await nextTick()
+        expect(sortOnly.filters.awaitingReviewOnly.value).toBe(true)
+        sortOnly.wrapper.unmount()
+        const off = mountHarness({ role: 'REVIEWER', query: { awaiting_review: 'false', sort: 'id', order: 'asc' } })
+        await nextTick()
+        expect(off.filters.awaitingReviewOnly.value).toBe(false)
+        expect(off.filters.filterUrl.value).toContain('awaiting_review=false')
+        off.wrapper.unmount()
     })
 })

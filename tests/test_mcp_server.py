@@ -146,6 +146,32 @@ async def test_search_returns_compact_rows(service):
     assert none["project_total"] == 1
 
 
+async def test_search_without_pending_review_finds_nothing_awaiting_review(service):
+    result = await service.search_vulnerabilities(
+        _token(["read"]), project="TestApp", awaiting_review=True
+    )
+    assert result["matching"] == 0 and result["items"] == []
+    assert result["project_total"] == 1
+
+
+async def test_search_filters_vulnerabilities_awaiting_review(service, project):
+    # A team's submission, not approved yet, on one version only: the
+    # vulnerability waits for a reviewer whatever its lifecycle.
+    project["p1"][0]["analysis"]["analysisDetails"] = (
+        EXISTING + "\n\n[Status: Pending Review]"
+    )
+    result = await service.search_vulnerabilities(
+        _token(["read"]), project="TestApp", awaiting_review=True
+    )
+    assert result["matching"] == 1
+    row = result["items"][0]
+    assert row["id"] == "CVE-2026-0001" and row["pending_review"] is True
+    narrowed = await service.search_vulnerabilities(
+        _token(["read"]), project="TestApp", awaiting_review=True, lifecycle=["OPEN"]
+    )
+    assert narrowed["matching"] == 0
+
+
 async def test_unknown_project_and_vulnerability_are_explained(service):
     with pytest.raises(McpToolError, match="Unknown project"):
         await service.search_vulnerabilities(_token(["read"]), project="Nope")

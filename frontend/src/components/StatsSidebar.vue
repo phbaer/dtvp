@@ -14,6 +14,14 @@ import type {
     AutomaticAssessmentOutcome,
     AutomaticAssessmentRescoreState,
 } from '../lib/automaticAssessmentFilters'
+import {
+    FILTER_PRESETS,
+    activeFilterPreset,
+    applyFilterPreset,
+    type FilterOption,
+    type FilterPresetKey,
+    type FilterState,
+} from '../lib/projectVulnFilterPresets'
 
 export interface TeamEntry {
     team: string
@@ -28,43 +36,9 @@ interface TeamGroupTreeEntry extends TeamEntry {
     depth: number
 }
 
-export interface FilterOption {
-    value: string
-    label: string
-    color: string
-    description?: string
-}
-
-export interface FilterState {
-    originalSeverityFilters?: string[]
-    ssvcFilters?: string[]
-    evidenceFilters?: string[]
-    sortBy: string
-    sortOrder: 'asc' | 'desc'
-    dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
-    tmrescoreFilter: Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>
-    automaticAssessmentFilter: Array<'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'>
-    automaticAssessmentOutcomeFilter: AutomaticAssessmentOutcome[]
-    automaticAssessmentRescoreFilter: AutomaticAssessmentRescoreState[]
-    idFilter: string
-    teamFilters?: string[]
-    tagFilter: string
-    teamAssessmentFilter?: string
-    componentFilter: string
-    versionFilterInput: string
-    lifecycleFilters: string[]
-    inconsistencyReasonFilters?: InconsistencyReason[]
-    analysisFilters: string[]
-    cvssVersionMismatchOnly: boolean
-    notRescoredOnly?: boolean
-    newFindingsOnly?: boolean
-    assigneeFilter: string
-    attributionAgeDays: number | null
-    attributionAgeMode: 'older' | 'younger'
-}
-
 const props = defineProps<{
     filters: FilterState
+    hasCustomFilters?: boolean
     availableVersions: string[]
     lifecycleOptions: FilterOption[]
     inconsistencyReasonOptions: ReadonlyArray<Omit<FilterOption, 'color'>>
@@ -91,6 +65,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     'update:filters': [filters: FilterState]
     'copy-filter-url': []
+    'reset-filters': []
 }>()
 
 const priorityFacets = [
@@ -151,15 +126,58 @@ const toggleAutomaticAssessmentRescoreFilter = (value: AutomaticAssessmentRescor
     updateFilter('automaticAssessmentRescoreFilter', current)
 }
 
-const statusViews = computed(() => [
-    { key: 'analyst-work', label: 'Analyst work', detail: 'Open + Incomplete', statuses: ['OPEN', 'INCOMPLETE'] },
-    { key: 'all', label: 'All statuses', detail: 'Every status', statuses: props.lifecycleOptions.map(option => option.value) },
-    { key: 'approval', label: 'Approval queue', detail: 'Ready for approval', statuses: ['READY_FOR_APPROVAL'] },
-])
-const activeStatusView = computed(() => statusViews.value.find(view =>
-    view.statuses.length === props.filters.lifecycleFilters.length
-    && view.statuses.every(status => props.filters.lifecycleFilters.includes(status))
-)?.key)
+const presetContext = computed(() => ({
+    inconsistencyReasons: props.inconsistencyReasonOptions.map(option => option.value as InconsistencyReason),
+}))
+const activePreset = computed(() => activeFilterPreset(props.filters, presetContext.value))
+const applyPreset = (key: FilterPresetKey) => {
+    emit('update:filters', applyFilterPreset(props.filters, key, presetContext.value))
+}
+
+const facets = computed(() => props.facetCounts || props.resultCounts)
+const hasTeamSelection = computed(() => !!(props.filters.teamFilters?.length || props.filters.tagFilter))
+
+// Progressive disclosure: the summaries say how many hidden filters are set.
+const legacyActiveCount = computed(() => [
+    props.filters.tmrescoreFilter.length !== props.tmrescoreOptions.length,
+    props.filters.automaticAssessmentFilter.length !== props.automaticAssessmentOptions.length,
+    props.filters.automaticAssessmentOutcomeFilter.length !== props.automaticAssessmentOutcomeOptions.length,
+    props.filters.automaticAssessmentRescoreFilter.length !== props.automaticAssessmentRescoreOptions.length,
+].filter(Boolean).length)
+const moreActiveCount = computed(() => [
+    (props.filters.inconsistencyReasonFilters || []).length > 0,
+    !!props.filters.newFindingsOnly,
+    (props.filters.originalSeverityFilters || []).length > 0,
+    (props.filters.ssvcFilters || []).length > 0,
+    (props.filters.evidenceFilters || []).length > 0,
+    props.filters.dependencyFilter.length !== props.dependencyOptions.length,
+    !!props.filters.notRescoredOnly,
+    props.filters.cvssVersionMismatchOnly,
+    props.filters.attributionAgeDays != null,
+].filter(Boolean).length + legacyActiveCount.value)
+
+const chipClass = (active: boolean, activeClass: string) => [
+    'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 inline-flex items-center gap-1.5',
+    active ? activeClass : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white',
+]
+
+const versionSearch = ref('')
+const versionSearchInput = ref<HTMLInputElement | null>(null)
+const selectedVersions = computed(() => props.filters.versionFilterInput
+    .split(',').map(v => v.trim()).filter(Boolean))
+const isVersionSelected = (version: string) =>
+    selectedVersions.value.some(v => v.toLowerCase() === version.toLowerCase())
+const versionOptions = computed(() => {
+    const query = versionSearch.value.trim().toLowerCase()
+    return props.availableVersions.filter(version => !query || version.toLowerCase().includes(query))
+})
+const toggleVersion = (version: string) => {
+    const next = isVersionSelected(version)
+        ? selectedVersions.value.filter(v => v.toLowerCase() !== version.toLowerCase())
+        : [...selectedVersions.value, version]
+    versionSearch.value = ''
+    updateFilter('versionFilterInput', next.join(', '))
+}
 
 const toggleLifecycleFilter = (val: string) => {
     const current = [...props.filters.lifecycleFilters]
@@ -481,370 +499,348 @@ const handleCopy = () => {
             </div>
             <div class="p-3.5 space-y-3 relative">
                 <div v-if="activeTab === 'scope-search'" class="space-y-3">
-                    <div class="space-y-3">
-                        <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
-                            <div class="space-y-2.5">
-                                <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
-                                    <div class="flex flex-col gap-1">
-                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Sort By</label>
-                                        <CustomSelect
-                                            :modelValue="props.filters.sortBy"
-                                            @update:modelValue="(value) => updateFilter('sortBy', value)"
-                                            :options="[...props.sortOptions]"
+                    <section class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm" aria-labelledby="filter-presets-legend">
+                        <h3 id="filter-presets-legend" class="mb-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-widest">Quick views</h3>
+                        <div class="grid grid-cols-2 gap-1.5">
+                            <button
+                                v-for="preset in FILTER_PRESETS"
+                                :key="preset.key"
+                                type="button"
+                                :data-testid="`filter-preset-${preset.key}`"
+                                :aria-pressed="activePreset === preset.key"
+                                :title="preset.detail"
+                                @click="applyPreset(preset.key)"
+                                :class="[
+                                    'min-h-9 rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400',
+                                    preset.key === 'all' ? 'col-span-2' : '',
+                                    activePreset === preset.key
+                                        ? 'border-blue-400/50 bg-blue-500/15 text-white'
+                                        : 'border-white/10 bg-white/3 text-gray-300 hover:border-white/25 hover:bg-white/5'
+                                ]"
+                            >
+                                {{ preset.label }}
+                            </button>
+                        </div>
+                        <p class="mt-1.5 text-[10px] text-gray-500">
+                            {{ activePreset ? FILTER_PRESETS.find(preset => preset.key === activePreset)?.detail : 'Custom selection' }}. Search, teams, versions and More filters stay.
+                        </p>
+                    </section>
+
+                    <section class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm space-y-3">
+                        <div class="space-y-1.5">
+                            <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Team</label>
+                            <TeamFilter :modelValue="filters.teamFilters || (filters.tagFilter ? [filters.tagFilter] : [])"
+                                :options="teamOptions" :aliases="teamAliases"
+                                @update:modelValue="value => updateFilter('teamFilters', value)" />
+                            <label class="block text-[10px] text-gray-400">
+                                Their assessment
+                                <select aria-label="Assessment for selected teams" data-testid="team-assessment-filter"
+                                    :value="filters.teamAssessmentFilter || 'ANY'"
+                                    :disabled="!hasTeamSelection"
+                                    :aria-describedby="assessmentHelpId"
+                                    @change="updateFilter('teamAssessmentFilter', ($event.target as HTMLSelectElement).value)"
+                                    class="mt-1 block w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-200 disabled:opacity-50">
+                                    <option value="ANY">Any</option>
+                                    <option value="MISSING">Not recorded{{ hasTeamSelection ? ` (${countLabel(facets.team_assessment?.MISSING)})` : '' }}</option>
+                                    <option value="DOCUMENTED">Recorded{{ hasTeamSelection ? ` (${countLabel(facets.team_assessment?.DOCUMENTED)})` : '' }}</option>
+                                </select>
+                            </label>
+                            <p :id="assessmentHelpId" class="text-[10px] text-gray-500">{{ hasTeamSelection ? 'Recorded includes pending approval. Not recorded: a selected responsible team has none.' : 'Select a team first.' }}</p>
+                        </div>
+
+                        <div class="space-y-1.5">
+                            <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Status</label>
+                            <button
+                                type="button"
+                                data-testid="filter-awaiting-review"
+                                :aria-pressed="!!filters.awaitingReviewOnly"
+                                title="Submitted for review and not yet approved: Ready for approval, a team's submission while other teams are open, and proposals saved pending review"
+                                @click="updateFilter('awaitingReviewOnly', !filters.awaitingReviewOnly)"
+                                :class="[
+                                    'flex w-full min-h-9 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400',
+                                    filters.awaitingReviewOnly
+                                        ? 'border-violet-400/50 bg-violet-500/20 text-white'
+                                        : 'border-white/10 bg-white/3 text-gray-300 hover:border-white/25 hover:bg-white/5'
+                                ]"
+                            >
+                                <span>Awaiting review only</span>
+                                <span class="rounded-md bg-black/20 px-1.5 py-0.5 text-[10px] tabular-nums">{{ countLabel(facets.awaiting_review) }}</span>
+                            </button>
+                            <div class="flex flex-wrap gap-1.5 items-center">
+                                <button
+                                    v-for="opt in props.lifecycleOptions"
+                                    :key="opt.value"
+                                    type="button"
+                                    @click="toggleLifecycleFilter(opt.value)"
+                                    :aria-pressed="props.filters.lifecycleFilters.includes(opt.value)"
+                                    :title="opt.description"
+                                    :class="chipClass(props.filters.lifecycleFilters.includes(opt.value), `${opt.color} text-white border-transparent`)"
+                                >
+                                    {{ opt.label }}
+                                    <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">
+                                        {{ countLabel(opt.value === 'INCOMPLETE' ? (facets.lifecycle.INCOMPLETE || 0) + (facets.lifecycle.INCONSISTENT || 0) : facets.lifecycle[opt.value]) }}
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1.5">
+                            <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Analysis state</label>
+                            <div class="flex flex-wrap gap-1.5 items-center">
+                                <button
+                                    v-for="opt in props.analysisOptions"
+                                    :key="opt.value"
+                                    type="button"
+                                    @click="toggleAnalysisFilter(opt.value)"
+                                    :aria-pressed="(props.filters.analysisFilters || []).includes(opt.value)"
+                                    :class="chipClass(props.filters.analysisFilters.includes(opt.value), `${opt.color} text-white border-transparent`)"
+                                >
+                                    {{ opt.label }}
+                                    <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.analysis[opt.value]) }}</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1.5" data-testid="version-filter">
+                            <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Project versions</label>
+                            <CustomSelect modelValue="" :options="[]">
+                                <template #trigger="{ open }">
+                                    <div class="flex flex-wrap items-center gap-1 bg-black/40 border border-white/10 rounded-xl px-2 min-h-[2.5rem] cursor-text focus-within:border-blue-500/50"
+                                         @focusin="open" @click="versionSearchInput?.focus()">
+                                        <span v-for="version in selectedVersions" :key="version" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium">
+                                            {{ version }}
+                                            <button type="button" :aria-label="`Remove version ${version}`" @click.stop="toggleVersion(version)" class="hover:text-white text-blue-300/70 leading-none">&times;</button>
+                                        </span>
+                                        <input
+                                            ref="versionSearchInput"
+                                            v-model="versionSearch"
+                                            type="text"
+                                            aria-label="Search project versions"
+                                            :placeholder="selectedVersions.length ? '' : 'All versions'"
+                                            class="flex-1 min-w-[5rem] bg-transparent border-none outline-none text-sm text-gray-200 placeholder:text-gray-500 h-8 px-1"
                                         />
                                     </div>
-                                    <div class="flex flex-col gap-1">
-                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Order</label>
-                                        <button 
-                                            @click="updateFilter('sortOrder', props.filters.sortOrder === 'asc' ? 'desc' : 'asc')"
-                                            class="bg-black/40 border border-white/10 rounded-xl px-2 h-10 text-sm hover:bg-white/5 transition-colors font-medium text-blue-400 border-dashed"
-                                            :title="props.filters.sortOrder === 'asc' ? 'Ascending' : 'Descending'"
+                                </template>
+                                <template #menu>
+                                    <div class="divide-y divide-white/5">
+                                        <button
+                                            v-for="version in versionOptions" :key="version"
+                                            type="button"
+                                            @mousedown.prevent="toggleVersion(version)"
+                                            :class="['w-full text-left px-3 py-1.5 text-sm flex items-center justify-between', isVersionSelected(version) ? 'bg-blue-500/15 text-blue-200' : 'text-gray-300 hover:bg-white/5']"
                                         >
-                                            {{ props.filters.sortOrder === 'asc' ? 'ASC' : 'DESC' }}
+                                            {{ version }}
+                                            <span v-if="isVersionSelected(version)" class="text-blue-400 text-xs">&#10003;</span>
                                         </button>
                                     </div>
-                                </div>
+                                </template>
+                            </CustomSelect>
+                        </div>
 
+                        <div class="grid gap-2 grid-cols-[1fr_auto]">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Sort by</label>
+                                <CustomSelect
+                                    :modelValue="props.filters.sortBy"
+                                    @update:modelValue="(value) => updateFilter('sortBy', value)"
+                                    :options="[...props.sortOptions]"
+                                />
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Order</label>
+                                <button
+                                    type="button"
+                                    @click="updateFilter('sortOrder', props.filters.sortOrder === 'asc' ? 'desc' : 'asc')"
+                                    class="bg-black/40 border border-white/10 rounded-xl px-2 h-10 text-sm hover:bg-white/5 transition-colors font-medium text-blue-400 border-dashed"
+                                    :title="props.filters.sortOrder === 'asc' ? 'Ascending' : 'Descending'"
+                                >
+                                    {{ props.filters.sortOrder === 'asc' ? 'ASC' : 'DESC' }}
+                                </button>
                             </div>
                         </div>
-                        <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
-                            <div class="space-y-3">
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Team</label>
-                                    <TeamFilter :modelValue="filters.teamFilters || (filters.tagFilter ? [filters.tagFilter] : [])"
-                                        :options="teamOptions" :aliases="teamAliases"
-                                        @update:modelValue="value => updateFilter('teamFilters', value)" />
+                    </section>
+
+                    <details class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm group" data-testid="more-filters">
+                        <summary class="cursor-pointer text-sm text-gray-200"><span>More filters</span><span v-if="moreActiveCount" class="ml-2 rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] text-blue-200">{{ moreActiveCount }} active</span></summary>
+                        <div class="mt-3 space-y-3">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Conflict reason</label>
+                                <div class="flex flex-wrap gap-1.5 items-center">
+                                    <button
+                                        v-for="opt in props.inconsistencyReasonOptions"
+                                        :key="opt.value"
+                                        type="button"
+                                        @click="toggleInconsistencyReasonFilter(opt.value as InconsistencyReason)"
+                                        :aria-pressed="(props.filters.inconsistencyReasonFilters || []).includes(opt.value as InconsistencyReason)"
+                                        :title="opt.description"
+                                        :class="chipClass((props.filters.inconsistencyReasonFilters || []).includes(opt.value as InconsistencyReason), 'bg-indigo-500/20 text-indigo-200 border-indigo-400/30')"
+                                    >
+                                        {{ opt.label }}
+                                        <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.inconsistency_reason?.[opt.value as InconsistencyReason]) }}</span>
+                                    </button>
                                 </div>
+                            </div>
 
-
-                                <div class="space-y-2">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">
-                                        Assessment for selected teams
-                                        <select aria-label="Assessment for selected teams" data-testid="team-assessment-filter"
-                                            :value="filters.teamAssessmentFilter || 'ANY'"
-                                            :disabled="!(filters.teamFilters?.length || filters.tagFilter)"
-                                            :aria-describedby="assessmentHelpId"
-                                            @change="updateFilter('teamAssessmentFilter', ($event.target as HTMLSelectElement).value)"
-                                            class="mt-1 block w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-200 normal-case tracking-normal">
-                                            <option value="ANY">Any</option>
-                                            <option value="MISSING">Not recorded{{ filters.teamFilters?.length || filters.tagFilter ? ` (${countLabel((props.facetCounts || props.resultCounts).team_assessment?.MISSING)})` : '' }}</option>
-                                            <option value="DOCUMENTED">Recorded{{ filters.teamFilters?.length || filters.tagFilter ? ` (${countLabel((props.facetCounts || props.resultCounts).team_assessment?.DOCUMENTED)})` : '' }}</option>
-                                        </select>
-                                    </label>
-                                    <p :id="assessmentHelpId" class="text-xs text-gray-400">{{ filters.teamFilters?.length || filters.tagFilter ? 'Recorded includes pending approval. Not recorded means at least one selected responsible team has no assessment.' : 'Select a team first.' }}</p>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Findings and CVSS</label>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button
+                                        type="button"
+                                        data-testid="filter-new-findings"
+                                        @click="updateFilter('newFindingsOnly', !props.filters.newFindingsOnly)"
+                                        :aria-pressed="!!props.filters.newFindingsOnly"
+                                        title="Only vulnerabilities with a finding added after the vulnerability was assessed and not assessed yet"
+                                        :class="chipClass(!!props.filters.newFindingsOnly, 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20')"
+                                    >
+                                        New findings
+                                        <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.new_findings) }}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        @click="updateFilter('notRescoredOnly', !props.filters.notRescoredOnly)"
+                                        :aria-pressed="!!props.filters.notRescoredOnly"
+                                        title="Only vulnerabilities without a rescored CVSS score or vector"
+                                        :class="chipClass(!!props.filters.notRescoredOnly, 'bg-orange-500/15 text-orange-300 border-orange-500/20')"
+                                    >
+                                        Not rescored
+                                        <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.not_rescored) }}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        @click="updateFilter('cvssVersionMismatchOnly', !props.filters.cvssVersionMismatchOnly)"
+                                        :aria-pressed="props.filters.cvssVersionMismatchOnly"
+                                        title="Only vulnerabilities whose rescored vector uses another CVSS version than the original"
+                                        :class="chipClass(props.filters.cvssVersionMismatchOnly, 'bg-orange-500/15 text-orange-300 border-orange-500/20')"
+                                    >
+                                        CVSS version mismatch
+                                        <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.cvss_version_mismatch) }}</span>
+                                    </button>
                                 </div>
+                            </div>
 
-                                <div class="space-y-2">
-                                    <fieldset class="space-y-1.5">
-                                        <legend class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Workflow view</legend>
-                                        <div class="grid gap-1.5">
-                                            <button
-                                                v-for="view in statusViews"
-                                                :key="view.key"
-                                                type="button"
-                                                :data-testid="`workflow-view-${view.key}`"
-                                                :aria-pressed="activeStatusView === view.key"
-                                                @click="updateFilter('lifecycleFilters', [...view.statuses])"
-                                                :class="[
-                                                    'flex min-h-10 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400',
-                                                    activeStatusView === view.key
-                                                        ? 'border-blue-400/50 bg-blue-500/15 text-white'
-                                                        : 'border-white/10 bg-white/3 text-gray-300 hover:border-white/25 hover:bg-white/5'
-                                                ]"
-                                            >
-                                                <span class="font-semibold">{{ view.label }}</span>
-                                                <span class="text-[10px] text-gray-400">{{ view.detail }}</span>
-                                            </button>
-                                        </div>
-                                    </fieldset>
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Overall status</span>
-                                        <span v-if="!activeStatusView" class="text-[10px] text-blue-300">Custom selection</span>
-                                    </div>
-                                    <div class="flex flex-wrap gap-1.5 items-center">
-                                        <button
-                                            v-for="opt in props.lifecycleOptions"
-                                            :key="opt.value"
-                                            @click="toggleLifecycleFilter(opt.value)"
-                                            :aria-pressed="props.filters.lifecycleFilters.includes(opt.value)"
-                                            :title="opt.description"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.lifecycleFilters.includes(opt.value)
-                                                    ? `${opt.color} text-white border-transparent shadow-lg shadow-blue-900/40`
-                                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span
-                                                class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
-                                                :class="props.filters.lifecycleFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
-                                            >
-                                                {{ countLabel(opt.value === 'INCOMPLETE' ? ((props.facetCounts || props.resultCounts).lifecycle.INCOMPLETE || 0) + ((props.facetCounts || props.resultCounts).lifecycle.INCONSISTENT || 0) : (props.facetCounts || props.resultCounts).lifecycle[opt.value]) }}
-                                            </span>
-                                        </button>
-                                    </div>
+                            <div v-for="facet in priorityFacets" :key="facet.key" class="space-y-1" :data-testid="facet.key">
+                                <h4 class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">{{ facet.label }} <span class="normal-case tracking-normal text-gray-600">· none selected = all</span></h4>
+                                <p v-if="facet.countKey === 'evidence'" class="text-[10px] text-gray-400">Cached sources; either selected source matches. CISA is checked when opening the global SSVC calculator. Unchecked is not “no data”; stale matches remain included. Other filters still apply.</p>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button v-for="value in facet.values" :key="value" type="button" :aria-pressed="(props.filters[facet.key] || []).includes(value)" class="rounded-full border px-2 py-1 text-[10px]" :class="(props.filters[facet.key] || []).includes(value) ? 'border-purple-400/50 bg-purple-500/20 text-purple-200' : 'border-white/10 text-gray-400'" @click="togglePriorityFilter(facet.key, value)">
+                                        {{ facet.countKey === 'evidence' ? evidenceLabel(value) : ssvcLabel(value) }} <span class="text-gray-500">{{ countLabel(facets[facet.countKey]?.[value]) }}</span>
+                                    </button>
                                 </div>
+                            </div>
 
-                                <details class="space-y-3"><summary class="cursor-pointer text-sm text-gray-200">More filters</summary>
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Attribution Age</label>
-                                    <AttributionAgeFilter
-                                        :days="props.filters.attributionAgeDays"
-                                        :mode="props.filters.attributionAgeMode"
-                                        :count="props.countsUpdating ? undefined : attributionRangeCount"
-                                        @update:days="updateFilter('attributionAgeDays', $event)"
-                                        @update:mode="updateFilter('attributionAgeMode', $event)"
-                                    />
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Dependency</label>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button
+                                        v-for="opt in props.dependencyOptions"
+                                        :key="opt.value"
+                                        type="button"
+                                        @click="toggleDependencyFilter(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')"
+                                        :aria-pressed="(props.filters.dependencyFilter || []).includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')"
+                                        :class="chipClass(props.filters.dependencyFilter.includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'), opt.value === 'DIRECT' ? 'bg-red-600/15 text-red-300 border-red-500/20' : opt.value === 'TRANSITIVE' ? 'bg-purple-600/10 text-purple-300 border-purple-600/20' : 'bg-slate-700/20 text-slate-300 border-slate-600/20')"
+                                    >
+                                        {{ opt.label }}
+                                        <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.dependency_relationship[opt.value === 'DIRECT' ? 'direct' : opt.value === 'TRANSITIVE' ? 'transitive' : 'unknown']) }}</span>
+                                    </button>
                                 </div>
+                            </div>
 
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Inconsistency Reason</label>
-                                    <div class="flex flex-wrap gap-1.5 items-center">
-                                        <button
-                                            v-for="opt in props.inconsistencyReasonOptions"
-                                            :key="opt.value"
-                                            @click="toggleInconsistencyReasonFilter(opt.value as InconsistencyReason)"
-                                            :aria-pressed="(props.filters.inconsistencyReasonFilters || []).includes(opt.value as InconsistencyReason)"
-                                            :title="opt.description"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                (props.filters.inconsistencyReasonFilters || []).includes(opt.value as InconsistencyReason)
-                                                    ? 'bg-indigo-500/20 text-indigo-200 border-indigo-400/30'
-                                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).inconsistency_reason?.[opt.value as InconsistencyReason]) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Attribution age</label>
+                                <AttributionAgeFilter
+                                    :days="props.filters.attributionAgeDays"
+                                    :mode="props.filters.attributionAgeMode"
+                                    :count="props.countsUpdating ? undefined : attributionRangeCount"
+                                    @update:days="updateFilter('attributionAgeDays', $event)"
+                                    @update:mode="updateFilter('attributionAgeMode', $event)"
+                                />
+                            </div>
 
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Dependency</label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button
-                                            v-for="opt in props.dependencyOptions"
-                                            :key="opt.value"
-                                            @click="toggleDependencyFilter(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')"
-                                            :aria-pressed="(props.filters.dependencyFilter || []).includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.dependencyFilter.includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')
-                                                    ? opt.value === 'DIRECT' ? 'bg-red-600/15 text-red-300 border-red-500/20' : opt.value === 'TRANSITIVE' ? 'bg-purple-600/10 text-purple-300 border-purple-600/20' : 'bg-slate-700/20 text-slate-300 border-slate-600/20'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.dependencyFilter.includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN') ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).dependency_relationship[opt.value === 'DIRECT' ? 'direct' : opt.value === 'TRANSITIVE' ? 'transitive' : 'unknown']) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Threadmodel Proposal</label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button
-                                            v-for="opt in props.tmrescoreOptions"
-                                            :key="opt.value"
-                                            @click="toggleTmrescoreFilter(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')"
-                                            :aria-pressed="(props.filters.tmrescoreFilter || []).includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.tmrescoreFilter.includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')
-                                                    ? opt.value === 'WITH_PROPOSAL' ? 'bg-blue-500 text-white border-blue-500' : 'bg-amber-500 text-white border-amber-500'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.tmrescoreFilter.includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).tmrescore?.[opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Automatic Assessment</label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button
-                                            v-for="opt in props.automaticAssessmentOptions"
-                                            :key="opt.value"
-                                            @click="toggleAutomaticAssessmentFilter(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')"
-                                            :aria-pressed="(props.filters.automaticAssessmentFilter || []).includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')
-                                                    ? opt.value === 'WITH_AUTOMATIC_ASSESSMENT' ? 'bg-cyan-500 text-white border-cyan-500' : 'bg-slate-600/60 text-white border-slate-500'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT') ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).automatic_assessment?.[opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT']) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Auto Analysis Outcome</label>
-                                    <div class="flex flex-wrap gap-2" data-testid="automatic-assessment-outcome-filters">
-                                        <button
-                                            v-for="opt in props.automaticAssessmentOutcomeOptions"
-                                            :key="opt.value"
-                                            @click="toggleAutomaticAssessmentOutcomeFilter(opt.value as AutomaticAssessmentOutcome)"
-                                            :aria-pressed="(props.filters.automaticAssessmentOutcomeFilter || []).includes(opt.value as AutomaticAssessmentOutcome)"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.automaticAssessmentOutcomeFilter.includes(opt.value as AutomaticAssessmentOutcome)
-                                                    ? opt.value === 'AFFECTED' ? 'bg-red-600/80 text-white border-red-500'
-                                                        : opt.value === 'PROBABLY_AFFECTED' ? 'bg-orange-500/80 text-white border-orange-400'
-                                                            : opt.value === 'NOT_AFFECTED' ? 'bg-emerald-600/80 text-white border-emerald-500'
-                                                                : 'bg-amber-600/70 text-white border-amber-500'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentOutcomeFilter.includes(opt.value as AutomaticAssessmentOutcome) ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).automatic_assessment_outcome?.[opt.value as AutomaticAssessmentOutcome]) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Auto Analysis Rescore</label>
-                                    <div class="flex flex-wrap gap-2" data-testid="automatic-assessment-rescore-filters">
-                                        <button
-                                            v-for="opt in props.automaticAssessmentRescoreOptions"
-                                            :key="opt.value"
-                                            @click="toggleAutomaticAssessmentRescoreFilter(opt.value as AutomaticAssessmentRescoreState)"
-                                            :aria-pressed="(props.filters.automaticAssessmentRescoreFilter || []).includes(opt.value as AutomaticAssessmentRescoreState)"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState)
-                                                    ? 'bg-blue-600/80 text-white border-blue-500'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState) ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).automatic_assessment_rescore?.[opt.value as AutomaticAssessmentRescoreState]) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Findings</label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button
-                                            data-testid="filter-new-findings"
-                                            @click="updateFilter('newFindingsOnly', !props.filters.newFindingsOnly)"
-                                            :aria-pressed="!!props.filters.newFindingsOnly"
-                                            title="Show only vulnerabilities with a finding that was added after the vulnerability was assessed and has no assessment yet"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.newFindingsOnly
-                                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            New findings
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.newFindingsOnly ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).new_findings) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Rescoring</label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button
-                                            @click="updateFilter('notRescoredOnly', !props.filters.notRescoredOnly)"
-                                            :aria-pressed="!!props.filters.notRescoredOnly"
-                                            title="Show only vulnerabilities without a rescored CVSS score or vector"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.notRescoredOnly
-                                                    ? 'bg-orange-500/15 text-orange-300 border-orange-500/20'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            Not rescored
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.notRescoredOnly ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).not_rescored) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">CVSS Version</label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button
-                                            @click="updateFilter('cvssVersionMismatchOnly', !props.filters.cvssVersionMismatchOnly)"
-                                            :aria-pressed="props.filters.cvssVersionMismatchOnly"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.cvssVersionMismatchOnly
-                                                    ? 'bg-orange-500/15 text-orange-300 border-orange-500/20'
-                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
-                                            ]"
-                                        >
-                                            Mismatch
-                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.cvssVersionMismatchOnly ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel((props.facetCounts || props.resultCounts).cvss_version_mismatch) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
-                                    <div v-for="facet in priorityFacets" :key="facet.key" class="mb-3 space-y-1" :data-testid="facet.key">
-                                        <h4 class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">{{ facet.label }}</h4>
-                                        <p class="text-[10px] text-gray-500">None selected = all</p>
-                                        <p v-if="facet.countKey === 'evidence'" class="text-[10px] text-gray-400">Cached sources; either selected source matches. CISA is checked when opening the global SSVC calculator. Unchecked is not “no data”; stale matches remain included. Other filters still apply.</p>
+                            <details class="rounded-xl border border-dashed border-white/10 p-2" data-testid="legacy-filters">
+                                <summary class="cursor-pointer text-xs text-gray-400">Legacy analysis filters<span v-if="legacyActiveCount" class="ml-2 rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] text-blue-200">{{ legacyActiveCount }} active</span></summary>
+                                <p class="mt-1 text-[10px] text-gray-500">Threat-model rescoring and automatic assessments are removed in 2.1.0.</p>
+                                <div class="mt-2 space-y-3">
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Threat-model proposal</label>
                                         <div class="flex flex-wrap gap-1.5">
-                                            <button v-for="value in facet.values" :key="value" type="button" :aria-pressed="(props.filters[facet.key] || []).includes(value)" class="rounded-full border px-2 py-1 text-[10px]" :class="(props.filters[facet.key] || []).includes(value) ? 'border-purple-400/50 bg-purple-500/20 text-purple-200' : 'border-white/10 text-gray-400'" @click="togglePriorityFilter(facet.key, value)">
-                                                {{ facet.countKey === 'evidence' ? evidenceLabel(value) : ssvcLabel(value) }} <span class="text-gray-500">{{ countLabel((props.facetCounts || props.resultCounts)[facet.countKey]?.[value]) }}</span>
+                                            <button
+                                                v-for="opt in props.tmrescoreOptions"
+                                                :key="opt.value"
+                                                type="button"
+                                                @click="toggleTmrescoreFilter(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')"
+                                                :aria-pressed="(props.filters.tmrescoreFilter || []).includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')"
+                                                :class="chipClass(props.filters.tmrescoreFilter.includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'), opt.value === 'WITH_PROPOSAL' ? 'bg-blue-500 text-white border-blue-500' : 'bg-amber-500 text-white border-amber-500')"
+                                            >
+                                                {{ opt.label }}
+                                                <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.tmrescore?.[opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']) }}</span>
                                             </button>
                                         </div>
                                     </div>
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Analysis State</label>
-                                    <div class="flex flex-wrap gap-1.5 items-center">
-                                        <button
-                                            v-for="opt in props.analysisOptions"
-                                            :key="opt.value"
-                                            @click="toggleAnalysisFilter(opt.value)"
-                                            :aria-pressed="(props.filters.analysisFilters || []).includes(opt.value)"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
-                                                props.filters.analysisFilters.includes(opt.value)
-                                                    ? `${opt.color} text-white border-transparent shadow-lg shadow-blue-900/40`
-                                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span
-                                                class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
-                                                :class="props.filters.analysisFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
+
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Automatic Assessment</label>
+                                        <div class="flex flex-wrap gap-1.5">
+                                            <button
+                                                v-for="opt in props.automaticAssessmentOptions"
+                                                :key="opt.value"
+                                                type="button"
+                                                @click="toggleAutomaticAssessmentFilter(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')"
+                                                :aria-pressed="(props.filters.automaticAssessmentFilter || []).includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')"
+                                                :class="chipClass(props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'), opt.value === 'WITH_AUTOMATIC_ASSESSMENT' ? 'bg-cyan-500 text-white border-cyan-500' : 'bg-slate-600/60 text-white border-slate-500')"
                                             >
-                                                {{ countLabel((props.facetCounts || props.resultCounts).analysis[opt.value]) }}
-                                            </span>
-                                        </button>
+                                                {{ opt.label }}
+                                                <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.automatic_assessment?.[opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT']) }}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Auto analysis outcome</label>
+                                        <div class="flex flex-wrap gap-1.5" data-testid="automatic-assessment-outcome-filters">
+                                            <button
+                                                v-for="opt in props.automaticAssessmentOutcomeOptions"
+                                                :key="opt.value"
+                                                type="button"
+                                                @click="toggleAutomaticAssessmentOutcomeFilter(opt.value as AutomaticAssessmentOutcome)"
+                                                :aria-pressed="(props.filters.automaticAssessmentOutcomeFilter || []).includes(opt.value as AutomaticAssessmentOutcome)"
+                                                :class="chipClass(props.filters.automaticAssessmentOutcomeFilter.includes(opt.value as AutomaticAssessmentOutcome), opt.value === 'AFFECTED' ? 'bg-red-600/80 text-white border-red-500' : opt.value === 'PROBABLY_AFFECTED' ? 'bg-orange-500/80 text-white border-orange-400' : opt.value === 'NOT_AFFECTED' ? 'bg-emerald-600/80 text-white border-emerald-500' : 'bg-amber-600/70 text-white border-amber-500')"
+                                            >
+                                                {{ opt.label }}
+                                                <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.automatic_assessment_outcome?.[opt.value as AutomaticAssessmentOutcome]) }}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="space-y-1">
+                                        <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Auto analysis rescore</label>
+                                        <div class="flex flex-wrap gap-1.5" data-testid="automatic-assessment-rescore-filters">
+                                            <button
+                                                v-for="opt in props.automaticAssessmentRescoreOptions"
+                                                :key="opt.value"
+                                                type="button"
+                                                @click="toggleAutomaticAssessmentRescoreFilter(opt.value as AutomaticAssessmentRescoreState)"
+                                                :aria-pressed="(props.filters.automaticAssessmentRescoreFilter || []).includes(opt.value as AutomaticAssessmentRescoreState)"
+                                                :class="chipClass(props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState), 'bg-blue-600/80 text-white border-blue-500')"
+                                            >
+                                                {{ opt.label }}
+                                                <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.automatic_assessment_rescore?.[opt.value as AutomaticAssessmentRescoreState]) }}</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                                </details>
-                            </div>
+                            </details>
                         </div>
-                    </div>
+                    </details>
+
+                    <button
+                        type="button"
+                        data-testid="sidebar-reset-filters"
+                        :disabled="!props.hasCustomFilters"
+                        @click="emit('reset-filters')"
+                        class="w-full rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-slate-950/30"
+                    >
+                        Reset filters
+                    </button>
                 </div>
 
                 <div v-else class="space-y-3" data-testid="stats-sidebar-results">

@@ -77,6 +77,11 @@ describe('projectVulnTaskQuery', () => {
     it('requests only vulnerabilities with new findings from the sidebar toggle or a search token', () => {
         expect(buildTaskVulnGroupListQuery(baseInput()).new_findings).toBeFalsy()
         expect(buildTaskVulnGroupListQuery(baseInput({ newFindingsOnly: true })).new_findings).toBe(true)
+        expect(buildTaskVulnGroupListQuery(baseInput()).awaiting_review).toBeFalsy()
+        expect(buildTaskVulnGroupListQuery(baseInput({ awaitingReviewOnly: true })).awaiting_review).toBe(true)
+        expect(buildTaskVulnGroupListQuery(baseInput({
+            parsedSearch: parseVulnSearchQuery('has:awaiting_review'),
+        })).awaiting_review).toBe(true)
         expect(buildTaskVulnGroupListQuery(baseInput({
             parsedSearch: parseVulnSearchQuery('has:new_findings'),
         })).new_findings).toBe(true)

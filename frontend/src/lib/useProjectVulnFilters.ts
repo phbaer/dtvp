@@ -1,6 +1,6 @@
 import { computed, onMounted, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import type { Router } from 'vue-router'
-import type { FilterState } from '../components/FilterSidebar.vue'
+import type { FilterState } from './projectVulnFilterPresets'
 import {
     normalizeAttributionAgeDays,
     normalizeFilterSelection,
@@ -28,6 +28,10 @@ export const DEFAULT_REVIEWER_LIFECYCLE_FILTERS = ALL_LIFECYCLE_FILTERS
 export const DEFAULT_ANALYST_LIFECYCLE_FILTERS = ANALYST_WORK_FILTERS
 
 // Migrate retired filter choices in shared URLs to the visible categories.
+// NEEDS_APPROVAL meant "any pending review" on the server, which is Awaiting
+// review; hydrateFiltersFromQuery maps it there. Combined with other statuses
+// it was an OR that Awaiting review (an AND) cannot express; there it stays
+// the nearest status, Ready for approval.
 const normalizeLifecycleSelection = (values: string[]) => Array.from(new Set(values.filter(value => value !== '__NO_MATCH__').map(value => {
     if (value === 'NEEDS_APPROVAL') return 'READY_FOR_APPROVAL'
     if (value === 'ASSESSED_LEGACY') return 'ASSESSED'
@@ -99,6 +103,7 @@ const FILTER_QUERY_KEYS = new Set([
     'cvss_mismatch',
     'not_rescored',
     'new_findings',
+    'awaiting_review',
     'attributed_before_days',
     'attribution_mode',
     'attribution_age_days',
@@ -140,6 +145,7 @@ export function useProjectVulnFilters({
     const cvssVersionMismatchOnly = ref(false)
     const notRescoredOnly = ref(false)
     const newFindingsOnly = ref(false)
+    const awaitingReviewOnly = ref(false)
     const attributionAgeDays = ref<number | null>(null)
     const attributionAgeMode = ref<'older' | 'younger'>('older')
     const lifecycleFilters = ref<string[]>([])
@@ -166,6 +172,9 @@ export function useProjectVulnFilters({
     const defaultAnalysisFilters = DEFAULT_ANALYSIS_FILTERS
     let lifecycleFollowsRole = true
     let teamAssessmentFollowsRole = true
+    // Reviewers start on Awaiting review, analysts without it.
+    const defaultAwaitingReviewOnly = computed(() => currentUserRole.value === 'REVIEWER')
+    let awaitingReviewFollowsRole = true
 
     const versionFilterList = computed(() => {
         return versionFilterInput.value
@@ -187,6 +196,7 @@ export function useProjectVulnFilters({
     const resetFilters = () => {
         lifecycleFollowsRole = true
         teamAssessmentFollowsRole = true
+        awaitingReviewFollowsRole = true
         originalSeverityFilters.value = []
         ssvcFilters.value = []
         evidenceFilters.value = []
@@ -210,6 +220,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly.value = false
         notRescoredOnly.value = false
         newFindingsOnly.value = false
+        awaitingReviewOnly.value = defaultAwaitingReviewOnly.value
         attributionAgeDays.value = null
         attributionAgeMode.value = 'older'
         sortBy.value = 'rescored-severity'
@@ -224,6 +235,11 @@ export function useProjectVulnFilters({
         })
     }
 
+    const hasNarrowingQueryParams = (query: Record<string, unknown>) =>
+        hasFilterQueryParams(Object.fromEntries(
+            Object.entries(query).filter(([key]) => key !== 'sort' && key !== 'order'),
+        ))
+
     const hydrateFiltersFromQuery = () => {
         const q = route.query
         originalSeverityFilters.value = queryStringList(q.original_severity).flatMap(v => v.split(',')).map(v => v.trim().toUpperCase()).filter(Boolean)
@@ -237,7 +253,14 @@ export function useProjectVulnFilters({
         }
 
         if (q.q) smartSearchInput.value = queryStringList(q.q).join(' ')
-        if (q.lifecycle) {
+        const rawLifecycle = queryStringList(q.lifecycle).map(value => value.toUpperCase())
+        const legacyPendingReview = rawLifecycle.includes('NEEDS_APPROVAL')
+            && rawLifecycle.every(value => ['NEEDS_APPROVAL', 'READY_FOR_APPROVAL'].includes(value))
+        if (legacyPendingReview) {
+            // An old link to "needs approval": everything pending review.
+            lifecycleFilters.value = [...ALL_LIFECYCLE_FILTERS]
+            lifecycleFollowsRole = sameSelection(lifecycleFilters.value, defaultLifecycleFilters.value)
+        } else if (q.lifecycle) {
             lifecycleFilters.value = normalizeLifecycleSelection(queryStringList(q.lifecycle))
             lifecycleFollowsRole = sameSelection(lifecycleFilters.value, defaultLifecycleFilters.value)
         } else {
@@ -294,6 +317,13 @@ export function useProjectVulnFilters({
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
         if (q.not_rescored === 'true') notRescoredOnly.value = true
         if (q.new_findings === 'true') newFindingsOnly.value = true
+        // Awaiting review is written whenever it is on, and as false when a
+        // reviewer turned it off. A link without it that holds other filters
+        // (an old one) means off; one with only the sort follows the role.
+        const awaitingReviewParam = queryString(q.awaiting_review)
+        awaitingReviewOnly.value = legacyPendingReview || awaitingReviewParam === 'true'
+            || (!awaitingReviewParam && !hasNarrowingQueryParams(q) && defaultAwaitingReviewOnly.value)
+        awaitingReviewFollowsRole = awaitingReviewOnly.value === defaultAwaitingReviewOnly.value
         const legacyDays = normalizeAttributionAgeDays(
             firstQueryValue(q.attributed_before_days ?? q.attribution_age_days ?? q.age_days),
         )
@@ -308,48 +338,50 @@ export function useProjectVulnFilters({
         filtersReady.value = true
     }
 
-    const filterUrl = computed(() => {
-        const query: Record<string, string | string[]> = {
-            ...(route.query as Record<string, string | string[]>),
+    // One mapping from the selection to the URL query: the address bar and
+    // the copied link are the same. Retired parameters are dropped once they
+    // were read (hydrateFiltersFromQuery maps them to their replacements).
+    const filterQuery = () => {
+        const query: Record<string, unknown> = { ...route.query }
+        const setList = (key: string, values: readonly string[]) => {
+            if (values.length) query[key] = [...values]
+            else delete query[key]
         }
+        const setText = (key: string, value: string) => {
+            if (value) query[key] = value
+            else delete query[key]
+        }
+        const setFlag = (key: string, value: boolean) => {
+            if (value) query[key] = 'true'
+            else delete query[key]
+        }
+        for (const retired of ['tag', 'cve', 'auto_assessment', 'attributed_from', 'attributed_to', 'attributed_not', 'attribution_age_days', 'age_days']) {
+            delete query[retired]
+        }
+
+        setText('q', smartSearchInput.value.trim())
         if (lifecycleFollowsRole) delete query.lifecycle
-        else query.lifecycle = lifecycleFilters.value.length ? lifecycleFilters.value : ['__NO_MATCH__']
-        if (originalSeverityFilters.value.length) query.original_severity = originalSeverityFilters.value
-        else delete query.original_severity
-        if (ssvcFilters.value.length) query.ssvc = ssvcFilters.value
-        else delete query.ssvc
-        if (evidenceFilters.value.length) query.evidence = evidenceFilters.value
-        else delete query.evidence
-
-        if (selectedDependencyFilters.value.length > 0) query.dependency = selectedDependencyFilters.value
-        else delete query.dependency
-
-        if (versionFilterInput.value) query.versions = versionFilterInput.value
-        else delete query.versions
-
-        if (selectedTMRescoreProposalFilters.value.length > 0) query.tmrescore = selectedTMRescoreProposalFilters.value
-        else delete query.tmrescore
-
-        if (selectedAutomaticAssessmentFilters.value.length > 0) query.automatic_assessment = selectedAutomaticAssessmentFilters.value
-        else delete query.automatic_assessment
-        delete query.auto_assessment
-
-        if (selectedAutomaticAssessmentOutcomeFilters.value.length > 0) {
-            query.automatic_assessment_outcome = selectedAutomaticAssessmentOutcomeFilters.value
-        } else delete query.automatic_assessment_outcome
-
-        if (selectedAutomaticAssessmentRescoreFilters.value.length > 0) {
-            query.automatic_assessment_rescore = selectedAutomaticAssessmentRescoreFilters.value
-        } else delete query.automatic_assessment_rescore
-
-        delete query.tag
-        if (teamFilters.value.length) query.teams = [...teamFilters.value]
-        else delete query.teams
+        else query.lifecycle = lifecycleFilters.value.length ? [...lifecycleFilters.value] : ['__NO_MATCH__']
+        if (awaitingReviewOnly.value) query.awaiting_review = 'true'
+        else if (!awaitingReviewFollowsRole) query.awaiting_review = 'false'
+        else delete query.awaiting_review
+        setList('analysis', analysisFilters.value)
+        setList('teams', teamFilters.value)
         if (teamFilters.value.length && !teamAssessmentFollowsRole) query.team_assessment = teamAssessmentFilter.value
         else delete query.team_assessment
-        if (inconsistencyReasonFilters.value.length > 0) query.inconsistency_reason = inconsistencyReasonFilters.value
-        else delete query.inconsistency_reason
+        setText('versions', versionFilterInput.value)
+        setText('id', idFilter.value)
+        setText('component', componentFilter.value)
+        setText('assignee', assigneeFilter.value)
 
+        setList('inconsistency_reason', inconsistencyReasonFilters.value)
+        setFlag('new_findings', newFindingsOnly.value)
+        setList('original_severity', originalSeverityFilters.value)
+        setList('ssvc', ssvcFilters.value)
+        setList('evidence', evidenceFilters.value)
+        setList('dependency', selectedDependencyFilters.value)
+        setFlag('cvss_mismatch', cvssVersionMismatchOnly.value)
+        setFlag('not_rescored', notRescoredOnly.value)
         if (attributionAgeDays.value == null) {
             delete query.attributed_before_days
             delete query.attribution_mode
@@ -357,19 +389,23 @@ export function useProjectVulnFilters({
             query.attributed_before_days = String(attributionAgeDays.value)
             query.attribution_mode = attributionAgeMode.value
         }
-        delete query.attributed_from
-        delete query.attributed_to
-        delete query.attributed_not
-        delete query.attribution_age_days
-        delete query.age_days
 
-        if (smartSearchInput.value.trim()) query.q = smartSearchInput.value.trim()
-        else delete query.q
+        // Legacy, removed in 2.1.0 (#342).
+        setList('tmrescore', selectedTMRescoreProposalFilters.value)
+        setList('automatic_assessment', selectedAutomaticAssessmentFilters.value)
+        setList('automatic_assessment_outcome', selectedAutomaticAssessmentOutcomeFilters.value)
+        setList('automatic_assessment_rescore', selectedAutomaticAssessmentRescoreFilters.value)
 
+        query.sort = sortBy.value
+        query.order = sortOrder.value
+        return query
+    }
+
+    const filterUrl = computed(() => {
         const params = new URLSearchParams()
-        Object.entries(query).forEach(([key, value]) => {
+        Object.entries(filterQuery()).forEach(([key, value]) => {
             if (Array.isArray(value)) {
-                value.forEach(item => params.append(key, item))
+                value.forEach(item => params.append(key, String(item)))
             } else if (value != null && value !== '') {
                 params.set(key, String(value))
             }
@@ -400,85 +436,7 @@ export function useProjectVulnFilters({
     }
 
     const syncFilterQueryToUrl = () => {
-        const query = { ...route.query }
-        if (originalSeverityFilters.value.length) query.original_severity = originalSeverityFilters.value
-        else delete query.original_severity
-        if (ssvcFilters.value.length) query.ssvc = ssvcFilters.value
-        else delete query.ssvc
-        if (evidenceFilters.value.length) query.evidence = evidenceFilters.value
-        else delete query.evidence
-
-        if (smartSearchInput.value.trim()) query.q = smartSearchInput.value.trim()
-        else delete query.q
-
-        if (lifecycleFollowsRole) delete query.lifecycle
-        else query.lifecycle = lifecycleFilters.value.length ? lifecycleFilters.value : ['__NO_MATCH__']
-
-        if (analysisFilters.value.length > 0) query.analysis = analysisFilters.value
-        else delete query.analysis
-
-        delete query.tag
-        if (teamFilters.value.length) query.teams = [...teamFilters.value]
-        else delete query.teams
-        if (teamFilters.value.length && !teamAssessmentFollowsRole) query.team_assessment = teamAssessmentFilter.value
-        else delete query.team_assessment
-        if (inconsistencyReasonFilters.value.length > 0) query.inconsistency_reason = inconsistencyReasonFilters.value
-        else delete query.inconsistency_reason
-
-        if (idFilter.value) query.id = idFilter.value
-        else delete query.id
-
-        if (componentFilter.value) query.component = componentFilter.value
-        else delete query.component
-
-        if (assigneeFilter.value) query.assignee = assigneeFilter.value
-        else delete query.assignee
-
-        if (selectedDependencyFilters.value.length > 0) query.dependency = selectedDependencyFilters.value
-        else delete query.dependency
-
-        if (versionFilterInput.value) query.versions = versionFilterInput.value
-        else delete query.versions
-
-        if (selectedTMRescoreProposalFilters.value.length > 0) query.tmrescore = selectedTMRescoreProposalFilters.value
-        else delete query.tmrescore
-
-        if (selectedAutomaticAssessmentFilters.value.length > 0) query.automatic_assessment = selectedAutomaticAssessmentFilters.value
-        else delete query.automatic_assessment
-        delete query.auto_assessment
-
-        if (selectedAutomaticAssessmentOutcomeFilters.value.length > 0) {
-            query.automatic_assessment_outcome = selectedAutomaticAssessmentOutcomeFilters.value
-        } else delete query.automatic_assessment_outcome
-
-        if (selectedAutomaticAssessmentRescoreFilters.value.length > 0) {
-            query.automatic_assessment_rescore = selectedAutomaticAssessmentRescoreFilters.value
-        } else delete query.automatic_assessment_rescore
-
-        if (cvssVersionMismatchOnly.value) query.cvss_mismatch = 'true'
-        else delete query.cvss_mismatch
-        if (notRescoredOnly.value) query.not_rescored = 'true'
-        else delete query.not_rescored
-        if (newFindingsOnly.value) query.new_findings = 'true'
-        else delete query.new_findings
-
-        if (attributionAgeDays.value == null) {
-            delete query.attributed_before_days
-            delete query.attribution_mode
-        } else {
-            query.attributed_before_days = String(attributionAgeDays.value)
-            query.attribution_mode = attributionAgeMode.value
-        }
-        delete query.attributed_from
-        delete query.attributed_to
-        delete query.attributed_not
-        delete query.attribution_age_days
-        delete query.age_days
-
-        query.sort = sortBy.value
-        query.order = sortOrder.value
-
-        router.replace({ path: route.path || '/', query: query as any }).catch(() => {})
+        router.replace({ path: route.path || '/', query: filterQuery() as any }).catch(() => {})
     }
 
     const filterState = computed<FilterState>(() => ({
@@ -505,12 +463,14 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
         notRescoredOnly: notRescoredOnly.value,
         newFindingsOnly: newFindingsOnly.value,
+        awaitingReviewOnly: awaitingReviewOnly.value,
         attributionAgeDays: attributionAgeDays.value,
         attributionAgeMode: attributionAgeMode.value,
     }))
 
     const handleFilterUpdate = (newFilters: FilterState) => {
         if (!sameSelection(newFilters.lifecycleFilters, lifecycleFilters.value)) lifecycleFollowsRole = false
+        if (!!newFilters.awaitingReviewOnly !== awaitingReviewOnly.value) awaitingReviewFollowsRole = false
         if (teamFilters.value.length && newFilters.teamAssessmentFilter !== teamAssessmentFilter.value) {
             teamAssessmentFollowsRole = false
         }
@@ -542,6 +502,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly.value = newFilters.cvssVersionMismatchOnly
         notRescoredOnly.value = !!newFilters.notRescoredOnly
         newFindingsOnly.value = !!newFilters.newFindingsOnly
+        awaitingReviewOnly.value = !!newFilters.awaitingReviewOnly
         attributionAgeDays.value = normalizeAttributionAgeDays(newFilters.attributionAgeDays)
         attributionAgeMode.value = newFilters.attributionAgeMode === 'younger' ? 'younger' : 'older'
     }
@@ -549,6 +510,7 @@ export function useProjectVulnFilters({
     watch(currentUserRole, (role, previousRole) => {
         if (!filtersReady.value || role === previousRole) return
         if (lifecycleFollowsRole) lifecycleFilters.value = [...defaultLifecycleFilters.value]
+        if (awaitingReviewFollowsRole) awaitingReviewOnly.value = defaultAwaitingReviewOnly.value
         if (teamAssessmentFollowsRole && teamFilters.value.length) {
             teamAssessmentFilter.value = defaultTeamAssessmentFilter.value
         }
@@ -577,6 +539,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly,
         notRescoredOnly,
         newFindingsOnly,
+        awaitingReviewOnly,
         attributionAgeDays,
         attributionAgeMode,
         sortBy,
@@ -620,6 +583,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly,
         notRescoredOnly,
         newFindingsOnly,
+        awaitingReviewOnly,
         attributionAgeDays,
         attributionAgeMode,
         lifecycleFilters,
@@ -644,6 +608,7 @@ export function useProjectVulnFilters({
         handleFilterUpdate,
         defaultTeamAssessmentFilter,
         defaultLifecycleFilters,
+        defaultAwaitingReviewOnly,
         defaultAnalysisFilters,
     }
 }

@@ -152,6 +152,32 @@ describe('vulnListViewModel', () => {
         expect(searchCounts.lifecycle.OPEN).toBe(1)
     })
 
+    it('with Awaiting review the status and analysis counts split the waiting vulnerabilities', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'team-submitted', list_metadata: { lifecycle: 'INCOMPLETE', is_pending: true, technical_state: 'NOT_AFFECTED' } }),
+            makeGroup({ id: 'ready', list_metadata: { lifecycle: 'NEEDS_APPROVAL', is_pending: true, technical_state: 'NOT_AFFECTED' } }),
+            makeGroup({ id: 'open', list_metadata: { lifecycle: 'OPEN', is_pending: false, technical_state: 'NOT_SET' } }),
+            makeGroup({ id: 'done', list_metadata: { lifecycle: 'ASSESSED', is_pending: false, technical_state: 'NOT_AFFECTED' } }),
+        ], {})
+        const stats = deriveVulnListStaticStats(items)
+        const waiting = deriveVulnListFacetCounts(items, baseFilters({ awaitingReviewOnly: true }), stats)
+        expect(waiting.total).toBe(2)
+        expect(waiting.lifecycle.OPEN).toBe(0)
+        expect(waiting.lifecycle.INCOMPLETE).toBe(1)
+        expect(waiting.lifecycle.READY_FOR_APPROVAL).toBe(1)
+        expect(waiting.lifecycle.ASSESSED).toBe(0)
+        expect(waiting.analysis.NOT_AFFECTED).toBe(2)
+        expect(waiting.analysis.NOT_SET).toBe(0)
+        // Its own count leaves the toggle out.
+        expect(waiting.awaiting_review).toBe(2)
+        const all = deriveVulnListFacetCounts(items, baseFilters(), stats)
+        expect(all.lifecycle.OPEN).toBe(1)
+        expect(all.analysis.NOT_AFFECTED).toBe(3)
+        expect(all.awaiting_review).toBe(2)
+        const narrowed = deriveVulnListFacetCounts(items, baseFilters({ lifecycleFilters: ['READY_FOR_APPROVAL'] }), stats)
+        expect(narrowed.awaiting_review).toBe(1)
+    })
+
     it('ignores unrelated selected teams when checking recorded assessments', () => {
         const items = buildVulnListItems([
             makeGroup({ id: 'owned-a', tags: ['Security'], list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: ['Security'] } }),

@@ -336,7 +336,7 @@ const themeMap: Record<string, { border: string, bg: string, text: string, label
         class="border-spacing-0"
         style="border-collapse: collapse"
       >
-        <caption class="pb-1 text-left text-[9px] font-bold uppercase tracking-wider text-gray-500">{{ section.title }}</caption>
+        <caption class="whitespace-nowrap pb-1 text-left text-[9px] font-bold uppercase tracking-wider text-gray-500">{{ section.title }}</caption>
         <thead>
           <tr>
             <th v-if="vectors.length > 1" class="pr-1"><span class="sr-only">Vector</span></th>

@@ -32,14 +32,23 @@ import { API_BASE, AUTH_BASE, BASE_WITH_CONTEXT } from './apiBase';
 import { notifyAuthExpired } from './authSession';
 import { readStreamLines } from './streamLines';
 import type { SsvcEnrichment, SsvcModel } from './ssvc';
-import { EVIDENCE_UPDATED_EVENT } from './evidence';
+import { EVIDENCE_UPDATED_EVENT, evidenceSourcesFromLookup, type EvidenceUpdate } from './evidence';
 
 export async function getSsvcExploitation(cves: string[], refresh = false): Promise<SsvcEnrichment> {
     const params = new URLSearchParams();
     cves.forEach(cve => params.append('cve', cve));
     if (refresh) params.set('refresh', 'true');
     const result = (await api.get<SsvcEnrichment>('/ssvc/exploitation', { params })).data;
-    globalThis.dispatchEvent?.(new Event(EVIDENCE_UPDATED_EVENT));
+    // The lookup may have fetched new evidence. The project list decides
+    // from the flags whether it shows anything different (an opened
+    // vulnerability looks its evidence up every time).
+    if (result?.enabled && result.sources?.length && typeof CustomEvent !== 'undefined') {
+        const detail: EvidenceUpdate = {
+            cves: [...new Set(cves.map(cve => cve.trim().toUpperCase()))].sort(),
+            sources: evidenceSourcesFromLookup(result.sources as any),
+        };
+        globalThis.dispatchEvent?.(new CustomEvent(EVIDENCE_UPDATED_EVENT, { detail }));
+    }
     return result;
 }
 
@@ -388,6 +397,7 @@ export interface TaskVulnGroupListQuery {
     cvss_mismatch?: boolean;
     not_rescored?: boolean;
     new_findings?: boolean;
+    awaiting_review?: boolean;
     attributed_before_days?: number | null;
     attribution_mode?: 'older' | 'younger';
     tmrescore?: string[];
@@ -543,6 +553,7 @@ export interface TaskVulnGroupListCounts {
     cvss_version_mismatch: number;
     not_rescored?: number;
     new_findings?: number;
+    awaiting_review?: number;
     ids?: Record<string, number>;
     versions: Record<string, number>;
     tags: Record<string, number>;

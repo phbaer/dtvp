@@ -19,7 +19,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 vi.mock('vue-router', () => ({
-    useRoute: vi.fn(() => ({ params: { name: 'Test' }, query: {} })),
+    useRoute: vi.fn(() => ({ params: { name: 'Test' }, query: { awaiting_review: 'false' } })),
     useRouter: vi.fn(() => ({ replace: vi.fn(() => Promise.resolve()) })),
     RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
 }))

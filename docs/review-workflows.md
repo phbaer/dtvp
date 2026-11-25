@@ -10,18 +10,77 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 ## Project Review
 
-The project view searches and filters grouped vulnerabilities by lifecycle,
-inconsistency reason, analysis state, dependency relationship, component,
-version, team, assignee, attribution age, tmrescore proposal, CVSS mismatch,
-missing rescoring, new findings,
-code-assessment availability, automatic-analysis outcome, and proposed
-automatic CVSS severity. Outcome choices (`Affected`, `Probably affected`,
-`Not affected`, and `Uncertain`) and rescore choices (`Critical` through
-`Info`, `No rescore`, and `Unscored`) use OR semantics within each facet and
-AND semantics across facets. They are server-side task-window filters, so URL
+The project view searches and filters grouped vulnerabilities. Every filter
+is a server-side task-window filter (`GET /api/tasks/{id}/groups`), so URL
 state, counts, pagination, and Bulk Changes all operate on the same candidate
-set. The Open selection matches the displayed `OPEN` lifecycle category, and
-vulnerability-ID searches are combined with all active filters.
+set. Filters combine with AND across categories and OR within one; option
+counts leave out their own category. The sidebar is described in the
+[screen guide](screens.md#filters).
+
+| Filter | Where | URL parameter (default) |
+| :--- | :--- | :--- |
+| Search (text, `id:`, `component:`, `team:`, `assignee:`, `version:`, `state:`, `has:`) | Toolbar | `q`; `id` (old links: `cve`), `component`, `assignee` |
+| Quick views | Sidebar, top | none: they set the status filters below |
+| Team, their assessment (Any, Not recorded, Recorded) | Sidebar | `teams` (old links: `tag`), `team_assessment` (role default) |
+| Awaiting review | Sidebar, Status | `awaiting_review` (role default: on for reviewers, off for analysts; old links: `lifecycle=NEEDS_APPROVAL`) |
+| Status: Open, Incomplete (with Conflicting), Ready for approval, Assessed | Sidebar | `lifecycle` (role default; old values `CONFLICTING`, `INCONSISTENT`, `ASSESSED_LEGACY` are mapped, `NEEDS_APPROVAL` see Awaiting review) |
+| Analysis state | Sidebar | `analysis` (all) |
+| Project versions | Sidebar | `versions` (all) |
+| Sort | Sidebar | `sort`, `order` (`rescored-severity`, `desc`) |
+| Conflict reason | More filters | `inconsistency_reason` (none) |
+| New findings, not rescored, CVSS version mismatch | More filters | `new_findings`, `not_rescored`, `cvss_mismatch` (off) |
+| Original severity, SSVC priority, KEV/CISA evidence | More filters | `original_severity`, `ssvc`, `evidence` (none) |
+| Dependency | More filters | `dependency` (all) |
+| Attribution age | More filters | `attributed_before_days`, `attribution_mode` (old links: `age_days`, `attribution_age_days`) |
+| Threat-model proposal, automatic assessment, outcome, rescore | More filters, Legacy (removed in 2.1.0, #342) | `tmrescore`, `automatic_assessment` (old links: `auto_assessment`), `automatic_assessment_outcome`, `automatic_assessment_rescore` |
+
+Outcome choices (`Affected`, `Probably affected`, `Not affected`, and
+`Uncertain`) and rescore choices (`Critical` through `Info`, `No rescore`, and
+`Unscored`) use OR semantics within each facet and AND semantics across
+facets. The Open selection matches the displayed `OPEN` lifecycle category, and
+vulnerability-ID searches are combined with all active filters. A retired
+parameter of a saved link is read as its replacement and replaced in the
+address bar.
+
+### Awaiting review
+
+**Awaiting review** lists every vulnerability that waits for a reviewer: at
+least one of its findings holds an assessment that was submitted for review
+and not approved yet (`[Status: Pending Review]` in its text). That is:
+
+- Ready for approval: all required teams assessed, only the approval is left;
+- a team's submission while other teams are still open: the status stays
+  Incomplete, but the submission waits for review all the same;
+- a conflicting submission, which needs repair before it can be approved;
+- proposals saved pending review: assessments carried over to a replacing
+  finding (`carried-over`, `carried-over-by-alias`,
+  `carried-over-by-same-issue`, see [Gone findings](#gone-findings)), an
+  earlier assessment an analyst saved through the form, team assessments AI
+  agents drafted through MCP, and combined decisions of
+  [Repair Assessments](#bulk-changes) whose sources disagreed.
+
+Reviewers start on Awaiting review; analysts start without it. It is a role
+default like the status default: an explicit choice (a quick view, the
+toggle, the chip, a link) wins and stays when the role changes, and Reset
+returns to the role default. The URL carries `awaiting_review=true` while it
+is on and `awaiting_review=false` when a reviewer turned it off; a link
+without it that holds other filters (an older link) means off, so saved links
+keep showing what they showed. An old link with `lifecycle=NEEDS_APPROVAL`,
+the former server meaning of "any pending review", opens Awaiting review with
+every status; combined with other statuses it was an alternative (OR) that
+Awaiting review (AND) cannot express, and becomes Ready for approval among
+them. The search tokens `state:pending`, `state:pending_review` and
+`lifecycle:needs_approval` also mean Awaiting review.
+
+It is a toggle that combines with the status chips (AND): with Awaiting review
+on, the chips count the waiting vulnerabilities per status, and selecting Ready
+for approval narrows the list to what can be approved now. With teams
+selected it lists what waits in those teams' vulnerabilities. Approving one
+takes it off the list and selects the next (see
+[Stable list](screens.md#stable-list)). The **Awaiting review** quick view
+sets the toggle with every status. The toggle is the `awaiting_review=true`
+URL and API parameter and the `has:awaiting_review` (or `has:pending_review`)
+search token, and it narrows Bulk Changes candidates.
 
 The **Not rescored** toggle under **More filters** lists vulnerabilities that
 have neither a rescored CVSS score nor a rescored vector on any finding. It
@@ -89,12 +148,13 @@ become visible selections; partial tokens with several matches require an
 explicit choice. Plain text still searches team names alongside other fields,
 but never establishes an assessment scope.
 
-**Overall status** always describes the entire vulnerability. The **Workflow
-view** controls offer Analyst work (Open plus Incomplete), All statuses, and
-Approval queue (Ready for approval). The active view is highlighted; changing
-individual status chips shows a Custom selection. Analysts start with Analyst
-work; reviewers with All statuses. Untouched status defaults follow role changes,
-while explicit selections remain. Incomplete includes Conflicting findings that
+**Status** always describes the entire vulnerability. The **Quick views**
+offer Needs my assessment (Open plus Incomplete; with teams selected, Not
+recorded), Awaiting review, Conflicting (every conflict reason), New findings
+and All. The active view is highlighted; any other selection shows a Custom
+selection. Analysts start with Needs my assessment; reviewers with Awaiting review.
+Untouched status defaults follow role changes, while explicit selections
+remain. Incomplete includes Conflicting findings that
 need repair before approval; cards and the API retain their distinct labels.
 **Assessment for selected teams** is disabled without a team selection:
 
@@ -114,6 +174,9 @@ no teams, and Any. URLs persist explicit teams (`teams`), status choices
 (`lifecycle`), and assessment choices (`team_assessment`); role defaults remain
 implicit. Legacy single-team `tag` URLs remain supported. Pagination
 and bulk actions use the same filters. Additional controls are under **More filters**.
+**Reset filters** in the sidebar and **Reset** in the toolbar restore the
+role's default statuses, every analysis state, dependency and legacy option,
+and the default sort, and clear everything else.
 
 A single selected team also scopes component-driven content inside an
 opened vulnerability card; multiple teams leave its full context visible:

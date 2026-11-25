@@ -62,6 +62,7 @@ async function mockShell(page: Page, state: { details: string, clears: unknown[]
     await page.route('**/api/projects/*/vulnerabilities/*/analysis-results**', route => route.fulfill(json([])));
     await page.route('**/api/projects/*/vulnerabilities/*/code-evidence**', route => route.fulfill(json({ items: [], withdrawn_count: 0 })));
     await page.route('**/api/gone-findings?*', route => route.fulfill(json({ name: 'TestProject', versions: [] })));
+    await page.route('**/api/project/*/earlier-assessments?*', route => route.fulfill(json({ earlier: [] })));
     await page.route('**/api/assessments/history**', route => route.fulfill(json([])));
     await page.route(url => url.pathname.endsWith('/api/events'), route => route.fulfill({
         status: 200,

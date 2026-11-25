@@ -145,7 +145,8 @@ const collectConsoleErrors = (page: Page) => {
 };
 
 async function selectVulnerability(page: Page) {
-    await page.goto('/project/TestProject');
+    // A reviewer starts on Awaiting review; this test needs every vulnerability.
+    await page.goto('/project/TestProject?awaiting_review=false');
     const row = page.locator(`.vuln-card[data-group-id="${workspaceGroup.id}"]`);
     await expect(row).toBeVisible({ timeout: 20000 });
     await row.click();
@@ -353,6 +354,32 @@ test.describe('Assessment workspace', () => {
             await unclipped(workspace, 'workspace');
         });
     }
+
+    test('lines up the CVSS metric groups that sit side by side', async ({ page }) => {
+        // One CVSS 4.0 vector: narrow tables under long group titles.
+        const group40 = { ...workspaceGroup, cvss_vector: 'CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N' };
+        await mockGroupedVulnTask(page, { taskId: 'task-ws', groups: [group40] });
+        await page.route('**/api/tasks/task-ws/groups/*', route => route.fulfill(json(group40)));
+        await page.setViewportSize({ width: 1280, height: 1000 });
+        const inspector = await selectVulnerability(page);
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+
+        const display = inspector.getByTestId('cvss-vector-display');
+        await expect(display.getByTestId('cvss-vector-row')).toHaveCount(1);
+        await display.scrollIntoViewIfNeeded();
+        const sections = await display.getByTestId('cvss-metric-section').all();
+        expect(sections.length).toBe(3);
+        // Groups on one line share their header row, so the cells line up.
+        const headerTops = new Map<number, number[]>();
+        for (const section of sections) {
+            const top = Math.round((await section.boundingBox())!.y);
+            const header = Math.round((await section.locator('thead').boundingBox())!.y);
+            headerTops.set(top, [...(headerTops.get(top) || []), header]);
+        }
+        for (const headers of headerTops.values()) {
+            expect(Math.max(...headers) - Math.min(...headers)).toBeLessThanOrEqual(1);
+        }
+    });
 
     test('keeps Tab inside the workspace', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });

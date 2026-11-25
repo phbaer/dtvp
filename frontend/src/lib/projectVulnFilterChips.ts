@@ -27,6 +27,7 @@ export type ActiveFilterChipKey =
     | 'cvss'
     | 'notRescored'
     | 'newFindings'
+    | 'awaitingReview'
     | 'attributionAge'
 
 export interface ActiveFilterChip {
@@ -69,12 +70,15 @@ export interface BuildActiveFilterChipsInput {
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
+    awaitingReviewOnly?: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
 }
 
 export interface HasCustomProjectVulnFilterStateInput {
     defaultTeamAssessmentFilter?: string
+    /** Reviewers start on Awaiting review. */
+    defaultAwaitingReviewOnly?: boolean
     originalSeverityFilters?: readonly string[]
     ssvcFilters?: readonly string[]
     evidenceFilters?: readonly string[]
@@ -88,6 +92,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     cvssVersionMismatchOnly: boolean
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
+    awaitingReviewOnly?: boolean
     attributionAgeDays: number | null
     sortBy: string
     sortOrder: 'asc' | 'desc'
@@ -139,6 +144,8 @@ const hasAllOptionsSelected = (
     return options.every(option => selected.has(option.value))
 }
 
+// Chips follow the sidebar: the primary filters first, then More filters,
+// then the legacy ones. Each label starts with the sidebar section's name.
 export function buildActiveFilterChips({
     originalSeverityFilters = [],
     ssvcFilters = [],
@@ -169,64 +176,69 @@ export function buildActiveFilterChips({
     cvssVersionMismatchOnly,
     notRescoredOnly,
     newFindingsOnly,
+    awaitingReviewOnly,
     attributionAgeDays,
     attributionAgeMode,
 }: BuildActiveFilterChipsInput): ActiveFilterChip[] {
     const chips: ActiveFilterChip[] = []
+    if (awaitingReviewOnly) chips.push({ key: 'awaitingReview', label: 'Awaiting review' })
+    if (!hasAllOptionsSelected(lifecycleFilters, lifecycleOptions)) {
+        chips.push({ key: 'lifecycle', label: `Status: ${summarizedSelection(lifecycleFilters, lifecycleOptions, 'All')}` })
+    }
+    if (teamFilters.length) chips.push({ key: 'tag', label: `Teams: ${teamFilters.join(', ')}` })
+    else if (tagFilter) chips.push({ key: 'tag', label: `Team: ${tagFilter}` })
     if (teamAssessmentFilter !== 'ANY') chips.push({
         key: 'teamAssessment',
-        label: `Selected-team assessment: ${teamAssessmentFilter === 'DOCUMENTED' ? 'Recorded' : 'Not recorded'}`,
+        label: `Team assessment: ${teamAssessmentFilter === 'DOCUMENTED' ? 'Recorded' : 'Not recorded'}`,
     })
-    if (originalSeverityFilters.length) chips.push({ key: 'originalSeverity', label: `Original severity: ${originalSeverityFilters.join(', ')}` })
-    if (ssvcFilters.length) chips.push({ key: 'ssvc', label: `SSVC: ${ssvcFilters.map(v => v.replaceAll('_', ' ')).join(', ')}` })
-    if (evidenceFilters.length) chips.push({ key: 'evidence', label: `Evidence: ${evidenceFilters.map(evidenceLabel).join(', ')}` })
-
-    if (!hasAllOptionsSelected(lifecycleFilters, lifecycleOptions)) {
-        chips.push({ key: 'lifecycle', label: `Lifecycle: ${summarizedSelection(lifecycleFilters, lifecycleOptions, 'All lifecycle')}` })
+    if (!hasAllOptionsSelected(analysisFilters, analysisOptions)) {
+        chips.push({ key: 'analysis', label: `Analysis: ${summarizedSelection(analysisFilters, analysisOptions, 'All')}` })
     }
+    if (versionFilters.length) chips.push({ key: 'versions', label: `Versions: ${versionFilters.join(', ')}` })
+    if (idFilter) chips.push({ key: 'id', label: `ID: ${idFilter}` })
+    if (componentFilter) chips.push({ key: 'component', label: `Component: ${componentFilter}` })
+    if (assigneeFilter) chips.push({ key: 'assignee', label: `Assignee: ${assigneeFilter}` })
+
     if (inconsistencyReasonFilters.length > 0) {
         chips.push({
             key: 'inconsistencyReason',
-            label: `Inconsistency: ${summarizedSelection(inconsistencyReasonFilters, inconsistencyReasonOptions, 'All reasons')}`,
+            label: inconsistencyReasonOptions.length && hasAllOptionsSelected(inconsistencyReasonFilters, inconsistencyReasonOptions)
+                ? 'Conflicting'
+                : `Conflict: ${summarizedSelection(inconsistencyReasonFilters, inconsistencyReasonOptions, 'Any reason')}`,
         })
     }
-    if (!hasAllOptionsSelected(analysisFilters, analysisOptions)) {
-        chips.push({ key: 'analysis', label: `State: ${summarizedSelection(analysisFilters, analysisOptions, 'All states')}` })
-    }
+    if (newFindingsOnly) chips.push({ key: 'newFindings', label: 'New findings' })
+    if (originalSeverityFilters.length) chips.push({ key: 'originalSeverity', label: `Original severity: ${originalSeverityFilters.join(', ')}` })
+    if (ssvcFilters.length) chips.push({ key: 'ssvc', label: `SSVC: ${ssvcFilters.map(v => v.replaceAll('_', ' ')).join(', ')}` })
+    if (evidenceFilters.length) chips.push({ key: 'evidence', label: `Evidence: ${evidenceFilters.map(evidenceLabel).join(', ')}` })
     if (!hasAllOptionsSelected(dependencyFilters, dependencyOptions)) {
-        chips.push({ key: 'dependency', label: `Dependency: ${summarizedSelection(dependencyFilters, dependencyOptions, 'All dependencies')}` })
+        chips.push({ key: 'dependency', label: `Dependency: ${summarizedSelection(dependencyFilters, dependencyOptions, 'All')}` })
+    }
+    if (notRescoredOnly) chips.push({ key: 'notRescored', label: 'CVSS: not rescored' })
+    if (cvssVersionMismatchOnly) chips.push({ key: 'cvss', label: 'CVSS: version mismatch' })
+    if (attributionAgeDays != null) {
+        const verb = attributionAgeMode === 'younger' ? 'younger' : 'older'
+        chips.push({ key: 'attributionAge', label: `Attributed ${verb} than ${attributionAgeDays}d` })
     }
 
-    if (idFilter) chips.push({ key: 'id', label: `ID: ${idFilter}` })
-    if (teamFilters.length) chips.push({ key: 'tag', label: `Teams: ${teamFilters.join(', ')}` })
-    else if (tagFilter) chips.push({ key: 'tag', label: `Team: ${tagFilter}` })
-    if (componentFilter) chips.push({ key: 'component', label: `Component: ${componentFilter}` })
-    if (assigneeFilter) chips.push({ key: 'assignee', label: `Assignee: ${assigneeFilter}` })
-    if (versionFilters.length) chips.push({ key: 'versions', label: `Versions: ${versionFilters.join(', ')}` })
+    // Legacy, removed in 2.1.0 (#342).
     if (tmrescoreFilters.length !== tmrescoreOptions.length) {
-        chips.push({ key: 'tmrescore', label: `TM: ${summarizedSelection(tmrescoreFilters, tmrescoreOptions, 'All proposals')}` })
+        chips.push({ key: 'tmrescore', label: `Threat-model proposal: ${summarizedSelection(tmrescoreFilters, tmrescoreOptions, 'All')}` })
     }
     if (automaticAssessmentFilters.length !== automaticAssessmentOptions.length) {
-        chips.push({ key: 'automaticAssessment', label: `Auto: ${summarizedSelection(automaticAssessmentFilters, automaticAssessmentOptions, 'All automatic assessments')}` })
+        chips.push({ key: 'automaticAssessment', label: `Automatic assessment: ${summarizedSelection(automaticAssessmentFilters, automaticAssessmentOptions, 'All')}` })
     }
     if (automaticAssessmentOutcomeFilters.length !== automaticAssessmentOutcomeOptions.length) {
         chips.push({
             key: 'automaticAssessmentOutcome',
-            label: `Auto outcome: ${summarizedSelection(automaticAssessmentOutcomeFilters, automaticAssessmentOutcomeOptions, 'All outcomes')}`,
+            label: `Auto outcome: ${summarizedSelection(automaticAssessmentOutcomeFilters, automaticAssessmentOutcomeOptions, 'All')}`,
         })
     }
     if (automaticAssessmentRescoreFilters.length !== automaticAssessmentRescoreOptions.length) {
         chips.push({
             key: 'automaticAssessmentRescore',
-            label: `Auto rescore: ${summarizedSelection(automaticAssessmentRescoreFilters, automaticAssessmentRescoreOptions, 'All rescores')}`,
+            label: `Auto rescore: ${summarizedSelection(automaticAssessmentRescoreFilters, automaticAssessmentRescoreOptions, 'All')}`,
         })
-    }
-    if (cvssVersionMismatchOnly) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
-    if (notRescoredOnly) chips.push({ key: 'notRescored', label: 'Not rescored' })
-    if (newFindingsOnly) chips.push({ key: 'newFindings', label: 'New findings' })
-    if (attributionAgeDays != null) {
-        const verb = attributionAgeMode === 'younger' ? 'younger' : 'older'
-        chips.push({ key: 'attributionAge', label: `Attributed ${verb} than ${attributionAgeDays}d` })
     }
 
     return chips
@@ -246,6 +258,8 @@ export function hasCustomProjectVulnFilterState({
     cvssVersionMismatchOnly,
     notRescoredOnly,
     newFindingsOnly,
+    awaitingReviewOnly,
+    defaultAwaitingReviewOnly = false,
     attributionAgeDays,
     sortBy,
     sortOrder,
@@ -280,6 +294,7 @@ export function hasCustomProjectVulnFilterState({
         || cvssVersionMismatchOnly
         || notRescoredOnly
         || newFindingsOnly
+        || !!awaitingReviewOnly !== defaultAwaitingReviewOnly
         || attributionAgeDays != null
         || sortBy !== 'rescored-severity'
         || sortOrder !== 'desc'

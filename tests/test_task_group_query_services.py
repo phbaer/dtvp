@@ -839,3 +839,127 @@ def test_new_findings_filter_matches_groups_with_a_new_finding():
     combined = _query(index, new_findings=True, lifecycle=["INCOMPLETE"])
     assert [item["id"] for item in combined["items"]] == ["CVE-2026-0002"]
     assert combined["counts"]["facets"]["new_findings"] == 1
+
+
+def _review_group(vuln_id: str, tags: list[str], details: list[str]) -> dict:
+    """A vulnerability with one finding per assessment text."""
+    return {
+        "id": vuln_id,
+        "title": f"Review finding {vuln_id}",
+        "tags": tags,
+        "affected_versions": [
+            {
+                "project_version": "1.0",
+                "components": [
+                    {
+                        "component_name": f"lib-{number}",
+                        "analysis_state": "NOT_SET" if not text else "NOT_AFFECTED",
+                        "analysis_details": text,
+                        "tags": [tags[number % len(tags)]],
+                    }
+                    for number, text in enumerate(details)
+                ],
+            }
+        ],
+    }
+
+
+def test_awaiting_review_covers_every_submission_not_yet_approved():
+    from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
+
+    pending = "\n[Status: Pending Review]"
+    team_a = "--- [Team: TeamA] [State: NOT_AFFECTED] ---\nNot reachable."
+    team_b = "--- [Team: TeamB] [State: NOT_AFFECTED] ---\nNot reachable."
+    groups = [
+        # Both teams submitted, not approved: Ready for approval.
+        _review_group("CVE-2026-1000", ["TeamA", "TeamB"],
+                      [team_a + "\n" + team_b + pending] * 2),
+        # TeamA submitted while TeamB is still open: Incomplete, yet waiting
+        # for a reviewer.
+        _review_group("CVE-2026-1001", ["TeamA", "TeamB"],
+                      [team_a + pending, team_a + pending]),
+        # A proposal saved pending review (a carry-over, an agent's draft).
+        _review_group("CVE-2026-1002", ["TeamA"], [team_a + pending]),
+        # Approved: nothing to review.
+        _review_group("CVE-2026-1003", ["TeamA"], [team_a]),
+        # Nobody assessed yet.
+        _review_group("CVE-2026-1004", ["TeamA"], [""]),
+    ]
+    summaries = summarize_grouped_vulnerabilities(groups, {})
+    lifecycles = {s["id"]: s["list_metadata"]["lifecycle"] for s in summaries}
+    assert lifecycles == {
+        "CVE-2026-1000": "NEEDS_APPROVAL",
+        "CVE-2026-1001": "INCOMPLETE",
+        "CVE-2026-1002": "NEEDS_APPROVAL",
+        "CVE-2026-1003": "ASSESSED",
+        "CVE-2026-1004": "OPEN",
+    }
+    index = query_services.build_task_group_query_index(summaries)
+    review = {"q": "", "awaiting_review": True}
+
+    result = _query(index, **review)
+    assert [item["id"] for item in result["items"]] == [
+        "CVE-2026-1000", "CVE-2026-1001", "CVE-2026-1002",
+    ]
+    assert result["filtered"] == 3
+    assert result["counts"]["all"]["awaiting_review"] == 3
+    assert result["counts"]["filtered"]["awaiting_review"] == 3
+    # Ready for approval is the complete subset; the team submission with
+    # another team open is not in it, but is awaiting review.
+    ready = _query(index, q="", lifecycle=["READY_FOR_APPROVAL"])
+    assert [item["id"] for item in ready["items"]] == ["CVE-2026-1000", "CVE-2026-1002"]
+
+    # Combined with a lifecycle it narrows (AND); the facet count leaves out
+    # its own restriction and keeps the lifecycle one.
+    incomplete = _query(index, **review, lifecycle=["INCOMPLETE", "INCONSISTENT"])
+    assert [item["id"] for item in incomplete["items"]] == ["CVE-2026-1001"]
+    assert incomplete["counts"]["facets"]["awaiting_review"] == 1
+    # The lifecycle facet shows how the waiting ones split up.
+    lifecycle_facet = result["counts"]["facets"]["lifecycle"]
+    assert lifecycle_facet["READY_FOR_APPROVAL"] == 2
+    assert lifecycle_facet["INCOMPLETE"] == 1
+    assert lifecycle_facet["OPEN"] == 0
+    # Without the restriction the facet still counts what it would add.
+    assert _query(index, q="")["counts"]["facets"]["awaiting_review"] == 3
+
+    # The sidebar sends every status and analysis state; their chips then
+    # count the waiting vulnerabilities, not all of them.
+    as_sent = _query(
+        index,
+        **review,
+        lifecycle=["OPEN", "INCOMPLETE", "INCONSISTENT", "READY_FOR_APPROVAL", "ASSESSED"],
+        analysis=["NOT_SET", "EXPLOITABLE", "IN_TRIAGE", "RESOLVED", "FALSE_POSITIVE", "NOT_AFFECTED"],
+    )
+    assert as_sent["filtered"] == 3
+    facets = as_sent["counts"]["facets"]
+    assert facets["lifecycle"]["READY_FOR_APPROVAL"] == 2
+    assert facets["lifecycle"]["INCOMPLETE"] == 1
+    assert facets["lifecycle"]["OPEN"] == 0
+    assert facets["lifecycle"]["ASSESSED"] == 0
+    assert facets["analysis"]["NOT_AFFECTED"] == 3
+    assert facets["analysis"]["NOT_SET"] == 0
+    everything = _query(index, q="", analysis=["NOT_SET", "NOT_AFFECTED"])["counts"]["facets"]
+    assert everything["analysis"] == {**everything["analysis"], "NOT_AFFECTED": 4, "NOT_SET": 1}
+
+    # A selected team with the filter: what waits in that team's scope.
+    team_b_only = _query(index, **review, teams=["TeamB"])
+    assert [item["id"] for item in team_b_only["items"]] == [
+        "CVE-2026-1000", "CVE-2026-1001",
+    ]
+
+    # Bulk Changes candidates follow the same filter.
+    bulk = general_api_routes._filter_bulk_workflow_groups(
+        index, general_api_routes.BulkWorkflowFilters(awaiting_review=True)
+    )
+    assert [group["id"] for group in bulk] == [
+        "CVE-2026-1000", "CVE-2026-1001", "CVE-2026-1002",
+    ]
+
+
+def test_awaiting_review_is_part_of_the_query_cache_key():
+    groups = [_group(index) for index in range(2)]
+    groups[1]["list_metadata"]["is_pending"] = True
+    index = query_services.build_task_group_query_index(groups)
+    assert _query(index)["filtered"] == 2
+    assert _query(index, awaiting_review=True)["filtered"] == 1
+    assert _query(index)["filtered"] == 2

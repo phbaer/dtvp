@@ -19,7 +19,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 vi.mock('vue-router', () => ({
-    useRoute: vi.fn(() => ({ params: { name: 'Test' }, query: {} })),
+    useRoute: vi.fn(() => ({ params: { name: 'Test' }, query: { awaiting_review: 'false' } })),
     useRouter: vi.fn(() => ({ replace: vi.fn(() => Promise.resolve()) })),
     RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
 }))
@@ -35,7 +35,7 @@ vi.mock('../../components/VulnGroupCard.vue', () => ({
 describe('ProjectView Coverage Extra Detailed', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        vi.mocked(useRoute).mockReturnValue({ params: { name: 'Test' }, query: {} } as any)
+        vi.mocked(useRoute).mockReturnValue({ params: { name: 'Test' }, query: { awaiting_review: 'false' } } as any)
     })
 
     it('preserves missing rescored_cvss if backend only provides a rescored vector', async () => {

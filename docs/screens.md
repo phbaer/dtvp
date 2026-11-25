@@ -6,7 +6,7 @@ This guide describes the application screens covered by the documentation screen
 cd frontend && npm run test:ui:docs -- --project=chromium
 ```
 
-The capture flow uses mocked API fixtures and Chromium for a consistent screenshot set. Project examples explicitly select all five lifecycle categories; reviewers normally start with Ready for approval.
+The capture flow uses mocked API fixtures and Chromium for a consistent screenshot set. Project examples explicitly select every status; without a filter in the URL a reviewer starts on Awaiting review, an analyst on Needs my assessment.
 
 ## Entry And Project Navigation
 
@@ -48,6 +48,37 @@ The dashboard lists Dependency-Track projects, versions, classifiers, and review
 ![Project review](screenshots/project-view.png)
 
 The project review page is the main vulnerability workflow. It combines grouped vulnerability cards, lifecycle state, team ownership, assessment controls, dependency-path context, and code-analysis shortcuts. Compact row badges identify the next useful analyst step; inside the opened card the tab status badges say what is still missing, and every action sits in the sticky bar next to the tabs. A Team filter also scopes the opened card's code evidence and assessment workflow, so another team's saved run or draft does not drive the selected team's next action.
+
+### Filters
+
+![Filter sidebar](screenshots/filter-sidebar.png)
+
+The Filters tab of the sidebar shows the filters most reviews need; everything else is one click away under **More filters**.
+
+- **Quick views** at the top: **Needs my assessment** (Open or Incomplete; with teams selected, their assessment is missing), **Awaiting review**, **Conflicting** (any conflict reason), **New findings** and **All**. A quick view sets the status part of the selection (status, awaiting review, conflict reasons, new findings, the selected teams' assessment) and keeps search, teams, versions and More filters. The one in effect is highlighted; otherwise the line under it says Custom selection.
+- **Team** with **Their assessment** (Any, Not recorded, Recorded), **Status** with the **Awaiting review only** toggle and the status chips (Open, Incomplete, Ready for approval, Assessed), **Analysis state**, **Project versions**, and the sort order.
+- Every option shows how many vulnerabilities it would list with the other filters as they are.
+- Every active filter is a chip under the search field, labelled like its sidebar section, with × to remove it. **Reset** (toolbar) and **Reset filters** (sidebar) go back to the role's defaults; both are available only when something differs from them.
+
+![Awaiting review](screenshots/filter-awaiting-review.png)
+
+Reviewers start on **Awaiting review**. It lists every vulnerability with an assessment that was submitted for review and is not approved yet: Ready for approval, a team's submission while other teams are still open (Incomplete), a conflicting submission, and proposals saved pending review (carried-over assessments, agents' drafts). The status chips then show how those split up; picking Ready for approval narrows it to what can be approved now. See [Review workflows](review-workflows.md#awaiting-review).
+
+![More filters](screenshots/filter-sidebar-more.png)
+
+**More filters** holds conflict reasons, new findings, the CVSS toggles (not rescored, version mismatch), original severity, SSVC priority, KEV/CISA evidence, dependency and attribution age; its summary says how many of them are set. **Legacy analysis filters** inside it holds the threat-model proposal and automatic-assessment filters, which go with threat-model rescoring and Agentyzer in 2.1.0.
+
+![Filter drawer](screenshots/filter-drawer.png)
+
+Below 1280px (1680px with a vulnerability open) the same panel opens as a drawer from **Filters** in the toolbar.
+
+### Stable List
+
+Selecting a vulnerability, from the list or through a link, neither reloads the list nor moves it; when the detail pane opens and narrows the list, the clicked row stays where it was.
+
+A save, an approval, a reload of one vulnerability or new exploitation evidence asks for the list again in place: the loaded rows stay, and the scroll position with them. The selected vulnerability keeps its place on screen, even when the sort moved it. When it left the list (an approved one no longer awaits review), the next vulnerability that is still listed is selected and opened at the same place, else the previous one; so approving through Awaiting review goes from item to item without scrolling. An unsaved edit in the open card still asks first. Screen readers hear which vulnerability was selected and why. Only a new query (other filters or sort) starts again at the top.
+
+Opening a vulnerability looks its exploitation evidence up; the list asks again only when that changed what it shows (the row's evidence, or, with an evidence filter, which vulnerabilities match).
 
 ### Lifecycle Badges
 
@@ -95,13 +126,13 @@ Cards show assigned users and reviewer approval actions when an analyst-submitte
 
 ![Assignee filter](screenshots/assignee-filter.png)
 
-The assignee filter narrows the project view to vulnerabilities assigned to a specific user.
+The `assignee:` search token (URL parameter `assignee`) narrows the project view to vulnerabilities assigned to a specific user.
 
 ### Automatic Assessment Filter
 
 ![Automatic assessment filter](screenshots/automatic-assessment-filter.png)
 
-Automatic assessment markers show groups with saved automatic code-analysis results, and the sidebar filter can narrow the list to vulnerabilities with or without those cached assessments.
+Automatic assessment markers show groups with saved automatic code-analysis results, and the sidebar filter (under **More filters**, **Legacy analysis filters**) can narrow the list to vulnerabilities with or without those cached assessments. These filters go with Agentyzer in 2.1.0.
 
 ### User Assignment Form
 

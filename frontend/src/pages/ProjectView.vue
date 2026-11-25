@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { EVIDENCE_UPDATED_EVENT } from '../lib/evidence'
+import { EVIDENCE_UPDATED_EVENT, evidenceSources, groupCves, type EvidenceUpdate } from '../lib/evidence'
+import { captureListAnchor, estimatedScrollTop, resolveListAnchor, type ListAnchor } from '../lib/listSelectionAnchor'
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -523,6 +524,7 @@ const {
     cvssVersionMismatchOnly,
     notRescoredOnly,
     newFindingsOnly,
+    awaitingReviewOnly,
     attributionAgeDays,
     attributionAgeMode,
     lifecycleFilters,
@@ -550,6 +552,7 @@ const {
     defaultTeamAssessmentFilter,
     defaultLifecycleFilters,
     defaultAnalysisFilters,
+    defaultAwaitingReviewOnly,
     automaticAssessmentFilter,
     automaticAssessmentOutcomeFilter,
     automaticAssessmentRescoreFilter,
@@ -584,7 +587,7 @@ const showFilterDrawer = ref(false)
 const LIFECYCLE_OPTIONS = [
     { value: 'OPEN', label: 'Open', color: 'bg-red-500', description: 'No assessment has been recorded yet' },
     { value: 'INCOMPLETE', label: 'Incomplete', color: 'bg-amber-500', description: 'Missing assessment coverage or conflicting data that needs repair' },
-    { value: 'READY_FOR_APPROVAL', label: 'Ready for Approval', color: 'bg-violet-500', description: 'All required assessments are documented and only reviewer approval remains' },
+    { value: 'READY_FOR_APPROVAL', label: 'Ready for approval', color: 'bg-violet-500', description: 'All required assessments are documented and only reviewer approval remains' },
     { value: 'ASSESSED', label: 'Assessed', color: 'bg-green-600', description: 'Complete assessments with no pending approval, including legacy assessments' },
 ]
 
@@ -631,6 +634,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
+    awaitingReviewOnly: awaitingReviewOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
     tmrescoreFilters: selectedTMRescoreProposalFilters.value,
@@ -759,6 +763,7 @@ const listFilterOptions = computed(() => ({
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
+    awaitingReviewOnly: awaitingReviewOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
     lifecycleFilters: lifecycleFilters.value,
@@ -957,15 +962,38 @@ const {
     findListGroup,
 })
 
+// A refresh after a change (a save, an approval, a reload, new evidence)
+// asks for the rows again in place and keeps the selection steady; see
+// listSelectionAnchor. Only a new query (filters, sort) starts at the top.
+const refreshTaskWindowInPlace = async () => {
+    const anchor = captureSelectionAnchor()
+    await loadTaskGroupWindow({ reset: true, keepPosition: true })
+    await restoreSelectionAnchor(anchor)
+}
+
 const refreshActiveTaskWindowAndDetails = async () => {
-    await loadTaskGroupWindow({ reset: true })
-    if (selectedGroupId.value) {
+    const before = selectedGroupId.value
+    await refreshTaskWindowInPlace()
+    // A newly selected neighbour loads through the selection watcher.
+    if (selectedGroupId.value && selectedGroupId.value === before) {
         await refreshTaskGroupDetail(selectedGroupId.value, { showLoading: false })
     }
 }
 
-function refreshEvidenceFilters() {
-    if (isAnalysisViewActive.value && currentVulnTaskId.value) void loadTaskGroupWindow({ reset: true })
+// Opening a vulnerability looks its exploitation evidence up. The list asks
+// again only when that changed what it shows: the evidence flags of a listed
+// row, or, with an evidence filter, of a vulnerability it may now list.
+function refreshEvidenceFilters(event?: Event) {
+    if (!isAnalysisViewActive.value || !currentVulnTaskId.value) return
+    const update = (event as CustomEvent<EvidenceUpdate> | undefined)?.detail
+    if (update?.cves?.length) {
+        const key = update.cves.join(',')
+        const listed = listItems.value.filter(item => groupCves(item.group).join(',') === key)
+        const changed = listed.some(item =>
+            [...evidenceSources(item.group)].sort().join(',') !== [...update.sources].sort().join(','))
+        if (!changed && (listed.length || !evidenceFilters.value.length)) return
+    }
+    void refreshTaskWindowInPlace()
 }
 
 const selectedGroupHasAutomaticAssessment = computed(() =>
@@ -1074,7 +1102,7 @@ const handleReloadGroup = async (group: GroupedVuln) => {
         replaceGroup(applyReloadedAssessmentDetails(sourceGroup, results))
         statsDirty.value = true
         if (currentVulnTaskId.value) {
-            await loadTaskGroupWindow({ reset: true })
+            await refreshTaskWindowInPlace()
             if (selectedGroupId.value === group.id) {
                 await refreshTaskGroupDetail(group.id, { showLoading: false })
             }
@@ -1158,6 +1186,8 @@ const {
     virtualPaddingBottom,
     scrollContainer: listScrollContainer,
     resetVisibleItems,
+    scrollToTop: scrollListTo,
+    estimatedItemHeight: listItemHeight,
 } = useVisibleGroupWindow({
     items: sortedItems,
     isActive: isAnalysisViewActive,
@@ -1168,6 +1198,86 @@ const {
 
 const setListScrollContainer = (element: any) => {
     listScrollContainer.value = element as HTMLElement | null
+}
+
+const listRow = (id: string): HTMLElement | null => {
+    const container = listScrollContainer.value
+    if (!container) return null
+    return [...container.querySelectorAll<HTMLElement>('.vuln-card[data-group-id]')]
+        .find(row => row.dataset.groupId === id) || null
+}
+
+const rowOffset = (id: string): number | null => {
+    const container = listScrollContainer.value
+    const row = listRow(id)
+    if (!container || !row) return null
+    return row.getBoundingClientRect().top - container.getBoundingClientRect().top
+}
+
+const firstVisibleRowId = (): string | null => {
+    const container = listScrollContainer.value
+    if (!container) return null
+    const top = container.getBoundingClientRect().top
+    const row = [...container.querySelectorAll<HTMLElement>('.vuln-card[data-group-id]')]
+        .find(candidate => candidate.getBoundingClientRect().bottom > top)
+    return row?.dataset.groupId || null
+}
+
+/** The selected row, else the first visible one, with its neighbours. */
+const captureSelectionAnchor = (): ListAnchor | null => {
+    const ids = sortedItems.value.map(item => item.id)
+    const selected = selectedGroupId.value && ids.includes(selectedGroupId.value)
+        ? selectedGroupId.value
+        : null
+    const anchorId = selected || firstVisibleRowId()
+    if (!anchorId) return null
+    return captureListAnchor(ids, anchorId, { selected: !!selected, offset: rowOffset(anchorId) })
+}
+
+const listAnnouncement = ref('')
+
+const placeRowAt = async (id: string, offset: number) => {
+    const index = sortedItems.value.findIndex(item => item.id === id)
+    if (index < 0 || !listScrollContainer.value) return
+    if (rowOffset(id) == null) {
+        scrollListTo(estimatedScrollTop(index, offset, listItemHeight.value))
+        await nextTick()
+    }
+    const current = rowOffset(id)
+    if (current != null && listScrollContainer.value) {
+        scrollListTo(listScrollContainer.value.scrollTop + current - offset)
+    }
+}
+
+// Selecting a row never reloads or scrolls the list. Opening the detail
+// pane can narrow the list column; the clicked row stays where it was.
+const selectListRow = async (group: GroupedVuln) => {
+    const offset = rowOffset(group.id)
+    await selectGroupWithDraftGuard(group)
+    if (offset == null || selectedGroupId.value !== group.id) return
+    await nextTick()
+    await placeRowAt(group.id, offset)
+}
+
+const restoreSelectionAnchor = async (anchor: ListAnchor | null) => {
+    if (!anchor) return
+    await nextTick()
+    const resolution = resolveListAnchor(anchor, sortedItems.value.map(item => item.id))
+    if (anchor.selected && selectedGroupId.value === anchor.id && resolution.id !== anchor.id) {
+        const target = resolution.id ? sortedGroupLookup.value.groupById.get(resolution.id) : null
+        if (target) {
+            await selectGroupWithDraftGuard(target)
+            if (selectedGroupId.value === target.id) {
+                listAnnouncement.value = `${anchor.id} left the list; selected ${target.id}, the ${resolution.reason === 'next' ? 'next' : 'previous'} vulnerability.`
+            }
+        } else {
+            listAnnouncement.value = `${anchor.id} left the list; no other vulnerability is listed.`
+        }
+    }
+    if (resolution.id && anchor.offset != null) {
+        await nextTick()
+        await placeRowAt(resolution.id, anchor.offset)
+    }
 }
 
 const hasMeasuredListViewport = () => {
@@ -1190,13 +1300,14 @@ watch(() => viewMode.value, () => {
     showFilterDrawer.value = false
 })
 
-watch(sortedItems, (items, previousItems) => {
-    const isAppendingTaskWindow = !!currentVulnTaskId.value
-        && taskListAppendLoading.value
-        && items.length >= (previousItems?.length || 0)
-    if (!isAppendingTaskWindow) {
-        resetVisibleItems()
-    }
+// Changed rows (a save, a refresh in place, more rows) keep the scroll
+// position; a new query starts at the top: the task window resets it when
+// the first window of a new query arrives, the local list here.
+watch(() => JSON.stringify([listFilterOptions.value, sortBy.value, sortOrder.value]), () => {
+    if (!currentVulnTaskId.value) resetVisibleItems()
+})
+
+watch(sortedItems, () => {
     if (selectedGroupId.value && !selectedListGroup.value && !currentVulnTaskId.value) {
         closeSelectedGroup()
     } else if (selectedGroupId.value && !selectedGroup.value) {
@@ -1250,6 +1361,7 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
+    awaitingReviewOnly: awaitingReviewOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
 }))
@@ -1311,6 +1423,10 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'newFindings':
             newFindingsOnly.value = false
             break
+        case 'awaitingReview':
+            // Through the update, so a reviewer's choice outlives a reload.
+            handleFilterUpdate({ ...filterState.value, awaitingReviewOnly: false })
+            break
         case 'attributionAge':
             attributionAgeDays.value = null
             attributionAgeMode.value = 'older'
@@ -1332,6 +1448,7 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
+    awaitingReviewOnly: awaitingReviewOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
@@ -1339,6 +1456,7 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     teamAssessmentFilter: teamAssessmentFilter.value,
     inconsistencyReasonFilters: inconsistencyReasonFilters.value,
     defaultTeamAssessmentFilter: teamFilters.value.length ? defaultTeamAssessmentFilter.value : 'ANY',
+    defaultAwaitingReviewOnly: defaultAwaitingReviewOnly.value,
     defaultLifecycleFilters: defaultLifecycleFilters.value,
     analysisFilters: analysisFilters.value,
     defaultAnalysisFilters,
@@ -1356,6 +1474,7 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
 
 const filterSidebarProps = computed(() => ({
     filters: filterState.value,
+    hasCustomFilters: hasCustomFilterState.value,
     availableVersions: availableVersions.value,
     lifecycleOptions: LIFECYCLE_OPTIONS,
     inconsistencyReasonOptions: INCONSISTENCY_REASON_OPTIONS,
@@ -1729,6 +1848,7 @@ watch(currentUserRole, (role) => {
                 v-bind="filterSidebarProps"
                 @update:filters="handleFilterUpdate"
                 @copy-filter-url="copyFilterUrl"
+                @reset-filters="resetFilters"
             />
         </div>
 
@@ -1787,10 +1907,12 @@ watch(currentUserRole, (role) => {
                             ></div>
                         </div>
                     </div>
+                    <div class="sr-only" role="status" aria-live="polite" data-testid="list-announcement">{{ listAnnouncement }}</div>
                     <div
                         v-if="viewMode === 'analysis'"
                         :ref="setListScrollContainer"
-                        class="min-h-0 flex-1 overflow-y-auto pr-1"
+                        data-testid="vuln-list-scroll"
+                        class="min-h-0 flex-1 overflow-y-auto pr-1 [overflow-anchor:none]"
                     >
                         <template v-if="filteredGroupCount > 0">
                             <div
@@ -1807,7 +1929,7 @@ watch(currentUserRole, (role) => {
                                     :reloading="reloadingGroupIds.has(item.id)"
                                     :reload-error="groupReloadErrors[item.id]"
                                     :data-group-id="item.id"
-                                    @select="selectGroupWithDraftGuard"
+                                    @select="selectListRow"
                                     @reload="handleReloadGroup"
                                     @update="handleTeamMappingUpdated"
                                     @update:assessment="(data) => handleLocalAssessmentUpdate(item.group, data)"
@@ -1984,6 +2106,7 @@ watch(currentUserRole, (role) => {
                     v-bind="filterSidebarProps"
                     @update:filters="handleFilterUpdate"
                     @copy-filter-url="copyFilterUrl"
+                    @reset-filters="resetFilters"
                 />
             </aside>
         </div>
