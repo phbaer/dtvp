@@ -108,11 +108,11 @@ def register_frontend_routes(app: FastAPI, deps: FrontendRouteDeps) -> None:
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="refresh" content="0; url={escaped_target}" />
-  <title>DTVP</title>
+  <title>River</title>
 </head>
 <body>
   <script>window.location.replace({target_json});</script>
-  <a href="{escaped_target}">DTVP</a>
+  <a href="{escaped_target}">River</a>
 </body>
 </html>"""
             )

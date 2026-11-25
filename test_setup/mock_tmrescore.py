@@ -666,7 +666,7 @@ async def ui():
           <head><title>Mock TMRescore</title></head>
           <body style=\"font-family: sans-serif; padding: 2rem; background: #111827; color: #f3f4f6;\">
             <h1>Mock TMRescore</h1>
-            <p>In-memory mock service for local DTVP integration testing.</p>
+            <p>In-memory mock service for local River integration testing.</p>
             <ul>
               <li>Sessions: {session_count}</li>
               <li>Health: <a href=\"/health\" style=\"color: #60a5fa;\">/health</a></li>

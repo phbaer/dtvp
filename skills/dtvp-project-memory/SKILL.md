@@ -1,9 +1,9 @@
 ---
 name: dtvp-project-memory
-description: Use when working in the DTVP repository, understanding its functionality, planning changes, onboarding to the codebase, reviewing project architecture, or after implementing changes that affect behavior, APIs, configuration, integrations, commands, or workflows. Read README.md before broad scanning, and update it when meaningful changes are made.
+description: Use when working in the River repository, understanding its functionality, planning changes, onboarding to the codebase, reviewing project architecture, or after implementing changes that affect behavior, APIs, configuration, integrations, commands, or workflows. Read README.md before broad scanning, and update it when meaningful changes are made.
 ---
 
-# DTVP Project Memory
+# River Project Memory
 
 ## Start Here
 

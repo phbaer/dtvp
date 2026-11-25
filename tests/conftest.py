@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 # a test run never touches the developer's real data directory.
 _IMPORT_TIME_DATA = tempfile.TemporaryDirectory(prefix="dtvp-test-import-")
 os.environ["DTVP_DT_CACHE_PATH"] = os.path.join(_IMPORT_TIME_DATA.name, "dt_cache")
-# DTVP refuses to start without a strong session signing key. Assign (not
+# River refuses to start without a strong session signing key. Assign (not
 # setdefault) so a developer .env or the CI copy of .env.test cannot supply a
 # weaker one or a key file; process variables take precedence over .env.
 os.environ["DTVP_SESSION_SECRET_KEY"] = "dtvp-dev-only-test-session-signing-key-0123456789"

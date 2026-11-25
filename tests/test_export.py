@@ -287,7 +287,7 @@ def test_vdr_carries_the_local_assessments_not_yet_exported(client, queued, monk
     entries = {entry["id"]: entry for entry in document["vulnerabilities"]}
     assert set(entries) == {"CVE-2026-0001", "CVE-2026-0002"}
     first = entries["CVE-2026-0001"]
-    # DTVP's value, although Dependency-Track does not hold it yet.
+    # River's value, although Dependency-Track does not hold it yet.
     # When the General assessment was saved.
     assert first["analysis"].pop("lastUpdated").startswith("20")
     assert first["analysis"] == {"state": "not_affected", "detail": "Decision 1"}

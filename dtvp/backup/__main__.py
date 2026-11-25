@@ -24,7 +24,7 @@ def _print_err(message: str) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m dtvp.backup",
-        description="Export, inspect, verify and restore DTVP instance dumps (dtvp.dump/1).",
+        description="Export, inspect, verify and restore River instance dumps (dtvp.dump/1).",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -87,7 +87,7 @@ def _export(args: argparse.Namespace) -> int:
     if args.include_access_tokens:
         _print_err(
             "Warning: the dump will contain access-token digests. Anyone holding "
-            "it can use those tokens against a DTVP with the same data; store and "
+            "it can use those tokens against a River with the same data; store and "
             "encrypt it as a credential."
         )
     result = export_dump(
@@ -109,7 +109,7 @@ def _summary_text(summary: dict[str, Any]) -> str:
     lines = [
         f"Dump {summary['dump_id']} ({summary['format']})",
         f"Created {summary['created_at']} by {summary['created_by']} ({summary['reason']}), "
-        f"DTVP {summary['dtvp']['version']} ({summary['dtvp']['build_commit']})",
+        f"River {summary['dtvp']['version']} ({summary['dtvp']['build_commit']})",
         f"Dependency-Track: {summary['source']['dependency_track_url'] or 'unknown'}",
         f"Contains credentials: {'yes' if summary['contains_credentials'] else 'no'}",
         f"Excluded: {', '.join(summary['excluded']) or 'nothing'}",

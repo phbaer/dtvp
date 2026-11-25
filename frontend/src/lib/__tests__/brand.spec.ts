@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { applyFavicon, radarIconUrl } from '../brand'
+import { applyFavicon, markIconUrl } from '../brand'
 
 describe('brand', () => {
-    it('points the page icon at the DTVP radar', () => {
+    it('points the page icon at the River mark', () => {
         document.head.innerHTML = '<link rel="icon" href="data:," />'
         applyFavicon()
         const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')!
         // Small enough for Vite to embed in the bundle.
-        expect(radarIconUrl).toMatch(/^data:image\/svg\+xml|dtvp-lucide-radar/)
-        expect(link.getAttribute('href')).toBe(radarIconUrl)
+        expect(markIconUrl).toMatch(/^data:image\/svg\+xml|river-mark/)
+        expect(link.getAttribute('href')).toBe(markIconUrl)
         expect(link.type).toBe('image/svg+xml')
     })
 

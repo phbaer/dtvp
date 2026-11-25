@@ -1,4 +1,4 @@
-"""One DTVP process per data directory, and none while a restore is open."""
+"""One River process per data directory, and none while a restore is open."""
 
 import json
 import os
@@ -74,7 +74,7 @@ def test_claim_writes_the_registry(instance_dir):
 def test_cache_manager_cannot_open_a_locked_instance(instance_dir):
     descriptor = try_lock_exclusive(str(instance_dir / ".dtvp-instance.lock"))
     try:
-        with pytest.raises(InstanceBusyError, match="another DTVP process or a restore"):
+        with pytest.raises(InstanceBusyError, match="another River process or a restore"):
             CacheManager(base_path=str(instance_dir))
     finally:
         unlock(descriptor)

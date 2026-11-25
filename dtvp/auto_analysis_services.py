@@ -470,7 +470,7 @@ def build_component_auto_analysis_guidance_block(
         else ""
     )
     return (
-        "Component-specific auto-assessment guidance configured in DTVP "
+        "Component-specific auto-assessment guidance configured in River "
         f"for scan target {target.component_name}.{selector_text} "
         "Treat this as reviewer context to investigate, not as evidence. "
         "Do not infer dependency presence, version, reachability, or affectedness "
@@ -516,13 +516,13 @@ def build_auto_analysis_guidance(
     guidance_parts: list[str] = []
     if target.team:
         guidance_parts.append(
-            "Automatic DTVP scan for an open vulnerability. "
+            "Automatic River scan for an open vulnerability. "
             f"Assess {vuln_id} for component {target.component_name} "
             f"owned by {target.team}."
         )
     else:
         guidance_parts.append(
-            "Automatic DTVP scan for an open vulnerability. "
+            "Automatic River scan for an open vulnerability. "
             f"Assess {vuln_id} for component {target.component_name}."
         )
     tmrescore_guidance = build_tmrescore_code_analysis_guidance(tmrescore_proposal)

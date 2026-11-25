@@ -2,7 +2,7 @@
 
 Database and data migrations can take a while on an existing installation.
 They report here; the message is printed to the console and shown on the
-start page until DTVP is ready.
+start page until River is ready.
 """
 
 from __future__ import annotations

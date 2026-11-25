@@ -198,8 +198,8 @@ jobs:
           if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
             TAG_DTVP_VERSION=$(git show "$TAG:pyproject.toml" | awk -F'"' '/^version = "/ {print $2; exit}')
             if [[ "$TAG_DTVP_VERSION" != "$VERSION" ]]; then
-              echo "Git tag $TAG does not contain DTVP package version $VERSION." >&2
-              echo "Tagged version: DTVP=$TAG_DTVP_VERSION; expected $VERSION." >&2
+              echo "Git tag $TAG does not contain River package version $VERSION." >&2
+              echo "Tagged version: River=$TAG_DTVP_VERSION; expected $VERSION." >&2
               exit 1
             fi
             echo "Git tag ${TAG} already exists — skipping release tag creation."
@@ -327,7 +327,7 @@ jobs:
           uv run git-cliff -o CHANGELOG.md
           # The commits' parts for the "What's new" dialog (dtvp/release_notes.py).
           uv run git-cliff --context -o CHANGELOG.json
-      - name: Build and Push DTVP (free-threaded)
+      - name: Build and Push River (free-threaded)
         env:
           REGISTRY: ${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
           REGISTRY_USER: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}

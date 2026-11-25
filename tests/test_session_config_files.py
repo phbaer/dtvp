@@ -2,7 +2,7 @@
 
 Compose must not fall back to the refused placeholder. Every development
 setup (pm2 ecosystem, the documented split-backend exports, VS Code) carries
-a committed key DTVP accepts only as a development key: copied into
+a committed key River accepts only as a development key: copied into
 production without the development flag, it is refused.
 """
 

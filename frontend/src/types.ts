@@ -104,7 +104,7 @@ export interface Instance {
     dtvp_sync_status?: string;
     dtvp_update_id?: string | null;
     dtvp_sync_error?: string | null;
-    /** Set for findings assessed in DTVP: synced, pending, error, inactive, superseded, or cancelled. */
+    /** Set for findings assessed in River: synced, pending, error, inactive, superseded, or cancelled. */
     sync_status?: string;
     /** What Dependency-Track holds while an export is waiting or failing and it differs. */
     source_assessment?: SourceAssessment | null;
@@ -241,7 +241,7 @@ export interface AssessmentPayload {
     state: string;
     /** The assessment as fields; the server renders the stored text. */
     fields?: import('./lib/assessment-helpers').AssessmentFields;
-    /** Text in DTVP's markup; only for callers that do not send fields. */
+    /** Text in River's markup; only for callers that do not send fields. */
     details?: string;
     justification?: string;
     suppressed: boolean;
@@ -613,7 +613,7 @@ export interface AliasDisagreement {
     component_name: string | null;
     component_version: string | null;
     findings: { vulnerability_uuid: string; vuln_id: string | null; state: string }[];
-    /** For a same-issue pair: why DTVP thinks they are one issue. */
+    /** For a same-issue pair: why River thinks they are one issue. */
     reason?: string;
 }
 

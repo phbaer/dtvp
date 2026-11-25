@@ -1,5 +1,5 @@
 """Repair Assessments carries the assessment of a gone finding whose component
-DTVP never knew to the finding of the same vulnerability reported now in the
+River never knew to the finding of the same vulnerability reported now in the
 same version (CVE-2024-28863 on ViewPoint 7.2.0, 2026-11-23): only when that
 is unambiguous and the gone records agree; never onto a finding saved since
 the preview; a second run changes nothing."""

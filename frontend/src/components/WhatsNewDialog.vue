@@ -78,11 +78,11 @@ const showFullList = computed(() => props.mode !== 'compact' || expanded.value)
 const title = computed(() => {
     if (props.mode === 'browse') return "What's new"
     return props.mode === 'major'
-        ? `DTVP ${props.currentVersion}`
-        : `What's new in DTVP ${props.currentVersion}`
+        ? `River ${props.currentVersion}`
+        : `What's new in River ${props.currentVersion}`
 })
 const subtitle = computed(() => {
-    if (props.mode === 'browse') return `You are running DTVP ${props.currentVersion}.`
+    if (props.mode === 'browse') return `You are running River ${props.currentVersion}.`
     if (props.previousVersion) return `Changes since ${props.previousVersion}.`
     return ''
 })

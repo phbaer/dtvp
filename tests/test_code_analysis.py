@@ -539,7 +539,7 @@ def test_code_analysis_dashboard_status_reports_queue_and_external_state(client)
     item.model = "gpt-queue"
     item.llm_backend = "openwebui"
     item.llm_provider = "OpenWebUI"
-    item.logs = ["DTVP started scan"]
+    item.logs = ["River started scan"]
     item.progress = {
         "completed_steps": 2,
         "total_steps": 4,
@@ -641,7 +641,7 @@ def test_code_analysis_dashboard_status_reports_queue_and_external_state(client)
     assert payload["llm_backend_source"] == "queue"
     assert payload["llm_provider"] == "OpenWebUI"
     assert payload["llm_provider_source"] == "queue"
-    assert payload["queue"]["active_item"]["logs"] == ["DTVP started scan"]
+    assert payload["queue"]["active_item"]["logs"] == ["River started scan"]
     assert payload["external"]["configuration"]["service_name"] == "agentyzer"
     assert (
         payload["external"]["configuration"]["repositories"]["workspace_dir"]
@@ -1958,7 +1958,7 @@ async def test_analysis_queue_worker_sends_lean_guidance_to_native_follow_up(
         vuln_id="CVE-2026-FOLLOW",
         component_name="keycloak",
         submitted_by="testuser",
-        user_guidance="DTVP compact prior context that must only be used for fallback",
+        user_guidance="River compact prior context that must only be used for fallback",
         parent_job_id="parent-job",
         follow_up_question="Is Keycloak itself vulnerable?",
         follow_up_user_guidance="Reviewer asks about upstream Keycloak itself.",
@@ -1988,7 +1988,7 @@ async def test_analysis_queue_worker_sends_lean_guidance_to_native_follow_up(
     assert captured["job_id"] == "parent-job"
     assert captured["question"] == "Is Keycloak itself vulnerable?"
     assert captured["user_guidance"] == "Reviewer asks about upstream Keycloak itself."
-    assert "DTVP compact prior context" not in str(captured)
+    assert "River compact prior context" not in str(captured)
     assert any("analyzer-native parent context" in line for line in item.logs)
     assert completed["status"] == "completed"
 

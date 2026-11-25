@@ -301,7 +301,7 @@ detail_executor = BoundedWorkExecutor(
 )
 app_runtime_state: Dict[str, Any] = {
     "status": "ready",
-    "message": "DTVP is ready.",
+    "message": "River is ready.",
     "error": None,
 }
 _runtime_tasks: StartupRuntimeTasks | None = None
@@ -346,7 +346,7 @@ def _is_api_or_auth_path(path: str) -> bool:
 
 async def _initialize_application_runtime() -> None:
     global _runtime_tasks
-    _set_runtime_state("starting", "DTVP runtime is starting.")
+    _set_runtime_state("starting", "River runtime is starting.")
     try:
         # Re-check after startup imports so a native extension cannot silently
         # invalidate a deployment that explicitly requires free threading.
@@ -370,15 +370,15 @@ async def _initialize_application_runtime() -> None:
             producer_task = asyncio.create_task(producer.run())
             background_tasks.add(producer_task)
             producer_task.add_done_callback(background_tasks.discard)
-        _set_runtime_state("ready", "DTVP is ready.")
+        _set_runtime_state("ready", "River is ready.")
     except asyncio.CancelledError:
-        _set_runtime_state("stopped", "DTVP startup was stopped.")
+        _set_runtime_state("stopped", "River startup was stopped.")
         raise
     except Exception as exc:
-        logger.exception("DTVP runtime startup failed")
+        logger.exception("River runtime startup failed")
         _set_runtime_state(
             "failed",
-            "DTVP startup failed. Check the backend logs.",
+            "River startup failed. Check the backend logs.",
             str(exc),
         )
 
@@ -421,10 +421,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         group_build_executor.shutdown()
         group_postprocess_executor.shutdown()
         detail_executor.shutdown()
-        _set_runtime_state("ready", "DTVP is ready.")
+        _set_runtime_state("ready", "River is ready.")
 
 
-app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
+app = FastAPI(title="River", version=VERSION, lifespan=lifespan)
 context_path = normalize_context_path(auth_settings.CONTEXT_PATH)
 
 
@@ -551,7 +551,7 @@ source_sync = SourceSync(
 )
 cache_manager.attach_scheduler(source_sync)
 # Every authenticated API request counts as use: the sync reads the source
-# only while DTVP is in use (ADR 0004, "Idle without users").
+# only while River is in use (ADR 0004, "Idle without users").
 add_request_listener(product_interest.note_request)
 export_state_producer = ExportStateProducer(event_hub, cache_manager)
 cache_refresh_producer = CacheRefreshProducer(

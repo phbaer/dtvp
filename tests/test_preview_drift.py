@@ -95,7 +95,7 @@ async def test_one_finding_assessed_in_dt_refuses_and_names_the_fields():
 
 async def test_the_same_value_again_applies():
     """A change listener that fires for a value the snapshot already has
-    (the echo of DTVP's own export, or a read of the same assessment) changes
+    (the echo of River's own export, or a read of the same assessment) changes
     nothing the apply depends on."""
     group = _listener_refresh(_group(), TEAM_B_DECISION)
     seen = _preview(group)

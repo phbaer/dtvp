@@ -1,13 +1,13 @@
-"""CycloneDX documents of one project version, built from DTVP's records.
+"""CycloneDX documents of one project version, built from River's records.
 
 ``inventory`` is the stored BOM. ``vdr`` adds the findings with their
-assessments in standard fields, so a consumer does not have to parse DTVP's
+assessments in standard fields, so a consumer does not have to parse River's
 markup out of an analysis text:
 
 - ``analysis``: state, justification, response, the rationale as ``detail``,
   and the date of the General assessment as ``lastUpdated``;
 - ``ratings``: one rating per CVSS version of the advisory, each with its
-  score, plus DTVP's own rescoring as a rating whose ``source.name`` is the
+  score, plus River's own rescoring as a rating whose ``source.name`` is the
   configured assessment source, with its vector and the rationale as
   ``justification``;
 - BOM ``annotations``: one per team assessment, with the vulnerability's
@@ -326,7 +326,7 @@ def _references(
     vuln_id: str,
     aliases: Mapping[str, Mapping[str, str | None]] | None = None,
 ) -> list[dict[str, Any]]:
-    """The vulnerability's aliases: those its record names, and those DTVP
+    """The vulnerability's aliases: those its record names, and those River
     knows from the other findings' records."""
     seen = {
         identifier: source
@@ -564,7 +564,7 @@ def _analysis(fields: dict[str, Any], read: dict[str, Any]) -> dict[str, Any] | 
     )
     if justification and state == "not_affected":
         analysis["justification"] = justification
-    # One response per finding in DTVP; CycloneDX takes a list.
+    # One response per finding in River; CycloneDX takes a list.
     if response := _RESPONSES.get(str(fields.get("response") or "").upper()):
         analysis["response"] = [response]
     if read["rationale"]:
@@ -1002,7 +1002,7 @@ def build_vdr(
     ``same_issue_as`` maps a finding (component UUID, vulnerability UUID) to
     the vulnerability ids a person confirmed it to be the same issue as,
     although no source names them as aliases; exported as
-    ``<prefix>:same_issue_as``, never as ``references`` (it is DTVP's
+    ``<prefix>:same_issue_as``, never as ``references`` (it is River's
     record, not a source's).
     """
     moment = (generated_at or datetime.now(UTC)).astimezone(UTC).isoformat()

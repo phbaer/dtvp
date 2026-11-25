@@ -357,7 +357,7 @@ def test_cached_project_snapshot_discovers_persisted_findings(tmp_path):
 
 
 def test_cached_project_snapshot_overlays_local_assessment(tmp_path):
-    # A finding whose cached findings file predates a local DTVP assessment
+    # A finding whose cached findings file predates a local River assessment
     # must surface the assessed state via the snapshot, so the automatic
     # code-analysis sweep does not re-queue an already-assessed vulnerability.
     manager = CacheManager(base_path=str(tmp_path))
@@ -1223,7 +1223,7 @@ async def test_source_assessments_are_adopted_and_unedited_ones_keep_all_fields(
 
     analysis = (await manager.get_vulnerabilities(client, "p1"))[0]["analysis"]
 
-    # Shown exactly as imported, including fields DTVP does not model.
+    # Shown exactly as imported, including fields River does not model.
     assert analysis["analysisJustification"] == "CODE_NOT_REACHABLE"
     assert analysis["analysisDetails"] == "From the source"
     # And recorded locally, so it survives the source losing it.
@@ -1256,7 +1256,7 @@ async def test_first_local_edit_follows_the_adopted_value(tmp_path):
 
 async def test_a_change_made_in_the_source_is_overwritten_by_the_local_record(tmp_path):
     manager, client = await _manager_with_source(tmp_path)
-    await manager.persist_assessment_updates([_local_payload("Decided in DTVP")])
+    await manager.persist_assessment_updates([_local_payload("Decided in River")])
     await manager.flush_pending_updates(client)
     client.update_analysis.reset_mock()
 
@@ -1265,11 +1265,11 @@ async def test_a_change_made_in_the_source_is_overwritten_by_the_local_record(tm
     ]
     analysis = await _analysis(manager, client, refresh=True)
 
-    assert analysis["analysisDetails"] == "Decided in DTVP"
+    assert analysis["analysisDetails"] == "Decided in River"
     assert analysis["dtvpSyncStatus"] == "pending"
     assert analysis["dtvpRemote"]["analysisDetails"] == "Changed in Dependency-Track"
     await manager.flush_pending_updates(client)
-    assert client.update_analysis.await_args.kwargs["details"] == "Decided in DTVP"
+    assert client.update_analysis.await_args.kwargs["details"] == "Decided in River"
     # The source is not read before the export any more.
     client.get_analysis.assert_not_awaited()
     await manager.close()
@@ -1320,7 +1320,7 @@ async def test_an_export_writes_the_response_of_the_exported_text(tmp_path):
     assert manager._load_pending_updates() == []
     assert manager.get_assessment_fields("puuid", "cuuid", "vuuid")["response"] == "UPDATE"
 
-    # Removed in DTVP: the next export says so.
+    # Removed in River: the next export says so.
     await manager.queue_analysis_update(
         {**payload, "details": payload["details"].replace("[Response: UPDATE]\n\n", "")},
         replace=True,
@@ -1632,7 +1632,7 @@ async def test_records_from_before_tracking_get_a_gone_row_at_startup(tmp_path):
 
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
-    # DTVP knows the version's findings (a read), and has a record of a
+    # River knows the version's findings (a read), and has a record of a
     # finding that is not among them.
     client.get_vulnerabilities.return_value = [_lib("c1", "1.0", vuln="v2")]
     await manager.import_findings(client, "p1")
@@ -1654,7 +1654,7 @@ async def test_records_from_before_tracking_get_a_gone_row_at_startup(tmp_path):
     again = CacheManager(base_path=str(tmp_path))
     row = again.finding_lifecycle.presence("p1")[("c-old", "v1")]
     assert (row["status"], row["predates_tracking"], row["gone_reason"]) == ("gone", 1, "undetermined")
-    # A version DTVP never read: its first read follows the record.
+    # A version River never read: its first read follows the record.
     assert again.finding_lifecycle.presence("p-unread") == {}
     await again.close()
 
@@ -1966,7 +1966,7 @@ async def test_a_gone_record_is_superseded_once_its_successor_has_an_approved_as
 
     client.get_vulnerabilities.return_value = [_lib("c-new", "1.1")]
     client.get_bom.return_value = _bom("c-new")
-    # The successor is assessed in DTVP before the read that sees it.
+    # The successor is assessed in River before the read that sees it.
     await manager.persist_assessment_updates(
         [{
             "project_uuid": "p1", "component_uuid": "c-new", "vulnerability_uuid": "v1",
@@ -2045,7 +2045,7 @@ async def test_an_assessment_from_before_findings_were_recorded_is_carried_by_vu
 ):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
-    # A record whose finding DTVP never recorded; only the BOM DTVP stored
+    # A record whose finding River never recorded; only the BOM River stored
     # earlier still names its component.
     await manager.persist_assessment_updates(
         [{

@@ -1323,7 +1323,7 @@ describe('CodeAnalysisPanel', () => {
         mocks.listResults.mockResolvedValue([summaryRecord])
         mocks.getResult.mockResolvedValue({
             ...summaryRecord,
-            user_guidance: 'Component-specific auto-assessment guidance configured in DTVP.\nCheck owned-service runtime exposure.',
+            user_guidance: 'Component-specific auto-assessment guidance configured in River.\nCheck owned-service runtime exposure.',
             result: makeAnalysisResult('Stored automatic assessment'),
         })
 
@@ -1349,7 +1349,7 @@ describe('CodeAnalysisPanel', () => {
         expect(wrapper.text()).toContain('Saved additional guidance')
         expect(wrapper.text()).toContain('Use not verifiable')
         expect(wrapper.text()).toContain('no model conversation was captured')
-        expect(wrapper.text()).toContain('Component-specific auto-assessment guidance configured in DTVP.')
+        expect(wrapper.text()).toContain('Component-specific auto-assessment guidance configured in River.')
         expect(wrapper.text()).toContain('Check owned-service runtime exposure.')
     })
 
@@ -1534,7 +1534,7 @@ describe('CodeAnalysisPanel', () => {
         )
         expect(mocks.refreshStatus).toHaveBeenCalled()
         expect(wrapper.get('[data-testid="analysis-cleanup-panel"]').text()).toContain(
-            '2 assessments, 3 DTVP runs, 3 Agentyzer jobs removed.',
+            '2 assessments, 3 River runs, 3 Agentyzer jobs removed.',
         )
 
         confirmSpy.mockRestore()

@@ -1,4 +1,4 @@
-"""DTVP is the record: an assessment never disappears because Dependency-Track
+"""River is the record: an assessment never disappears because Dependency-Track
 recreates a component (new UUID, same package), changes its CPE, or drops a
 finding for one read before reporting it again on the new component. After
 every read, every vulnerability assessed before is assessed with the same
@@ -81,7 +81,7 @@ async def test_assessments_survive_recreated_components_and_cpe_changes(tmp_path
         client.get_bom.return_value = _bom(component_uuid, cpe)
         return await manager.import_findings(client, "p1")
 
-    # Read 1: assessed in Dependency-Track, adopted by DTVP.
+    # Read 1: assessed in Dependency-Track, adopted by River.
     client.get_vulnerabilities.return_value = [
         _finding("c1", vuln, _STATE[vuln], _TEXT[vuln]) for vuln in ("v1", "v2")
     ]

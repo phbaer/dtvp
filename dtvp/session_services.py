@@ -2,7 +2,7 @@
 
 The session cookie is an HS256 JWT signed with ``DTVP_SESSION_SECRET_KEY``.
 The same key signs the transient OIDC login-state cookie and SSVC evidence
-tokens, so DTVP refuses to start without a strong one: unset, the old
+tokens, so River refuses to start without a strong one: unset, the old
 ``change_me`` placeholder, or shorter than 32 bytes. Keys committed to the
 repository for development and tests start with ``dtvp-dev-only-``; such a
 key is refused unless ``DTVP_SESSION_ALLOW_DEV_KEY=true`` says this is a
@@ -44,7 +44,7 @@ SESSION_COOKIE = "session_token"
 SESSION_ALGORITHM = "HS256"
 
 KEY_GENERATION_HINT = (
-    "DTVP refuses to start without a session signing key of at least "
+    "River refuses to start without a session signing key of at least "
     f"{MIN_SESSION_KEY_BYTES} random bytes. Generate one with "
     "`python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` or "
     f"`openssl rand -base64 48`, then set {SESSION_KEY_ENV} or write it to a "

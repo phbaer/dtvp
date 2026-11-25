@@ -80,7 +80,7 @@ const mountExpanded = async () => {
     return wrapper
 }
 
-describe('Dependency-Track holding a different value than DTVP', () => {
+describe('Dependency-Track holding a different value than River', () => {
     beforeEach(() => {
         vi.clearAllMocks()
     })

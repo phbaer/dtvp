@@ -1,10 +1,17 @@
-<p align="center"><img src="data/dtvp-wordmark.svg" alt="DTVP: Does This Violate Policy?" width="388"></p>
+<p align="center"><img src="data/river-wordmark.svg" alt="River" width="159"></p>
 
-# DTVP: Does This Violate Policy?
+# ≋ River: River Inspects Vulnerabilities and Evaluates Risks
 
-DTVP is a FastAPI and Vue application for reviewing Dependency-Track findings
+*Read the ripples before they reach the shore.*
+
+River is a FastAPI and Vue application for reviewing Dependency-Track findings
 across project versions. It groups vulnerabilities, tracks team assessments,
 and applies consistent decisions across releases.
+
+River was called DTVP before. Identifiers such as the `DTVP_*` variables, the
+`dtvp` package and the `/dtvp` path keep that name for now; see
+[ADR 0013](docs/adr/0013-the-product-is-called-river.md). The name, the
+tagline and the story behind them are in [Brand](docs/brand.md).
 
 [Main repository](https://git.baer.one/phbaer/dtvp/) ·
 [GitHub mirror](https://github.com/phbaer/dtvp/)
@@ -25,7 +32,7 @@ and applies consistent decisions across releases.
   read vulnerabilities, draft team assessments that stay pending review, and
   add code evidence that a person reviews beside the Agentyzer runs. Agent evidence
   follows the visible dependency findings, separately from analyzer application targets.
-- Local-first: DTVP imports from Dependency-Track, works on its own database,
+- Local-first: River imports from Dependency-Track, works on its own database,
   which is the record for assessments, and exports them back automatically or
   on request. Findings Dependency-Track stops reporting are kept as gone, with
   a reason, once its analysis of a BOM upload finished; the assessment of a
@@ -40,7 +47,7 @@ and applies consistent decisions across releases.
 
 Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 26 LTS or a newer
 supported Node.js release (24.15+ still works).
-DTVP's Python environment and test suite are independent of Agentyzer, which
+River's Python environment and test suite are independent of Agentyzer, which
 is accessed through the optional code-analysis HTTP integration.
 
 ```bash
@@ -80,19 +87,19 @@ docker compose up -d
 
 Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and
 `DTVP_SESSION_SECRET_KEY`: at least 32 random bytes, for example from
-`openssl rand -base64 48`. DTVP refuses to start without such a key; see
+`openssl rand -base64 48`. River refuses to start without such a key; see
 [Deployment](docs/deployment.md) for the file-based alternative. Compose
-serves DTVP under `/dtvp` by default; `DTVP_HTTP_PORT` controls the host port.
-Persistent data lives in `./data`; run one DTVP process per data directory,
+serves River under `/dtvp` by default; `DTVP_HTTP_PORT` controls the host port.
+Persistent data lives in `./data`; run one River process per data directory,
 which an instance lock enforces. Sign-ins expire after at most 12 hours without use
 and one week in total, logout ends all of a user's sessions, and reviewers can
 revoke a user's sessions; see [Deployment](docs/deployment.md).
 Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and a
-strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
+strong `DTVP_SESSION_SECRET_KEY`. Compose serves River under `/dtvp` by default;
 `DTVP_HTTP_PORT` controls the host port. Persistent data lives in `./data`;
-run one DTVP process per data directory, which instance locks enforce.
+run one River process per data directory, which instance locks enforce.
 
-The published DTVP image uses Python 3.14 free threading. Code analysis uses
+The published River image uses Python 3.14 free threading. Code analysis uses
 a separately deployed Agentyzer service; set `DTVP_CODE_ANALYSIS_URL` to its
 reachable base URL and configure repository mappings in that service.
 See [Deployment](docs/deployment.md) for networking, authentication, runtime
@@ -106,7 +113,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 
 | Task | Command |
 | :--- | :--- |
-| Run DTVP Python tests | `uv run pytest` |
+| Run River Python tests | `uv run pytest` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- --run ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |
@@ -259,7 +266,7 @@ fields scroll with the card while tabs and actions stay in view. From a
 full-screen [assessment workspace](docs/screens.md#assessment-workspace) with
 the context beside the assessment form.
 
-After an upgrade DTVP shows [what's new](docs/screens.md#whats-new) since the
+After an upgrade River shows [what's new](docs/screens.md#whats-new) since the
 version a user last saw: a large dialog for a new major version, a small one
 otherwise; **What's new** in the header and footer opens it again.
 
@@ -309,7 +316,7 @@ version is recorded in its sync state, with content digests:
 ([Sync state](docs/runtime.md#sync-state)). The browser announces the
 products its tabs show with `PUT /api/events/interest`
 ([Product interest](docs/runtime.md#product-interest)). A sync scheduler
-reads Dependency-Track in the background, and only while DTVP is in use: a
+reads Dependency-Track in the background, and only while River is in use: a
 version once, then on its change signals, a request, or when it is opened and
 was last read longer ago than the safety interval. Without users it reads
 only what the export and explicit requests need. All of it runs within one
@@ -340,6 +347,7 @@ Sync menu ([Manual requests](docs/runtime.md#manual-requests)).
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
 | [Backup and restore](docs/backup-and-restore.md) | The instance dump `dtvp.dump/1`: export, verify, restore and recovery, encryption at rest, format, JSON Schemas, versioning, and validation rules |
 | [Architecture decisions](docs/adr/README.md) | Accepted and proposed decisions with their implementation status |
+| [Brand](docs/brand.md) | The name River and where it comes from, the logo and its files, wording |
 
 OpenAPI specifications: [tmrescore](openapi/tmrescore-openapi.json) and
 [code analysis](openapi/code-analysis-openapi.json).
@@ -356,5 +364,5 @@ as routing hints; the generic entry point is `skills/project-entrypoint/SKILL.md
 
 ## License And SBOM
 
-[MIT License](LICENSE). The DTVP image includes CycloneDX frontend/backend SBOMs,
+[MIT License](LICENSE). The River image includes CycloneDX frontend/backend SBOMs,
 served at `/api/sbom` and `/api/sbom/html`.

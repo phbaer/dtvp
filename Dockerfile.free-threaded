@@ -1,4 +1,4 @@
-# Sole published DTVP image: CPython free-threaded with fail-closed validation.
+# Sole published River image: CPython free-threaded with fail-closed validation.
 ARG PYTHON_VERSION=3.14t
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:alpine
 
@@ -15,7 +15,7 @@ RUN npm ci --include=optional
 COPY frontend/ ./
 COPY data/rescore_rules.json /app/data/rescore_rules.json
 # The logo the frontend bundles (src/lib/brand.ts).
-COPY data/dtvp-lucide-radar.svg /app/data/dtvp-lucide-radar.svg
+COPY data/river-mark.svg /app/data/river-mark.svg
 COPY dtvp/resources/ssvc /app/dtvp/resources/ssvc
 RUN npm run build
 
@@ -46,7 +46,7 @@ COPY sbom/dtvp-frontend-cyclonedx.json /app/sbom/dtvp-frontend-cyclonedx.json
 COPY sbom/dtvp-backend-cyclonedx.json /app/sbom/dtvp-backend-cyclonedx.json
 RUN chmod +x start.sh
 
-# Load the native dependencies that DTVP uses and prove that none of them has
+# Load the native dependencies that River uses and prove that none of them has
 # re-enabled the GIL before publishing the image.
 RUN DTVP_REQUIRE_FREE_THREADED=true /app/.venv/bin/python -c \
     "import _cffi_backend, cryptography.hazmat.bindings._rust, pydantic_core; from dtvp.python_runtime_services import validate_python_runtime; validate_python_runtime()"

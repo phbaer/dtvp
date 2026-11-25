@@ -35,7 +35,7 @@ Deployment rules:
   backend stopped:
   `docker compose run --rm dtvp python -m dtvp.backup restore <file>`.
   A cold copy of the whole `./data` directory taken while the backend was
-  stopped remains a fallback, into the same DTVP version only.
+  stopped remains a fallback, into the same River version only.
 - Practise the restore once a quarter: copy a recent dump to a scratch
   host or directory, run `python -m dtvp.backup verify --deep <file>`, then
   restore it into a scratch instance (`restore <file> --new-instance`), start
@@ -48,7 +48,7 @@ Deployment rules:
   otherwise resolve to `data/` in the working directory, the production
   files; the restore then stops with T1 because the running backend holds
   that directory's lock.
-- Run one DTVP process per data directory. Before it opens a database the
+- Run one River process per data directory. Before it opens a database the
   backend takes an exclusive lock (`flock`) on
   `data/dt_cache/.dtvp-instance.lock` and on `.dtvp-instance.lock` in every
   other directory holding its record databases, proposals file or caches
@@ -60,13 +60,13 @@ Deployment rules:
   backend refuses to start until the restore is completed or undone.
 - Code analysis is an optional external service. Deploy Agentyzer separately,
   configure its repository mappings there, and set `DTVP_CODE_ANALYSIS_URL` to
-  an endpoint reachable from the DTVP container. An empty URL disables the
-  integration. DTVP's Compose stack does not build or start the analyzer.
-- Internal services use Compose names and container ports. DTVP reaches
+  an endpoint reachable from the River container. An empty URL disables the
+  integration. River's Compose stack does not build or start the analyzer.
+- Internal services use Compose names and container ports. River reaches
   Dependency-Track at `http://dtrack-apiserver:8080` unless overridden.
 - If proxies are configured, list exact internal hostnames/IPs in `NO_PROXY`;
   do not rely only on CIDR entries.
-- DTVP delegates OIDC discovery, state and nonce handling, the authorization-
+- River delegates OIDC discovery, state and nonce handling, the authorization-
   code flow with S256 PKCE, token exchange, and JWKS-backed ID-token validation
   to Authlib. Its transient login state lives in a signed, HttpOnly cookie that
   expires after ten minutes. This login is independent of Dependency-Track
@@ -78,7 +78,7 @@ Deployment rules:
   `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` or
   `openssl rand -base64 48` and set it as `DTVP_SESSION_SECRET_KEY` in `.env`,
   or write it to a file, mount that file read-only, and name it with
-  `DTVP_SESSION_SECRET_KEY_FILE`. DTVP refuses to start when the key is unset,
+  `DTVP_SESSION_SECRET_KEY_FILE`. River refuses to start when the key is unset,
   the old `change_me` placeholder, or shorter than 32 bytes: the backend logs
   the reason and uvicorn exits with "Application startup failed", so the
   container stops instead of serving. Keys committed to the repository for
@@ -100,7 +100,7 @@ Deployment rules:
   `POST <context path>/auth/sessions/revoke` and the body
   `{"username": "<user>"}` from a signed-in browser session; any user may
   revoke their own. There is no button for it yet; signed in as a reviewer,
-  run this in the browser's developer console on a DTVP page:
+  run this in the browser's developer console on a River page:
 
   ```js
   await fetch('/dtvp/auth/sessions/revoke', {
@@ -111,7 +111,7 @@ Deployment rules:
   ```
 
   Replace `/dtvp` with the context path. The answer is
-  `{"status": "revoked", "username": ...}`. The username is the identity DTVP records (the OIDC
+  `{"status": "revoked", "username": ...}`. The username is the identity River records (the OIDC
   `sub`, as in `user_roles.json`). Access tokens are revoked separately (see
   [AI and API access](ai-access.md)). When the database cannot be read,
   requests fail with `503` instead of signing users out. After upgrading to a
@@ -136,7 +136,7 @@ Deployment rules:
 - Process-local cache objects and named project searches use LRU limits, and
   completed grouped tasks have a separate retained-count cap. These bounds keep
   long-running and multi-user instances from growing without limit.
-- nginx proxies `DTVP_CONTEXT_PATH` to DTVP and defaults it to `/dtvp`.
+- nginx proxies `DTVP_CONTEXT_PATH` to River and defaults it to `/dtvp`.
   `DTVP_HTTP_PORT` changes the host gateway port. Direct-container deployments
   must publish port `8000` and include the context path in the URL.
 - The Compose nginx gateway keeps upstream HTTP/1.1 connections open,
@@ -145,7 +145,7 @@ Deployment rules:
   event streams, and the project archive task streams (the archive stream was
   buffered before). Uvicorn keeps those upstream connections for 30 seconds
   and uses a 2048-connection accept backlog.
-- An external proxy in front of DTVP must not buffer or compress
+- An external proxy in front of River must not buffer or compress
   `text/event-stream` responses on `/api/events`, `/api/tasks/*/events`, and
   `/api/project-archives/tasks/*/events`, and must allow idle reads longer
   than 15 seconds (1 hour recommended). Clients whose proxy cannot stream
@@ -155,7 +155,7 @@ Deployment rules:
 - Stop the container with SIGTERM (`docker stop` does). The signal ends open
   `/api/events` streams at once, so the graceful shutdown does not wait for
   them.
-- Serve DTVP over HTTP/2 at the TLS-terminating proxy. With HTTP/1.1 browsers
+- Serve River over HTTP/2 at the TLS-terminating proxy. With HTTP/1.1 browsers
   open about six connections per host, and every long-lived stream holds one;
   the Compose nginx itself listens with HTTP/1.1.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
@@ -167,7 +167,7 @@ Deployment rules:
   finished. Reading existing assessments into fields happens once, at the
   first start of a version that needs it; 51,000 assessments took under
   three seconds in a test on a development machine.
-- The DTVP container startup script prints its packaged project version and
+- The River container startup script prints its packaged project version and
   image build number before importing the application, so deployment identity
   remains visible in Docker logs even if initialization fails.
 - `/api/performance-status` reports grouped-query/build/post-processing
@@ -183,7 +183,7 @@ Deployment rules:
 
 ## Python Runtime Images
 
-The default Compose and published DTVP image use the Python 3.14 free-threaded
+The default Compose and published River image use the Python 3.14 free-threaded
 build. Start it normally:
 
 ```bash
@@ -191,7 +191,7 @@ docker compose up -d --build
 ```
 
 `Dockerfile.free-threaded` asks `uv` for the explicit `3.14t` interpreter. It
-loads DTVP's native dependencies and verifies the runtime during the image
+loads River's native dependencies and verifies the runtime during the image
 build. Compose also sets `DTVP_REQUIRE_FREE_THREADED=true`, so the
 application refuses to start if it receives a normal interpreter or a native
 extension re-enables the GIL. Confirm the live state under `python` in
@@ -203,16 +203,16 @@ guide](https://docs.python.org/3/howto/free-threading-python.html) and [`uv`
 Python variant documentation](https://docs.astral.sh/uv/concepts/python-versions/)
 for the interpreter guarantees and `3.14t` selector.
 
-Free threading lets DTVP's dedicated CPU worker pools execute Python code on
+Free threading lets River's dedicated CPU worker pools execute Python code on
 multiple cores. It does not make Dependency-Track/network I/O faster, and the
 free-threaded interpreter has some single-thread overhead. The pipeline builds
-and publishes only this validated free-threaded DTVP image. Its canonical tags
+and publishes only this validated free-threaded River image. Its canonical tags
 are `latest`, release versions, `dev`, and PR tags; no GIL-enabled or duplicate
 variant tags are published.
 
-DTVP's root `pyproject.toml` is its release-version source. Regenerate the root
+River's root `pyproject.toml` is its release-version source. Regenerate the root
 lockfile after changing that version. A manually pushed `v*` tag must match
-DTVP's packaged version before the container is published. The workflow
+River's packaged version before the container is published. The workflow
 publishes version tags and `latest` for the `dtvp` container package only.
 A pre-release version in PEP 440 form (`2.0.0rc1`, `2.0.0b2`, `2.0.0a1`;
 tag `v2.0.0rc1`) gets its version tag but does not move `latest`, and its

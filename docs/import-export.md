@@ -6,14 +6,14 @@
 | :--- | :--- |
 | Status | Implemented |
 | Decision | [ADR 0002](adr/0002-local-first-database-with-import-and-export.md) for the database and export queue, [ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md) for assessments |
-| Verified | 2026-11-20: [Findings that disappear](#findings-that-disappear) against `tests/test_dt_cache.py`, `tests/test_finding_lifecycle_services.py`, and `tests/test_assessment_outbox_services.py` with a simulated Dependency-Track (synthetic findings and project times); not against a running Dependency-Track. 2026-11-18 against `tests/test_assessment_outbox_services.py`, `tests/test_dt_cache.py`, and `tests/test_export.py`. The run against the mock Dependency-Track dates from 2026-11-17, before assessments became DTVP's record. The response (2026-11-19) is checked against `tests/test_dt_cache.py`, `tests/test_dt_client.py`, and `tests/test_project_archive_services.py` only; how a running Dependency-Track treats `analysisResponse` was not checked |
+| Verified | 2026-11-20: [Findings that disappear](#findings-that-disappear) against `tests/test_dt_cache.py`, `tests/test_finding_lifecycle_services.py`, and `tests/test_assessment_outbox_services.py` with a simulated Dependency-Track (synthetic findings and project times); not against a running Dependency-Track. 2026-11-18 against `tests/test_assessment_outbox_services.py`, `tests/test_dt_cache.py`, and `tests/test_export.py`. The run against the mock Dependency-Track dates from 2026-11-17, before assessments became River's record. The response (2026-11-19) is checked against `tests/test_dt_cache.py`, `tests/test_dt_client.py`, and `tests/test_project_archive_services.py` only; how a running Dependency-Track treats `analysisResponse` was not checked |
 
-DTVP keeps its own copy of everything it works on. It **imports** projects,
+River keeps its own copy of everything it works on. It **imports** projects,
 findings, and vulnerability data from Dependency-Track, you **work** on the
-local copy, and DTVP **exports** assessments back.
+local copy, and River **exports** assessments back.
 
 For assessments the local database is the record. Dependency-Track never
-changes an assessment in DTVP: work is not lost because Dependency-Track is
+changes an assessment in River: work is not lost because Dependency-Track is
 unreachable, and not replaced because Dependency-Track reports something
 else.
 
@@ -62,27 +62,27 @@ version current, and readers serve only the database.
 
 Assessments are **not** replaced by an import. Per finding:
 
-| DTVP's record | Dependency-Track | Result |
+| River's record | Dependency-Track | Result |
 | :--- | :--- | :--- |
-| None yet | holds an assessment | It is adopted once as DTVP's record (revision 0, origin `import`) |
+| None yet | holds an assessment | It is adopted once as River's record (revision 0, origin `import`) |
 | None yet | holds an assessment with a [version override](assessment-model.md#version-override) marker | Adopted as revision 0 (origin `import`); revision 1 (origin `import-review`) marks it pending review and is exported |
 | None yet | holds nothing | Nothing happens |
 | Exists | holds the same value | Nothing happens; a waiting export is dropped |
-| Exists, synchronized | holds something else, or nothing | DTVP's value is exported again |
+| Exists, synchronized | holds something else, or nothing | River's value is exported again |
 | Exists, waiting for export | holds something else | Stays queued; the export overwrites it |
 | Export discarded, previous value unknown (`cancelled`) | any | Dependency-Track's value replaces the local one |
 
 "Same value" compares the analysis state, the details text (ignoring
 surrounding whitespace), and the suppression flag. Dependency-Track's findings
-list carries the text of findings with a state only; for a finding that DTVP
+list carries the text of findings with a state only; for a finding that River
 records with a text and no state, the analysis is read on its own, so that
 its text is compared too. A local change made while
 an import was already running is never touched by that import, and an
 assessed finding whose details could not be read from Dependency-Track is
 skipped rather than treated as emptied.
 
-What is adopted is the DTVP content: the state, the suppression flag, and
-the text with DTVP's markup. Assessments were never made in Dependency-Track
+What is adopted is the River content: the state, the suppression flag, and
+the text with River's markup. Assessments were never made in Dependency-Track
 itself, so its separate justification and response fields and its comment
 trail are not part of the record, and are not restored if Dependency-Track
 loses an assessment.
@@ -90,8 +90,8 @@ loses an assessment.
 The [response](assessment-model.md#response) is adopted only as the tag
 `[Response: …]` in the text. A response that exists only in
 Dependency-Track's own `analysisResponse` field is not read: the finding has
-no response in DTVP, and the first export of that finding sets
-Dependency-Track's field to `NOT_SET`. A finding that DTVP adopted and never
+no response in River, and the first export of that finding sets
+Dependency-Track's field to `NOT_SET`. A finding that River adopted and never
 changed is not exported, so its field stays as it is.
 
 On adoption, and on every later change, the text is read into atomic fields
@@ -125,7 +125,7 @@ version, assessments that exist only in Dependency-Track are not protected.
 
 ## Export
 
-`DTVP_EXPORT_MODE` selects how assessments leave DTVP:
+`DTVP_EXPORT_MODE` selects how assessments leave River:
 
 - `auto` (default): each saved assessment is exported in the background,
   usually within a second.
@@ -137,7 +137,7 @@ An export overwrites whatever Dependency-Track holds for the finding.
 Besides the state, the text, and the suppression flag, every export writes
 the [response](assessment-model.md#response) to Dependency-Track's
 `analysisResponse`: the value of the exported text, or `NOT_SET` when it has
-none, so a response removed in DTVP is removed there. Restoring a project
+none, so a response removed in River is removed there. Restoring a project
 archive writes it the same way, from the archived text. The justification is
 part of each team's assessment and is not written by an export of a saved
 assessment; only bulk workflows and archive restores pass one on.
@@ -171,14 +171,14 @@ A failing export is shown in three places:
   Dependency-Track's project list, with a hint what to do.
 
 Entries keep their product and version when the project has been deleted in
-Dependency-Track, together with the time it was last listed. DTVP remembers
+Dependency-Track, together with the time it was last listed. River remembers
 every project it has imported; for a project that vanished before that
 record existed, name and version come from the root component of its stored
 BOM. Only a project of which neither is stored shows as unknown.
 
 **Discard** removes an entry from the queue so it is never sent; **Discard
 failing** does so for all failing entries. Where the value last agreed with
-Dependency-Track is known, the assessment in DTVP goes back to it, as a new
+Dependency-Track is known, the assessment in River goes back to it, as a new
 revision with origin `export-discarded`, so both sides match again. For
 changes queued before that value was recorded, the text is kept and marked
 `cancelled`. The discarded version stays in the history. Discarding requires
@@ -197,7 +197,7 @@ Lines for `.env` (and `.env.dist` as the documented template):
 
 ```dotenv
 # auto: export assessments to Dependency-Track as they are saved (default).
-# manual: keep them in DTVP until a reviewer exports them in Settings.
+# manual: keep them in River until a reviewer exports them in Settings.
 DTVP_EXPORT_MODE=auto
 # The local database. Persistent data: back it up, do not clear it.
 # DTVP_DATABASE_PATH=data/dt_cache/dtvp.sqlite3
@@ -205,9 +205,9 @@ DTVP_EXPORT_MODE=auto
 
 ## When Dependency-Track Holds Something Else
 
-Dependency-Track is where DTVP stores a rendering of its assessments; it is
+Dependency-Track is where River stores a rendering of its assessments; it is
 not a second place to edit them. If an import finds a different value there,
-or none (as happens when Dependency-Track recreates a finding), DTVP exports
+or none (as happens when Dependency-Track recreates a finding), River exports
 its value again. In `manual` mode the entry appears under
 **Settings → Export** instead.
 
@@ -219,17 +219,17 @@ If Dependency-Track is found without the exported value again and again, the
 export is not repeated at every import. It is reported as failing, with
 "Dependency-Track did not keep the exported assessment" as the error, and
 retried with the same growing delay as other failing exports. It ends by
-itself as soon as an import finds DTVP's value in Dependency-Track.
+itself as soon as an import finds River's value in Dependency-Track.
 
 An assessment changed directly in Dependency-Track is therefore overwritten.
 Earlier versions compared both sides and held such findings as conflicts;
-findings in conflict at the time of the upgrade keep the DTVP value, which is
+findings in conflict at the time of the upgrade keep the River value, which is
 exported.
 
 ## Clearing An Assessment
 
 Clearing is an explicit operation, so that it can be told apart from
-Dependency-Track merely reporting nothing (which DTVP repairs by exporting the
+Dependency-Track merely reporting nothing (which River repairs by exporting the
 assessment again). Use the clear button in **Decision & rationale** to
 clear the open assessment, or **More** → **Clear assessment…** to choose the
 scope. The confirmation names the affected findings, components and versions:
@@ -302,17 +302,17 @@ when nothing would change, and 409 on a conflict.
 
 ## Reading A Dependency-Track Export Back
 
-Dependency-Track keeps the text DTVP last exported. A CycloneDX VDR that
+Dependency-Track keeps the text River last exported. A CycloneDX VDR that
 Dependency-Track exported can therefore be read back to restore team
-assessments DTVP lost: see
+assessments River lost: see
 [Restore team assessments from an export](review-workflows.md#restore-team-assessments-from-an-export).
 Nothing else is imported from such a file.
 
 ## Findings That Disappear
 
-DTVP follows the source's findings on every read. Dependency-Track
+River follows the source's findings on every read. Dependency-Track
 re-analyses a project asynchronously after a BOM upload, so a read in between
-can miss findings that return on recreated components a moment later. DTVP
+can miss findings that return on recreated components a moment later. River
 does not wait for that: what such a read misses is marked gone, and the next
 read heals it. A finding that returns is active again (step 5); a finding
 that returns on a recreated component takes its assessment over (step 4), and
@@ -323,7 +323,7 @@ be read at all is not acted on.
    no Dependency-Track-specific signal in this logic; any source that reports
    findings works the same way.
 2. **Keep the finding, mark it gone.** A finding a read no longer
-   has stays in DTVP as *gone*, with the read that first missed it
+   has stays in River as *gone*, with the read that first missed it
    (`gone_at`), the last read that had it (`last_seen_at`), and a
    reason:
 
@@ -333,7 +333,7 @@ be read at all is not acted on.
    | `no_longer_matched` | The component, or one of the same identity, is still there; the vulnerability is no longer reported on it (an analyser or mirror change, or a changed CPE: then the finding records "CPE changed from … to …") |
 
    Every assessment record is followed, an inactive one too: a record whose
-   finding went before DTVP tracked findings gets a gone row, once at the
+   finding went before River tracked findings gets a gone row, once at the
    first start of this version for all records and at each read for the
    version read, marked as predating tracking (first seen unknown, not
    counted as gone at that read nor in "followed since"). A row without a
@@ -362,7 +362,7 @@ be read at all is not acted on.
    with the identity known stays, also when a later version of the package
    appears. A carry-over by identity, and a recreation that needs no new
    review, need the package URL, unless the component was named by the
-   findings themselves (a finding DTVP saw reported): then name and version
+   findings themselves (a finding River saw reported): then name and version
    suffice, and a recreation also needs the only finding of the
    vulnerability with that name and version. A component whose name was
    taken from a BOM for an old record is carried by vulnerability and name,
@@ -372,7 +372,7 @@ be read at all is not acted on.
    A row made for an old record knows only the vulnerability's UUID; at each
    read, and when gone findings are shown, it is named from the stored
    findings and vulnerability records, so its aliases are found. The startup backfill skips
-   versions whose findings DTVP never read, and a row predating tracking
+   versions whose findings River never read, and a row predating tracking
    whose finding is reported is not counted as returned.
    | `component_removed` | The project's BOM has neither the component nor one of its identity; told only with the component's identity known |
    | `undetermined` | The findings do not tell, or suggest a replacement, and the BOM could not be read; or the component's identity is unknown, so a removal cannot be told from a recreation |
@@ -411,8 +411,8 @@ be read at all is not acted on.
    old record becomes `superseded`, so it is no candidate when the component
    is recreated again.
 
-   A gone finding whose component DTVP never knew (a record from before
-   DTVP tracked findings, on a component Dependency-Track has since
+   A gone finding whose component River never knew (a record from before
+   River tracked findings, on a component Dependency-Track has since
    recreated) is never carried on a read: nothing says which package it was
    on. Three things offer it to a person instead, none automatic:
    - the gone findings panel proposes the reported finding of the same
@@ -423,7 +423,7 @@ be read at all is not acted on.
      records in bulk where that is unambiguous (see
      [Review workflows](review-workflows.md));
    - a finding without an assessment shows **Earlier assessments** in its
-     assessment form: what DTVP still holds for gone findings of the same
+     assessment form: what River still holds for gone findings of the same
      vulnerability (and its aliases) in the version, each with **Use this**
      to fill the form (`GET /api/project/{uuid}/earlier-assessments`).
 
@@ -460,13 +460,13 @@ be read at all is not acted on.
    gone finding's record saved again in the meantime is not superseded:
    that carry-over is left out and logged, and the next read decides.
 
-   Records of findings that went before DTVP recorded findings (before this
+   Records of findings that went before River recorded findings (before this
    behaviour existed) have no identity. They are carried over by
    vulnerability, with origin `carried-over-by-vulnerability`, when exactly
    one reported finding of that vulnerability has no record, the BOM no
    longer has the record's component, and that component had the same name
    (case-insensitive) as the reported finding's. The name comes from the
-   BOM DTVP stored before the read, the only place that may still list the
+   BOM River stored before the read, the only place that may still list the
    component; it is kept with the gone finding. When the name cannot be
    told, nothing is carried over and the gone finding says so ("component
    unknown"): assess the new finding by hand. A component of another name is
@@ -509,13 +509,13 @@ The VDR states the counts in
 [CycloneDX inventory and VDR](cyclonedx-export.md).
 
 A finding that appears for the first time in a **new project version** has no
-assessment. DTVP marks it as new instead of copying one; see
+assessment. River marks it as new instead of copying one; see
 [New findings](review-workflows.md#new-findings).
 
 ## History
 
-Every value a finding's assessment has had in DTVP is kept with its time,
-origin, and author. This is DTVP's own history, not Dependency-Track's audit
+Every value a finding's assessment has had in River is kept with its time,
+origin, and author. This is River's own history, not Dependency-Track's audit
 trail. **Assessment → History** in a vulnerability's detail view shows it:
 who changed the assessment, when, and how, with the text of each version on
 request. A change that covered several findings at once is one entry. For
@@ -534,12 +534,12 @@ workflow records the reviewer who applied it as author; imports record no author
 `component_uuid`, and `vulnerability_uuid` returns it, newest first.
 
 History starts with the version that introduced it: an assessment edited in
-DTVP before has a single `before-history` entry, and one adopted from
+River before has a single `before-history` entry, and one adopted from
 Dependency-Track starts with an `import` entry at revision 0.
 
 ## Sync Status Values
 
-Findings with a record in DTVP carry a status (`dtvpSyncStatus` on an analysis,
+Findings with a record in River carry a status (`dtvpSyncStatus` on an analysis,
 `sync_status` on a grouped finding):
 
 | Value | Meaning |

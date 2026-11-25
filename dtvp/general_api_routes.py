@@ -167,7 +167,7 @@ class GoneFindingAliasRequest(BaseModel):
 
 class GoneFindingSameIssueRequest(BaseModel):
     project_uuid: str = Field(min_length=1, max_length=200)
-    # A gone or reported finding, and the reported finding DTVP proposed it
+    # A gone or reported finding, and the reported finding River proposed it
     # to be the same issue as (no source names either as the other's alias).
     component_uuid: str = Field(min_length=1, max_length=200)
     vulnerability_uuid: str = Field(min_length=1, max_length=200)
@@ -3786,7 +3786,7 @@ def _register_dependency_route(
 
 
 def cyclonedx_defaults() -> tuple[str, str]:
-    """Configured name of DTVP's own rating source and property namespace."""
+    """Configured name of River's own rating source and property namespace."""
     return (
         os.getenv("DTVP_CYCLONEDX_ASSESSMENT_SOURCE", "").strip()
         or DEFAULT_ASSESSMENT_SOURCE,
@@ -4064,7 +4064,7 @@ def _register_gone_findings_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        """The assessments DTVP still holds for gone findings of a
+        """The assessments River still holds for gone findings of a
         vulnerability (and of its aliases) in a project version: a starting
         point for a finding without an assessment. Nothing is applied; the
         form saves through the normal flow."""
@@ -4118,7 +4118,7 @@ def _register_gone_findings_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         """Confirm, or withdraw, that a finding is the same issue as a
-        reported one DTVP proposed for it (the same description on the same
+        reported one River proposed for it (the same description on the same
         component), although no source
         names either as the other's alias. Only a confirmed match can be
         applied and is exported. Reviewers only."""
@@ -4213,7 +4213,7 @@ def _register_gone_findings_routes(
             raise HTTPException(
                 status_code=409, detail="The other finding is not the same vulnerability"
             )
-        # A gone finding whose component DTVP never knew, which a person
+        # A gone finding whose component River never knew, which a person
         # confirmed to be this reported finding of the same vulnerability
         # (the source recreated the component).
         recreated_unknown = (
@@ -4288,7 +4288,7 @@ def _register_gone_findings_routes(
         client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        """The same for every version of a project. Versions DTVP has no
+        """The same for every version of a project. Versions River has no
         record of are left out."""
         try:
             projects = await deps.cache_manager.get_projects(client, name)

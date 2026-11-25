@@ -84,7 +84,7 @@ class BootApp:
         self.context_path = _normalize_context_path(os.getenv("DTVP_CONTEXT_PATH", "/"))
         self.state: dict[str, Any] = {
             "status": "starting",
-            "message": "DTVP application is loading.",
+            "message": "River application is loading.",
             "error": None,
         }
         self.real_app: ASGIApp | None = None
@@ -127,7 +127,7 @@ class BootApp:
 
     async def _load_real_app(self) -> None:
         try:
-            self._set_state("starting", "DTVP application is loading.")
+            self._set_state("starting", "River application is loading.")
             real_app = await asyncio.to_thread(_import_real_app)
             stack = AsyncExitStack()
             lifespan_context = getattr(
@@ -140,15 +140,15 @@ class BootApp:
             self._real_app_stack = stack
             self.real_app = real_app
             clear_startup_progress()
-            self._set_state("ready", "DTVP is ready.")
+            self._set_state("ready", "River is ready.")
         except asyncio.CancelledError:
-            self._set_state("stopped", "DTVP startup was stopped.")
+            self._set_state("stopped", "River startup was stopped.")
             raise
         except Exception as exc:
             traceback.print_exc()
             self._set_state(
                 "failed",
-                "DTVP startup failed. Check the backend logs.",
+                "River startup failed. Check the backend logs.",
                 str(exc),
             )
 
@@ -162,10 +162,10 @@ class BootApp:
                 try:
                     load_session_config()
                 except SessionConfigError as exc:
-                    print(f"DTVP startup refused: {exc}", file=sys.stderr)
+                    print(f"River startup refused: {exc}", file=sys.stderr)
                     self._set_state(
                         "failed",
-                        "DTVP startup failed. Check the backend logs.",
+                        "River startup failed. Check the backend logs.",
                         str(exc),
                     )
                     await send(

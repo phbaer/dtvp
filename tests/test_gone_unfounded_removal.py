@@ -1,5 +1,5 @@
 """A component missing from the BOM is "removed" only when its identity is
-known: without it DTVP cannot tell a removal from a recreation (Dependency-
+known: without it River cannot tell a removal from a recreation (Dependency-
 Track recreated components nightly before tracking)."""
 
 from dtvp.finding_lifecycle_services import (

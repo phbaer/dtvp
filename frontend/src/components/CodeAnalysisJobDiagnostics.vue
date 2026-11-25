@@ -54,10 +54,10 @@ async function download() {
         link.download = `agentyzer-${props.jobId.replace(/[^a-zA-Z0-9_-]/g, '_')}-diagnostics.json`
         link.click()
         URL.revokeObjectURL(url)
-        message.value = 'Debug download ready. Saved DTVP details are used if the analyzer job is unavailable.'
+        message.value = 'Debug download ready. Saved River details are used if the analyzer job is unavailable.'
     } catch (error: any) {
         message.value = error?.response?.status === 404
-            ? 'Job unavailable: it may have expired, been deleted, belong to another analyzer instance, or diagnostics may be unsupported. No saved DTVP failure details are available.'
+            ? 'Job unavailable: it may have expired, been deleted, belong to another analyzer instance, or diagnostics may be unsupported. No saved River failure details are available.'
             : 'Debug download unavailable. Retry later; any saved error details remain shown below.'
     } finally { busy.value = false }
 }

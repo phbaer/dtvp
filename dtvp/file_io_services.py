@@ -67,7 +67,7 @@ def write_bytes(path: str, content: bytes) -> None:
 
 
 def json_document_bytes(payload: Any) -> bytes:
-    """A settings document as DTVP writes it: JSON with an indent of 2."""
+    """A settings document as River writes it: JSON with an indent of 2."""
     return json.dumps(payload, indent=2).encode("utf-8")
 
 

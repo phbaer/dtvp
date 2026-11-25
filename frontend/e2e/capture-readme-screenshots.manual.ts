@@ -301,7 +301,7 @@ async function mockCodeAnalysisDashboardStatus(page: Page) {
             job_id: 'agentyzer-job-42',
             progress: runningProgress,
             logs: [
-                '2026-05-02T12:11:03Z INFO DTVP: Submitted scan to Agentyzer job agentyzer-job-42',
+                '2026-05-02T12:11:03Z INFO River: Submitted scan to Agentyzer job agentyzer-job-42',
                 '2026-05-02T12:11:11Z RUN RepositoryAgent: Indexed 148 source files and 19 manifests',
                 '2026-05-02T12:11:36Z WAIT Analyzer: Waiting for the single LLM backend slot',
                 '2026-05-02T12:12:08Z RUN ReachabilityAgent: Tracing request entrypoints and guard conditions',
@@ -320,7 +320,7 @@ async function mockCodeAnalysisDashboardStatus(page: Page) {
             submitted_at: '2026-05-02T12:09:00Z',
             status: 'queued',
             position: 1,
-            logs: ['2026-05-02T12:09:00Z WAIT DTVP: Queued behind running analysis docs-dashboard-running'],
+            logs: ['2026-05-02T12:09:00Z WAIT River: Queued behind running analysis docs-dashboard-running'],
         },
         {
             queue_id: 'docs-dashboard-completed',
@@ -2238,7 +2238,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         await expect(page.getByRole('heading', { name: 'Code Analysis' })).toBeVisible({ timeout: 10000 })
-        await expect(page.getByText('DTVP Queue')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('River Queue')).toBeVisible({ timeout: 10000 })
         await expect(page.getByText('Analyzer Configuration')).toBeVisible({ timeout: 10000 })
 
         await page.getByTestId('queue-log-toggle-docs-dashboard-running').click()

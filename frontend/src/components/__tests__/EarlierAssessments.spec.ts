@@ -44,7 +44,7 @@ describe('EarlierAssessments', () => {
         expect(wrapper.emitted('use')![0][0]).toMatchObject({ component_uuid: '36977e35', state: 'NOT_AFFECTED' })
     })
 
-    it('shows nothing when DTVP holds no earlier assessment', async () => {
+    it('shows nothing when River holds no earlier assessment', async () => {
         vi.mocked(getEarlierAssessments).mockResolvedValue([])
         const wrapper = mount(EarlierAssessments, {
             props: { findings: [{ project_uuid: 'p1', vulnerability_uuid: 'v1' }] },

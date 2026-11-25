@@ -1,4 +1,4 @@
-# DTVP Project Overview
+# River Project Overview
 
 This file is retained only as a compatibility pointer for older agents.
 

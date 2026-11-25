@@ -78,7 +78,7 @@ class Schedule:
     2026-11-23, in seconds. Watched products are not polled: a version is
     read again on a change hint, a request, when it is opened and its last
     read is older than ``safety``, and by the safety re-read; the intervals
-    count only time in which DTVP is in use (``plan_version``)."""
+    count only time in which River is in use (``plan_version``)."""
 
     safety: float = 12 * 3600
     # A source without change hints (ports.ChangeHints): every active
@@ -386,7 +386,7 @@ def plan_version(
     product. Without hints, every version is read again on the ``unhinted_*``
     intervals, staggered per version; with or without, the safety re-read.
     Those intervals count from the later of the read and ``active_since``
-    (when DTVP came into use): time without users does not make a version
+    (when River came into use): time without users does not make a version
     due, so coming back after a quiet night is no re-read of everything."""
     if not row.get("active_in_dt") or row.get("status") == STATUS_GONE:
         return None
@@ -443,7 +443,7 @@ def _older_in_use(
     value: Optional[str], active_since: Optional[datetime], now: datetime, seconds: float
 ) -> bool:
     """Older than ``seconds`` counted from the later of ``value`` and
-    ``active_since``: only time in which DTVP was in use counts. A kind never
+    ``active_since``: only time in which River was in use counts. A kind never
     read (or forgotten, to be read next) is due at once."""
     at = _parse(value)
     if at is None:
@@ -545,7 +545,7 @@ class SourceSync:
         # pause, or a person's request (which runs on its own).
         self.paused_until: Optional[float] = None
         self.paused: Optional[dict[str, Any]] = None
-        # Whether DTVP is in use (an interest lease or a recent authenticated
+        # Whether River is in use (an interest lease or a recent authenticated
         # request), and since when (wall clock): without users the scheduler
         # reads nothing but what the export and explicit requests need.
         self.active: Optional[bool] = None
@@ -685,7 +685,7 @@ class SourceSync:
         queued: list[dict[str, Any]] = []
         dropped: list[str] = []
         reasons: dict[str, str] = {}
-        # Paused after a cancel, or nobody uses DTVP: only requests are read.
+        # Paused after a cancel, or nobody uses River: only requests are read.
         paused = self.is_paused() or not self.is_active()
         # When each version's findings were stored, in one query: a version
         # whose sync state says read but whose findings are missing or older
@@ -1098,7 +1098,7 @@ class SourceSync:
             # Versions read before the pass existed have no digest yet: seed
             # it from their stored findings, so the first pass after the
             # upgrade already settles the unchanged ones. The stored findings
-            # carry DTVP's own values over the source's; where those differ
+            # carry River's own values over the source's; where those differ
             # (an assessment not exported yet) the version is read once,
             # which is the safe side.
             seeded = {
@@ -1285,7 +1285,7 @@ class SourceSync:
     # -- activity (ADR 0004 amendment of 2026-11-23, "Idle without users") ------
 
     def is_active(self) -> bool:
-        """Whether someone uses DTVP: an interest lease or an authenticated
+        """Whether someone uses River: an interest lease or an authenticated
         request within the watch TTL. Without an interest source, always."""
         active = getattr(self.interest, "active", None)
         return bool(active()) if callable(active) else True
@@ -1303,7 +1303,7 @@ class SourceSync:
             self.active_since = self._now()
             self._next_list_read = 0.0
             if was is not None:
-                logger.info("Sync active: DTVP is in use again")
+                logger.info("Sync active: River is in use again")
         else:
             self.active_since = None
             logger.info("Sync idle: no users; only exports and requests reach the source")

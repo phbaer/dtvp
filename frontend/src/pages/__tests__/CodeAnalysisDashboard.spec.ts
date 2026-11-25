@@ -54,7 +54,7 @@ const dashboardStatus = {
                 llm_backend: 'openwebui',
                 llm_provider: 'OpenWebUI',
                 logs: [
-                    'DTVP started scan',
+                    'River started scan',
                     'running code_scanner: Scanning source',
                     'warning Analyzer waiting for repository checkout',
                     'error Repository unavailable',
@@ -338,7 +338,7 @@ describe('CodeAnalysisDashboard.vue', () => {
         expect(panel.exists()).toBe(true)
         expect(panel.element.closest('td')?.getAttribute('colspan')).toBe('7')
         expect(panel.text()).toContain('Scan Log')
-        expect(panel.text()).toContain('DTVP started scan')
+        expect(panel.text()).toContain('River started scan')
         expect(panel.text()).toContain('Repository unavailable')
         expect(panel.find('[data-log-level="running"]').exists()).toBe(true)
         expect(panel.find('[data-log-level="warning"]').exists()).toBe(true)

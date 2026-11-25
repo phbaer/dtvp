@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { projectHeaderState } from './lib/projectHeaderStore'
 import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
-import { radarIconUrl } from './lib/brand'
+import { markIconUrl } from './lib/brand'
 import { buildVersionStore, recordServerIdentity } from './lib/buildVersion'
 import { eventStream } from './lib/eventStream'
 import {
@@ -221,7 +221,7 @@ const bootstrapApp = async () => {
         // One live-update stream per browser, shared by its tabs.
         if (user.value.username) eventStream.start()
     } catch (e) {
-        console.error('Failed to initialise DTVP', e)
+        console.error('Failed to initialise River', e)
         bootError.value = describeBootstrapError(e)
         bootStatus.value = 'unavailable'
     }
@@ -375,7 +375,7 @@ const reloadForUpdate = () => {
         role="status"
         data-testid="app-update-banner"
     >
-        <span>A newer version of DTVP has been deployed. This tab is out of date and has stopped updating.</span>
+        <span>A newer version of River has been deployed. This tab is out of date and has stopped updating.</span>
         <button
             type="button"
             class="rounded border border-amber-400/60 bg-amber-400/20 px-3 py-1 font-medium text-amber-50 hover:bg-amber-400/30"
@@ -400,7 +400,7 @@ const reloadForUpdate = () => {
                     <span v-else class="text-xl font-black text-amber-300">!</span>
                 </div>
                 <h1 class="text-2xl font-black uppercase tracking-[0.18em] text-white">
-                    {{ bootStatus === 'loading' ? 'DTVP is starting' : 'DTVP is still starting' }}
+                    {{ bootStatus === 'loading' ? 'River is starting' : 'River is still starting' }}
                 </h1>
                 <p class="mt-4 text-sm leading-6 text-slate-300">
                     {{ bootStatus === 'loading'
@@ -433,8 +433,8 @@ const reloadForUpdate = () => {
                         class="inline-flex items-center gap-2 text-lg font-black uppercase tracking-[0.3em] text-slate-100 hover:text-white transition-colors"
                         data-testid="brand"
                     >
-                        <img :src="radarIconUrl" alt="" class="h-6 w-6" />
-                        DTVP
+                        <img :src="markIconUrl" alt="" class="h-6 w-6" />
+                        River
                     </router-link>
 
                     <template v-if="showProjectHeaderButtons">
@@ -554,7 +554,7 @@ const reloadForUpdate = () => {
                             Logout
                         </button>
                     </div>
-                    <div v-else>Does This Violate Policy?</div>
+                    <div v-else>River Inspects Vulnerabilities and Evaluates Risks</div>
                 </div>
             </div>
         </header>
@@ -584,7 +584,7 @@ const reloadForUpdate = () => {
         <footer class="z-40 w-full shrink-0 border-t border-gray-700/70 bg-gray-900/70 backdrop-blur-2xl">
             <div class="w-full p-3 flex flex-col gap-1 text-center text-[11px] text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:text-left">
                 <div class="font-medium text-gray-300">
-                    DTVP v{{ version }} (build {{ build }})
+                    River v{{ version }} (build {{ build }})
                     <button
                         type="button"
                         class="ml-2 text-blue-300 hover:text-blue-200"

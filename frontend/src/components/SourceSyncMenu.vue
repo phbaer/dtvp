@@ -329,7 +329,7 @@ onBeforeUnmount(() => {
                 Last successful sync: {{ formatTime(lastSuccess) }}
             </div>
             <p class="mt-1 text-[11px] leading-snug text-gray-400">
-                DTVP reads every version in the background. Read again now, ask
+                River reads every version in the background. Read again now, ask
                 {{ sourceName }} to analyse again, or export the queued assessments now.
             </p>
             <div v-if="summary || lastPass" data-testid="source-sync-progress" class="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5" role="status" aria-live="polite">

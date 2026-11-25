@@ -115,7 +115,7 @@ class Source(PlainSource):
 
 
 def _scheduler(tmp_path, *, watched=(), concurrency=2, active=True):
-    """``active``: someone uses DTVP (a request is noted at every clock
+    """``active``: someone uses River (a request is noted at every clock
     step), so the scheduler reads the source; ``False`` leaves it idle
     unless a test adds a lease or a request."""
     clock = Clock(on_advance=None)

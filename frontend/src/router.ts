@@ -46,7 +46,7 @@ router.beforeEach(async (to, _from) => {
                 sessionChecked = true;
                 return '/login';
             }
-            console.warn('DTVP backend is not ready for session validation yet.', error);
+            console.warn('River backend is not ready for session validation yet.', error);
             return;
         }
     }

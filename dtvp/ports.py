@@ -1,9 +1,9 @@
-"""What DTVP needs from the systems it exchanges data with (ADR 0002).
+"""What River needs from the systems it exchanges data with (ADR 0002).
 
 The local database is the system of record. A *source* is imported from; a
 *sink* is exported to. Dependency-Track is both, through ``DTClient``. The
 cache manager is written against these protocols, so another source or sink
-only has to provide these methods; nothing else in DTVP depends on
+only has to provide these methods; nothing else in River depends on
 Dependency-Track's API.
 
 Assessments are exchanged as three fields per finding: state, details, and
@@ -38,7 +38,7 @@ class VulnerabilitySource(Protocol):
         vulnerability, and current assessment under ``analysis``.
 
         With ``analysis_details=False`` it may list each assessment's state
-        and suppression only; DTVP then reads the details of the findings it
+        and suppression only; River then reads the details of the findings it
         needs with ``get_analysis`` (``CacheManager._read_findings_list``). A
         source may leave the keyword out and always return complete
         assessments."""
@@ -80,7 +80,7 @@ class AffectedVersionSource(Protocol):
 class AssessmentHistorySource(Protocol):
     """The texts a finding's assessment held over time, where the source
     records them. Optional, like ``AffectedVersionSource``: used to restore
-    team assessments that DTVP no longer has (docs/review-workflows.md)."""
+    team assessments that River no longer has (docs/review-workflows.md)."""
 
     async def get_assessment_history(
         self,
@@ -95,7 +95,7 @@ class AssessmentHistorySource(Protocol):
 
 @runtime_checkable
 class AssessmentSink(Protocol):
-    """Write access for assessments made in DTVP."""
+    """Write access for assessments made in River."""
 
     async def update_analysis(
         self,
@@ -162,7 +162,7 @@ class VulnerabilityIdentifiers(Protocol):
 
 class VulnerabilityFacts(Protocol):
     """Optional: what a stored finding or vulnerability record tells of its
-    vulnerability, so DTVP can guess that two records without an alias are
+    vulnerability, so River can guess that two records without an alias are
     one issue (``dtvp/same_issue.py``): the same description. A source
     without it gets no such guesses."""
 
@@ -239,4 +239,4 @@ def change_hint(project: Any, kind: str) -> Any:
 
 @runtime_checkable
 class SourceAndSink(VulnerabilitySource, AssessmentSink, Protocol):
-    """A system DTVP both imports from and exports to."""
+    """A system River both imports from and exports to."""

@@ -36,7 +36,7 @@ describe('Login.vue', () => {
 
         const wrapper = mount(Login)
 
-        expect(wrapper.text()).toContain('Your DTVP session ended')
+        expect(wrapper.text()).toContain('Your River session ended')
         route.query = {}
     })
 })

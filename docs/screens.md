@@ -1,4 +1,4 @@
-# DTVP Screen Guide
+# River Screen Guide
 
 This guide describes the application screens covered by the documentation screenshot set. Regenerate the images from the repository root with:
 
@@ -14,11 +14,11 @@ The capture flow uses mocked API fixtures and Chromium for a consistent screensh
 
 ![Login](screenshots/login.png)
 
-The login screen offers the SSO entry point used before DTVP loads project data.
+The login screen offers the SSO entry point used before River loads project data.
 
 ### What's New
 
-After an upgrade, DTVP shows what changed since the version the signed-in user
+After an upgrade, River shows what changed since the version the signed-in user
 last saw, once per user and browser:
 
 - **A new major version** (for example 1.x to 2.0.0, or to one of its
@@ -297,7 +297,7 @@ The archive tab exports, imports, previews, applies, and downloads project archi
 ![TMRescore](screenshots/tmrescore.png)
 
 The threat-model rescoring screen prepares a synthetic analysis SBOM, selects latest-only or merged multi-version scope, and submits tmrescore inputs with optional LLM enrichment.
-The configured model is reported by vscorer and shown read-only in DTVP.
+The configured model is reported by vscorer and shown read-only in River.
 
 ## Code Analysis
 
@@ -329,7 +329,7 @@ Each request, tool, and response stage is independently collapsible. Requests an
 
 ![Code analysis dashboard](screenshots/code-analysis-dashboard.png)
 
-The dedicated dashboard shows DTVP worker state, queue pressure, active agents, model and LLM backend metadata, analyzer configuration, external jobs, auto-sweep status, and expandable structured scan logs. Expanded logs keep the newest line visible and use text color for log levels without boxed rows.
+The dedicated dashboard shows River worker state, queue pressure, active agents, model and LLM backend metadata, analyzer configuration, external jobs, auto-sweep status, and expandable structured scan logs. Expanded logs keep the newest line visible and use text color for log levels without boxed rows.
 
 ### Analysis Queue Dropdown
 

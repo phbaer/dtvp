@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ThreatModel name="Sample Threat Model" version="7.1">
   <Summary>
-    Sample TM7 fixture for local DTVP and mock-tmrescore uploads.
+    Sample TM7 fixture for local River and mock-tmrescore uploads.
     The matching sample-items.csv maps components to the TM element IDs below.
   </Summary>
   <Elements>

@@ -1,4 +1,4 @@
-"""The settings files DTVP reads, with the rules a new version must meet.
+"""The settings files River reads, with the rules a new version must meet.
 
 Every write of a settings file goes through ``write_settings_file``: the
 document is validated first and then written atomically, so a rejected or

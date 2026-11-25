@@ -733,7 +733,7 @@ class DTClient:
         Update analysis for a finding.
 
         ``response`` is always written: without one Dependency-Track is told
-        ``NOT_SET``, so a response removed in DTVP is removed there as well.
+        ``NOT_SET``, so a response removed in River is removed there as well.
         """
         payload = {
             "project": project_uuid,

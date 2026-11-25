@@ -109,7 +109,7 @@ Important frontend components:
 - Project smart search waits 400 ms for continued typing and aborts superseded
   result-window requests. Deactivated keep-alive project views stop their cache
   freshness timers. Cache-status filesystem counts are reused for up to five
-  seconds and invalidated when DTVP changes cached content.
+  seconds and invalidated when River changes cached content.
 - Queue submission and deduplication use in-memory FIFO and target indexes
   rather than rescanning and reindexing the complete queue. Detailed queue
   reads are newest-first and limited to 100 items by default (200 maximum);
@@ -222,7 +222,7 @@ Important frontend components:
   see [Import and export](import-export.md). Legacy
   `pending_updates.json` entries import once on first use. Interactive and bulk
   assessment requests return after the outbox transaction commits instead of
-  waiting for Dependency-Track. Per-finding local revisions reject stale DTVP
+  waiting for Dependency-Track. Per-finding local revisions reject stale River
   edits atomically; optional strict conflict mode additionally performs live
   Dependency-Track reads before accepting a save. Grouped-task artifacts carry
   reverse finding indexes, so accepted changes copy and re-summarize only
@@ -260,7 +260,7 @@ Dependency-Track its last BOM import and vulnerability analysis) in
 (`ChangeHints` in `dtvp/ports.py`): a source without them gets regular,
 staggered re-reads instead ([Sync scheduler](#sync-scheduler)). A
 findings, vulnerability, or BOM read stores a sha256 digest over the raw
-response (before DTVP's overlay), the attempt and success times, and resets
+response (before River's overlay), the attempt and success times, and resets
 the failures; a failed read records its error class and counts failures.
 A version changes (`last_change_at`, `generation` + 1) only when a known
 digest differs; an unknown one (after the upgrade) is stored without
@@ -269,7 +269,7 @@ version (see below); the counts of the last read are kept. `lastRiskScore` is no
 part of the grouped snapshot's revision: every export changes it.
 
 An analysis that differs from the previous read is an `export_echo` when
-Dependency-Track now holds the value DTVP last exported for it (the record's
+Dependency-Track now holds the value River last exported for it (the record's
 base, set by `mark_synced` and `note_exported`), even while a newer local
 value waits for export; otherwise it is a change in Dependency-Track.
 
@@ -308,7 +308,7 @@ reordered their instances.
   `requested`.
 - `scheduler_state.progress`: what runs now (see below), with `paused` and
   `active`.
-- `scheduler_state.activity`: whether DTVP is in use (`active`), the live
+- `scheduler_state.activity`: whether River is in use (`active`), the live
   interest `leases`, `last_request_seconds_ago`, `ttl_seconds` and
   `active_since`.
 - `scheduler_state.recent_syncs` and `last_portfolio_pass`: the timings.
@@ -325,7 +325,7 @@ Status: implemented 2026-11-21 (ADR 0004 step 5; checked against
 `tests/test_dt_cache.py`).
 
 `SourceSync` (`dtvp/source_sync.py`) is the background loop of the
-backend. It reads the source only while DTVP is in use (amended
+backend. It reads the source only while River is in use (amended
 2026-11-23): while an interest lease lives (an open tab, see
 [Product interest](#product-interest)) or an authenticated API or MCP request
 came within `DTVP_SYNC_WATCH_TTL_SECONDS`. **Idle without users**, it reads
@@ -403,7 +403,7 @@ user's read with other credentials succeeding says nothing about the
 scheduler's key.
 
 Per project, export writes share a gate and a findings read holds it alone
-(a waiting read goes before new writes), so DTVP's own export, including
+(a waiting read goes before new writes), so River's own export, including
 the record of an export a newer save overtook, cannot land between a read
 and its classification and count as a change in Dependency-Track. A batch
 skips the keys of a project being read; they go with the next batch. Gates
@@ -429,7 +429,7 @@ changed, findings added and removed, up to 20 new vulnerability ids),
 `backlog` (versions queued or syncing; published when it turns empty or
 not, or moves by ten), and `assessments.changed` with origin `dt` (the
 source changed an assessment) or `export_echo` (the source now holds
-DTVP's export; open views are not refreshed for it).
+River's export; open views are not refreshed for it).
 
 ### Manual requests
 
@@ -459,7 +459,7 @@ project version (`project_uuid`) or every active version of a product
   Dependency-Track: `POST /api/v1/finding/project/{uuid}/analyze`, followed
   with `GET /api/v1/event/token/{token}`; checked against Dependency-Track
   4.14.x `FindingResource` and `EventResource`: the analysis needs only the
-  `VIEW_VULNERABILITY` permission on DTVP's API key, the token check any
+  `VIEW_VULNERABILITY` permission on River's API key, the token check any
   authenticated key). Each version gets a
   `version.sync_state` event with status `analysing`; when the source
   reports the analysis finished (polled every 10 s within the budget, at
@@ -513,9 +513,9 @@ used to run inside every version sync, each with a fresh allowance of
 **Analysis details.** A version's findings read is one request: the
 source lists each assessment's state and suppression (Dependency-Track:
 `GET /api/v1/finding/project/{uuid}`, which has no details). Where those
-equal the value DTVP last read from the source or last exported for the
+equal the value River last read from the source or last exported for the
 finding, the details come from that record. Only the other assessed
-findings are read one by one (`get_analysis`): those DTVP has no record of
+findings are read one by one (`get_analysis`): those River has no record of
 (adoption, so a first import still reads every assessed finding) and those
 whose state or suppression changed in the source. The 12-hour safety re-read
 reads every assessment, so an edit of the details alone in the source shows
@@ -591,7 +591,7 @@ and times, never data; clients fetch the data from the usual endpoints.
 | `resync` | `{seq, reason}`: `restart`, `gap`, or `invalid_cursor` | When the cursor sent cannot be served; refetch everything |
 | `auth` | `{status}` | The heartbeat check failed; the stream ends |
 | `projects.changed` | `{added, removed, changed, truncated, count}` with `{uuid, name, version}` entries (`changed` adds `fields`), or `{initial: true, count}` for the first list | After a stored project-list change. Risk score and metrics alone are no change |
-| `assessments.changed` | `{product, project_uuids, keys_count, origin: "local"}` | After an import merge or a discarded export changed DTVP's records, once the open views were updated. `dt` and `export_echo` are reserved for the scheduler |
+| `assessments.changed` | `{product, project_uuids, keys_count, origin: "local"}` | After an import merge or a discarded export changed River's records, once the open views were updated. `dt` and `export_echo` are reserved for the scheduler |
 | `export.state` | `{pending, failed, oldest_pending_at}` | Reviewers only, when the export queue numbers change (checked at most every 2 s, and every 60 s) |
 | `cache.refreshed` | `{last_refreshed_at}` | When the cache's refresh time moved, for example after the background refresh of active versions saved new data (checked at most every 2 s, and every 60 s) |
 | `source.state` | `{dt: unknown\|ok\|down\|misconfigured, since, last_success_at, error_class}` | When a project-list read from Dependency-Track changes the state; 401/403 is `misconfigured` |
@@ -639,7 +639,7 @@ and times, never data; clients fetch the data from the usual endpoints.
   graceful shutdown proceeds. The lifespan teardown closes the hub again as a
   backstop.
 - **Browser client** (`frontend/src/lib/eventStream.ts`). One stream per
-  browser and DTVP instance: the tabs elect a leader with the Web Locks API
+  browser and River instance: the tabs elect a leader with the Web Locks API
   (lock `dtvp:events:leader:<API base>`) and share its events, cursor, and
   status over the BroadcastChannel `dtvp:events:<API base>`. Both names carry
   the API base (for example `/dtvp/api`), so two instances under different
@@ -749,7 +749,7 @@ uv run --no-project --python 3.14t python scripts/benchmark_group_queries.py
 
 ### Assessment Record
 
-DTVP keeps a record of every assessed finding, held in memory and in the
+River keeps a record of every assessed finding, held in memory and in the
 database ([ADR 0003](adr/0003-dtvp-is-the-record-for-assessments.md)). The
 numbers below are from 2026-11-18 on a 20-CPU development host with CPython
 3.15 and synthetic assessments (three to four team blocks each):

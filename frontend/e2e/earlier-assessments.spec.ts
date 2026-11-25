@@ -4,7 +4,7 @@ import { mockGroupedVulnTask } from './helpers/grouped-task';
 import { routeMappingTeams } from './helpers/mapping-teams';
 
 // One vulnerability whose findings have no assessment, on components
-// Dependency-Track recreated: DTVP still holds an assessment of a gone
+// Dependency-Track recreated: River still holds an assessment of a gone
 // finding of it, offered as a draft (Earlier assessments).
 const component = (overrides: Record<string, unknown>) => ({
     component_name: 'lib-a',

@@ -747,7 +747,7 @@ def _wait(client, operation_id):
 
 
 def _store(*instances):
-    """What DTVP has stored for the findings, as the task snapshot shows it."""
+    """What River has stored for the findings, as the task snapshot shows it."""
     for instance in instances:
         main.cache_manager._save_project_cache(
             main.cache_manager._findings_path(instance["project_uuid"]),

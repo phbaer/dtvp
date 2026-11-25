@@ -18,7 +18,7 @@ The integration supports vscorer's session/inventory contract, normalized
 step-based progress, chain/prioritization/what-if analysis, MITRE enrichment,
 offline mode, provider-neutral LLM enrichment, and output download maps. A
 `skeptic_gate_failed` response is terminal and requires manual review.
-DTVP submits inventory runs with vscorer's background-analysis contract and
+River submits inventory runs with vscorer's background-analysis contract and
 polls the session progress/result endpoints, so long NVD-enriched analyses are
 not tied to one HTTP response or cancelled by a caller/proxy disconnect. It
 retains the blocking-call timeout and gateway fallback for older vscorer
@@ -31,13 +31,13 @@ misrepresented as current inventory.
 ## Code Analysis
 
 Set `DTVP_CODE_ANALYSIS_URL` to enable reachability/exploitability analysis.
-DTVP queues requests containing the vulnerability, selected owned target, CVSS
+River queues requests containing the vulnerability, selected owned target, CVSS
 vector, processed project releases, dependency context,
 reviewer/static guidance, optional tmrescore context, and optional LLM metadata.
-DTVP retries up to five consecutive transport failures while polling Agentyzer
+River retries up to five consecutive transport failures while polling Agentyzer
 job status; any successful poll resets the counter. Persistent disconnections
 fail the queue item with a status-poll error.
-DTVP sends every project release represented in the processed vulnerability
+River sends every project release represented in the processed vulnerability
 group. Agentyzer intersects those candidates with versions the selected
 repository actually contains: matching Git tags, `release/*` branches from all
 available remotes, and `main`/`master` when configured project-version metadata
@@ -110,8 +110,8 @@ are not presented as installed affected versions.
 
 Applying an Agentyzer result requires `assessment.application_eligible=true`;
 copying its CVSS additionally requires `rescoring_eligible=true`. A missing
-field counts as not eligible, so DTVP needs an Agentyzer release that emits
-both fields. DTVP enforces eligibility in individual and combined drafts,
+field counts as not eligible, so River needs an Agentyzer release that emits
+both fields. River enforces eligibility in individual and combined drafts,
 saved-result reuse, bulk workflows, and assessment writes that carry analyzer
 run IDs; such a write is rejected with HTTP 422. A combined result is eligible
 only when every component result is.
@@ -131,7 +131,7 @@ requests, or as a failed job with a string `error` and structured
 Completed results are stored in SQLite at `DTVP_CODE_ANALYSIS_RESULTS_PATH`.
 The store retains full payloads separately from lightweight assessment metadata,
 plus run/job IDs, parent links, model metadata, target context, and application
-provenance. Analyzer requests also carry the DTVP project name so external jobs
+provenance. Analyzer requests also carry the River project name so external jobs
 can be correlated without conflating the same vulnerability and component in
 different projects. Numbered migrations live in
 `dtvp/migrations/code_analysis_results`; a legacy sibling JSON cache imports on
@@ -144,12 +144,12 @@ again; `DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS` can additionally age out a
 matching result.
 
 Follow-ups use `source=follow-up`, retain `parent_run_id`, and prefer the
-analyzer's `/jobs/{job_id}/follow-up` endpoint. Otherwise DTVP sends a normal
+analyzer's `/jobs/{job_id}/follow-up` endpoint. Otherwise River sends a normal
 request with bounded persisted parent context.
 
 The code-analysis dashboard polls every five seconds while work is active and
 every 15 seconds while idle, pauses in hidden tabs, and applies per-client
-jitter. DTVP shares a short-lived dashboard snapshot across clients so one
+jitter. River shares a short-lived dashboard snapshot across clients so one
 polling wave causes one analyzer health/jobs lookup and one recent-result
 query.
 
@@ -166,7 +166,7 @@ Result APIs:
 - `POST /api/projects/{project}/vulnerabilities/{vuln_id}/analysis-cleanup`
 
 Vulnerability cleanup can independently remove saved analyzer assessments or
-run records. Run cleanup reconciles DTVP queue entries with Agentyzer jobs,
+run records. Run cleanup reconciles River queue entries with Agentyzer jobs,
 including orphaned records that exist in only one store. It skips queued and
 running work unless active cancellation is explicitly selected. The project
 workspace exposes complete vulnerability cleanup plus per-run cleanup, while
@@ -315,7 +315,7 @@ An affected result produces a copyable Markdown remediation ticket. Setting
 create screen using the browser's existing session; ticket text is never placed
 in the URL or sent with Jira credentials.
 
-The header `Code Analysis` page is an operations dashboard for DTVP queue
+The header `Code Analysis` page is an operations dashboard for River queue
 slots, saved results, analyzer health/jobs/agents/progress, configured model and
 backend, automatic sweep state, logs, cancellation, and abort controls. It is
 not a second assessment editor.
@@ -323,15 +323,15 @@ not a second assessment editor.
 ### Benchmarks And Agentyzer
 
 Selecting a saved normal analysis run automatically compares it with an
-existing assessment. DTVP computes deterministic state, justification, and
+existing assessment. River computes deterministic state, justification, and
 CVSS anchors, then uses Agentyzer `POST /benchmark/compare` for semantic
-reasoning. If the analyzer is unavailable, DTVP returns a labeled deterministic
+reasoning. If the analyzer is unavailable, River returns a labeled deterministic
 fallback. No benchmark is shown for `NOT_SET` assessments. Ratings are 1/F
 (contradiction) through 5/A (strong agreement).
 
 Agentyzer is deployed separately; set `DTVP_CODE_ANALYSIS_URL` to its reachable
-base URL. The local PM2 stack uses a mock analyzer on port `8095`. DTVP optionally uses Agentyzer's compact, follow-up, and prompt
-inspection endpoints; persisted DTVP context remains the fallback.
+base URL. The local PM2 stack uses a mock analyzer on port `8095`. River optionally uses Agentyzer's compact, follow-up, and prompt
+inspection endpoints; persisted River context remains the fallback.
 
 Prompt bundles belong to the external Agentyzer deployment. They enforce
 structured, conservative assessment contracts and support native tool calls or
@@ -375,7 +375,7 @@ configured analyzer.
 - Stale automatic queue items are cancelled when the group becomes handled or
   loses its eligible target. Manual requests are not cancelled.
 
-DTVP and Agentyzer default to one running scan. Raise
+River and Agentyzer default to one running scan. Raise
 `DTVP_ANALYSIS_QUEUE_CAPACITY` and `AGENTYZER_MAX_CONCURRENT_JOBS` together only
 when the analyzer host and model backend support parallel scans. Agentyzer
 serializes shared-cache Git mutations with per-repository filesystem locks and
@@ -390,13 +390,13 @@ history includes the same controls. The dashboard also shows the configured
 provider/model and backend health; check these when jobs fail immediately.
 
 Downloads use authenticated `GET /api/code-analysis/jobs/{job_id}/diagnostics`
-through DTVP, keeping the analyzer URL out of browser requests. The analyzer must
+through River, keeping the analyzer URL out of browser requests. The analyzer must
 support `GET /jobs/{job_id}/diagnostics`. Downloads contain allowlisted job state,
 timestamps and structured failure metadata, excluding requests, prompts, responses,
 credentials, free-text errors and logs. A 404 explains that the job may have expired,
 been deleted, belong to another instance, or the endpoint may be unsupported.
 
-When polling observes a failed job, DTVP saves sanitized failure details before
+When polling observes a failed job, River saves sanitized failure details before
 finishing the queue item. These remain downloadable if the remote job disappears
 or is unreachable. They are stored beside `DTVP_CODE_ANALYSIS_RESULTS_PATH` with
 `.diagnostics.sqlite` appended, and use `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS`
@@ -418,12 +418,12 @@ Percentages describe completed steps, not estimated time remaining.
 Completed jobs and saved history offer **Download assessment (.md)** beside job
 and debug controls. The document includes advisory sources, dependency paths,
 version/ref/commit evidence, limitations and CVSS rationale. New Agentyzer versions
-supply `assessment.report_markdown`; DTVP preserves it in saved results and prefers
+supply `assessment.report_markdown`; River preserves it in saved results and prefers
 that copy so it remains downloadable after analyzer job retention. History rows
 load the full saved result on demand rather than adding report bodies to list polls.
 Otherwise, authenticated `GET /api/code-analysis/jobs/{job_id}/report` proxies the
 configured analyzer's report download. Missing, expired, incomplete or older
-reports produce an explanation; DTVP does not invent a replacement report.
+reports produce an explanation; River does not invent a replacement report.
 Downloads contain assessment evidence and are distinct from sanitized debug JSON.
 They do not apply or approve the assessment. Older analyzers remain usable for
 ordinary scans and proposals; generating Markdown reports requires updated Agentyzer.

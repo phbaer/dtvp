@@ -4,6 +4,8 @@
 
 Decision status and implementation status are tracked separately in each record.
 
+The product was called DTVP until [ADR 0013](0013-the-product-is-called-river.md). Earlier records keep that name.
+
 | ADR | Decision | Implementation |
 | :--- | :--- | :--- |
 | [0001: AI access through MCP and personal access tokens](0001-ai-access-through-mcp-and-access-tokens.md) | Accepted | Implemented |
@@ -18,6 +20,7 @@ Decision status and implementation status are tracked separately in each record.
 | [0010: Version overrides of an assessment](0010-version-overrides.md) | Accepted; amends decisions 2 and 6 of 0003 | In progress (steps 0-6) |
 | [0011: Check the sink before writing; edits made there go to an inbox](0011-check-the-sink-before-writing.md) | Accepted; amends decision 3 of 0003 | Not started (planned for 2.1.0) |
 | [0012: The team mapping is organised by team](0012-team-centric-mapping.md) | Accepted | Implemented |
+| [0013: The product is called River](0013-the-product-is-called-river.md) | Accepted | In progress (visible name and logo done) |
 | [0014: One lifecycle decision table; a pending Global decision is ready for approval](0014-lifecycle-decision-table.md) | Accepted | Implemented |
 | [0015: A cutoff on the published or first-attributed date, and saved views with short links](0015-saved-views-cutoff-and-short-links.md) | Accepted | Implemented ([PR #360](https://git.baer.one/phbaer/dtvp/pulls/360)) |
 | [0016: Changes requested for a team assessment](0016-team-assessment-changes-requested.md) | Proposed | Implemented |

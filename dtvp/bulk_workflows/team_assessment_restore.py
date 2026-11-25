@@ -286,7 +286,7 @@ def create_team_assessment_restore_workflow() -> BulkWorkflowPlugin:
         id=WORKFLOW_ID,
         label="Restore Team Assessments From Export",
         description=(
-            "Adds team assessments a Dependency-Track export has and DTVP has in no "
+            "Adds team assessments a Dependency-Track export has and River has in no "
             "form, as historical assessments. Changes no state."
         ),
         preview_builder=build_team_assessment_restore_preview,

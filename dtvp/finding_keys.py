@@ -1,9 +1,9 @@
-"""DTVP's key for one finding.
+"""River's key for one finding.
 
 Dependency-Track's findings have no UUID of their own. A finding is the
 pair of a component and a vulnerability in a project version, and
 Dependency-Track names it with its ``matrix``:
-``<project uuid>:<component uuid>:<vulnerability uuid>``. DTVP uses that
+``<project uuid>:<component uuid>:<vulnerability uuid>``. River uses that
 composite as the finding key (``finding_uuid`` in the API and MCP). It is
 an internal key and is never sent to Dependency-Track.
 """

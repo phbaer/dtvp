@@ -8,7 +8,7 @@ test.describe('Bulk Changes: restore team assessments from an export', () => {
     const workflow = {
         id: 'team-assessment-restore',
         label: 'Restore Team Assessments From Export',
-        description: 'Adds team assessments a Dependency-Track export has and DTVP has in no form, as historical assessments. Changes no state.',
+        description: 'Adds team assessments a Dependency-Track export has and River has in no form, as historical assessments. Changes no state.',
         supports_apply: true,
         supports_document: false,
         requires_source: true,

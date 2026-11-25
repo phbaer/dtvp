@@ -866,7 +866,7 @@ def test_the_backfill_skips_versions_without_known_findings(tmp_path):
 
 
 def _tracked(component, name, version):
-    """A row of a finding DTVP saw reported, without a package URL."""
+    """A row of a finding River saw reported, without a package URL."""
     return {**_row(component, name=name, version=version), "vuln_id": "CVE-1",
             "component_purl": None, "component_identity": name, "predates_tracking": 0}
 

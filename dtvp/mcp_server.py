@@ -65,7 +65,7 @@ MAX_ANALYZER_REPORT_LENGTH = 8000
 DEFAULT_TASK_WAIT_SECONDS = 120.0
 TASK_POLL_SECONDS = 0.1
 SERVER_INSTRUCTIONS = """\
-DTVP reviews Dependency-Track vulnerabilities across the versions of a project.
+River reviews Dependency-Track vulnerabilities across the versions of a project.
 
 Read first: list_projects, then search_vulnerabilities, then get_vulnerability.
 get_vulnerability returns every finding with its current revision and the
@@ -1104,7 +1104,7 @@ def build_mcp_server(service: McpToolService) -> Any:
 
     server = MCPServer(
         "dtvp",
-        title="DTVP vulnerability review",
+        title="River vulnerability review",
         instructions=SERVER_INSTRUCTIONS,
     )
     read_only = ToolAnnotations(readOnlyHint=True, openWorldHint=False)

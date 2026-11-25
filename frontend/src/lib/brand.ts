@@ -1,10 +1,11 @@
-// The DTVP logo. The canonical files are in data/ (dtvp-lucide-radar.svg,
-// dtvp-wordmark.svg); the Docker image copies the icon for the frontend build.
-import radarIconUrl from '../../../data/dtvp-lucide-radar.svg'
+// The River logo: the triple tilde. The canonical files are in data/
+// (river-mark.svg, river-wordmark.svg); the Docker image copies the icon for the
+// frontend build.
+import markIconUrl from '../../../data/river-mark.svg'
 
-export { radarIconUrl }
+export { markIconUrl }
 
-/** Point the page's icon at the DTVP radar. */
+/** Point the page's icon at the River mark. */
 export const applyFavicon = (doc: Document = document) => {
     let link = doc.querySelector<HTMLLinkElement>('link[rel="icon"]')
     if (!link) {
@@ -13,5 +14,5 @@ export const applyFavicon = (doc: Document = document) => {
         doc.head.appendChild(link)
     }
     link.type = 'image/svg+xml'
-    link.href = radarIconUrl
+    link.href = markIconUrl
 }

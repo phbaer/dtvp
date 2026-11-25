@@ -47,7 +47,7 @@ const discard = async (items: ExportQueueItem[]) => {
         : `${items.length} exports`
     if (!window.confirm(
         `Discard ${what}? The change will not be sent to Dependency-Track. `
-        + 'Where the previous value is known, the assessment in DTVP goes back to it; '
+        + 'Where the previous value is known, the assessment in River goes back to it; '
         + 'the discarded version stays in the history.',
     )) return
     exporting.value = items.length === 1 ? `discard:${items[0]!.update_id}` : 'discard:all'
@@ -160,7 +160,7 @@ onMounted(() => load())
                 </h3>
                 <p v-if="queue" class="mt-1 text-sm text-gray-400" data-testid="export-mode">
                     <template v-if="queue.mode === 'manual'">
-                        Manual export is on: assessments stay in DTVP until a reviewer exports them here.
+                        Manual export is on: assessments stay in River until a reviewer exports them here.
                     </template>
                     <template v-else>
                         Assessments are exported automatically shortly after they are saved.

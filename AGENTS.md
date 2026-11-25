@@ -7,7 +7,7 @@ This repository uses a generic AI agent entry framework:
 - If the README conflicts with source code, configuration, tests, package metadata, or lockfiles, trust the source and update the README.
 - After implementing meaningful behavior, architecture, API, integration, configuration, workflow, command, or repository-structure changes, update `README.md` in the same change.
 - Do not maintain a second architecture overview in agent-specific files. `AGENTS.md` and `skills/*/SKILL.md` are routing hints that point agents back to the README.
-- The generic project skill entry point is `skills/project-entrypoint/SKILL.md`; `skills/dtvp-project-memory/SKILL.md` remains as a DTVP-named compatibility entry point.
+- The generic project skill entry point is `skills/project-entrypoint/SKILL.md`; `skills/dtvp-project-memory/SKILL.md` remains as a River-named compatibility entry point.
 - Use `uv` for Python/backend work from the repository root. Use `npm` for the Node/frontend part from `frontend/`.
 - Do not add `Co-Authored-By` trailers to commit messages, and do not add
   "Generated with Claude Code" or any other AI-tool attribution to commits,
@@ -16,6 +16,6 @@ This repository uses a generic AI agent entry framework:
   files; see [Release planning](docs/development.md#release-planning).
 - Agentyzer is a standalone repository (https://git.baer.one/phbaer/agentyzer),
   usually checked out at `../agentyzer`. Inspect it for the analyzer's API shape
-  and behavior; DTVP has no nested copy.
+  and behavior; River has no nested copy.
 
 The `.codex` and `.agents` directories in this checkout are mounted read-only, so the skillset lives in the normal repository tree.

@@ -31,7 +31,7 @@ means the integration or override is disabled.
 | `DTVP_EXPORT_MODE` | `auto` exports assessments in the background as they are saved; `manual` keeps them local until a reviewer exports them. See [Import and export](import-export.md) | `auto` |
 | `DTVP_FIXED_VERSIONS_REFRESH_DAYS` | Days after which the background refresh reads a vulnerability's affected version ranges from Dependency-Track again, for the [derived VDR recommendation](cyclonedx-export.md#recommendation); a changed record is read at once. Whole number, at least 1; an unusable value falls back to the default | `7` |
 | `DTVP_FIXED_VERSIONS_READS_PER_CYCLE` | Most vulnerabilities whose version ranges one round reads (four at a time, at low priority, only while no version waits or runs; see [Sync scheduler](runtime.md#sync-scheduler)); the rest follow in later rounds | `200` |
-| `DTVP_CYCLONEDX_ASSESSMENT_SOURCE` | `source.name` of DTVP's own rating in [CycloneDX VDR exports](cyclonedx-export.md); a request parameter overrides it | `DTVP` |
+| `DTVP_CYCLONEDX_ASSESSMENT_SOURCE` | `source.name` of River's own rating in [CycloneDX VDR exports](cyclonedx-export.md); a request parameter overrides it | `DTVP` |
 | `DTVP_CYCLONEDX_PROPERTY_PREFIX` | Namespace of the properties in CycloneDX VDR exports; a request parameter overrides it | `dtvp` |
 | `DTVP_CYCLONEDX_TICKET_PREFIXES` | Comma-separated project keys of ticket references (`EXP` for `EXP-123`) that CycloneDX VDR exports recognise in assessment texts; the request parameter `ticket_prefixes` overrides it | unset: only recorded ticket fields are exported |
 | `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
@@ -107,7 +107,7 @@ See [AI and API access](ai-access.md) for behavior and limits.
 | `DTVP_EVENT_BUFFER_SIZE` | Events kept for clients that reconnect to `/api/events`; at least 100. See [Event channel](runtime.md#event-channel) | `2000` |
 | `DTVP_EVENT_MAX_CONNECTIONS` | Open `/api/events` streams; more get `503`; at least 1 | `200` |
 | `DTVP_EVENT_MAX_CONNECTIONS_PER_USER` | Open `/api/events` streams of one user; more get `429`; at least 1 | `20` |
-| `DTVP_SYNC_WATCH_TTL_SECONDS` | How long a browser's product interest lease lives after its last renewal (`PUT /api/events/interest`), and how long after the last authenticated API or MCP request DTVP counts as in use. Without either the sync is idle and reads only for exports and requests; see [Sync scheduler](runtime.md#sync-scheduler) and [Product interest](runtime.md#product-interest) | `900` |
+| `DTVP_SYNC_WATCH_TTL_SECONDS` | How long a browser's product interest lease lives after its last renewal (`PUT /api/events/interest`), and how long after the last authenticated API or MCP request River counts as in use. Without either the sync is idle and reads only for exports and requests; see [Sync scheduler](runtime.md#sync-scheduler) and [Product interest](runtime.md#product-interest) | `900` |
 | `DTVP_SYNC_SAFETY_SECONDS` | Safety re-read of every active version, counted in time in use; also how old a version's last read must be for opening it to read it; at least 60 | `43200` |
 | `DTVP_SYNC_UNHINTED_FINDINGS_SECONDS` | For a source without change hints (`ChangeHints`, not Dependency-Track): how often every active version's findings are re-read, staggered per version; at least 60. See [Sync scheduler](runtime.md#sync-scheduler) | `3600` |
 | `DTVP_SYNC_PORTFOLIO_PAGE_SIZE` | Findings per page of the portfolio pass's list (`GET /api/v1/finding`); Dependency-Track runs the whole query for every page, so larger pages cost it less. See [Manual requests](runtime.md#manual-requests) | `1000` |
@@ -119,12 +119,12 @@ Retired on 2026-11-23 (ADR 0004 amendment, "No polling, idle without users"): `D
 Retired in ADR 0004 step 5: `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (a stored project list is always served; the scheduler re-reads it), `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` and `DTVP_DT_ACTIVE_PROJECT_LIMIT` (watched products replace recently opened versions). Set values are ignored.
 | `DTVP_REQUIRE_FREE_THREADED` | Fail startup unless CPython supports free threading and its GIL is actually disabled | local Python: `false`; Compose: `true` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
-| `DTVP_CORS_ORIGINS` | Comma-separated CORS origins. A set value replaces the built-in list (the localhost development origins, `DTVP_FRONTEND_URL`, and the host name) for the application; the startup page shown while DTVP loads adds it to that list instead | unset |
+| `DTVP_CORS_ORIGINS` | Comma-separated CORS origins. A set value replaces the built-in list (the localhost development origins, `DTVP_FRONTEND_URL`, and the host name) for the application; the startup page shown while River loads adds it to that list instead | unset |
 | `VITE_DTVP_API_URL` | Frontend API base override, read by the Vite dev server and at frontend build time only. Setting `DTVP_API_URL` on the container has no effect | empty |
 | `DTVP_DEFAULT_PROJECT_FILTER` | Dashboard default project filter | empty |
 | `DTVP_CUTOFF_PRESET_DAYS` | Rolling presets of the [cutoff](review-workflows.md#cutoff), in days before today. Replaces `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` (breaking: renamed without an alias in the release with saved views; the old name is ignored) | `7d,14d,28d` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
-| `BUILD_NUMBER` | Compose image build number, baked into DTVP startup logs | `unknown` |
+| `BUILD_NUMBER` | Compose image build number, baked into River startup logs | `unknown` |
 
 ## Project Archives
 
@@ -139,7 +139,7 @@ Retired in ADR 0004 step 5: `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (a stored project
 | `DTVP_PROJECT_ARCHIVE_INCLUDE` | Comma-separated scheduled project names | empty |
 | `DTVP_ARCHIVE_GIT_REMOTE` | Optional archive Git remote | empty |
 | `DTVP_ARCHIVE_GIT_BRANCH` | Archive Git branch | `main` |
-| `DTVP_ARCHIVE_GIT_AUTHOR_NAME` | Commit author name | `DTVP Archive Bot` |
+| `DTVP_ARCHIVE_GIT_AUTHOR_NAME` | Commit author name | `River Archive Bot` |
 | `DTVP_ARCHIVE_GIT_AUTHOR_EMAIL` | Commit author email | `dtvp-archive@example.invalid` |
 | `DTVP_ARCHIVE_GIT_SSH_KEY_FILE` | SSH key inside Git helper | `/ssh/dtvp_archive_deploy_key` |
 | `DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE` | Known-hosts file inside Git helper | `/ssh/known_hosts` |
@@ -160,8 +160,8 @@ Retired in ADR 0004 step 5: `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (a stored project
 | `DTVP_CODE_ANALYSIS_LLM_BACKEND` | LLM backend hint | unset |
 | `DTVP_CODE_ANALYSIS_LLM_PROVIDER` | LLM provider hint | unset |
 | `DTVP_JIRA_CREATE_URL` | Jira create-screen URL | unset |
-| `DTVP_ANALYSIS_QUEUE_CAPACITY` | Concurrent DTVP queue items | `1` |
-| `DTVP_ANALYSIS_QUEUE_MAX_PENDING` | Maximum pending DTVP queue items before new submissions receive HTTP 429 | `1000` |
+| `DTVP_ANALYSIS_QUEUE_CAPACITY` | Concurrent River queue items | `1` |
+| `DTVP_ANALYSIS_QUEUE_MAX_PENDING` | Maximum pending River queue items before new submissions receive HTTP 429 | `1000` |
 | `DTVP_ANALYSIS_QUEUE_TTL_SECONDS` | Completed/failed queue retention | `3600` |
 | `DTVP_CODE_ANALYSIS_RESULTS_PATH` | Result/application SQLite store; also holds the code evidence agents add through MCP ([agent code evidence](analysis-integrations.md#agent-code-evidence)) | `data/code_analysis_results.sqlite` |
 | `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS` | Maximum stored analyzer results; agent code evidence is not counted or pruned | `2000` |
@@ -172,6 +172,6 @@ Retired in ADR 0004 step 5: `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (a stored project
 | `DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS` | Automatic sweep interval | `900` |
 | `DTVP_AUTO_ANALYSIS_GUIDANCE_PATH` | Static component guidance | `data/auto_analysis_guidance.json` |
 
-The analyzer runs independently of DTVP. Configure its repositories, model
-backend, credentials, and concurrency in its own deployment; DTVP's Compose
+The analyzer runs independently of River. Configure its repositories, model
+backend, credentials, and concurrency in its own deployment; River's Compose
 file and `.env.dist` configure only the HTTP integration above.

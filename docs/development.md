@@ -10,7 +10,7 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 ## Toolchain and CI
 
-DTVP requires Python 3.14 or newer. Its development dependencies do not install
+River requires Python 3.14 or newer. Its development dependencies do not install
 Agentyzer or its LangGraph stack; code analysis is an external HTTP integration.
 Use `uv sync --python 3.15 --dev --frozen` to select Python 3.15 explicitly.
 Use a released Python version; early 3.15 alphas may lack APIs expected by
@@ -82,7 +82,7 @@ manifest that range resolution requires. `Dockerfile.free-threaded` likewise
 uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
 argument to a versioned tag or digest when a reproducible external build needs
 an explicit override. Pull-request runs cancel superseded workflow executions,
-and image publication waits for DTVP Python, frontend, and
+and image publication waits for River Python, frontend, and
 browser tests. Frontend jobs select Node.js 26 and reuse npm's download cache.
 The single-platform image builds reuse inline cache metadata from the `dev`
 images and exclude CI virtual environments from their build contexts. SBOM
@@ -128,7 +128,7 @@ git-cliff in CI (`cliff.toml`; `git-cliff --context` for the JSON). The
 "What's new" dialog lists only `feat`, `fix`, `perf` and breaking commits
 (`!` or a `BREAKING CHANGE:` footer, whose text becomes the entry's note), so
 write commit subjects for users: the squash subject of a pull request is the
-entry. Without `CHANGELOG.json` DTVP reads `CHANGELOG.md`; without either the
+entry. Without `CHANGELOG.json` River reads `CHANGELOG.md`; without either the
 dialog stays empty.
 
 ## Split Backend And Frontend

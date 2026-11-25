@@ -667,13 +667,13 @@ def test_recover_stops_on_files_changed_outside(source_dump, tmp_path, monkeypat
     monkeypatch.setattr(restore, "_replace", os.replace)
     journal = json.loads(next(target.dt_cache.glob(".dtvp-restore-*.json")).read_text())
     database = next(a for a in journal["actions"] if a["kind"] == "database" and a["staged"])
-    # Something outside DTVP put a file where the moved original was.
+    # Something outside River put a file where the moved original was.
     Path(database["target"]).write_bytes(b"intruder")
     if not Path(database["aside"]).exists():
         Path(database["aside"]).write_bytes(b"x")
     if not Path(database["staged"]).exists():
         Path(database["staged"]).write_bytes(b"y")
-    with pytest.raises(DumpError, match="changed outside DTVP"):
+    with pytest.raises(DumpError, match="changed outside River"):
         recover("abort")
 
 

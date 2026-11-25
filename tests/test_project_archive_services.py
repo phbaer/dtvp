@@ -327,7 +327,7 @@ async def test_apply_project_archive_creates_missing_and_restores_assessment(tmp
 async def test_a_restored_assessment_takes_its_response_from_the_text(
     tmp_path, monkeypatch
 ):
-    """The archive holds Dependency-Track's analysis. The response DTVP
+    """The archive holds Dependency-Track's analysis. The response River
     recorded is in its text; the field of its own beside it is not read."""
     monkeypatch.setitem(
         SOURCE_ANALYSIS,

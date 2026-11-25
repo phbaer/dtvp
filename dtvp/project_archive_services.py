@@ -588,7 +588,7 @@ def _load_project_archive(path: str) -> dict[str, Any]:
                 raise ProjectArchiveVersionError(
                     f"Unsupported project archive schema: {schema_version}"
                 )
-            raise ProjectArchiveValidationError("Not a DTVP project archive")
+            raise ProjectArchiveValidationError("Not a River project archive")
 
         for file_path, metadata in (manifest.get("files") or {}).items():
             _assert_safe_zip_name(file_path)
@@ -775,7 +775,7 @@ async def _restore_version_assessments(
         }
 
         try:
-            # The response is restored from the text, DTVP's record; the
+            # The response is restored from the text, River's record; the
             # archived Dependency-Track field of its own is not read.
             await client.update_analysis(**with_analysis_response(payload))
             deps.cache_manager._save_local_analysis(payload)

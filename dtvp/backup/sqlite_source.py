@@ -190,8 +190,8 @@ def check_migration_state(store: SnapshotStore) -> None:
             raise DumpError(
                 "E1",
                 f"The {namespace} database in {store.name} is at a different "
-                "migration state than this DTVP version; start the matching "
-                "backend once, or use the matching DTVP version",
+                "migration state than this River version; start the matching "
+                "backend once, or use the matching River version",
             )
 
 

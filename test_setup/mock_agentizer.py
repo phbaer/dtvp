@@ -1,4 +1,4 @@
-"""Mock Agenyzer (Agentic Vulnerability Analyzer) for local DTVP testing.
+"""Mock Agenyzer (Agentic Vulnerability Analyzer) for local River testing.
 
 Implements the same API surface as the real Agenyzer service:
   POST /assess           – submit an async or sync assessment
@@ -449,7 +449,7 @@ async def ui():
           <head><title>Mock Agenyzer</title></head>
           <body style="font-family: sans-serif; padding: 2rem; background: #111827; color: #f3f4f6;">
             <h1>Mock Agenyzer</h1>
-            <p>In-memory mock agentic vulnerability analyzer for local DTVP testing.</p>
+            <p>In-memory mock agentic vulnerability analyzer for local River testing.</p>
             <ul>
               <li>Jobs: {job_count}</li>
               <li>Health: <a href="/health" style="color: #60a5fa;">/health</a></li>

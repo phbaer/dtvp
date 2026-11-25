@@ -31,8 +31,8 @@ def upcast_chain(
     if from_version > target:
         raise DumpError(
             "F7",
-            f"{entity} records are schema version {from_version}; this DTVP "
-            f"reads up to version {target}. Use a newer DTVP.",
+            f"{entity} records are schema version {from_version}; this River "
+            f"reads up to version {target}. Use a newer River.",
         )
     chain: list[Upcast] = []
     version = from_version

@@ -15,7 +15,7 @@ TIMESTAMP_KEYS = {"last_refreshed_at", "projects_refreshed_at"}
 
 
 class Assessed(Source):
-    """DT holds an assessment; DTVP exports its own to DT on request."""
+    """DT holds an assessment; River exports its own to DT on request."""
 
     async def update_analysis(self, project_uuid, component_uuid, vulnerability_uuid, state,
                               details, comment=None, justification=None, suppressed=False,
@@ -51,7 +51,7 @@ def _data(manager):
 
 
 async def _assess_and_export(scheduler, manager, source):
-    """DTVP assesses c1/v1; the export reaches DT; the version is read again."""
+    """River assesses c1/v1; the export reaches DT; the version is read again."""
     await manager.persist_assessment_updates([{
         "project_uuid": "a1", "component_uuid": "c1", "vulnerability_uuid": "v1",
         "state": "EXPLOITABLE", "details": "Reachable from the API.", "suppressed": False,

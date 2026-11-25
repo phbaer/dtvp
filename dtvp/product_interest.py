@@ -10,7 +10,7 @@ Sync work never renews a lease. The scheduler (ADR 0004 step 5) reads
 Leases are held in the process, like the event hub.
 
 Activity (ADR 0004 amendment of 2026-11-23, "Idle without users"): the
-scheduler reads the source only while someone uses DTVP, that is while a
+scheduler reads the source only while someone uses River, that is while a
 lease lives or an authenticated API or MCP request came within the watch TTL
 (``note_request``, ``active``).
 """
@@ -116,13 +116,13 @@ class ProductInterest:
             return {product for lease in self._leases.values() for product in lease.products}
 
     def note_request(self, user: str | None = None) -> None:
-        """An authenticated API or MCP request: DTVP is in use for the TTL."""
+        """An authenticated API or MCP request: River is in use for the TTL."""
         if user is None or str(user).strip():
             with self._lock:
                 self._last_request = self._clock()
 
     def active(self) -> bool:
-        """Whether someone uses DTVP: a live lease, or a request within the TTL."""
+        """Whether someone uses River: a live lease, or a request within the TTL."""
         with self._lock:
             now = self._clock()
             self._prune_locked(now)

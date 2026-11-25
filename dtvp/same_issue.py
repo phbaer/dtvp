@@ -2,7 +2,7 @@
 
 Some vulnerabilities are recorded twice, for example as a CVE (from NVD) and
 as a GitHub advisory, without either record naming the other as an alias.
-DTVP can only guess that they are one issue: from the same description on
+River can only guess that they are one issue: from the same description on
 the same component. (An earlier fallback on the same affected range and CWE
 matched far too many different vulnerabilities of one package and was
 removed.) A description several ids on one component share is a template,
@@ -10,7 +10,7 @@ not an issue, and matches nothing. Such a guess is shown as "probably the same a
 as an alias and never exported as one; a person confirms it before anything
 is applied, and only a confirmed match is exported (``<prefix>:same_issue_as``).
 
-Everything here is a pure function over what DTVP stores: the vulnerability
+Everything here is a pure function over what River stores: the vulnerability
 records and findings (read through the source adapter's
 ``VulnerabilityFacts``) and the finding rows.
 See docs/review-workflows.md, "Gone findings".
@@ -22,7 +22,7 @@ import re
 from typing import Any, Callable, Iterable, Mapping, Optional
 
 REASON_DESCRIPTION = "same description"
-# A gone finding whose component DTVP never knew (a row made for a record
+# A gone finding whose component River never knew (a row made for a record
 # from before tracking, on a component the source has since recreated) and a
 # reported finding of the same vulnerability in the same version: probably
 # the same finding on a recreated component. Only a person can tell; nothing
@@ -251,7 +251,7 @@ class SameIssueIndex:
 
 
 def _component_unknown(row: Mapping[str, Any]) -> bool:
-    """Whether DTVP never learned which component a finding row was on."""
+    """Whether River never learned which component a finding row was on."""
     return not any(
         str(row.get(name) or "").strip()
         for name in ("component_identity", "component_purl", "component_name")
@@ -309,7 +309,7 @@ def unknown_component_records(
     record_of: Callable[[Mapping[str, Any]], Optional[Mapping[str, Any]]],
 ) -> dict[str, dict[str, Any]]:
     """Per vulnerability UUID of one project version: its gone findings whose
-    component DTVP never knew and that hold an assessment, and the findings of
+    component River never knew and that hold an assessment, and the findings of
     the same vulnerability reported now (the candidates to carry it to).
     Records that were superseded or cancelled are left out."""
     result: dict[str, dict[str, Any]] = {}

@@ -54,14 +54,14 @@ Settings tabs remain reviewer-only.
 2. Choose how long it stays valid (1 to 365 days, 90 by default).
 3. Tick **Allow writing: team assessment drafts and code evidence** only if
    the client should write (the `write` scope).
-4. Copy the token. It is shown once; DTVP stores only a SHA-256 digest.
+4. Copy the token. It is shown once; River stores only a SHA-256 digest.
 
 Revoke a token in the same list. Revocation takes effect on the next request.
 Each user can hold 20 active tokens.
 
 ## Connect An MCP Client
 
-The endpoint is `<DTVP base URL>/mcp` (the Settings tab shows the exact URL),
+The endpoint is `<River base URL>/mcp` (the Settings tab shows the exact URL),
 using MCP Streamable HTTP. Send the token on every request:
 
 ```text
@@ -127,7 +127,7 @@ Arguments: `project`, `vulnerability_id` (ID or alias), `title`,
 `suggested_state`, `suggested_justification`, `confidence`, and
 `idempotency_key`.
 
-**Scope.** The findings are resolved against DTVP's own view of the
+**Scope.** The findings are resolved against River's own view of the
 vulnerability, never taken from the caller:
 
 - `finding_uuids`: exactly those findings (scope `findings`);
@@ -185,11 +185,11 @@ A token acts as its owner. Code evidence follows the rules in
   `get_vulnerability` or `preview_assessment`, in `expected_revisions` keyed
   by `finding_uuid`. All findings are written in one transaction: if any
   changed since, nothing is saved and the client must read again.
-- `finding_uuid` is DTVP's key for a finding, not a Dependency-Track UUID:
+- `finding_uuid` is River's key for a finding, not a Dependency-Track UUID:
   Dependency-Track's findings have none. It is Dependency-Track's composite
   `matrix`, `<project uuid>:<component uuid>:<vulnerability uuid>`, and is
   never sent to Dependency-Track.
-- The existing blocks a save builds on come from DTVP's stored state for each
+- The existing blocks a save builds on come from River's stored state for each
   finding, never from the caller or from the live task snapshot.
 - The assessment text must be plain prose. Text containing `---` or the start
   of a reserved tag such as `[Team:` or `[Reviewed By` (closed or not) is
@@ -204,9 +204,9 @@ author attribution. Historical assessments do not contribute to it.
 A token cannot create, list, or revoke tokens, and is never forwarded to
 Dependency-Track.
 
-Revisions count every value saved in DTVP, so a save based on a value that
+Revisions count every value saved in River, so a save based on a value that
 has since been replaced is rejected. Dependency-Track never changes an
-assessment in DTVP; `sync_status` only tells whether Dependency-Track holds
+assessment in River; `sync_status` only tells whether Dependency-Track holds
 the value yet. See [Import and export](import-export.md).
 
 ## REST API With A Token

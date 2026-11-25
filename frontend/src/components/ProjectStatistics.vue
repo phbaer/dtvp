@@ -335,7 +335,7 @@ function stackedSeverityValue(seriesKey: string, index: number): number {
         <div>
             <h4 class="font-black text-blue-400 mb-1 uppercase text-sm tracking-tight">Global Intelligence</h4>
             <p class="text-xs text-gray-400 leading-relaxed font-medium">
-                This view shows unique vulnerabilities across your entire catalog. Vulnerabilities appearing in multiple projects or versions are de-duplicated using DTVP's canonical ID mapping.
+                This view shows unique vulnerabilities across your entire catalog. Vulnerabilities appearing in multiple projects or versions are de-duplicated using River's canonical ID mapping.
             </p>
         </div>
     </div>

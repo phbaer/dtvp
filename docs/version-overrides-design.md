@@ -49,7 +49,7 @@ A vulnerability group keeps one **base** assessment. A reviewer can put a projec
 
 `assessment_scopes(group, team_mapping) -> ScopeView`. It is pure, works on a group's `affected_versions` (keyed by `project_uuid`), and the backend lifecycle, saves, guard, bulk workflows, carry-over, MCP and export all use it. A TS port in `frontend/src/lib/assessmentScopes.ts` is tested against the same fixtures.
 
-Version identity is `project_uuid` now. After ADR 0009 M3 it becomes the DTVP project version id. The version label string is never used.
+Version identity is `project_uuid` now. After ADR 0009 M3 it becomes the River project version id. The version label string is never used.
 
 **(v2)** Shared predicate `is_untouched(finding)`: NOT_SET, no team blocks and no text other than tags this spec ignores. It is the one definition used by rule 3 below, `override_gaps`, and `refresh_new_finding_flags` (grouped_vuln_services.py:476-483, which today inlines the same test). When ADR 0009's matcher lands and still sets a system `IN_TRIAGE` state on medium-band findings (section 9), only this predicate changes.
 
@@ -130,7 +130,7 @@ A scope is `{name: "base" | L, label, reason, versions[], findings[], required_t
 - The use case gets a `ScopeResolver` dependency.
   - Primary path: resolve the request's group from the grouped-vulnerability cache, as MCP `_find_group` does, then `assessment_scopes`.
   - Fallback: query the fields index over `(project_uuid, vulnerability_uuid)` of the request's instances. **(v2)** It counts only active findings, so it agrees with the active-only rule of section 4: the query joins `assessment_state` and excludes `sync_status IN ('inactive', 'superseded')`, and it is restricted to the request's instance keys plus the keys the finding-presence store reports active for the same (project, vulnerability). `cancelled` is not excluded: it is an active finding whose export was discarded (assessment_outbox_services.py:99, :1403), and excluding it would drop a live finding from its version's scope.
-- It returns each finding's scope and its `resolved_marker`, keyed by `finding_key` (DTVP's own key; after #296 `finding_uuid` equals it).
+- It returns each finding's scope and its `resolved_marker`, keyed by `finding_key` (River's own key; after #296 `finding_uuid` equals it).
 - **(v2) One read.** `save_assessment` reads each instance's stored text **and revision** once, through `get_cached_assessments` (dt_cache.py:2431), and uses that read for the stored text it preserves, the stored markers, and the revision guard (6.4). It replaces today's separate `get_cached_assessment_details` call (assessment_use_cases.py:584-596).
 - **(v2) Cross-check.** If an instance's stored marker, from that read, is set and does not equal the label of the scope the resolver gives (for example a split committed after the grouped cache was built), the request fails with 409 `assessment_scope_mismatch`. A stale cache can therefore never lead the save to strip a marker.
 
@@ -221,7 +221,7 @@ Exempt, because they are explicit operations whose payloads may span versions:
 
 - **New findings (independent of the flag, plan step 1).** **(v2)**
   - `incomplete_sync`: the preview and the payloads call `refresh_new_finding_flags` on the group first and, by default, skip findings with `is_new_finding`, counted as skipped `new_finding`. The preview lists those findings per group, and the user can include them explicitly per group ("Also apply to N new findings", never preselected). That is the explicit "apply the existing assessment with a bulk workflow" path that docs/review-workflows.md:55-57 names, so the doc stays true and gains one sentence on the opt-in.
-  - `automatic_assessments`: a new finding is skipped, counted as `new_finding`, only when **none** of the applied runs covers its project version: its version name is not in `_covered_product_versions` of any applied run's version entries (automatic_assessments.py:484-516, casefold match as there). After ADR 0009 M3 the match is on the DTVP project version id. A run that covered the version is evidence about it, not a copy, so its verdict is applied as for any finding.
+  - `automatic_assessments`: a new finding is skipped, counted as `new_finding`, only when **none** of the applied runs covers its project version: its version name is not in `_covered_product_versions` of any applied run's version entries (automatic_assessments.py:484-516, casefold match as there). After ADR 0009 M3 the match is on the River project version id. A run that covered the version is evidence about it, not a copy, so its verdict is applied as for any finding.
 - **Synchronize (incomplete_sync), historical blocks (v2, plan step 3, independent of overrides):**
   - `_parse_blocks` results with `Historical: yes` are not used to build `blocks_by_team`; the merge works on current blocks only.
   - Each finding's payload is built from the merged current blocks plus **that finding's own** historical blocks and its own preamble (SSVC record and response as today through `_keep_finding_values`, plus its rescoring tags and, from step 7, its resolved marker and kept pending). Implemented as an explicit merge in `build_incomplete_sync_payloads`, not `keep_team_records(saved_team=None)`, because that function would also retire blocks the merge intentionally replaces.

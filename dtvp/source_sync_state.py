@@ -203,7 +203,7 @@ def classify_analysis_changes(
     exported_value: Callable[[str, str], Optional[tuple[str, str, bool]]],
 ) -> dict[str, list[str]]:
     """Which finding keys' analyses changed since the previous read, by
-    origin: ``export_echo`` when the source now holds the value DTVP has on
+    origin: ``export_echo`` when the source now holds the value River has on
     record (an export coming back), else ``dt``. Without a previous read
     nothing is classified."""
     result: dict[str, list[str]] = {ORIGIN_DT: [], ORIGIN_EXPORT_ECHO: []}
@@ -370,7 +370,7 @@ class SyncStateStore:
                 assignments["analyses_export_echoes"] = len(
                     origins.get(ORIGIN_EXPORT_ECHO, [])
                 )
-                # An analysis echo of DTVP's own export is not a change in
+                # An analysis echo of River's own export is not a change in
                 # the source.
                 if (
                     row["findings_digest"] == digests[0]

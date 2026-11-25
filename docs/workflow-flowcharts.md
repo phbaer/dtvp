@@ -1,14 +1,14 @@
-# DTVP Workflow Flowcharts
+# River Workflow Flowcharts
 
-This document summarizes the overall DTVP workflow and the optional TMRescore integration.
+This document summarizes the overall River workflow and the optional TMRescore integration.
 
-## 1. Core DTVP Workflow
+## 1. Core River Workflow
 
 ```mermaid
 flowchart TD
     User[Reviewer or Analyst] --> UI[Vue Frontend]
 
-    subgraph Frontend["DTVP Frontend"]
+    subgraph Frontend["River Frontend"]
         Dashboard[Dashboard]
         ProjectView[Project View]
         Statistics[Statistics View]
@@ -22,7 +22,7 @@ flowchart TD
     ProjectView --> RescoreDialog
     UI --> Settings
 
-    subgraph Backend["DTVP Backend"]
+    subgraph Backend["River Backend"]
         API[FastAPI API]
         Grouping[Grouping and Aggregation Logic]
         Rules[Team Mapping, Roles, Rescore Rules]
@@ -59,14 +59,14 @@ flowchart TD
     API --> ProjectView
 ```
 
-## 2. DTVP and TMRescore Integration Workflow
+## 2. River and TMRescore Integration Workflow
 
 ```mermaid
 flowchart LR
     User[Reviewer] --> ProjectView[Project View]
     ProjectView -->|Open Threat Model action| TMView[Threat-Model Page]
 
-    subgraph DTVP["DTVP Backend"]
+    subgraph River["River Backend"]
         Context[Load project versions and TMRescore context]
         Inventory[Collect findings, full vulnerabilities, and BOMs from Dependency-Track]
         SyntheticSBOM[Build synthetic multi-version or latest-only CycloneDX SBOM]
@@ -110,8 +110,8 @@ flowchart LR
     VEX --> ProposalCache
     DTVulns -->|Provide original score and vector baseline| ProposalCache
 
-    SessionCache -->|Return progress and final result via DTVP API| TMView
-    ProposalCache -->|Expose cached proposals via DTVP API| ProjectView
+    SessionCache -->|Return progress and final result via River API| TMView
+    ProposalCache -->|Expose cached proposals via River API| ProjectView
 
     ProjectView -->|Use proposal in rescoring dialog| User
     TMView -->|Return to project view without full reload| ProjectView

@@ -15,7 +15,7 @@ def _non_export(source):
 
 
 async def _imported_then_idle(tmp_path, *, refresh=600):
-    """Two products read while someone used DTVP; then everyone left."""
+    """Two products read while someone used River; then everyone left."""
     scheduler, manager, hub, clock = _scheduler(tmp_path, active=False)
     source = Assessed()
     source.projects = [_marked(project, "b1", "a1") for project in source.projects]
@@ -59,7 +59,7 @@ async def test_a_lease_reads_the_list_once_then_only_what_changed(tmp_path):
     clock.advance(scheduler.schedule.safety * 2)  # a long quiet night
     source.projects[1] = _marked(source.projects[1], "b1", "a2")  # DT re-analysed Beta
 
-    scheduler.interest.put("alice", "tab", ["Alpha"])  # someone opens DTVP
+    scheduler.interest.put("alice", "tab", ["Alpha"])  # someone opens River
     for _ in range(5):
         clock.advance(60)
         scheduler.interest.put("alice", "tab", ["Alpha"])

@@ -298,7 +298,7 @@ def start_analysis_queue_item(
     )
     _append_item_log(
         item,
-        f"DTVP started scan for {item.component_name} ({item.vuln_id})",
+        f"River started scan for {item.component_name} ({item.vuln_id})",
     )
 
 
@@ -436,7 +436,7 @@ async def process_analysis_queue_item(
                     _append_item_log(
                         item,
                         "Analyzer follow-up context unavailable; using compact "
-                        f"DTVP guidance fallback: {exc}",
+                        f"River guidance fallback: {exc}",
                     )
 
             _append_item_log(item, "Submitting scan to analyzer")

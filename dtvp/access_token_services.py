@@ -98,7 +98,7 @@ def looks_like_access_token(value: str) -> bool:
 def forwardable_bearer(authorization: str | None) -> str | None:
     """The bearer value of a request that may be passed on to Dependency-Track.
 
-    A DTVP access token authenticates the caller to DTVP only and is never
+    A River access token authenticates the caller to River only and is never
     forwarded, however the header is spaced.
     """
     scheme, _, value = str(authorization or "").partition(" ")

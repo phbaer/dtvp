@@ -1,4 +1,4 @@
-"""DTVP's finding key: Dependency-Track's matrix, else the same composite."""
+"""River's finding key: Dependency-Track's matrix, else the same composite."""
 
 from dtvp.code_analysis_result_services import CodeAnalysisResultStore
 from dtvp.finding_keys import (

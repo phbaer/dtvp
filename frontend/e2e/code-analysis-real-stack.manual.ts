@@ -25,7 +25,7 @@ test.describe('Code Analysis UI Flow (Real Stack)', () => {
         await page.goto('/code-analysis')
 
         await expect(page.getByRole('heading', { name: 'Code Analysis' })).toBeVisible({ timeout: 20000 })
-        await expect(page.getByRole('heading', { name: 'DTVP Queue' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: 'River Queue' })).toBeVisible()
         await expect(page.getByRole('heading', { name: 'Result Cache' })).toBeVisible()
         await expect(page.getByRole('heading', { name: 'Analyzer Configuration' })).toBeVisible()
         await expect(page.getByText(/saved runs|not reported/i)).toBeVisible()

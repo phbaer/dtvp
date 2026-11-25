@@ -439,7 +439,7 @@ async def revoke_sessions(
     """End every browser session of a user.
 
     Anyone may end their own sessions; reviewers may end anyone's. The
-    username is the identity DTVP stores (the OIDC ``sub``, else
+    username is the identity River stores (the OIDC ``sub``, else
     ``preferred_username`` or ``email``), as in user_roles.json. Unknown
     names are accepted so a session can be revoked before it is used.
     """

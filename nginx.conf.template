@@ -26,7 +26,7 @@ server {
     gzip_vary on;
     gzip_types application/json application/javascript text/css text/plain image/svg+xml;
 
-    # Proxy DTVP backend and SPA under the configured context path.
+    # Proxy River backend and SPA under the configured context path.
     location = ${DTVP_CONTEXT_PATH} {
         return 301 ${DTVP_CONTEXT_PATH}/;
     }

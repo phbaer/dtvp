@@ -54,7 +54,7 @@ def test_changelog_and_sbom_helpers_handle_present_and_missing_files(tmp_path):
 def test_build_sbom_html_embeds_content_and_download_link():
     html = build_sbom_html('{"bomFormat":"CycloneDX"}')
 
-    assert "DTVP CycloneDX SBOM" in html
+    assert "River CycloneDX SBOM" in html
     assert "href='/api/sbom'" in html
     assert '<pre>{"bomFormat":"CycloneDX"}</pre>' in html
 
@@ -96,7 +96,7 @@ def app_info_client(tmp_path):
         html_sbom_filename="html.json",
         media_type_json="application/json",
     )
-    app = FastAPI(title="DTVP test", version="2.3.4", description="test API")
+    app = FastAPI(title="River test", version="2.3.4", description="test API")
     app.include_router(
         create_app_info_router(app, deps, not_found_response={}),
         prefix="/api",
@@ -127,7 +127,7 @@ def test_app_info_routes_return_metadata_and_generated_openapi(app_info_client):
     assert client.get("/api/changelog").json() == {"content": "changes", "releases": []}
 
     openapi = client.get("/api/openapi.json").json()
-    assert openapi["info"]["title"] == "DTVP test"
+    assert openapi["info"]["title"] == "River test"
     assert "/api/version" in openapi["paths"]
 
 
@@ -159,7 +159,7 @@ def test_app_info_html_sbom_route_renders_file(app_info_client):
     response = client.get("/api/sbom/html")
 
     assert response.status_code == 200
-    assert "DTVP CycloneDX SBOM" in response.text
+    assert "River CycloneDX SBOM" in response.text
     assert '{"component":"html"}' in response.text
 
 

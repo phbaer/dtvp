@@ -233,7 +233,7 @@ project version (or a re-imported BOM) contains a vulnerability again. Next to
 the assessed findings of the other versions this looks like an assessment that
 was lost; it is a finding nobody has assessed yet.
 
-DTVP marks such a finding as **new**: it has neither a state nor text, and it
+River marks such a finding as **new**: it has neither a state nor text, and it
 was first reported after the vulnerability's assessment was written (the
 oldest team block date; for assessments without dated blocks, after every
 assessed finding was reported). A finding that was merely left out when the
@@ -413,7 +413,7 @@ work is filled, the others are outlined.
 
 Dependency-Track can stop reporting a finding: its component was replaced by
 a new one with the same package URL, removed from the BOM, or no longer
-matches the vulnerability. DTVP keeps such a finding as **gone**, with the
+matches the vulnerability. River keeps such a finding as **gone**, with the
 reason and dates. Right after a BOM upload a finding can be gone for one read
 and come back, or be replaced, at the next; see [Findings that disappear](import-export.md#findings-that-disappear).
 
@@ -458,7 +458,7 @@ Opened, it shows a dialog above the page:
   or `superseded` once carried over), and its tickets.
 - **Why, where the BOM tells:** a finding no longer matched on a component
   that is unchanged except for its CPE says so: "CPE changed from *old* to
-  *new*". DTVP compares the BOM it stored before the read with the one read
+  *new*". River compares the BOM it stored before the read with the one read
   now. It reads the BOM for this only when it reads it anyway, or when ten or
   more findings went no longer matched in one read.
 - **The same vulnerability under another id:** when a gone finding's
@@ -486,7 +486,7 @@ Opened, it shows a dialog above the page:
   ids share on one component is a template (boilerplate of a distribution or
   a scanner) and matches nothing. The same affected range and CWE are not
   enough: on one package they matched many different vulnerabilities. It is
-  DTVP's guess: reviewers first
+  River's guess: reviewers first
   **Confirm same issue** (or later **Not the same**), only then **Apply to
   *id*** works as for an alias, saved pending review with origin
   `carried-over-by-same-issue`. Reported findings on one component that are
@@ -498,8 +498,8 @@ Opened, it shows a dialog above the page:
   (`VulnerabilityFacts`); no source call. A confirmation is kept with the
   finding, in the instance dump too, and exported (see
   [CycloneDX export](cyclonedx-export.md)).
-- **A gone finding whose component DTVP never knew:** a record from before
-  DTVP tracked findings, whose component Dependency-Track has since recreated
+- **A gone finding whose component River never knew:** a record from before
+  River tracked findings, whose component Dependency-Track has since recreated
   under a new UUID, cannot be carried over: nothing says which package it was
   on. When the same vulnerability is reported in the same version, the gone
   finding says "Probably the same as *id* on *component version* (same
@@ -507,11 +507,11 @@ Opened, it shows a dialog above the page:
   same issue**, **Apply to *id*** copies the assessment to that finding,
   pending review (origin `carried-over-by-same-issue`). Nothing is exported
   for such a confirmation: the id is the same. When the vulnerability is
-  reported on more than one component of the version, DTVP picks none: the
+  reported on more than one component of the version, River picks none: the
   gone finding lists every candidate with **Confirm and apply here**, and
   **Apply to all N** applies to each of them explicitly.
-- Components of findings recorded before DTVP tracked findings are known only
-  by their Dependency-Track UUID. When gone findings are shown, DTVP looks
+- Components of findings recorded before River tracked findings are known only
+  by their Dependency-Track UUID. When gone findings are shown, River looks
   their name, version and package URL up once in local sources (the stored
   BOM of the version, then project archives, newest first; never
   Dependency-Track) and stores them. Components no source names show as
@@ -739,7 +739,7 @@ remain visible without blocking another edit. Per-finding local revisions are
 retained across list updates so subsequent edits keep conflict protection.
 A save that names no revisions (the overwrite offered after a conflict, an
 approval, a save from an agent) is guarded as well: it is checked against the
-revision DTVP read when it began handling that save, and fails with 409 when
+revision River read when it began handling that save, and fails with 409 when
 another save was stored in between.
 Each vulnerability card can reload its current assessment directly from
 Dependency-Track; the refreshed task snapshot updates the card, lifecycle
@@ -775,7 +775,7 @@ vulnerability the earlier apply changed.
 | :--- | :--- |
 | Apply Automatic Assessments | Usable, unapplied analyzer assessments; writes one assessment per owning team plus a global assessment with the worst verdict and its CVSS rescore |
 | Repair Assessments | Every safe, rule-based repair in one operation; each vulnerability lists the repairs that apply |
-| Restore Team Assessments From Export | Team assessments that a Dependency-Track export, or Dependency-Track's audit trail of the findings in view, has and DTVP has in no form; adds them as historical blocks and changes no state ([details](#restore-team-assessments-from-an-export)) |
+| Restore Team Assessments From Export | Team assessments that a Dependency-Track export, or Dependency-Track's audit trail of the findings in view, has and River has in no form; adds them as historical blocks and changes no state ([details](#restore-team-assessments-from-an-export)) |
 
 **Repair Assessments** also runs for one vulnerability: **Repair…** on the
 card (on the inconsistency banner, beside **Sync all**, and in **More**) is
@@ -804,7 +804,7 @@ label per applicable repair and count only the findings that change.
 | Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
 
 **Unknown component** (never preselected) carries the assessment of a gone
-finding whose component DTVP never knew to the finding of the same
+finding whose component River never knew to the finding of the same
 vulnerability reported now in the same version, when that finding has no
 assessment. The preview names the state, teams and date of the gone record
 and the target. It is copied as the gone findings panel applies a confirmed
@@ -820,7 +820,7 @@ conflicting; neither is applied. A finding saved since the preview is skipped, a
 finds nothing left to carry.
 
 **Earlier assessments.** When no finding of a vulnerability has an
-assessment, its assessment form lists what DTVP still holds for gone findings
+assessment, its assessment form lists what River still holds for gone findings
 of the same vulnerability (and of its aliases) in the same project versions:
 the component (or "unknown component"), state, justification, date and the
 start of the text. **Use this** fills the form (state, justification,
@@ -901,7 +901,7 @@ combined decision is new: it is marked pending review, and approving it
 completes the vulnerability. Conflicts that involve a current team's assessment still need a
 manual decision.
 
-Tickets are restored from DTVP's own [history](import-export.md#history). A
+Tickets are restored from River's own [history](import-export.md#history). A
 ticket counts as dropped when one version of a finding's assessment had it in
 a team's ticket field, the next version was written by a bulk workflow and
 names it nowhere, and the current text does not name it either. It returns to
@@ -961,8 +961,8 @@ full results.
 
 ### Restore team assessments from an export
 
-Dependency-Track keeps the text DTVP last exported for each finding, team
-blocks included. When a team block was lost in DTVP (a save from an
+Dependency-Track keeps the text River last exported for each finding, team
+blocks included. When a team block was lost in River (a save from an
 incomplete view, a raw-text edit, an older repair), a VDR that
 Dependency-Track exported before the loss still has it. This workflow reads
 such an export and brings each lost block back as a `[Historical: yes]`
@@ -971,10 +971,10 @@ block, so the record has it again. It follows
 changes no state.
 
 **Input.** A CycloneDX VDR (JSON, specification 1.4 to 1.6) that
-Dependency-Track exported for one project. DTVP's own
+Dependency-Track exported for one project. River's own
 [CycloneDX export](cyclonedx-export.md) is refused: it carries the
 rationale, not the team blocks. A file written by another tool is read with
-a warning. The reviewer uploads it in the dialog; DTVP keeps it in memory
+a warning. The reviewer uploads it in the dialog; River keeps it in memory
 only, per reviewer (up to four uploads, six hours each; nothing is written to
 disk or logged), so after a restart it is uploaded again. The limit is
 128 MiB.
@@ -985,7 +985,7 @@ current view instead (a polled task, at most 20000 findings, six requests at
 a time). Dependency-Track records every changed analysis text as a comment
 `Details: <the new text>` (`AnalysisCommentUtil.makeDetailsCommentIfChanged`
 in 4.x) and returns the comments, oldest first, with the analysis
-(`GET /api/v1/analysis`). DTVP reads those texts and the current one through
+(`GET /api/v1/analysis`). River reads those texts and the current one through
 the source's optional `AssessmentHistorySource` (`dtvp/ports.py`); state,
 justification, response, suppression and free comments are not texts and
 are ignored. From all texts of a finding the team blocks are taken as from
@@ -1047,7 +1047,7 @@ undated last; the rescoring, response and text ahead of the blocks, the SSVC
 record and the pending-review marker stay as they are. State,
 justification, suppression, response and rescoring of the finding never
 change: a historical block's rescoring tags and quoted vectors are not read
-as the finding's rescoring, so the score, vector and severity DTVP derives
+as the finding's rescoring, so the score, vector and severity River derives
 stay as they were. Each write is checked: a finding whose aggregated state
 would change, or whose text cannot be read, is skipped and counted. A
 finding whose stored assessment differs from the one the preview read, or
@@ -1057,7 +1057,7 @@ prepare the preview again to include it. The writes go through the
 normal path with origin `bulk-workflow` and the reviewer as author, so
 [History](import-export.md#history) shows them and the next export writes
 them to Dependency-Track, where they appear as `historical_assessment` in
-DTVP's [CycloneDX export](cyclonedx-export.md).
+River's [CycloneDX export](cyclonedx-export.md).
 
 **Review first.** A vulnerability starts unselected when a restored block
 has a worse state than its finding has today, when a finding has no

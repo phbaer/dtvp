@@ -1,4 +1,4 @@
-"""Everything DTVP persists, resolved in one place, and the instance lock.
+"""Everything River persists, resolved in one place, and the instance lock.
 
 ``resolve_instance_stores`` is the single registry of the files an instance
 consists of: the record databases, the record files, the settings files,
@@ -7,7 +7,7 @@ instance dump (``dtvp.backup``) and the restore work from it.
 
 ``claim_instance`` takes an exclusive lock on every directory that holds a
 record database, a record file or a cache before the databases are opened,
-so only one DTVP process (or one restore) uses those files at a time, even
+so only one River process (or one restore) uses those files at a time, even
 when two instances with different ``DTVP_DT_CACHE_PATH`` resolve some paths
 to the same directory. It refuses to open an instance a restore left
 half-finished.
@@ -353,19 +353,19 @@ def claim_instance(dt_cache_dir: str) -> str:
             for path in stores.instance_lock_paths():
                 if not _hold(path):
                     raise InstanceBusyError(
-                        f"The DTVP instance lock {path} is held: another "
-                        "DTVP process or a restore is using this data directory "
+                        f"The River instance lock {path} is held: another "
+                        "River process or a restore is using this data directory "
                         "or one of its record or cache directories. Run one "
-                        "DTVP process per data directory."
+                        "River process per data directory."
                     )
                 taken.append(path)
             journals = stores.journals()
             if journals:
                 raise RestoreInProgressError(
-                    "A restore of this DTVP instance did not finish "
+                    "A restore of this River instance did not finish "
                     f"({', '.join(journals)}). Complete or undo it with "
                     "`python -m dtvp.backup recover --resume` or "
-                    "`python -m dtvp.backup recover --abort` before starting DTVP."
+                    "`python -m dtvp.backup recover --abort` before starting River."
                 )
             write_instance_registry(stores)
         except BaseException:

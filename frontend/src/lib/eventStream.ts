@@ -1,7 +1,7 @@
 /**
  * The app-wide live-update stream (`GET /api/events`, ADR 0004).
  *
- * One tab per browser and DTVP instance holds the stream: tabs elect a
+ * One tab per browser and River instance holds the stream: tabs elect a
  * leader with the Web Locks API and share events, the cursor, and the status
  * over a BroadcastChannel. Both names carry the API base, because locks and
  * channels are scoped to the origin and two instances may share one under
@@ -70,9 +70,9 @@ export interface EventStream {
 
 export const EVENT_LOCK_NAME = 'dtvp:events:leader'
 export const EVENT_CHANNEL_NAME = 'dtvp:events'
-/** The leader lock of one DTVP instance (its API base) on this origin. */
+/** The leader lock of one River instance (its API base) on this origin. */
 export const eventLockName = (apiBase: string) => `${EVENT_LOCK_NAME}:${apiBase}`
-/** The BroadcastChannel of one DTVP instance (its API base) on this origin. */
+/** The BroadcastChannel of one River instance (its API base) on this origin. */
 export const eventChannelName = (apiBase: string) => `${EVENT_CHANNEL_NAME}:${apiBase}`
 export const IDLE_TIMEOUT_MS = 35_000
 /** A proxy that holds the response would otherwise keep `connect` waiting

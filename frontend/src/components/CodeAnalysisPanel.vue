@@ -1159,7 +1159,7 @@ const cleanupVulnerability = async () => {
     if (cleanupBusy.value || (!cleanupAssessments.value && !cleanupRuns.value)) return
     const selected = [
         cleanupAssessments.value ? 'saved assessments' : '',
-        cleanupRuns.value ? 'DTVP and Agentyzer run records' : '',
+        cleanupRuns.value ? 'River and Agentyzer run records' : '',
     ].filter(Boolean).join(' and ')
     const activeNotice = cleanupRuns.value && cleanupActive.value
         ? ' Active runs will be cancelled.'
@@ -1190,7 +1190,7 @@ const cleanupVulnerability = async () => {
         collectedResults.value = []
         cleanupMessage.value = [
             `${cleanup.removed.assessments} assessment${cleanup.removed.assessments === 1 ? '' : 's'}`,
-            `${cleanup.removed.dtvp_runs} DTVP run${cleanup.removed.dtvp_runs === 1 ? '' : 's'}`,
+            `${cleanup.removed.dtvp_runs} River run${cleanup.removed.dtvp_runs === 1 ? '' : 's'}`,
             `${cleanup.removed.agentyzer_jobs} Agentyzer job${cleanup.removed.agentyzer_jobs === 1 ? '' : 's'}`,
         ].join(', ') + ' removed.'
         const issues = [
@@ -1599,7 +1599,7 @@ watch(combinedCandidateRuns, runs => {
                 </label>
                 <label class="inline-flex items-center gap-1.5">
                     <input v-model="cleanupRuns" type="checkbox" class="accent-red-500" />
-                    DTVP and Agentyzer runs
+                    River and Agentyzer runs
                 </label>
                 <label class="inline-flex items-center gap-1.5" :class="cleanupRuns ? '' : 'opacity-50'">
                     <input v-model="cleanupActive" type="checkbox" class="accent-red-500" :disabled="!cleanupRuns" />

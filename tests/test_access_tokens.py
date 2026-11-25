@@ -256,7 +256,7 @@ def test_a_token_sent_as_api_key_has_the_same_access_and_limits(client, enabled)
     # Read-only through REST, and never an interactive session.
     assert client.post("/api/export", json={}, headers=key).status_code == 403
     assert client.get("/api/settings/tokens", headers=key).status_code == 403
-    # Anything that is not a DTVP token is not an API key.
+    # Anything that is not a River token is not an API key.
     assert client.get("/api/projects", headers={"X-Api-Key": "odt_abc"}).status_code == 401
     assert client.get(
         "/api/projects", headers={"X-Api-Key": plain[:-2] + "xx"}

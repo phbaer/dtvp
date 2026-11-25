@@ -186,7 +186,7 @@ export const listProjectArchiveSnapshots = async (): Promise<ProjectArchiveSnaps
     return res.data;
 };
 
-/** One assessment DTVP still holds for a gone finding of a vulnerability. */
+/** One assessment River still holds for a gone finding of a vulnerability. */
 export interface EarlierAssessment {
     component_uuid: string;
     component_name: string | null;
@@ -249,7 +249,7 @@ export const applyGoneFindingToAlias = async (
 };
 
 /** Confirm (or withdraw) that a gone finding is the same issue as the
- * reported one DTVP proposed for it, although no source links them. */
+ * reported one River proposed for it, although no source links them. */
 export const confirmGoneFindingSameIssue = async (
     projectUuid: string,
     componentUuid: string,

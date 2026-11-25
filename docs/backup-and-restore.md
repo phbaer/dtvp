@@ -9,7 +9,7 @@
 | Owner | Repository owner |
 | Verified | 2026-11-20 against `dtvp/backup/`, `dtvp/resources/dump-schemas/1/` and `tests/test_dump_schemas.py`, `tests/test_backup_*.py` |
 
-An instance dump is a logical copy of everything DTVP keeps as its record:
+An instance dump is a logical copy of everything River keeps as its record:
 assessments with their history and sync state, the export queue, source
 data, known projects, the access-token audit log (and, on request, the token
 digests), code-analysis runs, threat-model proposals and the settings files.
@@ -40,7 +40,7 @@ version or storage engine. The per-project archive is not a backup.
 | Scheduled dumps and `prune` | Implemented |
 
 A cold copy of the whole data directory, taken while the backend was
-stopped, remains a fallback for the same DTVP version; see
+stopped, remains a fallback for the same River version; see
 [Deployment](deployment.md).
 
 ## How To Export And Verify A Dump
@@ -81,7 +81,7 @@ What export does:
      between, within 300 s (E8).
    - Without `--include-access-tokens` the token rows are deleted from the
      copy at once.
-3. Refuses a database whose migrations differ from this DTVP version's
+3. Refuses a database whose migrations differ from this River version's
    (E1): start the matching backend once, or use the matching version.
 4. Streams the records from the copies, validating each against its schema
    and checking the referential rules as it goes; reads each settings file
@@ -95,7 +95,7 @@ assessments, history, export queue, source data, known projects, tokens and
 the audit log, so they come from one moment.
 
 `--include-access-tokens` adds the token digests: anyone holding the dump
-can use those tokens against a DTVP with the same data. The file name gets
+can use those tokens against a River with the same data. The file name gets
 `-with-credentials` and the manifest the required feature `credentials`.
 Sessions are not in a dump.
 
@@ -226,7 +226,7 @@ After a restore:
   as on the source.
 - The first background sync reloads the project list from
   Dependency-Track.
-- DTVP never deletes `*.pre-restore-*` files. Remove them once the
+- River never deletes `*.pre-restore-*` files. Remove them once the
   restored instance has been checked. To open a moved-aside database, keep
   its `-wal` and `-journal` files beside it under their names.
 
@@ -246,7 +246,7 @@ docker compose run --rm dtvp python -m dtvp.backup recover --abort    # put the 
 
 Both repeat safely. `--abort` returns every file to its original state;
 staged files remain and are removed by the next restore. If a file was
-changed by something other than DTVP in between, recovery stops and prints
+changed by something other than River in between, recovery stops and prints
 the action to fix by hand.
 
 ## Reference: Format `dtvp.dump/1`
@@ -357,7 +357,7 @@ Entities are written in this order, each sorted as listed:
 | `code_analysis_application` | `code_analysis_result_applications` | run, finding | `analysis_run_id, finding_uuid, group_id_lower, workflow_id, status` (`applied`, `queued`, `failed`), `applied_by, applied_at, payload_fingerprint` |
 | `code_evidence` | `code_evidence` and `code_evidence_vuln_ids` | `evidence_id` | `evidence_id, schema_version, source, project_name, vuln_id, vuln_ids[]` (the lower-case ids and aliases it is found under), `scope` (`vulnerability`, `components`, `findings`), `targets, title, body_markdown, references, suggested_state, suggested_justification, confidence` (`low`, `medium`, `high` or null), `author_username, token_id, agent_label, authority, idempotency_key, created_at, withdrawn_at, withdrawn_by, withdrawn_reason`. Agent code evidence is record data: withdrawn entries are kept, and analyzer retention never prunes it |
 | `code_evidence_application` | `code_evidence_applications` | evidence, finding | `evidence_id, finding_uuid, workflow_id, status` (`applied`, `queued`, `failed`), `applied_by, applied_at` |
-| `finding_presence` | `finding_presence` (namespace `finding_lifecycle`, in the assessment records' file) | finding key | `key, vuln_id, component_name, component_version, component_purl, component_identity, first_seen_at, status` (`reported`, `gone`), `gone_at, last_seen_at, gone_reason` (`replaced`, `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export` or null), `successor_component_uuid, carry_over` (`carried`, `conflict`, `own_assessment`, `undetermined` or null), `returned_at`; optional `acknowledged_by, acknowledged_at`, present only for an acknowledged gone finding; optional `gone_cause` ("CPE changed from … to …"), present only when the stored BOMs told why; optional `predates_tracking` (`true`), present only for a finding followed from an assessment record older than finding tracking, whose `first_seen_at` is then empty. DTVP's record of findings the source stopped reporting; it cannot be read from the source again. These optional fields were added within dump version 1 and the schema allows no other fields, so a release from before them refuses to restore a dump that has them: restore such a dump with this release or later |
+| `finding_presence` | `finding_presence` (namespace `finding_lifecycle`, in the assessment records' file) | finding key | `key, vuln_id, component_name, component_version, component_purl, component_identity, first_seen_at, status` (`reported`, `gone`), `gone_at, last_seen_at, gone_reason` (`replaced`, `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export` or null), `successor_component_uuid, carry_over` (`carried`, `conflict`, `own_assessment`, `undetermined` or null), `returned_at`; optional `acknowledged_by, acknowledged_at`, present only for an acknowledged gone finding; optional `gone_cause` ("CPE changed from … to …"), present only when the stored BOMs told why; optional `predates_tracking` (`true`), present only for a finding followed from an assessment record older than finding tracking, whose `first_seen_at` is then empty. River's record of findings the source stopped reporting; it cannot be read from the source again. These optional fields were added within dump version 1 and the schema allows no other fields, so a release from before them refuses to restore a dump that has them: restore such a dump with this release or later |
 | `finding_read` | `finding_reads` | `project_uuid` | `project_uuid, read_at, went` (counts by reason; `went_raw` when not a JSON object), `returned, carried_over, not_carried` |
 | `session_version` | `session_versions` (in the access-token file) | `username` | `username, version, revoked_at`. Not a credential, so it is in every dump; it keeps logouts and revocations effective after a restore. A restore writes each version one higher: every restored user signs in again, and no session revoked before or after the dump comes back. Users without a version keep any session signed with the same key; to end every session after a restore, rotate `DTVP_SESSION_SECRET_KEY` |
 | `saved_view` | `saved_views` (namespace `saved_views`, in the main database) | `code` | `code, scope` (`personal`, `global`), `name`, `project` (null for any project), `query` (the canonical filter query), `owner, created_at, updated_at, updated_by`. Saved views; the code is the short link ([ADR 0015](adr/0015-saved-views-cutoff-and-short-links.md)). Added in format minor 1 |

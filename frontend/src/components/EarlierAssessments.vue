@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// For a finding without an assessment: what DTVP still holds for gone
+// For a finding without an assessment: what River still holds for gone
 // findings of the same vulnerability (or an alias) in the same project
 // version. "Use this" fills the form; nothing is saved here.
 import { computed, ref, watch } from 'vue'
@@ -62,7 +62,7 @@ const label = (value: string) => value.replaceAll('_', ' ')
     >
         <div class="font-semibold text-sky-100">Earlier assessments</div>
         <p class="mt-1 text-sky-200/75">
-            DTVP still holds these for findings of this vulnerability that are gone from the same version.
+            River still holds these for findings of this vulnerability that are gone from the same version.
             Use one as a draft; nothing is saved until you submit, and the usual review applies.
         </p>
         <div

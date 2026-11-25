@@ -1,6 +1,6 @@
 """What happened to the findings of a project: reported, gone, and why.
 
-Dependency-Track reports findings; when it stops reporting one, DTVP keeps
+Dependency-Track reports findings; when it stops reporting one, River keeps
 the finding with a reason instead of letting it vanish (ADR 0003). This
 module holds the rules, as functions without I/O, and the store that records
 the outcome:
@@ -348,7 +348,7 @@ def choose_carry_over(
 ) -> Optional[dict[str, Any]]:
     """The value several earlier records agree on; ``None`` when they differ.
 
-    A pending-review marker DTVP added is not a difference.
+    A pending-review marker River added is not a difference.
     """
     if not values:
         return None
@@ -362,7 +362,7 @@ def choose_carry_over(
 
 
 class FindingLifecycleStore:
-    """DTVP's record of the findings it was told about, per project.
+    """River's record of the findings it was told about, per project.
 
     Lives in the same database file as the assessment records, under its
     own migration namespace. Rows are written on transitions only; a
@@ -459,7 +459,7 @@ class FindingLifecycleStore:
         stored BOM) where it knows it. Returns how many rows were made, or
         ``None`` when it ran before.
 
-        Only versions whose findings DTVP has (rows of reported findings)
+        Only versions whose findings River has (rows of reported findings)
         are backfilled: for the others it cannot tell a gone finding from
         one still reported, and their first read follows the records."""
         self._ensure_initialized()
@@ -593,7 +593,7 @@ class FindingLifecycleStore:
         - ``recreated``: how many such earlier generations there are;
         - ``last_read``: the time of the last read and, by reason with
           ``recreated`` apart, the findings that went at it;
-        - ``since``: when DTVP started following the version's findings;
+        - ``since``: when River started following the version's findings;
           rows made for records that predate tracking do not count;
         - ``attention``: with ``outbox``, how many gone findings need
           attention and nobody acknowledged (see ``needs_attention``);
@@ -1231,7 +1231,7 @@ def _same_name(left: Optional[str], right: Optional[str]) -> bool:
 
 
 def identity_from_findings(row: Mapping[str, Any]) -> bool:
-    """The row's component was told by the source's findings (a finding DTVP
+    """The row's component was told by the source's findings (a finding River
     saw reported), not taken from a BOM for a record from before tracking."""
     return not row.get("predates_tracking") and bool(row.get("vuln_id"))
 
@@ -1302,7 +1302,7 @@ def plan_carry_over(
     when it is the only reading: the target is the one finding of the
     vulnerability without a record, the BOM no longer has the record's
     component, and that component had the target's name. The name comes
-    from the finding row or from the BOM DTVP stored before this read
+    from the finding row or from the BOM River stored before this read
     (``previous_bom``). When it cannot be told, nothing is carried and the
     case is ``undetermined``.
     """
@@ -1521,7 +1521,7 @@ def follow_findings_plan(
     as well: what it lacked returns, or is explained, on a later read.
     ``has_source_value`` says whether the source holds an assessment for a
     finding. ``bom`` reads the project's BOM now; ``previous_bom`` is the
-    BOM DTVP stored before. Blocking: run it in a worker thread.
+    BOM River stored before. Blocking: run it in a worker thread.
     """
     read_at = started_at.astimezone(UTC).isoformat()
     reported = ReportedIndex(
@@ -1593,7 +1593,7 @@ def record_carry_over(
     ) -> tuple[str, str]:
         finding = (candidate[1], candidate[2])
         if finding not in rows:
-            # Gone before DTVP recorded findings: only the record is known,
+            # Gone before River recorded findings: only the record is known,
             # and what the stored BOM said of its component. The BOM no
             # longer has the component: the carry-over rules ask for that.
             state = plan.records.get(candidate) or {}
@@ -1723,7 +1723,7 @@ _REVIEW_MARKER_SUFFIX = "\n\n[Status: Pending Review]"
 # bulk write that changed the assessment, counts as saved since.
 AUTOMATIC_ORIGINS = ("bulk-workflow",)
 
-# The review marker as DTVP writes it: on a line of its own, any case.
+# The review marker as River writes it: on a line of its own, any case.
 _MARKER_LINE_RE = re.compile(r"^[ \t]*\[Status:\s*Pending Review\][ \t]*$", re.I | re.M)
 
 # Why plan_recreated_reviews keeps a marker, for the read's log line.
@@ -1965,7 +1965,7 @@ def describe_gone_findings(
     same_issue: Any = None,
 ) -> Optional[dict[str, Any]]:
     """The gone findings of a project version with the last read, for
-    display. ``None`` when DTVP has no record of the version's findings.
+    display. ``None`` when River has no record of the version's findings.
 
     ``aliases`` maps a vulnerability id (upper case) to its other ids; with
     it, a gone finding whose alias is still reported on the same component
@@ -2474,7 +2474,7 @@ def earlier_assessments(
     vulnerability_uuid: str,
     alias_ids: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
-    """The assessments DTVP still holds for gone findings of a vulnerability
+    """The assessments River still holds for gone findings of a vulnerability
     in one project version (and of its aliases), newest first: what a person
     may take as a starting point for a finding that has none. Read only;
     nothing is applied here."""

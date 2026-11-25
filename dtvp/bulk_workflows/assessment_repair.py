@@ -831,9 +831,9 @@ def _unknown_component_stage(
     groups: list[dict[str, Any]],
     context: BulkWorkflowContext,
 ) -> tuple[list[Payload], dict[str, dict[str, Any]]]:
-    """Carry a gone finding's assessment whose component DTVP never knew to
+    """Carry a gone finding's assessment whose component River never knew to
     the finding of the same vulnerability reported now in the same version
-    (Dependency-Track recreated the component before DTVP tracked findings).
+    (Dependency-Track recreated the component before River tracked findings).
 
     Only onto a finding without an assessment, only when the vulnerability
     is reported on exactly one component of that version and the gone

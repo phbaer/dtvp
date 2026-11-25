@@ -9,7 +9,7 @@ DTVP_VERSION=$(
 )
 DTVP_VERSION=${DTVP_VERSION:-unknown}
 DTVP_BUILD_NUMBER=${DTVP_BUILD_NUMBER:-unknown}
-printf 'DTVP version: %s (build number: %s)\n' "${DTVP_VERSION}" "${DTVP_BUILD_NUMBER}"
+printf 'River version: %s (build number: %s)\n' "${DTVP_VERSION}" "${DTVP_BUILD_NUMBER}"
 
 # Default DTVP_CONTEXT_PATH to / if not set
 DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH:-/}
@@ -63,7 +63,7 @@ else
     echo "Warning: ${INDEX_TARGET} not found, skipping frontend configuration"
 fi
 
-# Run the boot wrapper so Uvicorn can bind before the full DTVP app imports.
+# Run the boot wrapper so Uvicorn can bind before the full River app imports.
 exec /app/.venv/bin/uvicorn dtvp.boot:app \
     --host 0.0.0.0 \
     --port 8000 \

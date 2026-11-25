@@ -52,12 +52,12 @@ def validate_python_runtime(
         return status
     if not status["free_threaded_build"]:
         raise RuntimeError(
-            "DTVP requires a free-threaded CPython build, but this interpreter "
+            "River requires a free-threaded CPython build, but this interpreter "
             "was built with the GIL. Use the 3.14t deployment variant."
         )
     if status["gil_enabled"] is not False:
         raise RuntimeError(
-            "DTVP requires free-threaded execution, but the GIL is enabled. "
+            "River requires free-threaded execution, but the GIL is enabled. "
             "Check PYTHON_GIL and imported native extensions."
         )
     return status

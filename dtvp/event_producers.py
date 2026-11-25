@@ -202,7 +202,7 @@ class SourceStateTracker:
 class AssessmentEventProducer:
     """Publishes ``assessments.changed`` per product, with its origin:
     ``local`` (a save, a carry-over, a discarded export), ``dt`` (the source
-    changed an assessment) or ``export_echo`` (the source now holds DTVP's
+    changed an assessment) or ``export_echo`` (the source now holds River's
     own export). Registered after the task-snapshot listener, so open views
     are already up to date."""
 

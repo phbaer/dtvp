@@ -31,7 +31,7 @@ def test_dtvp_container_prints_packaged_project_version_before_server_start():
     ]
 
     version_lookup = 'open("/app/pyproject.toml", "rb")'
-    version_output = "printf 'DTVP version: %s (build number: %s)\\n'"
+    version_output = "printf 'River version: %s (build number: %s)\\n'"
     server_start = "exec /app/.venv/bin/uvicorn"
 
     assert all("ARG BUILD_NUMBER=unknown" in dockerfile for dockerfile in dockerfiles)

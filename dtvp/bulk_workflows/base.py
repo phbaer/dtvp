@@ -44,7 +44,7 @@ class BulkWorkflowContext:
     # may carry ``expected_revision``; it is written only if the finding
     # still has that revision, else it is skipped as changed since preview.
     stored_assessments: Optional[Callable[[list[dict[str, Any]]], list[dict[str, Any]]]] = None
-    # Per project version, the assessed gone findings whose component DTVP
+    # Per project version, the assessed gone findings whose component River
     # never knew and the reported findings of the same vulnerability
     # (``CacheManager.unknown_component_records``).
     unknown_component_records: Optional[Callable[[str], dict[str, dict[str, Any]]]] = None

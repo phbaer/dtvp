@@ -550,7 +550,7 @@ watch(enrich, (enabled) => {
         <div>
           <h2 class="text-4xl font-extrabold tracking-tight text-white leading-none">Threat-Model Analysis for {{ projectName }}</h2>
           <p class="mt-2 text-sm text-gray-400 max-w-3xl">
-            This runs the external tmrescore service from DTVP. The recommended mode builds an analysis-only synthetic SBOM across all versions so historical vulnerabilities remain attached to the versioned components that actually carried them.
+            This runs the external tmrescore service from River. The recommended mode builds an analysis-only synthetic SBOM across all versions so historical vulnerabilities remain attached to the versioned components that actually carried them.
           </p>
         </div>
       </div>
@@ -714,7 +714,7 @@ watch(enrich, (enabled) => {
                   </div>
                 </div>
                 <div class="text-xs text-gray-500 md:max-w-xs">
-                  The model is selected by vscorer and cannot be overridden in DTVP. LLM enrichment and offline mode are mutually exclusive.
+                  The model is selected by vscorer and cannot be overridden in River. LLM enrichment and offline mode are mutually exclusive.
                 </div>
               </div>
 
@@ -859,7 +859,7 @@ watch(enrich, (enabled) => {
               </button>
 
               <div class="text-sm text-gray-500">
-                {{ context.versions.length }} version<span v-if="context.versions.length !== 1">s</span> available in DTVP
+                {{ context.versions.length }} version<span v-if="context.versions.length !== 1">s</span> available in River
               </div>
             </div>
           </form>

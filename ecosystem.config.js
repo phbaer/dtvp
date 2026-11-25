@@ -46,7 +46,7 @@ module.exports = {
                 DTVP_TMRESCORE_URL: "http://127.0.0.1:8090",
                 DTVP_CODE_ANALYSIS_URL: "http://127.0.0.1:8095",
                 DTVP_ACCESS_TOKENS_ENABLED: "true",
-                // For the local mock stack only. DTVP refuses to start without
+                // For the local mock stack only. River refuses to start without
                 // a session signing key of at least 32 bytes, and accepts this
                 // committed development key only with the flag below.
                 DTVP_SESSION_SECRET_KEY: "dtvp-dev-only-local-mock-stack-session-key",

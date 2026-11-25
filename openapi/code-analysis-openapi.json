@@ -1638,7 +1638,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Benchmark",
-            "description": "Structured benchmark artifact prepared by DTVP. It includes the human assessment snapshot, automated Agentyzer assessment summary, deterministic state/CVSS deltas, and fallback rating."
+            "description": "Structured benchmark artifact prepared by River. It includes the human assessment snapshot, automated Agentyzer assessment summary, deterministic state/CVSS deltas, and fallback rating."
           },
           "model": {
             "anyOf": [

@@ -180,7 +180,7 @@ def _forward(actions: list[dict[str, Any]]) -> None:
 def _inconsistent(action: dict[str, Any]) -> DumpError:
     return DumpError(
         "T2",
-        "Recovery stopped: the files of this action were changed outside DTVP; "
+        "Recovery stopped: the files of this action were changed outside River; "
         f"fix them by hand and run recover again: {json.dumps(action)}",
     )
 
@@ -246,7 +246,7 @@ class _Locks:
                 if descriptor is None:
                     raise DumpError(
                         "T1",
-                        f"The instance lock {path} is held: stop the DTVP backend "
+                        f"The instance lock {path} is held: stop the River backend "
                         "that uses this directory (or the other restore) first",
                     )
                 self.held.append(descriptor)
@@ -298,7 +298,7 @@ def check_paths(stores: InstanceStores, options: RestoreOptions) -> list[Finding
             return [Finding("T7", "No backend has run here; restoring as a new instance")]
         raise DumpError(
             "T7",
-            f"{stores.registry_path} does not exist: no DTVP backend has run with "
+            f"{stores.registry_path} does not exist: no River backend has run with "
             "this data directory, or this command resolves other paths than the "
             "backend. Run it with the backend's environment and working directory "
             "(docker compose run --rm dtvp ...), or pass --new-instance",
@@ -389,7 +389,7 @@ def check_target(
     elif dumped_url != target_url:
         rule(
             "T4",
-            f"The dump was taken against {dumped_url}; this DTVP uses {target_url}",
+            f"The dump was taken against {dumped_url}; this River uses {target_url}",
             options.accept_dt_url_change,
             "--accept-dt-url-change",
         )
@@ -399,7 +399,7 @@ def check_target(
         rule(
             "T5",
             f"{len(pruned)} restored code-analysis result(s) would be deleted by this "
-            "DTVP's DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS or RETENTION_DAYS",
+            "River's DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS or RETENTION_DAYS",
             options.accept_pruning,
             "--accept-pruning",
         )

@@ -92,7 +92,7 @@ def staged_path(target: str, dump_id: str) -> str:
 
 
 def remove_stale(path: str) -> None:
-    """Remove an earlier staged file of the same dump: DTVP's own temporary."""
+    """Remove an earlier staged file of the same dump: River's own temporary."""
     for suffix in ("", *SIDE_FILES):
         try:
             os.remove(path + suffix)

@@ -1342,7 +1342,7 @@ def _register_code_analysis_routes(
             except httpx.HTTPStatusError as exc:
                 if saved is None:
                     if exc.response.status_code == 404:
-                        raise HTTPException(status_code=404, detail="Analyzer diagnostics unavailable: the job may have expired, been deleted, belong to another instance, or this analyzer may not support diagnostic downloads. No saved DTVP failure details are available.") from None
+                        raise HTTPException(status_code=404, detail="Analyzer diagnostics unavailable: the job may have expired, been deleted, belong to another instance, or this analyzer may not support diagnostic downloads. No saved River failure details are available.") from None
                     raise HTTPException(status_code=502, detail="Analyzer diagnostic request failed; try again later.") from None
             except (httpx.RequestError, ValueError):
                 if saved is None:

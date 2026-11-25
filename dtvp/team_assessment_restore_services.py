@@ -1,9 +1,9 @@
 """Team assessments read back from a Dependency-Track export.
 
-Dependency-Track keeps the text DTVP wrote into each analysis, team blocks
-included. When a block was lost in DTVP, a CycloneDX VDR that
+Dependency-Track keeps the text River wrote into each analysis, team blocks
+included. When a block was lost in River, a CycloneDX VDR that
 Dependency-Track exported before the loss still has it. This module reads
-such an export, matches its entries to DTVP's findings, and works out which
+such an export, matches its entries to River's findings, and works out which
 team blocks a finding has today in no form. Those come back as historical
 blocks: the record keeps them, and no state changes (ADR 0003).
 
@@ -38,7 +38,7 @@ SOURCE_KIND_DEPENDENCY_TRACK_VDR = "dependency-track-vdr"
 HISTORY_TOOL = "Assessment history"
 SUPPORTED_SPEC_VERSIONS = ("1.4", "1.5", "1.6")
 DTVP_EXPORT_MESSAGE = (
-    "This is a DTVP export; restoring needs a Dependency-Track export."
+    "This is a River export; restoring needs a Dependency-Track export."
 )
 
 MATCH_UUID = "uuid"
@@ -172,7 +172,7 @@ def _component_index(components: Any) -> dict[str, dict[str, str]]:
 
 
 def _source_blocks(detail: str) -> list[dict[str, Any]]:
-    """The team blocks of an analysis text as DTVP reads such a text: per
+    """The team blocks of an analysis text as River reads such a text: per
     team name the newest live block (by ``Date``, then the longer text),
     and every distinct historical block."""
     _shared, blocks = parse_assessment_blocks(detail)
@@ -182,7 +182,7 @@ def _source_blocks(detail: str) -> list[dict[str, Any]]:
 def read_dependency_track_vdr(content: bytes) -> RestoreSource:
     """The entries and team blocks of a CycloneDX VDR of Dependency-Track.
 
-    Raises ``RestoreSourceError`` for anything else, DTVP's own export
+    Raises ``RestoreSourceError`` for anything else, River's own export
     included: that one carries the rationale, not the team blocks.
     """
     try:

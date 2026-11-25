@@ -287,7 +287,7 @@ def get_projects(request: Request, name: Optional[str] = None):
     return mock_projects
 
 
-# A BOM import and the analysis that followed it, so DTVP follows findings.
+# A BOM import and the analysis that followed it, so River follows findings.
 MOCK_BOM_IMPORTED_MS = 1_767_225_600_000  # 2026-01-01T00:00:00Z
 
 
@@ -763,7 +763,7 @@ def get_findings(project_uuid: str):
             add_vuln(vuln_uuid)
 
     # Findings keep Dependency-Track's real shape: no top-level uuid, only
-    # "matrix" (DTVP derives its finding key from it; dtvp/finding_keys.py).
+    # "matrix" (River derives its finding key from it; dtvp/finding_keys.py).
     now_ms = int(time.time() * 1000)
     day_ms = 24 * 60 * 60 * 1000
     for index, finding in enumerate(current_findings):
@@ -1210,7 +1210,7 @@ def update_analysis(update: AnalysisUpdate):
         if "analysisComments" not in mock_analysis[key]:
             mock_analysis[key]["analysisComments"] = []
 
-        # Add to the comments list (which is what DTVP reads)
+        # Add to the comments list (which is what River reads)
         mock_analysis[key]["analysisComments"].append(
             {"comment": update.comment, "timestamp": int(time.time() * 1000)}
         )

@@ -659,7 +659,7 @@ class CacheManager:
             legacy_path=get_legacy_assessment_outbox_path(self.base_path),
         )
         self._import_legacy_pending_updates()
-        # What happened to findings: DTVP's record, next to the assessments.
+        # What happened to findings: River's record, next to the assessments.
         self.finding_lifecycle = FindingLifecycleStore(
             get_assessment_outbox_path(self.base_path), logger=logger
         )
@@ -895,7 +895,7 @@ class CacheManager:
 
         # Overlay locally stored assessments so callers (e.g. the automatic
         # code-analysis sweep) see the same analysis state as the live project
-        # view. Without this, a vulnerability assessed in DTVP but whose cached
+        # view. Without this, a vulnerability assessed in River but whose cached
         # findings file predates that assessment still looks NOT_SET here and
         # would be incorrectly treated as "open" and re-queued for analysis.
         findings = self._overlay_local_analysis(project_uuid, findings)
@@ -1887,7 +1887,7 @@ class CacheManager:
         fetch_started_at = datetime.now(timezone.utc)
         # No export of this project's assessments between the read and its
         # classification: an export landing in between would leave the
-        # source holding DTVP's value before ``mark_synced`` records it as
+        # source holding River's value before ``mark_synced`` records it as
         # exported, and the echo would count as a change in the source.
         async with self._project_exchange(project_uuid).read():
             try:
@@ -1898,10 +1898,10 @@ class CacheManager:
                 self._record_sync_state(self.sync_state.record_failure, project_uuid, exc)
                 raise
             self.last_analysis_reads[project_uuid] = detail_reads
-            # Over the raw response, before anything of DTVP's is read into it.
+            # Over the raw response, before anything of River's is read into it.
             findings_identity, analyses, analyses_index = findings_digests(fresh_findings)
             portfolio = portfolio_digest(fresh_findings)
-            # Which analyses the source changed, and which are DTVP's own
+            # Which analyses the source changed, and which are River's own
             # export coming back; against the record before this read is
             # merged into it.
             try:
@@ -1975,7 +1975,7 @@ class CacheManager:
             for key in (analysis_origins or {}).get(ORIGIN_EXPORT_ECHO, [])
         ]
         if echoes:
-            # The source now holds DTVP's own export: nothing changed here.
+            # The source now holds River's own export: nothing changed here.
             await self._notify_assessments_changed(
                 echoes, value_changed=False, origin=ORIGIN_EXPORT_ECHO
             )
@@ -2006,9 +2006,9 @@ class CacheManager:
     def _exported_value(
         self, key: AssessmentKey
     ) -> Optional[Tuple[str, str, bool]]:
-        """The value DTVP last exported for a finding (``mark_synced``,
+        """The value River last exported for a finding (``mark_synced``,
         ``note_exported``; the record's base), or ``None``. A source value
-        equal to it is DTVP's own export coming back (ADR 0004, "Echoes"),
+        equal to it is River's own export coming back (ADR 0004, "Echoes"),
         even when a newer local value is waiting for export."""
         overlay = self.assessment_outbox.get_overlay(key)
         if overlay is None:
@@ -2623,10 +2623,10 @@ class CacheManager:
 
         A source that can leave the details out (``analysis_details=False``)
         lists each analysis with its state and suppression only. Where that
-        equals the value DTVP last saw in the source or last exported for the
+        equals the value River last saw in the source or last exported for the
         finding, the details come from that record: the source still holds
         them, so reading them again costs a request and tells nothing new.
-        Only the other assessed findings are read one by one: those DTVP has
+        Only the other assessed findings are read one by one: those River has
         no record of (adoption) and those whose state or suppression changed
         in the source. A change of the details alone in the source is seen
         by the safety re-read, which reads every assessment
@@ -2698,7 +2698,7 @@ class CacheManager:
     def _known_source_value(
         self, key: AssessmentKey, state: str, suppressed: bool
     ) -> Optional[str]:
-        """The details the source holds for a finding, when DTVP knows them:
+        """The details the source holds for a finding, when River knows them:
         the value it last read from the source or last exported, if that has
         the listed state and suppression; else ``None``."""
         overlay = self.assessment_outbox.get_overlay(key)
@@ -2823,7 +2823,7 @@ class CacheManager:
         ``listener(keys, value_changed=..., origin=...)``; ``value_changed``
         is False when only the sync status changed (an export); ``origin`` is
         ``local``, ``dt`` (the source changed it) or ``export_echo`` (the
-        source now holds DTVP's own export; nothing changed here)."""
+        source now holds River's own export; nothing changed here)."""
         self._assessment_change_listeners.append(listener)
 
     async def _notify_assessments_changed(
@@ -2933,7 +2933,7 @@ class CacheManager:
 
     def unknown_component_records(self, project_uuid: str) -> Dict[str, Dict[str, Any]]:
         """Per vulnerability of a project version: the assessed gone findings
-        whose component DTVP never knew, and the findings of the same
+        whose component River never knew, and the findings of the same
         vulnerability reported now (``same_issue.unknown_component_records``)."""
         rows = self.finding_lifecycle.presence(project_uuid)
         return unknown_component_records(
@@ -3051,7 +3051,7 @@ class CacheManager:
                     "suppressed": _get_analysis_suppressed(analysis),
                     "revision": int(analysis.get("dtvpRevision") or 0),
                     "sync_status": analysis.get("dtvpSyncStatus") or "synced",
-                    # Whether DTVP holds a record of the finding, as opposed
+                    # Whether River holds a record of the finding, as opposed
                     # to a value read from the source's findings.
                     "recorded": recorded,
                 }
@@ -3501,7 +3501,7 @@ class CacheManager:
         self, payload: Dict[str, Any], *, exported: bool = False
     ) -> None:
         """Store what the source holds for a finding. ``exported`` says it is
-        DTVP's own value that just went out: the assessment shown does not
+        River's own value that just went out: the assessment shown does not
         change, only its sync status, which the caller reports to the
         assessment change listeners. It is not an unapplied write either: a
         snapshot that shows the value stays reusable; its sync status is

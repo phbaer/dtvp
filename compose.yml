@@ -63,7 +63,7 @@ services:
       DTVP_CUTOFF_PRESET_DAYS: ${DTVP_CUTOFF_PRESET_DAYS:-7d,14d,28d}
       DTVP_GROUPED_VULN_TASK_TTL_SECONDS: ${DTVP_GROUPED_VULN_TASK_TTL_SECONDS:-900}
       DTVP_JIRA_CREATE_URL: ${DTVP_JIRA_CREATE_URL:-}
-      # Required: at least 32 random bytes; DTVP refuses to start without it.
+      # Required: at least 32 random bytes; River refuses to start without it.
       # Set the key, or mount it read-only and name the file with _FILE.
       DTVP_SESSION_SECRET_KEY: ${DTVP_SESSION_SECRET_KEY:-}
       DTVP_SESSION_SECRET_KEY_FILE: ${DTVP_SESSION_SECRET_KEY_FILE:-}
@@ -97,7 +97,7 @@ services:
     environment:
       DTVP_ARCHIVE_GIT_REMOTE: ${DTVP_ARCHIVE_GIT_REMOTE:-}
       DTVP_ARCHIVE_GIT_BRANCH: ${DTVP_ARCHIVE_GIT_BRANCH:-main}
-      DTVP_ARCHIVE_GIT_AUTHOR_NAME: ${DTVP_ARCHIVE_GIT_AUTHOR_NAME:-DTVP Archive Bot}
+      DTVP_ARCHIVE_GIT_AUTHOR_NAME: ${DTVP_ARCHIVE_GIT_AUTHOR_NAME:-River Archive Bot}
       DTVP_ARCHIVE_GIT_AUTHOR_EMAIL: ${DTVP_ARCHIVE_GIT_AUTHOR_EMAIL:-dtvp-archive@example.invalid}
       DTVP_ARCHIVE_GIT_SSH_KEY_FILE: ${DTVP_ARCHIVE_GIT_SSH_KEY_FILE:-/ssh/dtvp_archive_deploy_key}
       DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE: ${DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE:-/ssh/known_hosts}
@@ -118,7 +118,7 @@ services:
         fi
 
         if [ -z "$$(find /archive-tree -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-          echo "No expanded DTVP archive files found in /archive-tree"
+          echo "No expanded River archive files found in /archive-tree"
           exit 0
         fi
 
@@ -144,10 +144,10 @@ services:
 
         git add project_archives
         if git diff --cached --quiet; then
-          echo "No DTVP archive changes to commit"
+          echo "No River archive changes to commit"
           exit 0
         fi
-        git commit -m "Update DTVP project archives"
+        git commit -m "Update River project archives"
         git push origin "$${DTVP_ARCHIVE_GIT_BRANCH}"
 
 volumes:

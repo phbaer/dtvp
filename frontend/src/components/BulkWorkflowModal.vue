@@ -861,7 +861,7 @@ watch(() => props.show, show => {
                                 Read Dependency-Track history
                             </button>
                             <p v-if="!sourceUpload" class="min-w-0 flex-1 text-[11px] text-slate-400">
-                                A CycloneDX VDR that Dependency-Track exported for this project (DTVP's own export does not work), or Dependency-Track's history of each finding in view. Either stays in server memory only.
+                                A CycloneDX VDR that Dependency-Track exported for this project (River's own export does not work), or Dependency-Track's history of each finding in view. Either stays in server memory only.
                             </p>
                             <p
                                 v-else

@@ -1,9 +1,9 @@
 """An assessment as atomic fields.
 
 Dependency-Track keeps an analysis as a state, a suppression flag, and one
-free text, so DTVP writes everything else into that text as markup: the
+free text, so River writes everything else into that text as markup: the
 rescoring, the review status, and one block per team. This module reads that
-text into fields and writes fields back as that text. DTVP's database stores
+text into fields and writes fields back as that text. River's database stores
 the fields; the text is their rendering for Dependency-Track. See ADR 0003.
 
 ``parse_assessment(render_assessment(fields))`` returns ``fields``: a save
@@ -26,7 +26,7 @@ FORM_STRUCTURED = "structured"  # at least one team block
 FORM_TEXT = "text"  # text without team blocks (legacy or plain)
 FORM_EMPTY = "empty"
 
-# Texts DTVP itself writes into an assessment; readers recognise them by these.
+# Texts River itself writes into an assessment; readers recognise them by these.
 SEE_GLOBAL_ASSESSMENT = "See global assessment."  # a team referring to General
 FORMER_TEAM_NOTE = "Former team assessment"  # starts a note about a former team
 

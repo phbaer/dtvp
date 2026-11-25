@@ -77,7 +77,7 @@ def read_all(
     if stripped:
         finding = Finding(
             "F6",
-            "Fields unknown to this DTVP version: " + ", ".join(sorted(set(stripped))[:10]),
+            "Fields unknown to this River version: " + ", ".join(sorted(set(stripped))[:10]),
         )
         if not allow_unknown:
             raise DumpError(finding.code, finding.message + ". Use --allow-unknown to drop them.")

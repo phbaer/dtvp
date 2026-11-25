@@ -67,7 +67,7 @@ def test_startup_gate_serves_page_for_browser_routes(client):
         main.app_runtime_state.update(original_state)
 
     assert response.status_code == 200
-    assert "DTVP is starting" in response.text
+    assert "River is starting" in response.text
     assert "Preparing runtime." in response.text
     assert '"/api/startup"' in response.text
 
@@ -101,7 +101,7 @@ def test_lifespan_serves_startup_page_while_runtime_initializes():
             response = startup_client.get("/")
 
     assert response.status_code == 200
-    assert "DTVP is starting" in response.text
+    assert "River is starting" in response.text
 
 
 def test_main_context_path_reload():

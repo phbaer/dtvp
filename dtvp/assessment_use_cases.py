@@ -140,7 +140,7 @@ class AssessmentFields(BaseModel):
 class AssessmentRequest(BaseModel):
     instances: list[dict]
     state: str
-    # The assessment as text in DTVP's markup. Ignored when ``fields`` is
+    # The assessment as text in River's markup. Ignored when ``fields`` is
     # given, which is the form new clients send.
     details: str = ""
     fields: Optional[AssessmentFields] = None

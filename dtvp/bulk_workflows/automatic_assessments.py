@@ -1568,7 +1568,7 @@ def build_automatic_assessment_document(context: BulkWorkflowContext, group_ids:
                 "",
                 item["ticket_text"],
                 "",
-                f"DTVP analysis run IDs: {', '.join(item['run_ids'])}",
+                f"River analysis run IDs: {', '.join(item['run_ids'])}",
                 "",
             ]
         )

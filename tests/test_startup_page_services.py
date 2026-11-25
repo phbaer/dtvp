@@ -12,13 +12,13 @@ def test_contextual_path_handles_root_and_context_paths():
 
 def test_startup_status_payload_reports_ready_state():
     payload = build_startup_status_payload(
-        {"status": "ready", "message": "DTVP is ready."}
+        {"status": "ready", "message": "River is ready."}
     )
 
     assert payload == {
         "status": "ready",
         "ready": True,
-        "message": "DTVP is ready.",
+        "message": "River is ready.",
     }
 
 
@@ -29,7 +29,7 @@ def test_startup_status_payload_hides_failure_details():
 
     assert payload["ready"] is False
     assert payload["status"] == "failed"
-    assert payload["message"] == "DTVP startup failed. Check the backend logs."
+    assert payload["message"] == "River startup failed. Check the backend logs."
     assert "secret" not in str(payload)
 
 
@@ -39,7 +39,7 @@ def test_startup_page_uses_contextual_status_endpoint():
         context_path="/dtvp",
     )
 
-    assert "DTVP is starting" in html
+    assert "River is starting" in html
     assert "Preparing cache." in html
     assert '"/dtvp/api/startup"' in html
     assert '"/dtvp/"' in html
@@ -51,10 +51,10 @@ def test_startup_status_shows_the_migration_in_progress_only_while_starting():
     report_startup_progress("Data migration: 2000 of 51000 assessments read into fields")
     try:
         starting = build_startup_status_payload(
-            {"status": "starting", "message": "DTVP application is loading."}
+            {"status": "starting", "message": "River application is loading."}
         )
         ready = build_startup_status_payload(
-            {"status": "ready", "message": "DTVP is ready."}
+            {"status": "ready", "message": "River is ready."}
         )
         html = build_startup_page_html(
             state={"status": "starting", "message": "loading"}, context_path=""
@@ -63,7 +63,7 @@ def test_startup_status_shows_the_migration_in_progress_only_while_starting():
         clear_startup_progress()
 
     assert starting["message"].startswith("Data migration: 2000 of 51000")
-    assert ready["message"] == "DTVP is ready."
+    assert ready["message"] == "River is ready."
     assert "Data migration: 2000 of 51000" in html
-    assert build_startup_status_payload({"status": "starting"})["message"] == "DTVP is starting."
+    assert build_startup_status_payload({"status": "starting"})["message"] == "River is starting."
 

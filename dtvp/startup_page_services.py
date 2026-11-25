@@ -14,9 +14,9 @@ def contextual_path(context_path: str, suffix: str) -> str:
 
 def build_startup_status_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     status = str(state.get("status") or "starting")
-    message = str(state.get("message") or "DTVP is starting.")
+    message = str(state.get("message") or "River is starting.")
     if status == "failed":
-        message = "DTVP startup failed. Check the backend logs."
+        message = "River startup failed. Check the backend logs."
     elif status == "starting":
         # A migration in progress says more than "loading".
         message = current_startup_progress() or message
@@ -34,9 +34,9 @@ def build_startup_page_html(
 ) -> str:
     payload = build_startup_status_payload(state)
     status = payload["status"]
-    title = "DTVP is ready" if status == "ready" else "DTVP is starting"
+    title = "River is ready" if status == "ready" else "River is starting"
     if status == "failed":
-        title = "DTVP startup failed"
+        title = "River startup failed"
 
     status_url = contextual_path(context_path, "/api/startup")
     home_url = contextual_path(context_path, "/")
@@ -126,7 +126,7 @@ def build_startup_page_html(
     <div class="spinner" aria-hidden="true"></div>
     <h1 id="startup-title">{escaped_title}</h1>
     <p id="startup-message">{escaped_message}</p>
-    <p class="hint">This page will refresh automatically when DTVP is ready.</p>
+    <p class="hint">This page will refresh automatically when River is ready.</p>
   </main>
   <script>
     const statusUrl = {status_url_json};
@@ -141,7 +141,7 @@ def build_startup_page_html(
         }}
         if (payload.status === 'failed') {{
           document.body.querySelector('main')?.classList.add('failed');
-          document.getElementById('startup-title').textContent = 'DTVP startup failed';
+          document.getElementById('startup-title').textContent = 'River startup failed';
         }}
         if (payload.message) {{
           document.getElementById('startup-message').textContent = payload.message;

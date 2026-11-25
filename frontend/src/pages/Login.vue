@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { login } from '../lib/api'
-import { radarIconUrl } from '../lib/brand'
+import { markIconUrl } from '../lib/brand'
 
 const route = useRoute()
 const sessionExpired = computed(() => route.query.expired === '1')
@@ -12,9 +12,9 @@ const sessionExpired = computed(() => route.query.expired === '1')
     <div class="min-h-screen bg-gray-900 flex items-center justify-center font-sans">
         <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-[400px] border border-gray-700">
             <div class="text-center mb-8">
-                <img :src="radarIconUrl" alt="" class="mx-auto mb-3 h-14 w-14" data-testid="login-logo" />
-                <div class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">DTVP</div>
-                <div class="text-gray-400 mt-2 text-sm">Does This Violate Policy?</div>
+                <img :src="markIconUrl" alt="" class="mx-auto mb-3 h-14 w-14" data-testid="login-logo" />
+                <div class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">River</div>
+                <div class="text-gray-400 mt-2 text-sm">River Inspects Vulnerabilities and Evaluates Risks</div>
             </div>
             
             <div class="space-y-6">
@@ -23,7 +23,7 @@ const sessionExpired = computed(() => route.query.expired === '1')
                     class="rounded border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
                     role="status"
                 >
-                    Your DTVP session ended. Sign in again to return to your previous screen.
+                    Your River session ended. Sign in again to return to your previous screen.
                 </p>
                 <button 
                     @click="login()"

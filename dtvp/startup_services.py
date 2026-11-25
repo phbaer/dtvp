@@ -91,13 +91,13 @@ def build_startup_console_lines(
     build_commit: str,
     details: Mapping[str, Mapping[str, Any]],
 ) -> list[str]:
-    lines = [f"DTVP startup: name=DTVP, version={version}, build={build_commit}"]
+    lines = [f"River startup: name=River, version={version}, build={build_commit}"]
     runtime_details = details.get("runtime", {})
     environment_details = details.get("environment", {})
     if runtime_details:
-        lines.append(f"DTVP runtime: {format_startup_details(runtime_details)}")
+        lines.append(f"River runtime: {format_startup_details(runtime_details)}")
     if environment_details:
-        lines.append(f"DTVP environment: {format_startup_details(environment_details)}")
+        lines.append(f"River environment: {format_startup_details(environment_details)}")
     return lines
 
 
@@ -152,17 +152,17 @@ async def start_application_runtime(
         deps.console_writer(line)
 
     deps.logger.info(
-        "Starting DTVP version %s (build %s)",
+        "Starting River version %s (build %s)",
         deps.version,
         deps.build_commit,
     )
     runtime_details = details.get("runtime", {})
     environment_details = details.get("environment", {})
     if runtime_details:
-        deps.logger.info("DTVP runtime: %s", format_startup_details(runtime_details))
+        deps.logger.info("River runtime: %s", format_startup_details(runtime_details))
     if environment_details:
         deps.logger.info(
-            "DTVP environment: %s",
+            "River environment: %s",
             format_startup_details(environment_details),
         )
 
@@ -171,7 +171,7 @@ async def start_application_runtime(
     tmrescore_cache = await asyncio.to_thread(deps.load_tmrescore_project_cache)
     deps.tmrescore_project_cache.update(tmrescore_cache)
     tmrescore_cache_line = (
-        "DTVP startup step completed: tmrescore cache loaded "
+        "River startup step completed: tmrescore cache loaded "
         f"in {(time.perf_counter() - tmrescore_cache_started_at) * 1000:.1f} ms "
         f"(projects={len(tmrescore_cache)})"
     )
@@ -181,14 +181,14 @@ async def start_application_runtime(
     dt_cache_started_at = time.perf_counter()
     await deps.initialize_cache_manager()
     dt_cache_line = (
-        "DTVP startup step completed: Dependency-Track cache initialized "
+        "River startup step completed: Dependency-Track cache initialized "
         f"in {(time.perf_counter() - dt_cache_started_at) * 1000:.1f} ms"
     )
     deps.console_writer(dt_cache_line)
     deps.logger.info(dt_cache_line)
 
     ready_line = (
-        "DTVP startup ready: runtime tasks starting "
+        "River startup ready: runtime tasks starting "
         f"after {(time.perf_counter() - startup_started_at) * 1000:.1f} ms"
     )
     deps.console_writer(ready_line)

@@ -152,9 +152,9 @@ async def test_the_import_records_digests_and_tells_echoes_from_changes(tmp_path
     [row] = manager.sync_state.list_versions()
     assert row["status"] == "synced" and row["generation"] == 1
 
-    # DTVP's own value comes back from the source after its export: an
+    # River's own value comes back from the source after its export: an
     # echo, not a change. A newer local value waiting for export does not
-    # change that: the source holds what DTVP last exported.
+    # change that: the source holds what River last exported.
     await manager.persist_assessment_updates(
         [{"project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1",
           "state": "NOT_AFFECTED", "details": "Ours.", "suppressed": False}],

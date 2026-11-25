@@ -84,12 +84,12 @@ def check_manifest(
     refused otherwise.
     """
     if raw.get("format") != schemas.FORMAT:
-        raise DumpError("F1", f"Not a DTVP instance dump (format {raw.get('format')!r})")
+        raise DumpError("F1", f"Not a River instance dump (format {raw.get('format')!r})")
     version = raw.get("format_version")
     if version != schemas.FORMAT_VERSION:
         raise DumpError(
             "F2",
-            f"Dump format version {version!r} is not supported; this DTVP reads "
+            f"Dump format version {version!r} is not supported; this River reads "
             f"version {schemas.FORMAT_VERSION}",
         )
     features = raw.get("required_features")
@@ -99,7 +99,7 @@ def check_manifest(
     if unknown_features:
         raise DumpError(
             "F3",
-            "The dump requires features this DTVP does not know: "
+            "The dump requires features this River does not know: "
             + ", ".join(unknown_features),
         )
     scope = raw.get("scope")
@@ -137,7 +137,7 @@ def check_manifest(
         )
     if checked.unknown_entities or checked.unknown_fields:
         message = (
-            f"The dump is format minor version {minor}; this DTVP knows "
+            f"The dump is format minor version {minor}; this River knows "
             f"{schemas.FORMAT_MINOR}. Unknown entities: "
             f"{', '.join(checked.unknown_entities) or 'none'}; unknown manifest "
             f"fields: {', '.join(checked.unknown_fields) or 'none'}"

@@ -476,7 +476,7 @@ def build_follow_up_guidance(
         FOLLOW_UP_CONTEXT_PROMPT_LIMIT,
     )
     lines = [
-        "DTVP follow-up analysis. Reuse the compact prior context below as background; do not treat it as proof if new code evidence contradicts it.",
+        "River follow-up analysis. Reuse the compact prior context below as background; do not treat it as proof if new code evidence contradicts it.",
         "",
         "Follow-up question:",
         question.strip(),

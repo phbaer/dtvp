@@ -289,7 +289,7 @@ const inferLogSource = (message: string, explicitSource?: string) => {
     if (explicitSource) return explicitSource
     const sourceMatch = message.match(/^([A-Za-z][\w.-]{1,40}):\s+(.+)$/)
     if (sourceMatch) return sourceMatch[1]
-    if (/^dtvp\b/i.test(message) || /submitting scan|abort/i.test(message)) return 'DTVP'
+    if (/^(river|dtvp)\b/i.test(message) || /submitting scan|abort/i.test(message)) return 'River'
     if (/^analyzer\b|assessment|repository|pipeline|job/i.test(message)) return 'analyzer'
     return 'scan'
 }
@@ -507,7 +507,7 @@ onBeforeUnmount(() => {
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <div class="rounded border border-gray-800 bg-gray-900/70 p-3">
                 <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                    <span>DTVP Worker</span>
+                    <span>River Worker</span>
                     <Zap :size="14" class="text-cyan-400" />
                 </div>
                 <div class="mt-3 text-2xl font-bold text-white">{{ status?.queue.dtvp_worker_busy ? 'Busy' : 'Idle' }}</div>
@@ -559,7 +559,7 @@ onBeforeUnmount(() => {
                 <div class="rounded border border-gray-800 bg-gray-900/60 xl:col-span-2">
                     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 px-4 py-3">
                         <div>
-                            <h3 class="text-sm font-bold uppercase tracking-wider text-gray-200">DTVP Queue</h3>
+                            <h3 class="text-sm font-bold uppercase tracking-wider text-gray-200">River Queue</h3>
                             <div class="mt-1 text-xs text-gray-500">
                                 {{ runningCount }} running, {{ queuedCount }} queued, {{ terminalCount }} finished
                             </div>

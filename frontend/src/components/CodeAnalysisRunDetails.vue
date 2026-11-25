@@ -407,7 +407,7 @@ const benchmarkEvaluatorLabel = (comparison: CodeAnalysisBenchmarkComparison) =>
         const model = comparison.evaluator.model ? ` · ${comparison.evaluator.model}` : ''
         return `Agentyzer probabilistic${model}`
     }
-    return 'DTVP fallback'
+    return 'River fallback'
 }
 
 const benchmarkRatingClass = (tone?: string) => {
@@ -1938,7 +1938,7 @@ watch([
                     </button>
                     <div v-if="coverageOpen" class="space-y-2 border-t border-gray-800 p-3">
                         <p class="text-[10px] leading-relaxed text-gray-500">
-                            Product Version is populated for DTVP affected-version tag or branch checks. Workspace and lock-file rows describe the current analyzed checkout.
+                            Product Version is populated for River affected-version tag or branch checks. Workspace and lock-file rows describe the current analyzed checkout.
                         </p>
                         <div v-if="checkedVersionRows.length === 0" class="text-xs text-gray-500">No checked versions reported.</div>
                         <div v-else class="max-h-72 overflow-auto rounded border border-gray-800">
@@ -2084,7 +2084,7 @@ watch([
                                     </div>
                                     <div v-else-if="savedRunGuidance" class="space-y-2 px-3 py-2.5">
                                         <p class="text-[10px] leading-relaxed text-amber-200">
-                                            DTVP saved this guidance with the analyzer request, but it was not found in the captured model messages. Without matching trace evidence, model use cannot be verified.
+                                            River saved this guidance with the analyzer request, but it was not found in the captured model messages. Without matching trace evidence, model use cannot be verified.
                                         </p>
                                         <pre class="max-h-48 overflow-y-auto overscroll-auto whitespace-pre-wrap break-words rounded border border-amber-900/35 bg-gray-950/50 p-2 text-[10px] leading-relaxed text-gray-300" tabindex="0">{{ savedRunGuidance }}</pre>
                                     </div>
@@ -2396,7 +2396,7 @@ watch([
                                     <span class="rounded-full border border-amber-700/50 bg-amber-950/30 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-amber-300">Use not verifiable</span>
                                 </div>
                                 <p class="text-[10px] leading-relaxed text-amber-200">
-                                    DTVP saved this guidance on the analyzer request, but no model conversation was captured for this run.
+                                    River saved this guidance on the analyzer request, but no model conversation was captured for this run.
                                 </p>
                                 <pre class="max-h-48 overflow-y-auto overscroll-auto whitespace-pre-wrap break-words rounded border border-fuchsia-900/40 bg-fuchsia-950/15 p-3 text-[11px] leading-relaxed text-gray-300" tabindex="0">{{ savedRunGuidance }}</pre>
                             </div>

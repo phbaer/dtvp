@@ -113,7 +113,7 @@ SYNC_SUPERSEDED = "superseded"
 ORIGIN_USER = "user"
 ORIGIN_IMPORT = "import"
 # A source value with a version override marker was adopted; the marker
-# says something about the other versions that DTVP checks with a review.
+# says something about the other versions that River checks with a review.
 ORIGIN_IMPORT_REVIEW = "import-review"
 ORIGIN_RESOLUTION = "conflict-resolution"
 ORIGIN_DISCARD = "export-discarded"
@@ -152,7 +152,7 @@ _REVIEW_MARKER = re.compile(r"\s*\[Status: Pending Review\]", re.IGNORECASE)
 def source_matches_base(theirs: dict[str, Any], base: dict[str, Any] | None) -> bool:
     """Whether the source still holds the value a local change started from.
 
-    DTVP can show an imported assessment with a pending-review marker it
+    River can show an imported assessment with a pending-review marker it
     added itself; the source's copy does not have it. That marker alone is
     not a change made in the source.
     """

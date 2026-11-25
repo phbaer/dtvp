@@ -1,4 +1,4 @@
-# Test Setup for DTVP
+# Test Setup for River
 
 This directory contains the mock service implementations used by the local pm2 development stack.
 

@@ -66,7 +66,7 @@ def is_team_format(document: Any) -> bool:
     a string-to-string object, so the team format is recognised by an
     object value or by a team owning ``*`` (``"Unknown": "*"``); a file of
     selector keys has ``*`` as a key instead. A file with neither is read
-    as selector keys; DTVP itself always writes objects."""
+    as selector keys; River itself always writes objects."""
     if not isinstance(document, dict) or not document:
         return False
     for value in document.values():

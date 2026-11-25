@@ -1,4 +1,4 @@
-"""CycloneDX inventory and VDR built from DTVP's records."""
+"""CycloneDX inventory and VDR built from River's records."""
 
 import json
 from datetime import UTC, datetime
@@ -388,7 +388,7 @@ def test_published_and_updated_are_date_times():
     assert "published" not in unreadable and "updated" not in unreadable
 
     assert _valid(document)
-    # The validation checks the format: the value DTVP wrote before fails.
+    # The validation checks the format: the value River wrote before fails.
     former = [{**document["vulnerabilities"][0], "published": "1777058234490"}]
     assert not _valid({"vulnerabilities": former})
 
@@ -414,7 +414,7 @@ def test_ticket_keys_in_the_texts_of_assessments_are_exported():
     assert {"name": "dtvp:export_ticket_prefixes", "value": "EXP, SEC_OPS"} in metadata
     assert {"name": "dtvp:export_text_only_tickets", "value": "1"} in metadata
 
-    # Without configured keys DTVP recognises none and says nothing about it.
+    # Without configured keys River recognises none and says nothing about it.
     entry, document = _entry(text, "EXPLOITABLE")
     assert _property(entry, "dtvp:spr") == ["EXP-1001"]
     assert not any("ticket" in item["name"] for item in document["metadata"]["properties"])

@@ -20,7 +20,7 @@ def test_boot_serves_startup_page_before_real_app_import_finishes(monkeypatch):
         status_response = client.get("/api/startup")
 
     assert response.status_code == 200
-    assert "DTVP is starting" in response.text
+    assert "River is starting" in response.text
     assert status_response.status_code == 200
     assert status_response.json()["ready"] is False
 

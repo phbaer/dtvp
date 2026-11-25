@@ -79,7 +79,7 @@ onBeforeUnmount(() => {
             <div class="text-xs font-semibold text-white">CycloneDX per version</div>
             <p class="mt-1 text-[11px] leading-snug text-gray-400">
                 <span class="font-semibold text-gray-300">Inventory</span> is the BOM.
-                <span class="font-semibold text-gray-300">VDR</span> adds every finding with DTVP's
+                <span class="font-semibold text-gray-300">VDR</span> adds every finding with River's
                 assessment: state, rescoring, and each team's text.
             </p>
             <div v-if="loading" class="mt-3 flex items-center gap-2 text-xs text-gray-400" role="status">

@@ -1318,7 +1318,7 @@ def group_vulnerabilities(
                 ),
             }
             if analysis.get("dtvpSyncStatus"):
-                # Present only for findings assessed in DTVP.
+                # Present only for findings assessed in River.
                 component_info["sync_status"] = analysis["dtvpSyncStatus"]
                 if analysis.get("dtvpRemote"):
                     component_info["source_assessment"] = analysis["dtvpRemote"]

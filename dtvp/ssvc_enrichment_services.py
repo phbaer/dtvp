@@ -178,7 +178,7 @@ class SsvcEnrichmentService:
                 return entry
             entry = {**entry, "attempted": now}
             try:
-                headers = {"Accept": "application/json", "User-Agent": "DTVP-SSVC/1.0"}
+                headers = {"Accept": "application/json", "User-Agent": "River-SSVC/1.0"}
                 if entry.get("etag"):
                     headers["If-None-Match"] = entry["etag"]
                 async with self.network_slots, httpx.AsyncClient(transport=self.transport, timeout=15, follow_redirects=False) as client:

@@ -1,4 +1,4 @@
-"""Names for the components of gone findings DTVP only knows by UUID.
+"""Names for the components of gone findings River only knows by UUID.
 
 Rows created from assessment records that predate finding tracking have no
 component name. When gone findings are shown, the name, version and package

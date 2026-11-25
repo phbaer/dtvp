@@ -1,4 +1,4 @@
-"""A separate DTVP instance in a temporary directory, filled through the real
+"""A separate River instance in a temporary directory, filled through the real
 stores, for tests of the instance dump. It is never the conftest instance,
 whose directory the test process holds the instance lock on."""
 

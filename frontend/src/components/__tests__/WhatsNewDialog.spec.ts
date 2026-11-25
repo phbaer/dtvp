@@ -47,7 +47,7 @@ describe('WhatsNewDialog', () => {
         const wrapper = mountDialog({ mode: 'major', shown: [v2, rc3], previousVersion: '1.0.26' })
 
         expect(wrapper.find('[data-testid="whats-new-major"]').exists()).toBe(true)
-        expect(wrapper.get('#whats-new-title').text()).toBe('DTVP 2.0.0')
+        expect(wrapper.get('#whats-new-title').text()).toBe('River 2.0.0')
         expect(wrapper.text()).toContain('Changes since 1.0.26.')
         const groups = wrapper.findAll('[data-testid^="whats-new-group-"]').map(g => g.attributes('data-testid'))
         expect(groups).toEqual(['whats-new-group-breaking', 'whats-new-group-new', 'whats-new-group-fixed'])
@@ -63,7 +63,7 @@ describe('WhatsNewDialog', () => {
     it('shows a minor upgrade compactly, with the rest behind "Show all"', async () => {
         const wrapper = mountDialog({ mode: 'compact', currentVersion: '2.1.0', shown: [small] })
 
-        expect(wrapper.get('#whats-new-title').text()).toBe("What's new in DTVP 2.1.0")
+        expect(wrapper.get('#whats-new-title').text()).toBe("What's new in River 2.1.0")
         expect(wrapper.findAll('[data-testid="whats-new-compact-list"] li')).toHaveLength(5)
         expect(wrapper.text()).toContain('and 2 more')
 

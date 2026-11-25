@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reproducible benchmark of the assessment record with synthetic data.
 
-Measures what grows with the number of assessed findings since DTVP keeps a
+Measures what grows with the number of assessed findings since River keeps a
 record of every one (ADR 0003): adopting assessments on import, a start with
 an existing database, the one-off read into atomic fields, the comparison of
 a later import, memory held by the records, and building a CycloneDX VDR.
@@ -46,7 +46,7 @@ def rss_mib() -> float:
 
 
 def synthetic_text(index: int, size: int) -> str:
-    """An assessment in DTVP's markup of roughly ``size`` characters."""
+    """An assessment in River's markup of roughly ``size`` characters."""
     state = STATES[index % len(STATES)]
     teams = [TEAMS[(index + offset) % len(TEAMS)] for offset in range(1 + index % 3)]
     filler = (

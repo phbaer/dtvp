@@ -629,7 +629,7 @@ def test_a_view_loaded_before_the_adoption_can_still_save(tmp_path):
 
 def test_the_source_never_changes_a_local_assessment(tmp_path):
     store = _store(tmp_path)
-    _synced(store, details="Decided in DTVP")
+    _synced(store, details="Decided in River")
 
     outcomes = store.reconcile_remote(
         _remote("EXPLOITABLE", "Changed in Dependency-Track"), fetched_at=_later()
@@ -637,12 +637,12 @@ def test_the_source_never_changes_a_local_assessment(tmp_path):
 
     assert outcomes["requeued"] == [KEY]
     record = store.get_overlay(KEY)
-    assert record["analysisDetails"] == "Decided in DTVP"
+    assert record["analysisDetails"] == "Decided in River"
     assert (record["revision"], record["sync_status"]) == (1, "pending")
     # What the source holds is kept for display only.
     assert record["remote"]["details"] == "Changed in Dependency-Track"
     due = store.list_due()
-    assert [item["payload"]["details"] for item in due] == ["Decided in DTVP"]
+    assert [item["payload"]["details"] for item in due] == ["Decided in River"]
 
 
 def test_an_adopted_assessment_the_source_lost_is_sent_back(tmp_path):

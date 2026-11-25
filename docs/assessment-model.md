@@ -16,7 +16,7 @@ aggregate state follows these rules:
 
 - Common analysis states are `NOT_SET`, `EXPLOITABLE`, `IN_TRIAGE`, `RESOLVED`,
   `FALSE_POSITIVE`, and `NOT_AFFECTED`.
-- A non-`NOT_SET` General assessment takes precedence; otherwise DTVP chooses
+- A non-`NOT_SET` General assessment takes precedence; otherwise River chooses
   the worst team state using the priority in `dtvp/logic.py`.
 - The lifecycle (Open, Incomplete, Conflicting, Ready for approval,
   Assessed), the Awaiting review flag, and exactly what decides them are
@@ -607,7 +607,7 @@ each team lists what it owns.
 | `components` | Component selectors (below); `*` makes the team the catch-all, at most one team owns it |
 
 A string or a list of strings is shorthand for `components`
-(`"Unknown": "*"`, `"Web": ["@scope/widget"]`). DTVP itself writes objects.
+(`"Unknown": "*"`, `"Web": ["@scope/widget"]`). River itself writes objects.
 
 Component selectors are deterministic CycloneDX selectors:
 

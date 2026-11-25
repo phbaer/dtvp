@@ -161,7 +161,7 @@ watch(() => props.refreshKey, () => {
             <p v-if="error" role="alert" class="rounded border border-red-800 bg-red-900/30 p-2 text-xs text-red-300">{{ error }}</p>
             <p v-else-if="loading && entries.length === 0" class="text-xs text-gray-500">Loading history…</p>
             <p v-else-if="entries.length === 0" class="text-xs text-gray-500" data-testid="assessment-history-empty">
-                No assessment has been recorded in DTVP for this vulnerability yet.
+                No assessment has been recorded in River for this vulnerability yet.
             </p>
             <ol v-else class="space-y-2">
                 <li

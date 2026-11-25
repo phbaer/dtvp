@@ -766,7 +766,7 @@ const blockToTeamFields = (block: AssessmentBlock): AssessmentTeamFields => {
 };
 
 /**
- * The fields of an assessment given as text in DTVP's markup.
+ * The fields of an assessment given as text in River's markup.
  *
  * Text before the first team block is the rescoring, the review marker, and
  * free text; it is not folded into a General assessment as the form's block

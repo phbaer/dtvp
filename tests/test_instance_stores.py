@@ -1,4 +1,4 @@
-"""The registry of everything DTVP persists."""
+"""The registry of everything River persists."""
 
 import os
 import subprocess

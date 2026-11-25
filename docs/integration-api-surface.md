@@ -1,10 +1,10 @@
 # External Integration API Surface
 
-This document defines the external HTTP APIs expected by DTVP for the optional integrations.
+This document defines the external HTTP APIs expected by River for the optional integrations.
 
 ## Dependency-Track
 
-DTVP reads and writes Dependency-Track through `dtvp/dt_client.py` with the
+River reads and writes Dependency-Track through `dtvp/dt_client.py` with the
 API key of `DTVP_DT_API_KEY` (or the user's session). The read that is not
 part of loading a project's findings:
 
@@ -23,7 +23,7 @@ part of loading a project's findings:
 
 ## TMRescore Service
 
-DTVP expects the TMRescore backend to expose the following endpoints under its configured base URL (`DTVP_TMRESCORE_URL`):
+River expects the TMRescore backend to expose the following endpoints under its configured base URL (`DTVP_TMRESCORE_URL`):
 
 - `GET /health`
   - Returns service health and optional configuration status.
@@ -66,7 +66,7 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 
 - `GET /api/v1/sessions/{session_id}/results/json`
   - Returns the complete raw analysis payload produced by TMRescore.
-  - Expected to include the session context, proposal details, per-CVE rescoring information, and any internal scoring metadata needed by the DTVP backend.
+  - Expected to include the session context, proposal details, per-CVE rescoring information, and any internal scoring metadata needed by the River backend.
 
 - `GET /api/v1/sessions/{session_id}/progress`
   - Returns a progress snapshot containing:
@@ -90,15 +90,15 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 
 ## Code Analysis Service
 
-DTVP expects the Code Analysis backend to expose the following endpoints under its configured base URL (`DTVP_CODE_ANALYSIS_URL`):
+River expects the Code Analysis backend to expose the following endpoints under its configured base URL (`DTVP_CODE_ANALYSIS_URL`):
 
-Agentyzer implements this API as an independently deployed service. Set `DTVP_CODE_ANALYSIS_URL` to its reachable base URL; code analysis is disabled when the URL is unset. DTVP does not install, build, publish, or start the analyzer.
+Agentyzer implements this API as an independently deployed service. Set `DTVP_CODE_ANALYSIS_URL` to its reachable base URL; code analysis is disabled when the URL is unset. River does not install, build, publish, or start the analyzer.
 
 - `GET /health`
   - Returns service readiness and health.
   - Expected response: `{ "status": "ok" }`.
   - May also include model/LLM metadata such as `model`, `llm_backend`, `llm_provider`, or a nested `llm` object.
-  - May include `configuration` and `backend` objects. DTVP promotes these into `/api/code-analysis/status` so the dashboard can show analyzer config paths, repository workspace/counts, enabled features, LLM host/provider/model health, repository backend strategy, job-store details, and execution slot availability.
+  - May include `configuration` and `backend` objects. River promotes these into `/api/code-analysis/status` so the dashboard can show analyzer config paths, repository workspace/counts, enabled features, LLM host/provider/model health, repository backend strategy, job-store details, and execution slot availability.
 
 - `POST /assess`
   - Start an assessment.
@@ -108,7 +108,7 @@ Agentyzer implements this API as an independently deployed service. Set `DTVP_CO
     - `job_id` — string
     - `status` — `pending`
     - `poll_url` — relative URL to poll for job status
-    - Optional model/LLM metadata (`model`, `llm_backend`, `llm_provider`, or `llm`) is preserved by DTVP when present.
+    - Optional model/LLM metadata (`model`, `llm_backend`, `llm_provider`, or `llm`) is preserved by River when present.
     - Optional `configuration` and `backend` objects are preserved for dashboard display.
 
 - `POST /assess?sync=true`
@@ -120,7 +120,7 @@ Agentyzer implements this API as an independently deployed service. Set `DTVP_CO
 - `POST /benchmark/compare`
   - Compare a human assessment artifact with a saved automated assessment result.
   - This endpoint evaluates assessment artifacts only; it must not rerun repository or source analysis.
-  - DTVP sends a prepared `benchmark` object with normalized human/automated fields and deterministic state/CVSS deltas.
+  - River sends a prepared `benchmark` object with normalized human/automated fields and deterministic state/CVSS deltas.
   - Expected response keeps the benchmark shape and includes `comparison_method`, `evaluator`, canonical 1-5 `rating`, `findings`, and `recommendation`.
   - If the LLM evaluator is unavailable, return a deterministic fallback response with `evaluator.probabilistic=false`.
 
@@ -145,7 +145,7 @@ Agentyzer implements this API as an independently deployed service. Set `DTVP_CO
 - `DELETE /jobs/{job_id}`
   - Cancel a pending/running job or remove a finished job.
   - Expected response: `204 No Content` on success.
-  - Cancellation is best effort for a running job. If the analyzer cannot stop a running job, return a non-2xx response with `{ "detail": "..." }`; DTVP will keep its queue item running and surface the refusal.
+  - Cancellation is best effort for a running job. If the analyzer cannot stop a running job, return a non-2xx response with `{ "detail": "..." }`; River will keep its queue item running and surface the refusal.
 
 ### Result JSON expectations for Code Analysis
 
@@ -206,5 +206,5 @@ Agentyzer implements this API as an independently deployed service. Set `DTVP_CO
 
 - A static OpenAPI specification for Code Analysis is available at `openapi/code-analysis-openapi.json`.
 - The expected Code Analysis API surface is also implemented by the mock service in `test_setup/mock_code_analysis.py`.
-- Code evidence from other AI agents does not use this API: agents add it through DTVP's own MCP tool `add_code_evidence` ([AI and API access](ai-access.md#code-evidence)). DTVP stores it beside the analyzer results and shows both kinds in one list.
+- Code evidence from other AI agents does not use this API: agents add it through River's own MCP tool `add_code_evidence` ([AI and API access](ai-access.md#code-evidence)). River stores it beside the analyzer results and shows both kinds in one list.
 - In the mock environment, Code Analysis exposes a dynamic OpenAPI definition at `/openapi.json`.

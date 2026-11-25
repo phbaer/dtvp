@@ -927,7 +927,7 @@ describe('BulkWorkflowModal', () => {
 
         it('shows an upload error', async () => {
             mocks.uploadBulkWorkflowSource.mockReset().mockRejectedValueOnce({
-                response: { data: { detail: 'This is a DTVP export; restoring needs a Dependency-Track export.' } },
+                response: { data: { detail: 'This is a River export; restoring needs a Dependency-Track export.' } },
             })
             const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
             await wrapper.setProps({ show: true })
@@ -935,7 +935,7 @@ describe('BulkWorkflowModal', () => {
             await wrapper.get('[data-testid="bulk-workflow-team-assessment-restore"]').trigger('click')
             await flushPromises()
             await choose(wrapper, 'dtvp.json')
-            expect(wrapper.get('[data-testid="bulk-workflow-error"]').text()).toContain('This is a DTVP export')
+            expect(wrapper.get('[data-testid="bulk-workflow-error"]').text()).toContain('This is a River export')
             expect(mocks.previewBulkWorkflow).not.toHaveBeenCalled()
         })
     })

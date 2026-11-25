@@ -217,7 +217,7 @@ const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Ana
 const syncStatusOf = (analysis: any): string =>
     String(analysis?.dtvpSyncStatus || analysis?.dtvp_sync_status || '').toLowerCase()
 
-// DTVP is the record. While an export is waiting or failing, the backend
+// River is the record. While an export is waiting or failing, the backend
 // reports what Dependency-Track still holds when that differs; the export
 // overwrites it. This is information only, there is nothing to decide.
 const sourceOutOfDate = computed(() => allInstances.value.some((instance: any) => {
@@ -2609,7 +2609,7 @@ const usePreviousTeamAssessment = (block: AssessmentBlock) => {
     formTouched.value = true
 }
 
-// No finding of the vulnerability has an assessment: offer what DTVP still
+// No finding of the vulnerability has an assessment: offer what River still
 // holds for gone findings of it in the same versions (EarlierAssessments).
 const assessmentEmpty = computed(() => allInstances.value.length > 0 && allInstances.value.every((instance: any) =>
     String(instance.analysis_state || instance.analysisState || 'NOT_SET') === 'NOT_SET'
@@ -4449,7 +4449,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
 
                     <DetailSection
                         title="History"
-                        help="Every version of this assessment recorded in DTVP: who changed it, when, and how, including deletions and values adopted from Dependency-Track."
+                        help="Every version of this assessment recorded in River: who changed it, when, and how, including deletions and values adopted from Dependency-Track."
                         data-testid="assessment-history-section"
                     >
                         <AssessmentHistory :instances="allInstances" :refresh-key="historyRefreshKey" />

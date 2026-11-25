@@ -310,7 +310,7 @@ async def test_a_confirmed_match_is_exported_on_the_reported_entry(client, queue
     )
 
 
-# -- a gone finding whose component DTVP never knew ------------------------------
+# -- a gone finding whose component River never knew ------------------------------
 
 
 def _unknown(component, vulnerability, vuln_id):
@@ -349,7 +349,7 @@ async def test_a_gone_record_on_an_unknown_component_is_applied_after_confirming
 ):
     """CVE-2024-28863 on ViewPoint 7.2.0 (2026-11-23): the record of a finding
     that went before tracking has no component; the finding on the recreated
-    component is unassessed. DTVP proposes it; a person confirms and applies."""
+    component is unassessed. River proposes it; a person confirms and applies."""
     from contextlib import closing
 
     from dtvp.same_issue import REASON_UNKNOWN_COMPONENT
@@ -438,7 +438,7 @@ async def test_every_candidate_of_an_unknown_component_is_listed(client, queued)
 async def test_earlier_assessments_list_what_gone_findings_of_the_vulnerability_hold(
     client, queued  # noqa: F811
 ):
-    """A finding without an assessment: the form offers what DTVP still holds
+    """A finding without an assessment: the form offers what River still holds
     for gone findings of the same vulnerability in the version, and of its
     aliases; nothing is applied."""
     from contextlib import closing

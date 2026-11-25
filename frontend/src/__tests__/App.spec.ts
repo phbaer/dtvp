@@ -150,7 +150,7 @@ describe('App bootstrap state', () => {
         const wrapper = mountApp()
         await wrapper.vm.$nextTick()
 
-        expect(wrapper.get('[data-testid="app-bootstrap-state"]').text()).toContain('DTVP is starting')
+        expect(wrapper.get('[data-testid="app-bootstrap-state"]').text()).toContain('River is starting')
         expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(false)
     })
 
@@ -162,7 +162,7 @@ describe('App bootstrap state', () => {
         const wrapper = mountApp()
         await flushBootstrapDom(wrapper)
 
-        expect(wrapper.get('[data-testid="app-bootstrap-state"]').text()).toContain('DTVP is still starting')
+        expect(wrapper.get('[data-testid="app-bootstrap-state"]').text()).toContain('River is still starting')
         expect(wrapper.get('[data-testid="app-bootstrap-error"]').text()).toContain('HTTP 503')
 
         await wrapper.get('button').trigger('click')
