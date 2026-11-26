@@ -60,6 +60,12 @@ def build_dump(
     members: dict[str, bytes] = {}
     for entity in schemas.ENTITY_ORDER:
         entity_records = (records or {}).get(entity, fixture_records(entity))
+        if entity not in manifest["entities"]:
+            # Added after the frozen fixture (format minor 0): listed only
+            # when the test gives records for it.
+            if not entity_records:
+                continue
+            manifest["entities"][entity] = {"schema": schemas.entity_schema_id(entity)}
         spec = manifest["entities"][entity]
         if not entity_records:
             spec.update(records=0, parts=[])

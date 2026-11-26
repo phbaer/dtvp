@@ -1,3 +1,4 @@
+import { cutoffLabel, cutoffPurpose } from './cutoff'
 import type { AutomaticAssessmentFilter, DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
 import type { InconsistencyReason } from '../types'
 import { evidenceLabel } from './evidence'
@@ -28,11 +29,13 @@ export type ActiveFilterChipKey =
     | 'notRescored'
     | 'newFindings'
     | 'awaitingReview'
-    | 'attributionAge'
+    | 'cutoff'
 
 export interface ActiveFilterChip {
     key: ActiveFilterChipKey
     label: string
+    /** Longer explanation, for the chip's title. */
+    title?: string
 }
 
 export interface ProjectVulnFilterOption {
@@ -71,8 +74,9 @@ export interface BuildActiveFilterChipsInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
-    attributionAgeDays: number | null
-    attributionAgeMode: 'older' | 'younger'
+    cutoff: string
+    cutoffMode: 'before' | 'after'
+    cutoffBasis?: 'published' | 'attributed'
 }
 
 export interface HasCustomProjectVulnFilterStateInput {
@@ -93,7 +97,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
-    attributionAgeDays: number | null
+    cutoff: string
     sortBy: string
     sortOrder: 'asc' | 'desc'
     lifecycleFilters: readonly string[]
@@ -177,8 +181,9 @@ export function buildActiveFilterChips({
     notRescoredOnly,
     newFindingsOnly,
     awaitingReviewOnly,
-    attributionAgeDays,
-    attributionAgeMode,
+    cutoff,
+    cutoffMode,
+    cutoffBasis = 'published',
 }: BuildActiveFilterChipsInput): ActiveFilterChip[] {
     const chips: ActiveFilterChip[] = []
     if (awaitingReviewOnly) chips.push({ key: 'awaitingReview', label: 'Awaiting review' })
@@ -216,10 +221,7 @@ export function buildActiveFilterChips({
     }
     if (notRescoredOnly) chips.push({ key: 'notRescored', label: 'CVSS: not rescored' })
     if (cvssVersionMismatchOnly) chips.push({ key: 'cvss', label: 'CVSS: version mismatch' })
-    if (attributionAgeDays != null) {
-        const verb = attributionAgeMode === 'younger' ? 'younger' : 'older'
-        chips.push({ key: 'attributionAge', label: `Attributed ${verb} than ${attributionAgeDays}d` })
-    }
+    if (cutoff) chips.push({ key: 'cutoff', label: cutoffLabel(cutoff, cutoffMode, cutoffBasis), title: `${cutoffLabel(cutoff, cutoffMode, cutoffBasis)}: ${cutoffPurpose(cutoffBasis)} (according to the FDA guidance)` })
 
     // Legacy, removed in 2.1.0 (#342).
     if (tmrescoreFilters.length !== tmrescoreOptions.length) {
@@ -260,7 +262,7 @@ export function hasCustomProjectVulnFilterState({
     newFindingsOnly,
     awaitingReviewOnly,
     defaultAwaitingReviewOnly = false,
-    attributionAgeDays,
+    cutoff,
     sortBy,
     sortOrder,
     lifecycleFilters,
@@ -295,7 +297,7 @@ export function hasCustomProjectVulnFilterState({
         || notRescoredOnly
         || newFindingsOnly
         || !!awaitingReviewOnly !== defaultAwaitingReviewOnly
-        || attributionAgeDays != null
+        || !!cutoff
         || sortBy !== 'rescored-severity'
         || sortOrder !== 'desc'
         || !sameStringSet(lifecycleFilters, defaultLifecycleFilters)

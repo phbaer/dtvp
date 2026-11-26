@@ -89,8 +89,9 @@ describe('projectVulnFilterChips', () => {
             newFindingsOnly: true,
             awaitingReviewOnly: true,
             teamAssessmentFilter: 'MISSING',
-            attributionAgeDays: 14,
-            attributionAgeMode: 'younger',
+            cutoff: '14d',
+            cutoffMode: 'after',
+            cutoffBasis: 'published',
         })
 
         expect(chips).toEqual([
@@ -107,7 +108,11 @@ describe('projectVulnFilterChips', () => {
             { key: 'dependency', label: 'Dependency: Direct, Unknown' },
             { key: 'notRescored', label: 'CVSS: not rescored' },
             { key: 'cvss', label: 'CVSS: version mismatch' },
-            { key: 'attributionAge', label: 'Attributed younger than 14d' },
+            {
+                key: 'cutoff',
+                label: 'Published after 14 days ago',
+                title: 'Published after 14 days ago: premarket: what was publicly known by the date (according to the FDA guidance)',
+            },
             { key: 'tmrescore', label: 'Threat-model proposal: with' },
             { key: 'automaticAssessment', label: 'Automatic assessment: available' },
             { key: 'automaticAssessmentOutcome', label: 'Auto outcome: Affected, Probably affected' },
@@ -139,8 +144,9 @@ describe('projectVulnFilterChips', () => {
             automaticAssessmentRescoreFilters: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'],
             automaticAssessmentRescoreOptions,
             cvssVersionMismatchOnly: false,
-            attributionAgeDays: null,
-            attributionAgeMode: 'older',
+            cutoff: '',
+            cutoffMode: 'before',
+            cutoffBasis: 'published',
         })
         expect(chips).toEqual([{ key: 'inconsistencyReason', label: 'Conflicting' }])
     })
@@ -154,7 +160,7 @@ describe('projectVulnFilterChips', () => {
             assigneeFilter: '',
             versionFilters: [],
             cvssVersionMismatchOnly: false,
-            attributionAgeDays: null,
+            cutoff: '',
             sortBy: 'rescored-severity',
             sortOrder: 'desc' as const,
             lifecycleFilters: DEFAULT_REVIEWER_LIFECYCLE_FILTERS,

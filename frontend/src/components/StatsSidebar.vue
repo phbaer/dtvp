@@ -3,7 +3,7 @@ import { ref, computed, useId } from 'vue'
 import { LayoutList, Copy } from '@lucide/vue'
 import CustomSelect from './CustomSelect.vue'
 import TeamFilter from './TeamFilter.vue'
-import AttributionAgeFilter from './AttributionAgeFilter.vue'
+import CutoffFilter from './CutoffFilter.vue'
 import DonutChart from './DonutChart.vue'
 import { distributionSegments, SEVERITY_CHART_COLORS, ANALYSIS_CHART_COLORS } from '../lib/statisticsCharts'
 import { ORIGINAL_SEVERITIES, SSVC_STATUSES, ssvcLabel } from '../lib/ssvc'
@@ -153,7 +153,6 @@ const moreActiveCount = computed(() => [
     props.filters.dependencyFilter.length !== props.dependencyOptions.length,
     !!props.filters.notRescoredOnly,
     props.filters.cvssVersionMismatchOnly,
-    props.filters.attributionAgeDays != null,
 ].filter(Boolean).length + legacyActiveCount.value)
 
 const chipClass = (active: boolean, activeClass: string) => [
@@ -391,11 +390,7 @@ const teamGroupTreeEntries = computed<TeamGroupTreeEntry[]>(() => {
     return entries
 })
 
-const attributionRangeCount = computed(() =>
-    props.filters.attributionAgeDays == null
-        ? props.resultCounts.total
-        : (props.resultCounts.attribution_age ?? props.resultCounts.total)
-)
+const cutoffCount = computed(() => facets.value.cutoff ?? props.resultCounts.total)
 
 const statsText = computed(() => {
     if (props.countsUpdating) return 'Updating vulnerability counts…'
@@ -487,6 +482,7 @@ const handleCopy = () => {
                 >
                     Results
                 </button>
+                <slot v-if="activeTab === 'scope-search'" name="header-actions" />
                 <button
                     type="button"
                     @click="handleCopy"
@@ -637,6 +633,20 @@ const handleCopy = () => {
                             </CustomSelect>
                         </div>
 
+                        <div class="space-y-1.5">
+                            <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Cutoff</label>
+                            <CutoffFilter
+                                :cutoff="props.filters.cutoff"
+                                :mode="props.filters.cutoffMode"
+                                :basis="props.filters.cutoffBasis"
+                                :count="props.countsUpdating ? undefined : cutoffCount"
+                                :unknown-count="props.countsUpdating ? undefined : props.resultCounts.cutoff_unknown"
+                                @update:cutoff="updateFilter('cutoff', $event)"
+                                @update:mode="updateFilter('cutoffMode', $event)"
+                                @update:basis="updateFilter('cutoffBasis', $event)"
+                            />
+                        </div>
+
                         <div class="grid gap-2 grid-cols-[1fr_auto]">
                             <div class="flex flex-col gap-1">
                                 <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Sort by</label>
@@ -743,17 +753,6 @@ const handleCopy = () => {
                                         <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">{{ countLabel(facets.dependency_relationship[opt.value === 'DIRECT' ? 'direct' : opt.value === 'TRANSITIVE' ? 'transitive' : 'unknown']) }}</span>
                                     </button>
                                 </div>
-                            </div>
-
-                            <div class="space-y-1">
-                                <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Attribution age</label>
-                                <AttributionAgeFilter
-                                    :days="props.filters.attributionAgeDays"
-                                    :mode="props.filters.attributionAgeMode"
-                                    :count="props.countsUpdating ? undefined : attributionRangeCount"
-                                    @update:days="updateFilter('attributionAgeDays', $event)"
-                                    @update:mode="updateFilter('attributionAgeMode', $event)"
-                                />
                             </div>
 
                             <details class="rounded-xl border border-dashed border-white/10 p-2" data-testid="legacy-filters">

@@ -2,6 +2,7 @@
 import { computed, ref, toRefs, inject, type Ref } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import DependencyChainViewer from './DependencyChainViewer.vue'
+import { cutoffDate, findingCutoffDate, isAfterCutoff, type CutoffBasis } from '../lib/cutoff'
 import { updateTeamMapping } from '../lib/api'
 import {
   findTeamMappingEntryForComponent,
@@ -21,6 +22,18 @@ const emit = defineEmits<{
 }>()
 
 const user = inject<any>('user', { role: 'ANALYST' })
+// The first-seen cutoff of the list (ADR 0015): findings first seen after it
+// stay in the vulnerability and are marked.
+type DatedInstance = { first_seen_ms?: number | null, published_ms?: number | null }
+const filterCutoff = inject<Ref<{ cutoff: string, mode: 'before' | 'after', basis?: CutoffBasis }>>('filterCutoff', ref({ cutoff: '', mode: 'before' }))
+const cutoffBasis = () => filterCutoff.value.basis || 'published'
+const isAfterFilterCutoff = (inst: DatedInstance) =>
+  filterCutoff.value.mode === 'before' && isAfterCutoff(findingCutoffDate(inst, cutoffBasis()), filterCutoff.value.cutoff)
+const afterCutoffTitle = (inst: DatedInstance) => {
+  const value = findingCutoffDate(inst, cutoffBasis())
+  const what = cutoffBasis() === 'attributed' ? 'First attributed in this project' : 'Published'
+  return `${what} on ${value ? new Date(value).toISOString().slice(0, 10) : 'an unknown date'}, after the cutoff ${cutoffDate(filterCutoff.value.cutoff)}; it is not hidden, and a save or bulk change includes it`
+}
 const teamMapping = inject<Ref<Record<string, string | string[]>>>('teamMapping', ref({}))
 const canEditMapping = computed(() => {
   const currentUser = user?.value ?? user
@@ -229,6 +242,8 @@ const partitionByRelationship = (instances: Array<{
   dependency_chains?: string[]
   is_direct_dependency?: boolean | null
   is_new_finding?: boolean
+  first_seen_ms?: number | null
+  published_ms?: number | null
 }>) => {
   const direct: typeof instances = []
   const transitive: typeof instances = []
@@ -375,6 +390,7 @@ const isChainExpanded = (id: string) => {
               </span>
               <span class="px-1 py-0 text-[8px] font-black uppercase text-red-400 bg-red-600/15 rounded border border-red-600/25">Direct</span>
               <span v-if="inst.is_new_finding" data-testid="new-finding-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-emerald-300 bg-emerald-600/15 rounded border border-emerald-600/30" title="Added after this vulnerability was assessed; not assessed yet">New</span>
+              <span v-if="isAfterFilterCutoff(inst)" data-testid="after-cutoff-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-amber-300 bg-amber-600/15 rounded border border-amber-600/30" :title="afterCutoffTitle(inst)">After cutoff</span>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-[9px] text-gray-400">Team:</span>
                 <span class="text-[9px] font-semibold uppercase text-blue-300">
@@ -410,6 +426,7 @@ const isChainExpanded = (id: string) => {
               </span>
               <span class="px-1 py-0 text-[8px] font-bold uppercase text-purple-400/70 bg-purple-600/10 rounded border border-purple-600/20">Transitive</span>
               <span v-if="inst.is_new_finding" data-testid="new-finding-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-emerald-300 bg-emerald-600/15 rounded border border-emerald-600/30" title="Added after this vulnerability was assessed; not assessed yet">New</span>
+              <span v-if="isAfterFilterCutoff(inst)" data-testid="after-cutoff-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-amber-300 bg-amber-600/15 rounded border border-amber-600/30" :title="afterCutoffTitle(inst)">After cutoff</span>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-[9px] text-gray-400">Team:</span>
                 <span class="text-[9px] font-semibold uppercase text-blue-300">
@@ -445,6 +462,7 @@ const isChainExpanded = (id: string) => {
               </span>
               <span class="px-1 py-0 text-[8px] font-bold uppercase text-gray-500 bg-gray-700/20 rounded border border-gray-600/25">Unknown</span>
               <span v-if="inst.is_new_finding" data-testid="new-finding-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-emerald-300 bg-emerald-600/15 rounded border border-emerald-600/30" title="Added after this vulnerability was assessed; not assessed yet">New</span>
+              <span v-if="isAfterFilterCutoff(inst)" data-testid="after-cutoff-badge" class="px-1 py-0 text-[8px] font-bold uppercase text-amber-300 bg-amber-600/15 rounded border border-amber-600/30" :title="afterCutoffTitle(inst)">After cutoff</span>
               <div class="ml-auto flex items-center gap-2">
                 <span class="text-[9px] text-gray-400">Team:</span>
                 <span class="text-[9px] font-semibold uppercase text-blue-300">

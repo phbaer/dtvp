@@ -204,8 +204,12 @@ describe('useProjectVulnFilters', () => {
         expect(filters.filterUrl.value).toContain('new_findings=true')
         expect(filters.awaitingReviewOnly.value).toBe(true)
         expect(filters.filterUrl.value).toContain('awaiting_review=true')
-        expect(filters.attributionAgeDays.value).toBe(14)
-        expect(filters.attributionAgeMode.value).toBe('younger')
+        // Retired attribution-age parameters are a relative cutoff (ADR 0015).
+        expect(filters.cutoff.value).toBe('14d')
+        expect(filters.cutoffMode.value).toBe('after')
+        expect(filters.filterUrl.value).toContain('cutoff=14d')
+        expect(filters.filterUrl.value).toContain('cutoff_mode=after')
+        expect(filters.filterUrl.value).not.toContain('attributed_before_days')
         expect(filters.sortBy.value).toBe('id')
         expect(filters.sortOrder.value).toBe('asc')
 
@@ -412,15 +416,15 @@ describe('useProjectVulnFilters', () => {
         expect(filters.teamFilters.value).toEqual(['Platform'])
         expect(filters.idFilter.value).toBe('CVE-2026-1')
         expect(filters.selectedAutomaticAssessmentFilters.value).toEqual(['WITH_AUTOMATIC_ASSESSMENT'])
-        expect(filters.attributionAgeDays.value).toBe(30)
+        expect(filters.cutoff.value).toBe('30d')
         expect(filters.lifecycleFilters.value).toEqual(['READY_FOR_APPROVAL', 'INCOMPLETE'])
         // An old link with other filters and no awaiting_review: off, also for reviewers.
         expect(filters.awaitingReviewOnly.value).toBe(false)
         filters.handleFilterUpdate({ ...filters.filterState.value, sortBy: 'id' })
         await vi.advanceTimersByTimeAsync(250)
         const query = router.replace.mock.lastCall![0].query
-        expect(query).toMatchObject({ teams: ['Platform'], id: 'CVE-2026-1', attributed_before_days: '30' })
-        for (const retired of ['tag', 'cve', 'auto_assessment', 'age_days']) expect(query).not.toHaveProperty(retired)
+        expect(query).toMatchObject({ teams: ['Platform'], id: 'CVE-2026-1', cutoff: '30d' })
+        for (const retired of ['tag', 'cve', 'auto_assessment', 'age_days', 'attributed_before_days', 'attribution_mode']) expect(query).not.toHaveProperty(retired)
         vi.useRealTimers()
         wrapper.unmount()
     })
@@ -491,5 +495,87 @@ describe('useProjectVulnFilters', () => {
         expect(off.filters.awaitingReviewOnly.value).toBe(false)
         expect(off.filters.filterUrl.value).toContain('awaiting_review=false')
         off.wrapper.unmount()
+    })
+})
+
+describe('useProjectVulnFilters with saved views (ADR 0015)', () => {
+    const mountWithDefault = (query: Record<string, unknown>, resolveDefaultQuery: () => Promise<string | null>) => {
+        const route = reactive({ path: '/project/Project', query: { ...query } })
+        const router = {
+            replace: vi.fn((location: { query: Record<string, unknown> }) => {
+                route.query = { ...location.query }
+                return Promise.resolve(location)
+            }),
+        }
+        let filters!: ProjectVulnFilters
+        const wrapper = mount(defineComponent({
+            setup() {
+                filters = useProjectVulnFilters({
+                    route,
+                    router: router as any,
+                    currentUserRole: computed(() => 'REVIEWER'),
+                    resolveDefaultQuery,
+                })
+                return {}
+            },
+            template: '<div />',
+        }))
+        return { wrapper, filters, router, route }
+    }
+    const flush = () => new Promise(resolve => setTimeout(resolve, 0))
+
+    it('opens a project without filters on the effective default view, and Reset returns to it', async () => {
+        const resolve = vi.fn(async () => 'cutoff=2026-03-01&versions=7.1.1&awaiting_review=false')
+        const { wrapper, filters, router } = mountWithDefault({}, resolve)
+        expect(filters.filtersReady.value).toBe(false)
+        await flush()
+        expect(filters.filtersReady.value).toBe(true)
+        expect(filters.cutoff.value).toBe('2026-03-01')
+        expect(filters.versionFilterInput.value).toBe('7.1.1')
+        expect(filters.awaitingReviewOnly.value).toBe(false)
+        expect(router.replace).toHaveBeenCalled()
+
+        filters.handleFilterUpdate({ ...filters.filterState.value, cutoff: '', versionFilterInput: '' })
+        expect(filters.cutoff.value).toBe('')
+        filters.resetFilters()
+        expect(filters.cutoff.value).toBe('2026-03-01')
+        expect(filters.versionFilterInput.value).toBe('7.1.1')
+
+        // Without a default view Reset gives the built-in role default.
+        filters.defaultViewQuery.value = null
+        filters.resetFilters()
+        expect(filters.cutoff.value).toBe('')
+        expect(filters.awaitingReviewOnly.value).toBe(true)
+        wrapper.unmount()
+    })
+
+    it('lets the URL win over the default view and falls back to the built-in default on errors', async () => {
+        const { wrapper, filters } = mountWithDefault({ versions: '2.0' }, async () => 'cutoff=2026-03-01')
+        expect(filters.filtersReady.value).toBe(true)
+        expect(filters.versionFilterInput.value).toBe('2.0')
+        expect(filters.cutoff.value).toBe('')
+        await flush()
+        expect(filters.defaultViewQuery.value).toBe('cutoff=2026-03-01')
+        wrapper.unmount()
+
+        const failing = mountWithDefault({}, async () => { throw new Error('offline') })
+        await flush()
+        expect(failing.filters.filtersReady.value).toBe(true)
+        expect(failing.filters.awaitingReviewOnly.value).toBe(true)
+        failing.wrapper.unmount()
+    })
+
+    it('gives the canonical query string of the filters to save', async () => {
+        const { wrapper, filters } = mountWithDefault(
+            { versions: '7.1.1', cutoff: '30d', cutoff_mode: 'after', vuln: 'CVE-1', lifecycle: ['OPEN', 'INCOMPLETE'] },
+            async () => null,
+        )
+        const query = filters.savedViewQuery()
+        expect(query).toContain('cutoff=30d')
+        expect(query).toContain('cutoff_mode=after')
+        expect(query).toContain('lifecycle=INCOMPLETE&lifecycle=OPEN')
+        expect(query).not.toContain('vuln=')
+        expect(query.indexOf('cutoff=')).toBeLessThan(query.indexOf('versions='))
+        wrapper.unmount()
     })
 })

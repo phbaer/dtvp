@@ -9,7 +9,7 @@ from typing import Any, Callable
 from .ports import change_hint
 
 
-GROUPED_VULN_SUMMARY_INDEX_SCHEMA_VERSION = 15
+GROUPED_VULN_SUMMARY_INDEX_SCHEMA_VERSION = 17
 
 
 def get_grouped_vuln_summary_index_path() -> str:

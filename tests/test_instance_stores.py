@@ -45,7 +45,7 @@ def test_defaults_resolve_against_the_working_directory(clean_env):
         (
             "main",
             os.path.join(dt_cache, "dtvp.sqlite3"),
-            ("local_store", "assessment_outbox", "finding_lifecycle", "access_tokens"),
+            ("local_store", "assessment_outbox", "finding_lifecycle", "access_tokens", "saved_views"),
         ),
         (
             "code_analysis_results",
@@ -112,7 +112,7 @@ def test_every_override_is_resolved(clean_env, monkeypatch, tmp_path):
     stores = resolve_instance_stores()
     assert stores.dt_cache_dir == os.path.join(clean_env, "cache")
     assert [(s.name, s.path, s.namespaces) for s in stores.sqlite_records] == [
-        ("main", f"{base}/db/main.sqlite3", ("local_store",)),
+        ("main", f"{base}/db/main.sqlite3", ("local_store", "saved_views")),
         ("assessment_outbox", f"{base}/db/outbox.sqlite3", ("assessment_outbox", "finding_lifecycle")),
         ("access_tokens", f"{base}/db/tokens.sqlite3", ("access_tokens",)),
         ("code_analysis_results", f"{base}/ca/results.sqlite", ("code_analysis_results",)),
@@ -137,7 +137,7 @@ def test_only_the_outbox_split_keeps_tokens_in_the_main_file(clean_env, monkeypa
     monkeypatch.setenv("DTVP_ASSESSMENT_OUTBOX_PATH", str(tmp_path / "outbox.sqlite"))
     stores = resolve_instance_stores()
     assert [(s.name, s.namespaces) for s in stores.sqlite_records] == [
-        ("main", ("local_store", "access_tokens")),
+        ("main", ("local_store", "access_tokens", "saved_views")),
         ("assessment_outbox", ("assessment_outbox", "finding_lifecycle")),
         ("code_analysis_results", ("code_analysis_results",)),
     ]
@@ -155,6 +155,7 @@ def test_symlinked_paths_are_merged(clean_env, monkeypatch, tmp_path):
         "assessment_outbox",
         "finding_lifecycle",
         "access_tokens",
+        "saved_views",
     )
 
 

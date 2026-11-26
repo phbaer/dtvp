@@ -623,7 +623,7 @@ describe('ProjectView.vue', () => {
                 WITH_AUTOMATIC_ASSESSMENT: mismatch,
                 WITHOUT_AUTOMATIC_ASSESSMENT: total - mismatch,
             },
-            attribution_age: total,
+            cutoff: total,
         })
         vi.mocked(getTaskVulnGroups).mockResolvedValue({
             items: [{

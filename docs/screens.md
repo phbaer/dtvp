@@ -56,9 +56,16 @@ The project review page is the main vulnerability workflow. It combines grouped 
 The Filters tab of the sidebar shows the filters most reviews need; everything else is one click away under **More filters**.
 
 - **Quick views** at the top: **Needs my assessment** (Open or Incomplete; with teams selected, their assessment is missing), **Awaiting review**, **Conflicting** (any conflict reason), **New findings** and **All**. A quick view sets the status part of the selection (status, awaiting review, conflict reasons, new findings, the selected teams' assessment) and keeps search, teams, versions and More filters. The one in effect is highlighted; otherwise the line under it says Custom selection.
-- **Team** with **Their assessment** (Any, Not recorded, Recorded), **Status** with the **Awaiting review only** toggle and the status chips (Open, Incomplete, Ready for approval, Assessed), **Analysis state**, **Project versions**, and the sort order.
+- **Team** with **Their assessment** (Any, Not recorded, Recorded), **Status** with the **Awaiting review only** toggle and the status chips (Open, Incomplete, Ready for approval, Assessed), **Analysis state**, **Project versions**, **Cutoff**, and the sort order.
+- **Cutoff**: the date, **Published (premarket)** or **First attributed (postmarket)**, with an info button that explains which purpose each serves according to the FDA guidance and that a cutoff is a planning aid, not a compliance boundary; then On or before / After, a date, or a rolling preset (7, 14, 28 days ago). The count beside it says how many vulnerabilities the cutoff keeps; a line below says how many are listed only because a finding has no date on the basis. In the detail, findings dated after the cutoff carry an **After cutoff** badge. See [Review workflows](review-workflows.md#cutoff).
 - Every option shows how many vulnerabilities it would list with the other filters as they are.
-- Every active filter is a chip under the search field, labelled like its sidebar section, with × to remove it. **Reset** (toolbar) and **Reset filters** (sidebar) go back to the role's defaults; both are available only when something differs from them.
+- Every active filter is a chip under the search field, labelled like its sidebar section, with × to remove it. **Reset** (toolbar) and **Reset filters** (sidebar) go back to the default view, else the role's defaults; both are available only when something differs from it.
+
+![Cutoff with the purpose of each date](screenshots/cutoff-help.png)
+
+![Saved views](screenshots/saved-views.png)
+
+**Views** in the sidebar header lists my views and the shared ones; choosing one applies it, the star makes it my default for the project, and the icons copy its short link `/v/<code>`, update it with the current filters, rename, share (reviewers) or delete it. **Copy link** copies the full URL of the current filters. Below, the current filters are saved under a name, for this project or all projects (reviewers: shared with everyone); the footer shows the default in effect, my default for all projects, and for reviewers the role defaults. See [Saved views and short links](review-workflows.md#saved-views-and-short-links).
 
 ![Awaiting review](screenshots/filter-awaiting-review.png)
 
@@ -66,7 +73,7 @@ Reviewers start on **Awaiting review**. It lists every vulnerability with an ass
 
 ![More filters](screenshots/filter-sidebar-more.png)
 
-**More filters** holds conflict reasons, new findings, the CVSS toggles (not rescored, version mismatch), original severity, SSVC priority, KEV/CISA evidence, dependency and attribution age; its summary says how many of them are set. **Legacy analysis filters** inside it holds the threat-model proposal and automatic-assessment filters, which go with threat-model rescoring and Agentyzer in 2.1.0.
+**More filters** holds conflict reasons, new findings, the CVSS toggles (not rescored, version mismatch), original severity, SSVC priority, KEV/CISA evidence and dependency; its summary says how many of them are set. **Legacy analysis filters** inside it holds the threat-model proposal and automatic-assessment filters, which go with threat-model rescoring and Agentyzer in 2.1.0.
 
 ![Filter drawer](screenshots/filter-drawer.png)
 

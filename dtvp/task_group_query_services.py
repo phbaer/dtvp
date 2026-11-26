@@ -5,7 +5,6 @@ import os
 import threading
 from array import array
 from concurrent.futures import Future
-from datetime import datetime
 from typing import Any
 
 from .inconsistency import INCONSISTENCY_REASONS
@@ -14,10 +13,20 @@ from .ssvc_services import FILTER_VALUES as SSVC_FILTER_VALUES
 from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
 from .evidence_services import evidence_sources, evidence_counts
 from .logic import _parse_assessment_blocks
+from .first_seen import (
+    BASIS_ATTRIBUTED,
+    CUTOFF_BASES,
+    CUTOFF_MODE_BEFORE,
+    DEFAULT_CUTOFF_BASIS,
+    annotate_first_seen,
+    cutoff_end_ms as _cutoff_end_ms,
+    cutoff_match,
+    resolve_cutoff,
+)
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 18
+TASK_GROUP_QUERY_INDEX_VERSION = 19
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -157,6 +166,38 @@ def _attributed_on_ms_values(group: dict[str, Any]) -> list[int]:
     return []
 
 
+def _first_seen_fields(
+    group: dict[str, Any],
+) -> dict[str, tuple[dict[str, tuple[int, int]], set[str]]]:
+    """Per cutoff basis, the date bounds per version and the versions with an
+    undated finding (ADR 0015)."""
+    metadata = group.get("list_metadata") or {}
+    dates = metadata.get("cutoff_dates")
+    if not isinstance(dates, dict):
+        dates = annotate_first_seen(group)["cutoff_dates"]
+        attributed = _attributed_on_ms_values(group)
+        for basis in (BASIS_ATTRIBUTED,):
+            entry = dates[basis]
+            if not entry["by_version"] and not entry["unknown"] and attributed:
+                # A summary without its findings: the attribution dates of
+                # the group stand for each of its versions.
+                entry["by_version"] = {
+                    label: [min(attributed), max(attributed)]
+                    for label in (_versions_for_group(group) or [""])
+                }
+    result: dict[str, tuple[dict[str, tuple[int, int]], set[str]]] = {}
+    for basis in CUTOFF_BASES:
+        entry = dates.get(basis) if isinstance(dates.get(basis), dict) else {}
+        by_version: dict[str, tuple[int, int]] = {}
+        for label, bounds in (entry.get("by_version") or {}).items():
+            try:
+                by_version[_lower(label)] = (int(bounds[0]), int(bounds[1]))
+            except (TypeError, ValueError, IndexError):
+                continue
+        result[basis] = (by_version, {_lower(label) for label in entry.get("unknown") or []})
+    return result
+
+
 def _dependency_relationship_for_group(group: dict[str, Any]) -> str:
     metadata = group.get("list_metadata") or {}
     relationship = str(metadata.get("dependency_relationship") or "").upper()
@@ -242,6 +283,7 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         or ""
     )
     inconsistency_reasons = _string_list(metadata.get("inconsistency_reasons"))
+    cutoff_dates = _first_seen_fields(group)
 
     searchable_text = " ".join(
         value
@@ -303,6 +345,7 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         ),
         "has_new_findings": int(metadata.get("new_finding_count") or 0) > 0,
         "attributed_on_ms_values": _attributed_on_ms_values(group),
+        "cutoff_dates": cutoff_dates,
         "base_score": _score_value(base_score),
         "rescored_score": _score_value(rescored_score),
         "base_severity_rank": _score_severity_rank(base_score),
@@ -366,19 +409,25 @@ def _matches_inconsistency_reason(
     return not fields["inconsistency_reason_set"].isdisjoint(filters)
 
 
-def _matches_attribution_age(
+def _cutoff_status(
     fields: dict[str, Any],
-    days: int | None,
+    end_ms: int | None,
     mode: str,
-    now_ms: int,
-) -> bool:
-    if days is None:
-        return True
-    cutoff = now_ms - days * DAY_MS
-    values = fields["attributed_on_ms_values"]
-    if mode == "younger":
-        return any(value >= cutoff for value in values)
-    return any(value < cutoff for value in values)
+    versions: set[str] | None,
+    basis: str = DEFAULT_CUTOFF_BASIS,
+) -> str | None:
+    """``"known"``/``"unknown"`` when the group passes the cutoff (ADR 0015),
+    ``None`` when it does not; ``"known"`` without a cutoff."""
+    if end_ms is None:
+        return "known"
+    by_version, unknown = fields["cutoff_dates"][basis]
+    return cutoff_match(
+        by_version,
+        unknown,
+        end_ms=end_ms,
+        mode=mode,
+        versions=versions,
+    )
 
 
 def _matches_all_terms(values: list[str], terms: tuple[str, ...]) -> bool:
@@ -487,8 +536,9 @@ def _matches_task_group_fields(
     not_rescored: bool = False,
     new_findings: bool = False,
     awaiting_review: bool = False,
-    attributed_before_days: int | None,
-    attribution_mode: str,
+    cutoff_end_ms: int | None = None,
+    cutoff_mode: str = CUTOFF_MODE_BEFORE,
+    cutoff_basis: str = DEFAULT_CUTOFF_BASIS,
     tmrescore: set[str],
     tmrescore_proposal_id_set: set[str],
     automatic_assessment: set[str],
@@ -496,7 +546,7 @@ def _matches_task_group_fields(
     automatic_assessment_outcome: set[str],
     automatic_assessment_rescore: set[str],
     automatic_assessment_facets: dict[str, dict[str, str]],
-    now_ms: int,
+    now_ms: int = 0,
     team_aliases: dict[str, str] | None = None,
     selected_teams: set[str] | None = None,
     team_assessment: str = "ANY",
@@ -557,12 +607,7 @@ def _matches_task_group_fields(
     # other teams are still open (Incomplete), or a conflicting one.
     if awaiting_review and not fields["is_pending"]:
         return False
-    if not _matches_attribution_age(
-        fields,
-        attributed_before_days,
-        attribution_mode,
-        now_ms,
-    ):
+    if _cutoff_status(fields, cutoff_end_ms, cutoff_mode, versions, cutoff_basis) is None:
         return False
     if not _matches_tmrescore_proposal(fields, tmrescore, tmrescore_proposal_id_set):
         return False
@@ -1048,9 +1093,10 @@ def _add_dynamic_counts(
     team_aliases: dict[str, str],
     team_groups: dict[str, tuple[str, ...]],
     team_group_structure: dict[str, dict[str, tuple[str, ...]]],
-    attributed_before_days: int | None,
-    attribution_mode: str,
-    now_ms: int,
+    cutoff_end_ms: int | None = None,
+    cutoff_mode: str = CUTOFF_MODE_BEFORE,
+    cutoff_basis: str = DEFAULT_CUTOFF_BASIS,
+    cutoff_versions: set[str] | None = None,
     team_versions: set[str] | None = None,
     selected_teams: set[str] | None = None,
 ) -> dict[str, Any]:
@@ -1063,7 +1109,8 @@ def _add_dynamic_counts(
     automatic_assessment_rescore_counts = (
         _empty_automatic_assessment_rescore_counts()
     )
-    attribution_age_count = 0
+    cutoff_count = 0
+    cutoff_unknown_count = 0
     team_rows = (
         _team_count_rows(rows, team_versions or set(), selected_teams or set(), team_aliases)
         if team_versions or selected_teams else rows
@@ -1108,7 +1155,7 @@ def _add_dynamic_counts(
         not tmrescore_proposal_id_set
         and not automatic_assessment_id_set
         and not automatic_assessment_facets
-        and attributed_before_days is None
+        and cutoff_end_ms is None
     ):
         tmrescore_counts["WITHOUT_PROPOSAL"] = len(rows)
         automatic_assessment_counts["WITHOUT_AUTOMATIC_ASSESSMENT"] = len(rows)
@@ -1120,7 +1167,8 @@ def _add_dynamic_counts(
         result["automatic_assessment_rescore"] = (
             automatic_assessment_rescore_counts
         )
-        result["attribution_age"] = attribution_age_count
+        result["cutoff"] = cutoff_count
+        result["cutoff_unknown"] = cutoff_unknown_count
         return result
 
     for row in rows:
@@ -1144,19 +1192,21 @@ def _add_dynamic_counts(
                 automatic_assessment_outcome_counts[outcome] += 1
             if rescore in automatic_assessment_rescore_counts:
                 automatic_assessment_rescore_counts[rescore] += 1
-        if attributed_before_days is not None and _matches_attribution_age(
-            fields,
-            attributed_before_days,
-            attribution_mode,
-            now_ms,
-        ):
-            attribution_age_count += 1
+        if cutoff_end_ms is not None:
+            status = _cutoff_status(
+                fields, cutoff_end_ms, cutoff_mode, cutoff_versions, cutoff_basis,
+            )
+            if status is not None:
+                cutoff_count += 1
+            if status == "unknown":
+                cutoff_unknown_count += 1
 
     result["tmrescore"] = tmrescore_counts
     result["automatic_assessment"] = automatic_assessment_counts
     result["automatic_assessment_outcome"] = automatic_assessment_outcome_counts
     result["automatic_assessment_rescore"] = automatic_assessment_rescore_counts
-    result["attribution_age"] = attribution_age_count
+    result["cutoff"] = cutoff_count
+    result["cutoff_unknown"] = cutoff_unknown_count
     return result
 
 
@@ -1223,8 +1273,9 @@ def _query_cache_key(
     not_rescored: bool = False,
     new_findings: bool = False,
     awaiting_review: bool = False,
-    attributed_before_days: int | None,
-    attribution_mode: str,
+    cutoff_end_ms: int | None = None,
+    cutoff_mode: str = CUTOFF_MODE_BEFORE,
+    cutoff_basis: str = DEFAULT_CUTOFF_BASIS,
     tmrescore: list[str],
     tmrescore_proposal_ids: list[str],
     automatic_assessment: list[str],
@@ -1238,13 +1289,7 @@ def _query_cache_key(
     dynamic_context_key: str,
     sort_by: str,
     sort_order: str,
-    now_ms: int,
 ) -> tuple[Any, ...]:
-    attribution_day_bucket = (
-        now_ms // DAY_MS
-        if attributed_before_days is not None
-        else None
-    )
     dynamic_parts: tuple[Any, ...] = (
         ("context", dynamic_context_key)
         if dynamic_context_key
@@ -1275,9 +1320,9 @@ def _query_cache_key(
         bool(not_rescored),
         bool(new_findings),
         bool(awaiting_review),
-        attributed_before_days,
-        attribution_mode,
-        attribution_day_bucket,
+        cutoff_end_ms,
+        cutoff_mode if cutoff_end_ms is not None else None,
+        cutoff_basis if cutoff_end_ms is not None else None,
         _normalized_upper_tuple(tmrescore),
         _normalized_lower_tuple(tmrescore_proposal_ids),
         _normalized_upper_tuple(automatic_assessment),
@@ -1473,8 +1518,13 @@ def query_task_groups(
     not_rescored: bool = False,
     new_findings: bool = False,
     awaiting_review: bool = False,
-    attributed_before_days: int | None,
-    attribution_mode: str,
+    cutoff: str = "",
+    cutoff_mode: str = CUTOFF_MODE_BEFORE,
+    # Empty: published (attributed for the retired parameters).
+    cutoff_basis: str = "",
+    # Retired (ADR 0015): read as ``cutoff=<N>d`` when no cutoff is given.
+    attributed_before_days: int | None = None,
+    attribution_mode: str = "older",
     tmrescore: list[str],
     tmrescore_proposal_ids: list[str],
     sort_by: str,
@@ -1500,9 +1550,12 @@ def query_task_groups(
     include_counts: bool = True,
     dynamic_context_key: str = "",
 ) -> dict[str, Any]:
-    now_ms = int(datetime.now().timestamp() * 1000)
     effective_offset = decode_task_group_cursor(cursor) if cursor else offset
-    normalized_mode = "younger" if attribution_mode == "younger" else "older"
+    cutoff, normalized_mode, basis = resolve_cutoff(
+        cutoff, cutoff_mode, attributed_before_days, attribution_mode,
+        cutoff_basis,
+    )
+    end_ms = _cutoff_end_ms(cutoff)
     if _is_task_group_query_index(groups_or_index):
         index = groups_or_index
     else:
@@ -1529,8 +1582,9 @@ def query_task_groups(
         not_rescored=not_rescored,
         new_findings=new_findings,
         awaiting_review=awaiting_review,
-        attributed_before_days=attributed_before_days,
-        attribution_mode=normalized_mode,
+        cutoff_end_ms=end_ms,
+        cutoff_mode=normalized_mode,
+        cutoff_basis=basis,
         tmrescore=tmrescore,
         tmrescore_proposal_ids=tmrescore_proposal_ids,
         automatic_assessment=automatic_assessment or [],
@@ -1544,7 +1598,6 @@ def query_task_groups(
         dynamic_context_key=dynamic_context_key,
         sort_by=sort_by,
         sort_order=sort_order,
-        now_ms=now_ms,
     )
     selected_teams = _normalized_lower_set([*(teams or []), *([team] if team else [])])
     team_assessment = str(team_assessment or "ANY").upper() if selected_teams else "ANY"
@@ -1628,7 +1681,7 @@ def query_task_groups(
                 or not_rescored
                 or new_findings
                 or awaiting_review
-                or attributed_before_days is not None
+                or end_ms is not None
                 or tmrescore_set
                 or automatic_assessment_set
                 or automatic_assessment_outcome_set
@@ -1655,8 +1708,9 @@ def query_task_groups(
                 not_rescored=not_rescored,
                 new_findings=new_findings,
                 awaiting_review=awaiting_review,
-                attributed_before_days=attributed_before_days,
-                attribution_mode=normalized_mode,
+                cutoff_end_ms=end_ms,
+                cutoff_mode=normalized_mode,
+                cutoff_basis=basis,
                 tmrescore=tmrescore_set,
                 tmrescore_proposal_id_set=tmrescore_proposal_id_set,
                 automatic_assessment=automatic_assessment_set,
@@ -1670,7 +1724,6 @@ def query_task_groups(
                 automatic_assessment_facets=(
                     normalized_automatic_assessment_facets
                 ),
-                now_ms=now_ms,
             )
             candidate_indices = range(len(rows))
             if selected_teams:
@@ -1720,9 +1773,9 @@ def query_task_groups(
                     team_aliases=normalized_team_aliases,
                     team_groups=normalized_team_groups,
                     team_group_structure=normalized_team_group_structure,
-                    attributed_before_days=attributed_before_days,
-                    attribution_mode=normalized_mode,
-                    now_ms=now_ms,
+                    cutoff_end_ms=end_ms,
+                    cutoff_mode=normalized_mode,
+                    cutoff_basis=basis,
                 )
                 if len(filtered_indices) == len(rows) and not version_set and not selected_teams:
                     filtered_counts = all_counts
@@ -1739,9 +1792,10 @@ def query_task_groups(
                         team_aliases=normalized_team_aliases,
                         team_groups=normalized_team_groups,
                         team_group_structure=normalized_team_group_structure,
-                        attributed_before_days=attributed_before_days,
-                        attribution_mode=normalized_mode,
-                        now_ms=now_ms,
+                        cutoff_end_ms=end_ms,
+                        cutoff_mode=normalized_mode,
+                        cutoff_basis=basis,
+                        cutoff_versions=version_set,
                         team_versions=version_set,
                         selected_teams=selected_teams,
                     )
@@ -1777,7 +1831,7 @@ def query_task_groups(
                     "not_rescored": ("not_rescored", False),
                     "new_findings": ("new_findings", False),
                     "awaiting_review": ("awaiting_review", False),
-                    "attribution_age": ("attributed_before_days", None),
+                    "cutoff": ("cutoff_end_ms", None),
                     "evidence": (None, None),
                 }
                 for facet, (option, unrestricted) in facet_definitions.items():
@@ -1807,8 +1861,10 @@ def query_task_groups(
                             team_aliases=normalized_team_aliases,
                             team_groups=normalized_team_groups,
                             team_group_structure=normalized_team_group_structure,
-                            attributed_before_days=attributed_before_days,
-                            attribution_mode=normalized_mode, now_ms=now_ms,
+                            cutoff_end_ms=end_ms,
+                            cutoff_mode=normalized_mode,
+                            cutoff_basis=basis,
+                            cutoff_versions=version_set,
                         )
                         facet_counts[facet] = values[facet]
                 counts = {
@@ -1855,6 +1911,8 @@ def query_task_groups(
         "has_more": bool(next_cursor),
         "sort": sort_by,
         "order": sort_order,
+        # The basis the cutoff used (ADR 0015).
+        "cutoff_basis": basis,
     }
     if include_counts:
         response["counts"] = counts

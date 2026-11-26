@@ -1,13 +1,13 @@
 import { getRuntimeConfig } from './env'
 
-export const DEFAULT_ATTRIBUTION_AGE_FILTER_DAYS = [7, 14, 28]
-export const ATTRIBUTION_AGE_FILTER_DAYS_CONFIG_KEY = 'DTVP_ATTRIBUTION_AGE_FILTER_DAYS'
+export const DEFAULT_CUTOFF_PRESET_DAYS = [7, 14, 28]
+export const CUTOFF_PRESET_DAYS_CONFIG_KEY = 'DTVP_CUTOFF_PRESET_DAYS'
 
-const DEFAULT_ATTRIBUTION_AGE_FILTER_DAYS_VALUE = DEFAULT_ATTRIBUTION_AGE_FILTER_DAYS
+const DEFAULT_CUTOFF_PRESET_DAYS_VALUE = DEFAULT_CUTOFF_PRESET_DAYS
     .map(day => `${day}d`)
     .join(',')
 
-export const parseAttributionAgeFilterDays = (value: string): number[] => {
+export const parseCutoffPresetDays = (value: string): number[] => {
     const seen = new Set<number>()
     const days: number[] = []
 
@@ -23,13 +23,13 @@ export const parseAttributionAgeFilterDays = (value: string): number[] => {
         days.push(day)
     }
 
-    return days.length ? days : [...DEFAULT_ATTRIBUTION_AGE_FILTER_DAYS]
+    return days.length ? days : [...DEFAULT_CUTOFF_PRESET_DAYS]
 }
 
-export const getAttributionAgeFilterDays = (): number[] =>
-    parseAttributionAgeFilterDays(
+export const getCutoffPresetDays = (): number[] =>
+    parseCutoffPresetDays(
         getRuntimeConfig(
-            ATTRIBUTION_AGE_FILTER_DAYS_CONFIG_KEY,
-            DEFAULT_ATTRIBUTION_AGE_FILTER_DAYS_VALUE,
+            CUTOFF_PRESET_DAYS_CONFIG_KEY,
+            DEFAULT_CUTOFF_PRESET_DAYS_VALUE,
         ),
     )

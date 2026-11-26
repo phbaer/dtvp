@@ -44,6 +44,7 @@ from ..local_store import (
     _project_vulnerability_row,
     source_analysis_row,
 )
+from ..saved_view_services import SAVED_VIEWS_MIGRATION_NAMESPACE
 from ..sqlite_migration_services import run_sqlite_migrations
 from .entities import MIGRATION_PATHS
 from .errors import DumpError
@@ -519,6 +520,37 @@ class SqliteDumpTarget:
         self._db(ACCESS_TOKEN_MIGRATION_NAMESPACE).execute(
             "INSERT INTO session_versions (username, version, revoked_at) VALUES (?, ?, ?)",
             (record["username"], record["version"], record["revoked_at"]),
+        )
+
+    def _write_saved_view(self, record: dict[str, Any]) -> None:
+        self._db(SAVED_VIEWS_MIGRATION_NAMESPACE).execute(
+            "INSERT INTO saved_views (code, scope, name, project, query, "
+            "owner, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                record["code"],
+                record["scope"],
+                record["name"],
+                record["project"],
+                record["query"],
+                record["owner"],
+                record["created_at"],
+                record["updated_at"],
+                record["updated_by"],
+            ),
+        )
+
+    def _write_saved_view_default(self, record: dict[str, Any]) -> None:
+        self._db(SAVED_VIEWS_MIGRATION_NAMESPACE).execute(
+            "INSERT INTO saved_view_defaults (subject_kind, subject, project, code, "
+            "updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                record["subject_kind"],
+                record["subject"],
+                record["project"],
+                record["code"],
+                record["updated_at"],
+                record["updated_by"],
+            ),
         )
 
     def _write_instance_metadata(self, record: dict[str, Any]) -> None:

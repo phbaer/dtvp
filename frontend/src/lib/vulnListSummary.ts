@@ -44,6 +44,7 @@ const summarizeComponent = (component: Instance): Instance => ({
     // Kept so a row can show and settle a conflict with Dependency-Track.
     sync_status: component.sync_status,
     is_new_finding: component.is_new_finding,
+    first_seen_ms: component.first_seen_ms,
     source_assessment: component.source_assessment ? { ...component.source_assessment } : undefined,
 })
 

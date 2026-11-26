@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:saved_view",
+  "title": "dtvp.dump.saved_view/1: a saved view of the project review, addressed by its short-link code (ADR 0015)",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "pattern": "^[23456789abcdefghjkmnpqrstuvwxyz]{8}$"
+    },
+    "scope": {
+      "enum": [
+        "personal",
+        "global"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "project": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "query": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "owner": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "created_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "updated_by": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    }
+  },
+  "required": [
+    "code",
+    "scope",
+    "name",
+    "project",
+    "query",
+    "owner",
+    "created_at",
+    "updated_at",
+    "updated_by"
+  ],
+  "additionalProperties": false
+}

@@ -1,3 +1,4 @@
+import { cutoffMatch, normalizeCutoff, normalizeCutoffBasis, normalizeCutoffMode, type CutoffBasis, type CutoffMode } from './cutoff'
 import { expandLifecycleSelection } from './projectLifecycleFilters'
 import type { GroupedVuln, InconsistencyReason, TMRescoreProposal } from '../types'
 import type { CodeAnalysisAssessmentIndexRecord } from './api'
@@ -36,7 +37,6 @@ const DEFAULT_AUTOMATIC_ASSESSMENT_FILTER: AutomaticAssessmentFilter[] = [
     'WITH_AUTOMATIC_ASSESSMENT',
     'WITHOUT_AUTOMATIC_ASSESSMENT',
 ]
-const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface VulnListItem {
     group: GroupedVuln
@@ -56,6 +56,8 @@ export interface VulnListItem {
     teamTagsByVersion: Map<string, Set<string>> | null
     attributedOnMsValues: number[]
     oldestAttributedOnMs: number | null
+    /** Per cutoff basis and version label (lower case): [earliest, latest] date, and versions with an undated finding. */
+    cutoffDates: Record<CutoffBasis, { byVersion: Record<string, [number, number]>, unknown: string[] }>
     instanceCount: number
     componentSummary: string
     searchableTextLower: string
@@ -115,8 +117,9 @@ export interface VulnListFilterInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
-    attributionAgeDays?: number | string | null
-    attributionAgeMode?: 'older' | 'younger'
+    cutoff?: string
+    cutoffMode?: CutoffMode
+    cutoffBasis?: CutoffBasis
 }
 
 export interface CompiledVulnListFilters {
@@ -149,9 +152,10 @@ export interface CompiledVulnListFilters {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
-    attributionAgeActive: boolean
-    attributionAgeCutoffMs: number | null
-    attributionAgeMode: 'older' | 'younger'
+    cutoff: string
+    cutoffMode: CutoffMode
+    cutoffBasis: CutoffBasis
+    cutoffNowMs: number
 }
 
 export interface VulnStateFilterInput {
@@ -265,6 +269,42 @@ export const parseAttributionTimestamp = (value: unknown): number | null => {
 
     const parsed = Date.parse(raw)
     return Number.isFinite(parsed) ? parsed : null
+}
+
+const firstSeenFields = (
+    group: GroupedVuln,
+    metadata: GroupedVuln['list_metadata'] | undefined,
+): VulnListItem['cutoffDates'] => {
+    const result = {} as VulnListItem['cutoffDates']
+    const stored = metadata?.cutoff_dates
+    for (const basis of ['published', 'attributed'] as const) {
+        const byVersion: Record<string, [number, number]> = {}
+        const entry = stored?.[basis]
+        if (entry && Array.isArray(entry.unknown)) {
+            for (const [label, bounds] of Object.entries(entry.by_version || {})) {
+                if (Array.isArray(bounds) && bounds.length >= 2) byVersion[label.toLowerCase()] = [Number(bounds[0]), Number(bounds[1])]
+            }
+            result[basis] = { byVersion, unknown: entry.unknown.map(label => label.toLowerCase()) }
+            continue
+        }
+        const unknown = new Set<string>()
+        for (const version of group.affected_versions || []) {
+            const label = String(version.project_version || '').toLowerCase()
+            for (const component of version.components || []) {
+                const value = basis === 'published'
+                    ? component.published_ms ?? null
+                    : component.first_seen_ms ?? parseAttributionTimestamp(component.attributed_on)
+                if (value == null) {
+                    unknown.add(label)
+                    continue
+                }
+                const bounds = byVersion[label]
+                byVersion[label] = bounds ? [Math.min(bounds[0], value), Math.max(bounds[1], value)] : [value, value]
+            }
+        }
+        result[basis] = { byVersion, unknown: [...unknown] }
+    }
+    return result
 }
 
 export const normalizeAttributionAgeDays = (value: unknown): number | null => {
@@ -739,6 +779,7 @@ export function buildVulnListItem(
             .filter((value): value is number => value != null)
             .map(value => String(value)),
     ).map(value => Number(value))
+    const firstSeen = firstSeenFields(group, metadata)
     const oldestAttributedOnMs = metadataNumber(metadata?.oldest_attributed_on_ms)
         ?? (attributedOnMsValues.length
         ? Math.min(...attributedOnMsValues)
@@ -825,6 +866,7 @@ export function buildVulnListItem(
         teamTagsByVersion: hasVersionOwnership ? teamTagsByVersion : null,
         attributedOnMsValues,
         oldestAttributedOnMs,
+        cutoffDates: firstSeen,
         instanceCount,
         componentSummary: summarizeComponents(componentNames),
         searchableTextLower,
@@ -898,25 +940,22 @@ const everyTermMatchesPrimaryOrAliases = (
     return terms.every(term => primary.includes(term) || aliases.some(alias => alias.includes(term)))
 }
 
-export function matchesAttributionAgeFilter(
+export function matchesCutoffFilter(
     item: VulnListItem,
-    days: unknown,
-    mode: 'older' | 'younger' = 'older',
+    cutoff: string,
+    mode: CutoffMode = 'before',
+    versions: readonly string[] = [],
     nowMs = Date.now(),
-): boolean {
-    const normalizedDays = normalizeAttributionAgeDays(days)
-    if (normalizedDays == null) return false
-    const cutoff = nowMs - normalizedDays * DAY_MS
-    return item.attributedOnMsValues.some(value =>
-        mode === 'younger' ? value >= cutoff : value < cutoff,
-    )
+    basis: CutoffBasis = 'published',
+): 'known' | 'unknown' | null {
+    const dates = item.cutoffDates[basis]
+    return cutoffMatch(dates.byVersion, dates.unknown, cutoff, mode, versions, nowMs)
 }
 
 export function compileVulnListFilters(
     filters: VulnListFilterInput,
     nowMs = Date.now(),
 ): CompiledVulnListFilters {
-    const normalizedAgeDays = normalizeAttributionAgeDays(filters.attributionAgeDays)
     const dependencyFilter = normalizeFilterSelection(filters.dependencyFilter)
     const tmrescoreProposalFilter = normalizeFilterSelection(filters.tmrescoreProposalFilter)
     const tmrescoreProposalFilterSet = new Set(tmrescoreProposalFilter)
@@ -965,22 +1004,21 @@ export function compileVulnListFilters(
         notRescoredOnly: !!filters.notRescoredOnly,
         newFindingsOnly: !!filters.newFindingsOnly,
         awaitingReviewOnly: !!filters.awaitingReviewOnly,
-        attributionAgeActive: filters.attributionAgeDays != null,
-        attributionAgeCutoffMs: normalizedAgeDays == null ? null : nowMs - normalizedAgeDays * DAY_MS,
-        attributionAgeMode: filters.attributionAgeMode || 'older',
+        cutoff: normalizeCutoff(filters.cutoff),
+        cutoffMode: normalizeCutoffMode(filters.cutoffMode),
+        cutoffBasis: normalizeCutoffBasis(filters.cutoffBasis),
+        cutoffNowMs: nowMs,
     }
 }
 
-export function matchesCompiledAttributionAgeFilter(
+export function matchesCompiledCutoffFilter(
     item: VulnListItem,
     filters: CompiledVulnListFilters,
 ): boolean {
-    if (!filters.attributionAgeActive) return true
-    const cutoff = filters.attributionAgeCutoffMs
-    if (cutoff == null) return false
-    return item.attributedOnMsValues.some(value =>
-        filters.attributionAgeMode === 'younger' ? value >= cutoff : value < cutoff,
-    )
+    if (!filters.cutoff) return true
+    return matchesCutoffFilter(
+        item, filters.cutoff, filters.cutoffMode, [...filters.versionFilterSet], filters.cutoffNowMs, filters.cutoffBasis,
+    ) != null
 }
 
 export function matchesCompiledDependencySelection(
@@ -1193,7 +1231,7 @@ export function matchesCompiledListFilters(
         return false
     }
 
-    if (!matchesCompiledAttributionAgeFilter(item, filters)) {
+    if (!matchesCompiledCutoffFilter(item, filters)) {
         return false
     }
 

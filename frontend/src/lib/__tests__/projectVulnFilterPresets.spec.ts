@@ -29,8 +29,9 @@ const state = (overrides: Partial<FilterState> = {}): FilterState => ({
     inconsistencyReasonFilters: [],
     analysisFilters: ['NOT_SET'],
     cvssVersionMismatchOnly: true,
-    attributionAgeDays: null,
-    attributionAgeMode: 'older',
+    cutoff: '',
+    cutoffMode: 'before',
+    cutoffBasis: 'published',
     ...overrides,
 })
 

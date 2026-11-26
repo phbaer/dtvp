@@ -16,7 +16,7 @@ class FrontendRouteDeps:
     get_frontend_url: Callable[[], str]
     get_dev_disable_auth: Callable[[], bool]
     get_default_project_filter: Callable[[], str]
-    get_attribution_age_filter_days: Callable[[], str]
+    get_cutoff_preset_days: Callable[[], str]
     get_jira_create_url: Callable[[], str]
     read_text: Callable[[str], str]
 
@@ -51,8 +51,8 @@ def _render_index_html(index_path: str, deps: FrontendRouteDeps) -> HTMLResponse
             deps.get_default_project_filter(),
         )
         content = content.replace(
-            "${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}",
-            deps.get_attribution_age_filter_days(),
+            "${DTVP_CUTOFF_PRESET_DAYS}",
+            deps.get_cutoff_preset_days(),
         )
         content = content.replace(
             "'${DTVP_JIRA_CREATE_URL}'",

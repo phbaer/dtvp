@@ -13,6 +13,8 @@ const routes = [
     { path: '/project/:name', component: () => import('./pages/ProjectView.vue') },
     { path: '/project/:name/tmrescore', component: () => import('./pages/TMRescore.vue'), meta: { role: 'REVIEWER' } },
     { path: '/statistics', component: () => import('./pages/Statistics.vue') },
+    // A short link or saved view (ADR 0015): opens the project with its filters.
+    { path: '/v/:code', component: () => import('./pages/ShortLink.vue') },
 ]
 
 export const router = createRouter({

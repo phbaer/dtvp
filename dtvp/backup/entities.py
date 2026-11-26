@@ -22,6 +22,10 @@ from ..finding_lifecycle_services import (
     get_finding_lifecycle_migrations_path,
 )
 from ..local_store import LOCAL_STORE_MIGRATION_NAMESPACE, get_local_store_migrations_path
+from ..saved_view_services import (
+    SAVED_VIEWS_MIGRATION_NAMESPACE,
+    get_saved_view_migrations_path,
+)
 from .schemas import ENTITY_ORDER
 
 # Where the code's migrations of each namespace live.
@@ -31,6 +35,7 @@ MIGRATION_PATHS: dict[str, Callable[[], Path]] = {
     ACCESS_TOKEN_MIGRATION_NAMESPACE: get_access_token_migrations_path,
     CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE: get_code_analysis_result_migrations_path,
     FINDING_LIFECYCLE_MIGRATION_NAMESPACE: get_finding_lifecycle_migrations_path,
+    SAVED_VIEWS_MIGRATION_NAMESPACE: get_saved_view_migrations_path,
 }
 
 GROUP_RECORD = "record"
@@ -75,6 +80,8 @@ ENTITIES: dict[str, EntitySpec] = {
         EntitySpec("finding_presence", FINDING_LIFECYCLE_MIGRATION_NAMESPACE, "finding_presence", GROUP_RECORD, _key),
         EntitySpec("finding_read", FINDING_LIFECYCLE_MIGRATION_NAMESPACE, "finding_reads", GROUP_RECORD, lambda r: r["project_uuid"]),
         EntitySpec("session_version", ACCESS_TOKEN_MIGRATION_NAMESPACE, "session_versions", GROUP_RECORD, lambda r: r["username"]),
+        EntitySpec("saved_view", SAVED_VIEWS_MIGRATION_NAMESPACE, "saved_views", GROUP_RECORD, lambda r: r["code"]),
+        EntitySpec("saved_view_default", SAVED_VIEWS_MIGRATION_NAMESPACE, "saved_view_defaults", GROUP_RECORD, lambda r: (r["subject_kind"], r["subject"], r["project"])),
         EntitySpec("tmrescore_proposal", None, None, GROUP_RECORD, lambda r: r["project_name"]),
         EntitySpec("instance_metadata", LOCAL_STORE_MIGRATION_NAMESPACE, "store_metadata", GROUP_RECORD, lambda r: r["key"]),
     )
@@ -377,5 +384,20 @@ COLUMN_MAP: dict[str, dict[str, str]] = {
     "session_versions": {
         column: field("session_version", column)
         for column in ("username", "version", "revoked_at")
+    },
+    "saved_views": {
+        **{
+            column: field("saved_view", column)
+            for column in (
+                "code", "scope", "name", "project", "query", "owner",
+                "created_at", "updated_at", "updated_by",
+            )
+        },
+    },
+    "saved_view_defaults": {
+        column: field("saved_view_default", column)
+        for column in (
+            "subject_kind", "subject", "project", "code", "updated_at", "updated_by",
+        )
     },
 }

@@ -38,8 +38,9 @@ export interface BuildTaskVulnGroupListQueryInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
-    attributionAgeDays: number | null
-    attributionAgeMode: 'older' | 'younger'
+    cutoff: string
+    cutoffMode: 'before' | 'after'
+    cutoffBasis: 'published' | 'attributed'
     tmrescoreFilters: readonly TMRescoreProposalFilter[]
     allTMRescoreFilterValues: readonly TMRescoreProposalFilter[]
     meaningfulTMRescoreProposalIds: readonly string[]
@@ -128,8 +129,9 @@ export function buildTaskVulnGroupListQuery({
     notRescoredOnly,
     newFindingsOnly,
     awaitingReviewOnly,
-    attributionAgeDays,
-    attributionAgeMode,
+    cutoff,
+    cutoffMode,
+    cutoffBasis,
     tmrescoreFilters,
     allTMRescoreFilterValues,
     meaningfulTMRescoreProposalIds,
@@ -190,8 +192,9 @@ export function buildTaskVulnGroupListQuery({
         not_rescored: notRescoredOnly || parsedSearch.notRescoredOnly,
         new_findings: newFindingsOnly || parsedSearch.newFindingsOnly,
         awaiting_review: awaitingReviewOnly || parsedSearch.awaitingReviewOnly,
-        attributed_before_days: attributionAgeDays,
-        attribution_mode: attributionAgeMode,
+        cutoff: cutoff || '',
+        cutoff_mode: cutoffMode,
+        cutoff_basis: cutoffBasis,
         tmrescore: isTMRescoreRestricted ? tmrescore : [],
         // Proposal IDs are also needed when the selection is unrestricted so
         // the backend can return accurate WITH/WITHOUT facet counts.

@@ -26,7 +26,7 @@ DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL:-http://localhost:8000}
 DTVP_DEFAULT_PROJECT_FILTER=${DTVP_DEFAULT_PROJECT_FILTER:-}
 
 # Default attribution-age filter presets if not set (used by Project filters)
-DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
+DTVP_CUTOFF_PRESET_DAYS=${DTVP_CUTOFF_PRESET_DAYS:-7d,14d,28d}
 
 # Default dev-disable-auth flag if not set (used by frontend bootstrap)
 DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH:-false}
@@ -34,7 +34,7 @@ DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH:-false}
 # Keep nginx-to-Uvicorn connections alive across normal polling intervals.
 DTVP_UVICORN_KEEP_ALIVE_SECONDS=${DTVP_UVICORN_KEEP_ALIVE_SECONDS:-30}
 
-echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}, DTVP_DEFAULT_PROJECT_FILTER=${DTVP_DEFAULT_PROJECT_FILTER}, DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}, DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH}"
+echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}, DTVP_DEFAULT_PROJECT_FILTER=${DTVP_DEFAULT_PROJECT_FILTER}, DTVP_CUTOFF_PRESET_DAYS=${DTVP_CUTOFF_PRESET_DAYS}, DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH}"
 
 # Render frontend runtime config from the immutable build template on every
 # container start. Rendering index.html in place is not restart-safe because
@@ -47,7 +47,7 @@ if [ -f "${INDEX_TEMPLATE}" ]; then
         -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
         -e "s|\${DTVP_DEV_DISABLE_AUTH}|${DTVP_DEV_DISABLE_AUTH}|g" \
         -e "s|\${DTVP_DEFAULT_PROJECT_FILTER}|${DTVP_DEFAULT_PROJECT_FILTER}|g" \
-        -e "s|\${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|g" \
+        -e "s|\${DTVP_CUTOFF_PRESET_DAYS}|${DTVP_CUTOFF_PRESET_DAYS}|g" \
         "${INDEX_TEMPLATE}" > "${INDEX_TARGET}.tmp" && \
     mv "${INDEX_TARGET}.tmp" "${INDEX_TARGET}"
 elif [ -f "${INDEX_TARGET}" ]; then
@@ -56,7 +56,7 @@ elif [ -f "${INDEX_TARGET}" ]; then
         -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
         -e "s|\${DTVP_DEV_DISABLE_AUTH}|${DTVP_DEV_DISABLE_AUTH}|g" \
         -e "s|\${DTVP_DEFAULT_PROJECT_FILTER}|${DTVP_DEFAULT_PROJECT_FILTER}|g" \
-        -e "s|\${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|g" \
+        -e "s|\${DTVP_CUTOFF_PRESET_DAYS}|${DTVP_CUTOFF_PRESET_DAYS}|g" \
         "${INDEX_TARGET}" > "${INDEX_TARGET}.tmp" && \
     mv "${INDEX_TARGET}.tmp" "${INDEX_TARGET}"
 else

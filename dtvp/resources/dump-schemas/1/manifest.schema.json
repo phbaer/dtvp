@@ -1207,6 +1207,106 @@
             "parts"
           ],
           "additionalProperties": false
+        },
+        "saved_view": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string",
+              "pattern": "^dtvp\\.dump\\.saved_view/[0-9]+$"
+            },
+            "records": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^records/[a-z_]+/[a-z_]+-[0-9]{4,}\\.jsonl$"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "records": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "records"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "records",
+            "parts"
+          ],
+          "additionalProperties": false
+        },
+        "saved_view_default": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string",
+              "pattern": "^dtvp\\.dump\\.saved_view_default/[0-9]+$"
+            },
+            "records": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^records/[a-z_]+/[a-z_]+-[0-9]{4,}\\.jsonl$"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "records": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "records"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "records",
+            "parts"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

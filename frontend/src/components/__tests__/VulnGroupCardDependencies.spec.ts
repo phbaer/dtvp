@@ -43,6 +43,24 @@ describe('VulnGroupCardDependencies.vue', () => {
         expect(wrapper.text()).not.toContain('Add Component Team Tag')
     })
 
+    it('marks findings first seen after the list cutoff', () => {
+        const mountWith = (first_seen_ms: number | null, cutoff: string, mode: 'before' | 'after' = 'before') => mount(VulnGroupCardDependencies, {
+            props: { instances: [{ ...instances[0], first_seen_ms }] },
+            global: {
+                provide: { user: { role: 'ANALYST' }, teamMapping: ref({}), filterCutoff: ref({ cutoff, mode, basis: 'attributed' }) },
+                stubs: { DependencyChainViewer: true },
+            },
+        })
+        const june = Date.parse('2026-06-01T08:00:00Z')
+        const badge = mountWith(june, '2026-03-01').get('[data-testid="after-cutoff-badge"]')
+        expect(badge.text()).toBe('After cutoff')
+        expect(badge.attributes('title')).toContain('2026-06-01')
+        expect(mountWith(june, '2026-06-01').find('[data-testid="after-cutoff-badge"]').exists()).toBe(false)
+        expect(mountWith(null, '2026-03-01').find('[data-testid="after-cutoff-badge"]').exists()).toBe(false)
+        expect(mountWith(june, '').find('[data-testid="after-cutoff-badge"]').exists()).toBe(false)
+        expect(mountWith(june, '2026-03-01', 'after').find('[data-testid="after-cutoff-badge"]').exists()).toBe(false)
+    })
+
     it('marks only findings added after the assessment as new', () => {
         const mountWith = (is_new_finding: boolean) => mount(VulnGroupCardDependencies, {
             props: { instances: [{ ...instances[0], is_new_finding }] },

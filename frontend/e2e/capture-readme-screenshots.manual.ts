@@ -524,6 +524,25 @@ async function mockCommonShell(page: Page) {
         enabled: true, auto_fill: false, retry_after: 0, suggestion: null, sources: [],
     } }))
     await page.route('**/api/settings/team-groups', route => route.fulfill({ json: {} }))
+    // Saved views (ADR 0015): a personal and a shared view, the shared one the
+    // reviewers' default for all projects.
+    const docsView = (code: string, name: string, scope: string, project: string | null, query: string, editable = true) => ({
+        code, name, scope, project, query, owner: 'reviewer', created_at: '', updated_at: '', updated_by: 'reviewer', editable,
+    })
+    await page.route('**/api/views?**', route => route.fulfill({ json: {
+        views: [
+            docsView('k7m2p9qa', 'Release 7.2 freeze', 'personal', 'TestProject', 'awaiting_review=false&cutoff=2026-03-01&versions=2.0.0'),
+            docsView('r4t8w2ze', 'Platform triage', 'global', null, 'awaiting_review=false&lifecycle=OPEN&lifecycle=INCOMPLETE&teams=PlatformTeam'),
+        ],
+        defaults: {
+            user_project: null, user_all: null, role_project: null, role_all: null,
+            roles: { REVIEWER: { project: null, all: null }, ANALYST: { project: null, all: 'r4t8w2ze' } },
+            effective: { source: 'builtin', code: null, query: null },
+        },
+        role: 'REVIEWER',
+        can_manage_global: true,
+        limits: {},
+    } }))
 
     await page.route('**/auth/me', async (route) => {
         await route.fulfill({
@@ -1200,7 +1219,8 @@ async function mockCommonShell(page: Page) {
         },
         tmrescore: { WITH_PROPOSAL: 0, WITHOUT_PROPOSAL: docsGroupedVulns.length },
         automatic_assessment: automaticAssessmentCountsFor(docsGroupedVulns),
-        attribution_age: 30,
+        cutoff: 30,
+        cutoff_unknown: 0,
     }
     const docsTaskLog = [
         'Starting...',
@@ -1797,6 +1817,36 @@ test.describe('Capture README screenshots', () => {
         await page.waitForTimeout(500)
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/filter-awaiting-review.png')
         await sidebar.getByTestId('filter-preset-all').click()
+
+        // Saved views (ADR 0015), opened from the sidebar header.
+        await sidebar.getByTestId('saved-views-trigger').click()
+        const viewsMenu = page.getByTestId('saved-views-menu')
+        await expect(viewsMenu).toContainText('Release 7.2 freeze', { timeout: 10000 })
+        await page.waitForTimeout(300)
+        const sidebarBox = (await sidebar.boundingBox())!
+        const menuBox = (await viewsMenu.boundingBox())!
+        const left = Math.min(sidebarBox.x, menuBox.x) - 16
+        const top = Math.max(0, sidebarBox.y - 16)
+        await page.screenshot({
+            path: '../docs/screenshots/saved-views.png',
+            clip: {
+                x: Math.max(0, left),
+                y: top,
+                width: Math.max(sidebarBox.x + sidebarBox.width, menuBox.x + menuBox.width) + 16 - Math.max(0, left),
+                height: Math.min(menuBox.y + menuBox.height + 16, sidebarBox.y + 700) - top,
+            },
+        })
+        await page.keyboard.press('Escape')
+
+        // The cutoff with the purpose of each date (ADR 0015).
+        await sidebar.getByTestId('cutoff-date').fill('2026-03-01')
+        await sidebar.getByTestId('cutoff-date').dispatchEvent('change')
+        await sidebar.getByTestId('cutoff-help-toggle').click()
+        await expect(sidebar.getByTestId('cutoff-help')).toBeVisible()
+        await page.waitForTimeout(300)
+        await captureWithPadding(sidebar.getByTestId('cutoff-filter'), '../docs/screenshots/cutoff-help.png', 12)
+        await sidebar.getByTestId('cutoff-help-toggle').click()
+        await sidebar.getByTestId('cutoff-clear').click()
 
         // Below the rail breakpoint the same panel opens as a drawer.
         await page.setViewportSize({ width: 900, height: 1300 })

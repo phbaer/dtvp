@@ -36,6 +36,8 @@ def test_the_frozen_fixture_verifies(tmp_path):
     assert result.ok
     assert _codes(result.warnings) == {"W8"}
     assert result.records["assessment"] == 5
+    # Format minor 0: the entities added since are not listed, and none held.
+    assert (result.records["saved_view"], result.records["saved_view_default"]) == (0, 0)
 
 
 def test_inspect_reads_only_the_manifest(tmp_path):
@@ -189,7 +191,7 @@ def test_f9_tokens_without_the_feature(dump_path):
 
 
 def _newer_minor(manifest):
-    manifest["format_minor"] = 1
+    manifest["format_minor"] = schemas.FORMAT_MINOR + 1
     manifest["future_manifest_field"] = True
     manifest["entities"]["future_entity"] = {"schema": "dtvp.dump.future_entity/1", "records": 0, "parts": []}
 
@@ -213,7 +215,7 @@ def test_f6_newer_minor_is_refused_without_allow_unknown(dump_path):
     records[0]["future_field"] = "x"
 
     def only_minor(manifest):
-        manifest["format_minor"] = 1
+        manifest["format_minor"] = schemas.FORMAT_MINOR + 1
 
     build_dump(dump_path, records={"known_project": records}, change_manifest=only_minor)
     _refused(dump_path, "F6", allow_unknown=False)

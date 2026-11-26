@@ -616,6 +616,31 @@ class SqliteDumpSource:
                 "revoked_at": row["revoked_at"],
             }
 
+    def _saved_view(self, connection: sqlite3.Connection) -> Iterator[dict[str, Any]]:
+        if "saved_views" not in _tables(connection):
+            return
+        for row in connection.execute("SELECT * FROM saved_views ORDER BY code"):
+            yield {
+                column: row[column]
+                for column in (
+                    "code", "scope", "name", "project", "query", "owner",
+                    "created_at", "updated_at", "updated_by",
+                )
+            }
+
+    def _saved_view_default(self, connection: sqlite3.Connection) -> Iterator[dict[str, Any]]:
+        if "saved_view_defaults" not in _tables(connection):
+            return
+        for row in connection.execute(
+            "SELECT * FROM saved_view_defaults ORDER BY subject_kind, subject, project"
+        ):
+            yield {
+                column: row[column]
+                for column in (
+                    "subject_kind", "subject", "project", "code", "updated_at", "updated_by",
+                )
+            }
+
     def _code_analysis_application(
         self, connection: sqlite3.Connection
     ) -> Iterator[dict[str, Any]]:

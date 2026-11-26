@@ -22,8 +22,9 @@ const filters = (): FilterState => ({
     analysisFilters: [],
     cvssVersionMismatchOnly: false,
     assigneeFilter: '',
-    attributionAgeDays: null,
-    attributionAgeMode: 'older',
+    cutoff: '',
+    cutoffMode: 'before',
+    cutoffBasis: 'published',
 })
 
 const teamTagList: TeamEntry[] = [

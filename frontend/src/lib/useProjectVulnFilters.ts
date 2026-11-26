@@ -1,11 +1,11 @@
-import { computed, onMounted, onUnmounted, ref, watch, type ComputedRef } from 'vue'
+import { computed, onActivated, onMounted, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import type { Router } from 'vue-router'
 import type { FilterState } from './projectVulnFilterPresets'
 import {
-    normalizeAttributionAgeDays,
     normalizeFilterSelection,
     parseVulnSearchQuery,
 } from './vulnListIndex'
+import { legacyCutoff, normalizeCutoff, normalizeCutoffBasis, normalizeCutoffMode, type CutoffBasis, type CutoffMode } from './cutoff'
 import type { DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
 import type { AutomaticAssessmentFilter } from './vulnListIndex'
 import {
@@ -60,6 +60,12 @@ interface UseProjectVulnFiltersOptions {
     route: ProjectVulnFilterRoute
     router: ProjectVulnFilterRouter
     currentUserRole: ComputedRef<string>
+    /**
+     * The query string of the effective default view (ADR 0015) for a
+     * project opened without filter parameters; null for the built-in
+     * default. Failures fall back to the built-in default.
+     */
+    resolveDefaultQuery?: () => Promise<string | null>
 }
 
 const firstQueryValue = (value: unknown) => Array.isArray(value) ? value[0] : value
@@ -104,16 +110,47 @@ const FILTER_QUERY_KEYS = new Set([
     'not_rescored',
     'new_findings',
     'awaiting_review',
+    'cutoff',
+    'cutoff_mode',
+    'cutoff_basis',
+    // Retired (ADR 0015): read as a relative cutoff.
     'attributed_before_days',
     'attribution_mode',
     'attribution_age_days',
     'age_days',
 ])
 
+/** The parameters a saved view keeps: every filter except retired ones. */
+export const SAVED_VIEW_QUERY_KEYS = [...FILTER_QUERY_KEYS].filter(key => ![
+    'tag', 'cve', 'auto_assessment', 'attributed_before_days', 'attribution_mode', 'attribution_age_days', 'age_days',
+].includes(key))
+
+/** A query string as the route query object it stands for. */
+export const parseFilterQueryString = (query: string): Record<string, string | string[]> => {
+    const result: Record<string, string | string[]> = {}
+    new URLSearchParams(query.replace(/^\?/, '')).forEach((value, key) => {
+        const existing = result[key]
+        if (existing === undefined) result[key] = value
+        else result[key] = Array.isArray(existing) ? [...existing, value] : [existing, value]
+    })
+    return result
+}
+
+/** The filter parameters of a route query as a sorted query string. */
+export const filterQueryString = (query: Record<string, unknown>): string => {
+    const params = new URLSearchParams()
+    for (const key of [...SAVED_VIEW_QUERY_KEYS].sort()) {
+        const values = queryStringList(query[key])
+        for (const value of [...values].sort()) params.append(key, value)
+    }
+    return params.toString()
+}
+
 export function useProjectVulnFilters({
     route,
     router,
     currentUserRole,
+    resolveDefaultQuery,
 }: UseProjectVulnFiltersOptions) {
     const smartSearchInput = ref('')
     const {
@@ -146,8 +183,11 @@ export function useProjectVulnFilters({
     const notRescoredOnly = ref(false)
     const newFindingsOnly = ref(false)
     const awaitingReviewOnly = ref(false)
-    const attributionAgeDays = ref<number | null>(null)
-    const attributionAgeMode = ref<'older' | 'younger'>('older')
+    const cutoff = ref('')
+    const cutoffMode = ref<CutoffMode>('before')
+    const cutoffBasis = ref<CutoffBasis>('published')
+    // The query of the effective default view; Reset returns to it.
+    const defaultViewQuery = ref<string | null>(null)
     const lifecycleFilters = ref<string[]>([])
     const defaultTeamAssessmentFilter = computed(() => currentUserRole.value === 'REVIEWER' ? 'ANY' : 'MISSING')
     const teamAssessmentFilter = ref('ANY')
@@ -193,7 +233,7 @@ export function useProjectVulnFilters({
         normalizeFilterSelection(automaticAssessmentRescoreFilter.value)
     )
 
-    const resetFilters = () => {
+    const resetToBuiltInDefaults = () => {
         lifecycleFollowsRole = true
         teamAssessmentFollowsRole = true
         awaitingReviewFollowsRole = true
@@ -221,8 +261,9 @@ export function useProjectVulnFilters({
         notRescoredOnly.value = false
         newFindingsOnly.value = false
         awaitingReviewOnly.value = defaultAwaitingReviewOnly.value
-        attributionAgeDays.value = null
-        attributionAgeMode.value = 'older'
+        cutoff.value = ''
+        cutoffMode.value = 'before'
+        cutoffBasis.value = 'published'
         sortBy.value = 'rescored-severity'
         sortOrder.value = 'desc'
     }
@@ -240,13 +281,12 @@ export function useProjectVulnFilters({
             Object.entries(query).filter(([key]) => key !== 'sort' && key !== 'order'),
         ))
 
-    const hydrateFiltersFromQuery = () => {
-        const q = route.query
+    const hydrateFiltersFromQuery = (q: Record<string, unknown> = route.query) => {
         originalSeverityFilters.value = queryStringList(q.original_severity).flatMap(v => v.split(',')).map(v => v.trim().toUpperCase()).filter(Boolean)
         ssvcFilters.value = queryStringList(q.ssvc).flatMap(v => v.split(',')).map(v => v.trim().toUpperCase()).filter(Boolean)
         evidenceFilters.value = queryStringList(q.evidence).flatMap(v => v.split(',')).map(v => v.trim().toUpperCase()).filter(Boolean)
         if (!hasFilterQueryParams(q)) {
-            resetFilters()
+            resetToBuiltInDefaults()
             flushSmartSearchFilter()
             filtersReady.value = true
             return
@@ -324,12 +364,19 @@ export function useProjectVulnFilters({
         awaitingReviewOnly.value = legacyPendingReview || awaitingReviewParam === 'true'
             || (!awaitingReviewParam && !hasNarrowingQueryParams(q) && defaultAwaitingReviewOnly.value)
         awaitingReviewFollowsRole = awaitingReviewOnly.value === defaultAwaitingReviewOnly.value
-        const legacyDays = normalizeAttributionAgeDays(
+        const legacy = legacyCutoff(
             firstQueryValue(q.attributed_before_days ?? q.attribution_age_days ?? q.age_days),
+            queryString(q.attribution_mode),
         )
-        if (legacyDays != null) {
-            attributionAgeDays.value = legacyDays
-            attributionAgeMode.value = queryString(q.attribution_mode) === 'younger' ? 'younger' : 'older'
+        const linkCutoff = normalizeCutoff(queryString(q.cutoff))
+        if (linkCutoff) {
+            cutoff.value = linkCutoff
+            cutoffMode.value = normalizeCutoffMode(queryString(q.cutoff_mode))
+            cutoffBasis.value = normalizeCutoffBasis(queryString(q.cutoff_basis))
+        } else if (legacy) {
+            cutoff.value = legacy.cutoff
+            cutoffMode.value = legacy.cutoffMode
+            cutoffBasis.value = legacy.cutoffBasis
         }
         if (q.sort) sortBy.value = queryString(q.sort)
         if (q.order) sortOrder.value = queryString(q.order) as 'asc' | 'desc'
@@ -355,7 +402,7 @@ export function useProjectVulnFilters({
             if (value) query[key] = 'true'
             else delete query[key]
         }
-        for (const retired of ['tag', 'cve', 'auto_assessment', 'attributed_from', 'attributed_to', 'attributed_not', 'attribution_age_days', 'age_days']) {
+        for (const retired of ['tag', 'cve', 'auto_assessment', 'attributed_from', 'attributed_to', 'attributed_not', 'attribution_age_days', 'age_days', 'attributed_before_days', 'attribution_mode']) {
             delete query[retired]
         }
 
@@ -382,13 +429,13 @@ export function useProjectVulnFilters({
         setList('dependency', selectedDependencyFilters.value)
         setFlag('cvss_mismatch', cvssVersionMismatchOnly.value)
         setFlag('not_rescored', notRescoredOnly.value)
-        if (attributionAgeDays.value == null) {
-            delete query.attributed_before_days
-            delete query.attribution_mode
-        } else {
-            query.attributed_before_days = String(attributionAgeDays.value)
-            query.attribution_mode = attributionAgeMode.value
-        }
+        setText('cutoff', cutoff.value)
+        if (cutoff.value && cutoffMode.value === 'after') query.cutoff_mode = 'after'
+        else delete query.cutoff_mode
+        // Always named with a cutoff, so links and saved views show the same
+        // whatever becomes the default.
+        if (cutoff.value) query.cutoff_basis = cutoffBasis.value
+        else delete query.cutoff_basis
 
         // Legacy, removed in 2.1.0 (#342).
         setList('tmrescore', selectedTMRescoreProposalFilters.value)
@@ -464,8 +511,9 @@ export function useProjectVulnFilters({
         notRescoredOnly: notRescoredOnly.value,
         newFindingsOnly: newFindingsOnly.value,
         awaitingReviewOnly: awaitingReviewOnly.value,
-        attributionAgeDays: attributionAgeDays.value,
-        attributionAgeMode: attributionAgeMode.value,
+        cutoff: cutoff.value,
+        cutoffMode: cutoffMode.value,
+        cutoffBasis: cutoffBasis.value,
     }))
 
     const handleFilterUpdate = (newFilters: FilterState) => {
@@ -503,8 +551,9 @@ export function useProjectVulnFilters({
         notRescoredOnly.value = !!newFilters.notRescoredOnly
         newFindingsOnly.value = !!newFilters.newFindingsOnly
         awaitingReviewOnly.value = !!newFilters.awaitingReviewOnly
-        attributionAgeDays.value = normalizeAttributionAgeDays(newFilters.attributionAgeDays)
-        attributionAgeMode.value = newFilters.attributionAgeMode === 'younger' ? 'younger' : 'older'
+        cutoff.value = normalizeCutoff(newFilters.cutoff)
+        cutoffMode.value = normalizeCutoffMode(newFilters.cutoffMode)
+        cutoffBasis.value = normalizeCutoffBasis(newFilters.cutoffBasis)
     }
 
     watch(currentUserRole, (role, previousRole) => {
@@ -540,8 +589,9 @@ export function useProjectVulnFilters({
         notRescoredOnly,
         newFindingsOnly,
         awaitingReviewOnly,
-        attributionAgeDays,
-        attributionAgeMode,
+        cutoff,
+        cutoffMode,
+        cutoffBasis,
         sortBy,
         sortOrder,
     ], () => {
@@ -552,7 +602,85 @@ export function useProjectVulnFilters({
         }, 200)
     }, { deep: true })
 
-    onMounted(hydrateFiltersFromQuery)
+    // The filter state as a saved view keeps it: the canonical query string
+    // of the filter parameters.
+    // Filters at their built-in value are left out: a missing parameter
+    // means that value.
+    const savedViewQuery = () => {
+        const query = filterQuery()
+        const unrestricted: Record<string, readonly string[]> = {
+            analysis: DEFAULT_ANALYSIS_FILTERS,
+            dependency: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'],
+            tmrescore: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
+            automatic_assessment: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+            automatic_assessment_outcome: AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS.map(option => option.value),
+            automatic_assessment_rescore: AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS.map(option => option.value),
+            sort: ['rescored-severity'],
+            order: ['desc'],
+        }
+        for (const [key, values] of Object.entries(unrestricted)) {
+            if (sameSelection(queryStringList(query[key]), values)) delete query[key]
+        }
+        return filterQueryString(query)
+    }
+
+    const nonFilterQuery = () => Object.fromEntries(
+        Object.entries(route.query).filter(([key]) => !FILTER_QUERY_KEYS.has(key)),
+    )
+
+    /** Show a saved view: its filters replace the current ones. */
+    const applyFilterQuery = (query: string) => {
+        const parsed = parseFilterQueryString(query)
+        // What the view leaves out is at its built-in value.
+        resetToBuiltInDefaults()
+        hydrateFiltersFromQuery(parsed)
+        router.replace({ path: route.path || '/', query: { ...nonFilterQuery(), ...parsed } as any }).catch(() => {})
+    }
+
+    /** Reset returns to the effective default view, else the built-in one. */
+    const resetFilters = () => {
+        if (defaultViewQuery.value != null) {
+            applyFilterQuery(defaultViewQuery.value)
+            return
+        }
+        resetToBuiltInDefaults()
+    }
+
+    const loadDefaultView = async () => {
+        if (!resolveDefaultQuery) return null
+        try {
+            defaultViewQuery.value = await resolveDefaultQuery()
+        } catch {
+            defaultViewQuery.value = null
+        }
+        return defaultViewQuery.value
+    }
+
+    const hydrateOnOpen = async () => {
+        if (!hasFilterQueryParams(route.query) && resolveDefaultQuery) {
+            const query = await loadDefaultView()
+            // The user may have chosen filters meanwhile.
+            if (filtersReady.value) return
+            if (query != null) {
+                applyFilterQuery(query)
+                return
+            }
+        } else {
+            void loadDefaultView()
+        }
+        hydrateFiltersFromQuery()
+    }
+
+    onMounted(() => { void hydrateOnOpen() })
+    // A kept-alive project view opened again through a link with other
+    // filters (a short link) takes them.
+    onActivated(() => {
+        if (!filtersReady.value) return
+        if (filterQueryString(route.query) === filterQueryString(filterQuery())) return
+        if (!hasFilterQueryParams(route.query)) return
+        resetToBuiltInDefaults()
+        hydrateFiltersFromQuery()
+    })
 
     onUnmounted(() => {
         if (filterUrlSyncTimer) {
@@ -584,8 +712,9 @@ export function useProjectVulnFilters({
         notRescoredOnly,
         newFindingsOnly,
         awaitingReviewOnly,
-        attributionAgeDays,
-        attributionAgeMode,
+        cutoff,
+        cutoffMode,
+        cutoffBasis,
         lifecycleFilters,
         teamAssessmentFilter,
         inconsistencyReasonFilters,
@@ -604,6 +733,11 @@ export function useProjectVulnFilters({
         filterUrl,
         copyFilterUrl,
         resetFilters,
+        resetToBuiltInDefaults,
+        savedViewQuery,
+        applyFilterQuery,
+        defaultViewQuery,
+        loadDefaultView,
         filterState,
         handleFilterUpdate,
         defaultTeamAssessmentFilter,

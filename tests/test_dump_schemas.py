@@ -54,7 +54,10 @@ def test_the_fixture_manifest_and_records_validate():
     assert _errors("manifest", manifest) == []
     # The manifest is written with sorted keys; readers process the entities
     # in the fixed order of schemas.ENTITY_ORDER.
-    assert set(manifest["entities"]) == set(schemas.ENTITY_ORDER)
+    # The frozen fixture is format minor 0: without the entities added later.
+    assert set(manifest["entities"]) == set(schemas.ENTITY_ORDER) - set(
+        schemas.OPTIONAL_ENTITIES
+    )
     for entity in schemas.ENTITY_ORDER:
         for record in fixture_records(entity):
             assert _errors(entity, record) == [], (entity, record)
@@ -120,7 +123,7 @@ def test_the_fixture_covers_the_listed_cases():
     assert any("payload_raw" in r for r in fixture_records("outbox_entry"))
     assert fixture_manifest()["config"]["user_roles"] == {"absent": True}
     for entity in schemas.ENTITY_ORDER:
-        if entity != "source_project_vulnerability":
+        if entity != "source_project_vulnerability" and entity not in schemas.OPTIONAL_ENTITIES:
             assert fixture_records(entity), entity
 
 

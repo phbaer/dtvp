@@ -38,6 +38,7 @@ from .logic import (
     without_historical_blocks,
 )
 from .task_group_query_services import build_task_group_query_index
+from .first_seen import annotate_first_seen, parse_timestamp_ms
 
 
 @dataclass(frozen=True)
@@ -124,34 +125,7 @@ def _unique_non_empty_strings(values: List[Any]) -> List[str]:
     return unique
 
 
-def _parse_attribution_timestamp_ms(value: Any) -> Optional[int]:
-    if value is None or value == "":
-        return None
-
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if not math.isfinite(value) or value <= 0:
-            return None
-        return int(value * 1000 if value < 1_000_000_000_000 else value)
-
-    raw = str(value).strip()
-    if not raw:
-        return None
-
-    try:
-        numeric = float(raw)
-        if math.isfinite(numeric) and numeric > 0:
-            return int(numeric * 1000 if numeric < 1_000_000_000_000 else numeric)
-    except ValueError:
-        pass
-
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return int(parsed.timestamp() * 1000)
+_parse_attribution_timestamp_ms = parse_timestamp_ms
 
 
 def _cvss_major_version(vector: Any) -> Optional[str]:
@@ -668,6 +642,7 @@ def _build_group_list_metadata(
     attributed_on_ms_numbers = [int(value) for value in attributed_on_ms_values]
     normalized_tags = _normalize_group_tags(group.get("tags") or [], team_mapping)
     new_finding_count = refresh_new_finding_flags(group)
+    first_seen = annotate_first_seen(group)
     summary = _build_assessment_summary(group)
     # The wildcard mapping uses Unassigned as an ownership fallback. It is a
     # reporting label, not a team that can provide an independent assessment.
@@ -722,6 +697,7 @@ def _build_group_list_metadata(
         "oldest_attributed_on_ms": (
             min(attributed_on_ms_numbers) if attributed_on_ms_numbers else None
         ),
+        **first_seen,
         "instance_count": len(components),
         "dependency_relationship": _dependency_relationship(components),
         "cvss_version_mismatch": _has_cvss_version_mismatch(group),
@@ -829,6 +805,8 @@ def _summarize_component(component: Dict[str, Any]) -> Dict[str, Any]:
         "vulnerability_uuid": component.get("vulnerability_uuid"),
         "finding_uuid": component.get("finding_uuid"),
         "attributed_on": component.get("attributed_on"),
+        "first_seen_ms": component.get("first_seen_ms"),
+        "published_ms": component.get("published_ms"),
         "analysis_state": component.get("analysis_state"),
         "justification": component.get("justification"),
         "is_suppressed": component.get("is_suppressed", False),

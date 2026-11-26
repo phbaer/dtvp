@@ -357,6 +357,28 @@ def populate(instance: Instance) -> dict:
         workflow_id="individual-assessment",
     )
 
+    # Saved views and defaults (ADR 0015).
+    from dtvp.saved_view_services import SavedViewStore
+
+    views = SavedViewStore(instance.database)
+    mine = views.create(
+        user="alice", role="ANALYST", name="My open", scope="personal",
+        project="Imaging Suite", query="lifecycle=OPEN&cutoff=2026-11-01",
+    )
+    shared = views.create(
+        user="rita", role="REVIEWER", name="Release 7.1", scope="global",
+        project=None, query="awaiting_review=false&versions=7.1.0",
+    )
+    views.set_default(
+        user="alice", role="ANALYST", target="user", target_role=None,
+        project="Imaging Suite", code=mine.code,
+    )
+    views.set_default(
+        user="rita", role="REVIEWER", target="role", target_role="ANALYST",
+        project=None, code=shared.code,
+    )
+    keys["saved_views"] = (mine.code, shared.code)
+
     save_tmrescore_project_cache({"Imaging Suite": {"status": "completed", "proposals": [{"score": 5.3}]}})
     data = instance.root / "data"
     (data / "team_mapping.json").write_bytes(b'{"lib-1": "Core"}\n')

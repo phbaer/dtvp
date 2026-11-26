@@ -16,7 +16,7 @@ from referencing import Registry, Resource
 FORMAT = "dtvp.dump"
 FORMAT_VERSION = 1
 # The highest minor version this reader knows.
-FORMAT_MINOR = 0
+FORMAT_MINOR = 1
 FEATURE_CREDENTIALS = "credentials"
 KNOWN_FEATURES = frozenset({FEATURE_CREDENTIALS})
 SCOPE_INSTANCE = "instance"
@@ -42,12 +42,18 @@ ENTITY_ORDER: tuple[str, ...] = (
     "finding_presence",
     "finding_read",
     "session_version",
+    "saved_view",
+    "saved_view_default",
     "tmrescore_proposal",
     "instance_metadata",
 )
 
 # The current schema version of each entity (``dtvp.dump.<entity>/<n>``).
 ENTITY_SCHEMA_VERSIONS: dict[str, int] = {name: 1 for name in ENTITY_ORDER}
+
+# Entities added within dump version 1: a dump of an older minor version
+# does not list them and holds none.
+OPTIONAL_ENTITIES: frozenset[str] = frozenset({"saved_view", "saved_view_default"})
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "resources" / "dump-schemas" / "1"
 SCHEMA_ID_PREFIX = "urn:dtvp:dump:1:"

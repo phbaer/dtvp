@@ -13,7 +13,7 @@ from typing import Annotated, Any, Awaitable, Callable, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .ssvc_services import (
     get_models as get_ssvc_models,
@@ -121,6 +121,7 @@ from .rescore_rule_services import (
     build_rescore_rule_sync_preview,
 )
 from .query_execution_services import QueryCapacityError, QuerySupersededError
+from .first_seen import normalize_cutoff
 from .task_group_query_services import (
     get_or_build_task_group_query_index,
     query_task_groups,
@@ -229,8 +230,18 @@ class BulkWorkflowFilters(BaseModel):
     not_rescored: bool = False
     new_findings: bool = False
     awaiting_review: bool = False
+    cutoff: str = ""
+    cutoff_mode: Literal["before", "after"] = "before"
+    # Empty: published, or attributed for the retired attribution-age filter.
+    cutoff_basis: Literal["", "published", "attributed"] = ""
+    # Retired (ADR 0015): read as ``cutoff=<N>d`` when no cutoff is given.
     attributed_before_days: Optional[int] = None
     attribution_mode: str = "older"
+
+    @field_validator("cutoff")
+    @classmethod
+    def _valid_cutoff(cls, value: str) -> str:
+        return normalize_cutoff(value)
     tmrescore: list[str] = Field(default_factory=list)
     tmrescore_proposal_ids: list[str] = Field(default_factory=list)
     automatic_assessment: list[str] = Field(default_factory=list)
@@ -1232,6 +1243,9 @@ GROUP_QUERY_DEFAULTS: dict[str, Any] = {
     "not_rescored": False,
     "new_findings": False,
     "awaiting_review": False,
+    "cutoff": "",
+    "cutoff_mode": "before",
+    "cutoff_basis": "",
     "attributed_before_days": None,
     "attribution_mode": "older",
     "tmrescore": [],
@@ -1417,6 +1431,9 @@ def _register_task_routes(
         not_rescored: bool = False,
         new_findings: bool = False,
         awaiting_review: bool = False,
+        cutoff: str = "",
+        cutoff_mode: str = Query("before", pattern="^(before|after)$"),
+        cutoff_basis: str = Query("", pattern="^(|published|attributed)$"),
         attributed_before_days: int | None = Query(default=None, ge=1),
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
@@ -1473,6 +1490,9 @@ def _register_task_routes(
                     "not_rescored": not_rescored,
                     "new_findings": new_findings,
                     "awaiting_review": awaiting_review,
+                    "cutoff": cutoff,
+                    "cutoff_mode": cutoff_mode,
+                    "cutoff_basis": cutoff_basis,
                     "attributed_before_days": attributed_before_days,
                     "attribution_mode": attribution_mode,
                     "tmrescore": split_query_values(tmrescore),
@@ -1555,6 +1575,9 @@ def _register_task_routes(
         not_rescored: bool = False,
         new_findings: bool = False,
         awaiting_review: bool = False,
+        cutoff: str = "",
+        cutoff_mode: str = Query("before", pattern="^(before|after)$"),
+        cutoff_basis: str = Query("", pattern="^(|published|attributed)$"),
         attributed_before_days: int | None = Query(default=None, ge=1),
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
@@ -1606,6 +1629,9 @@ def _register_task_routes(
                     "not_rescored": not_rescored,
                     "new_findings": new_findings,
                     "awaiting_review": awaiting_review,
+                    "cutoff": cutoff,
+                    "cutoff_mode": cutoff_mode,
+                    "cutoff_basis": cutoff_basis,
                     "attributed_before_days": attributed_before_days,
                     "attribution_mode": attribution_mode,
                     "tmrescore": split_query_values(tmrescore),
@@ -2054,6 +2080,9 @@ def _filter_bulk_workflow_groups(
         not_rescored=filters.not_rescored,
         new_findings=filters.new_findings,
         awaiting_review=filters.awaiting_review,
+        cutoff=filters.cutoff,
+        cutoff_mode=filters.cutoff_mode,
+        cutoff_basis=filters.cutoff_basis,
         attributed_before_days=filters.attributed_before_days,
         attribution_mode=filters.attribution_mode,
         tmrescore=filters.tmrescore,

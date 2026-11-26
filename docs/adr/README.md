@@ -18,3 +18,4 @@ Decision status and implementation status are tracked separately in each record.
 | [0010: Version overrides of an assessment](0010-version-overrides.md) | Accepted; amends decisions 2 and 6 of 0003 | In progress (steps 0-6) |
 | [0011: Check the sink before writing; edits made there go to an inbox](0011-check-the-sink-before-writing.md) | Accepted; amends decision 3 of 0003 | Not started (planned for 2.1.0) |
 | [0012: The team mapping is organised by team](0012-team-centric-mapping.md) | Accepted | Implemented |
+| [0015: A cutoff on the published or first-attributed date, and saved views with short links](0015-saved-views-cutoff-and-short-links.md) | Accepted | Implemented on branch `feat/saved-views-cutoff` (PR #360), not merged |

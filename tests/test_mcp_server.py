@@ -172,6 +172,36 @@ async def test_search_filters_vulnerabilities_awaiting_review(service, project):
     assert narrowed["matching"] == 0
 
 
+async def test_search_takes_a_cutoff_per_basis(service, project):
+    # Without any date: listed, and counted as date unknown.
+    result = await service.search_vulnerabilities(
+        _token(["read"]), project="TestApp", cutoff="2026-03-01"
+    )
+    assert result["matching"] == 1 and result["date_unknown"] == 1
+    assert result["cutoff_basis"] == "published"
+    for finding in (project["p1"][0], project["p2"][0]):
+        finding["vulnerability"]["published"] = "2025-12-01T00:00:00Z"
+    project["p1"][0]["attribution"] = {"attributedOn": "2026-06-01T00:00:00Z"}
+    project["p2"][0]["attribution"] = {"attributedOn": "2026-06-02T00:00:00Z"}
+    main.tasks.clear()
+    published = await service.search_vulnerabilities(
+        _token(["read"]), project="TestApp", cutoff="2026-03-01"
+    )
+    assert published["matching"] == 1 and published["date_unknown"] == 0
+    attributed = await service.search_vulnerabilities(
+        _token(["read"]), project="TestApp", cutoff="2026-03-01", cutoff_basis="attributed"
+    )
+    assert attributed["matching"] == 0 and attributed["cutoff_basis"] == "attributed"
+    after = await service.search_vulnerabilities(
+        _token(["read"]), project="TestApp", cutoff="2026-03-01",
+        cutoff_mode="after", cutoff_basis="attributed",
+    )
+    assert after["matching"] == 1
+    for bad in ({"cutoff": "soon"}, {"cutoff": "2026-03-01", "cutoff_basis": "discovered"}):
+        with pytest.raises(McpToolError):
+            await service.search_vulnerabilities(_token(["read"]), project="TestApp", **bad)
+
+
 async def test_unknown_project_and_vulnerability_are_explained(service):
     with pytest.raises(McpToolError, match="Unknown project"):
         await service.search_vulnerabilities(_token(["read"]), project="Nope")

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dtvp:dump:1:saved_view_default",
+  "title": "dtvp.dump.saved_view_default/1: a default view of a user or a role, for a project or all projects ('')",
+  "type": "object",
+  "properties": {
+    "subject_kind": {
+      "enum": [
+        "user",
+        "role"
+      ]
+    },
+    "subject": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    },
+    "project": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[23456789abcdefghjkmnpqrstuvwxyz]{8}$"
+    },
+    "updated_at": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "updated_by": {
+      "$ref": "urn:dtvp:dump:1:common#/$defs/non_empty_string"
+    }
+  },
+  "required": [
+    "subject_kind",
+    "subject",
+    "project",
+    "code",
+    "updated_at",
+    "updated_by"
+  ],
+  "additionalProperties": false
+}

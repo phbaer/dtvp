@@ -357,6 +357,9 @@ class McpToolService:
         severity: list[str] | None = None,
         analysis_state: list[str] | None = None,
         awaiting_review: bool = False,
+        cutoff: str = "",
+        cutoff_mode: str = "before",
+        cutoff_basis: str = "",
         limit: int = 25,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -375,9 +378,12 @@ class McpToolService:
                 original_severity=[str(v).upper() for v in severity or []],
                 analysis=[str(v).upper() for v in analysis_state or []],
                 awaiting_review=bool(awaiting_review),
+                cutoff=str(cutoff or ""),
+                cutoff_mode=str(cutoff_mode or "before"),
+                cutoff_basis=str(cutoff_basis or ""),
                 limit=limit,
                 offset=offset,
-                include_counts=False,
+                include_counts=bool(cutoff),
             )
         except ValueError as exc:
             raise McpToolError(str(exc)) from exc
@@ -403,8 +409,22 @@ class McpToolService:
                     "new_findings": int(metadata.get("new_finding_count") or 0),
                 }
             )
+        cutoff_fields = (
+            {
+                "cutoff_basis": window.get("cutoff_basis"),
+                "date_unknown": int(
+                    ((window.get("counts") or {}).get("filtered") or {}).get(
+                        "cutoff_unknown"
+                    )
+                    or 0
+                )
+            }
+            if cutoff
+            else {}
+        )
         return {
             "project": task.get("_project_name"),
+            **cutoff_fields,
             "matching": window.get("filtered", len(items)),
             "project_total": window.get("total", len(items)),
             "offset": offset,
@@ -1107,6 +1127,9 @@ def build_mcp_server(service: McpToolService) -> Any:
         severity: list[str] | None = None,
         analysis_state: list[str] | None = None,
         awaiting_review: bool = False,
+        cutoff: str = "",
+        cutoff_mode: str = "before",
+        cutoff_basis: str = "",
         limit: int = 25,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -1117,7 +1140,14 @@ def build_mcp_server(service: McpToolService) -> Any:
         analysis_state: NOT_SET, IN_TRIAGE, EXPLOITABLE, NOT_AFFECTED,
         FALSE_POSITIVE, RESOLVED. awaiting_review: only vulnerabilities with
         an assessment submitted for review and not yet approved (rows with
-        pending_review), whatever their lifecycle. Values within a filter are
+        pending_review), whatever their lifecycle. cutoff: a date YYYY-MM-DD
+        (UTC) or N days before today as "30d"; lists vulnerabilities with a
+        finding dated on or before it (cutoff_mode "before", the default) or
+        after it ("after"). cutoff_basis picks the date: "published" (the
+        default; publication by the source, earliest across aliases) or
+        "attributed" (first attributed by Dependency-Track to that component
+        in any version of the project). Findings without a date are listed
+        and counted in date_unknown. Values within a filter are
         alternatives; different filters must all match. Returns at most 100
         rows per call; page with offset.
         """
@@ -1131,6 +1161,9 @@ def build_mcp_server(service: McpToolService) -> Any:
             severity=severity,
             analysis_state=analysis_state,
             awaiting_review=awaiting_review,
+            cutoff=cutoff,
+            cutoff_mode=cutoff_mode,
+            cutoff_basis=cutoff_basis,
             limit=limit,
             offset=offset,
         )

@@ -11,8 +11,8 @@ import {
     computeListTeamCounts,
     getGroupDependencyRelationship,
     hasTMRescoreProposalForGroup,
-    matchesAttributionAgeFilter,
-    matchesCompiledAttributionAgeFilter,
+    matchesCutoffFilter,
+    matchesCompiledCutoffFilter,
     matchesCompiledDependencySelection,
     matchesCompiledLifecycleFilter,
     matchesCompiledListFilters,
@@ -374,8 +374,8 @@ describe('vulnListIndex', () => {
             componentFilter: 'LIBRARY',
             assigneeFilter: '',
             versionFilterList: ['1.0.0'],
-            attributionAgeDays: 28,
-            attributionAgeMode: 'older',
+            cutoff: '28d',
+            cutoffMode: 'before',
         }, nowMs)
 
         expect(compiled.dependencyFilterSet.has('DIRECT')).toBe(true)
@@ -383,7 +383,7 @@ describe('vulnListIndex', () => {
         expect(compiled.includesTmrescoreProposal).toBe(false)
         expect(matchesCompiledDependencySelection(item, compiled)).toBe(true)
         expect(matchesCompiledTMRescoreSelection(item, compiled)).toBe(true)
-        expect(matchesCompiledAttributionAgeFilter(item, compiled)).toBe(true)
+        expect(matchesCompiledCutoffFilter(item, compiled)).toBe(true)
         expect(matchesCompiledListFilters(item, compiled)).toBe(true)
 
         const emptySelections = compileVulnListFilters({})
@@ -396,10 +396,11 @@ describe('vulnListIndex', () => {
         const invalidAge = compileVulnListFilters({
             dependencyFilter: 'DIRECT',
             tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
-            attributionAgeDays: 'not-a-number',
+            cutoff: 'not-a-date',
         }, nowMs)
-        expect(matchesCompiledAttributionAgeFilter(item, invalidAge)).toBe(false)
-        expect(matchesCompiledListFilters(item, invalidAge)).toBe(false)
+        // An invalid cutoff is no cutoff.
+        expect(matchesCompiledCutoffFilter(item, invalidAge)).toBe(true)
+        expect(matchesCompiledListFilters(item, invalidAge)).toBe(true)
     })
 
     it('matches findings attributed before the selected age threshold', () => {
@@ -450,11 +451,11 @@ describe('vulnListIndex', () => {
         expect(parseAttributionTimestamp(String(Math.floor(oldMs / 1000)))).toBe(oldMs)
         expect(parseAttributionTimestamp(new Date(oldMs).toISOString())).toBe(oldMs)
         expect(item.oldestAttributedOnMs).toBe(oldMs)
-        expect(matchesAttributionAgeFilter(item, 28, 'older', nowMs)).toBe(true)
-        expect(matchesAttributionAgeFilter(item, 30, 'older', nowMs)).toBe(false)
+        expect(!!matchesCutoffFilter(item, '28d', 'before', [], nowMs, 'attributed')).toBe(true)
+        expect(!!matchesCutoffFilter(item, '30d', 'before', [], nowMs, 'attributed')).toBe(false)
     })
 
-    it('does not match the attribution age filter when timestamps are missing or invalid', () => {
+    it('shows findings without a first-seen date under any cutoff, as unknown', () => {
         const item = buildVulnListItem(makeGroup({
             affected_versions: [
                 {
@@ -482,7 +483,8 @@ describe('vulnListIndex', () => {
         }), {}, {})
 
         expect(item.attributedOnMsValues).toEqual([])
-        expect(matchesAttributionAgeFilter(item, 28, 'older', Date.UTC(2026, 5, 29))).toBe(false)
+        // Without a first-seen date the vulnerability is shown, as unknown.
+        expect(matchesCutoffFilter(item, '28d', 'before', [], Date.UTC(2026, 5, 29))).toBe('unknown')
     })
 
     it('matches younger and older attribution ages using the mode', () => {
@@ -542,10 +544,10 @@ describe('vulnListIndex', () => {
             ],
         }), {}, {})
 
-        expect(matchesAttributionAgeFilter(item, 14, 'older', nowMs)).toBe(true)
-        expect(matchesAttributionAgeFilter(item, 14, 'younger', nowMs)).toBe(false)
-        expect(matchesAttributionAgeFilter(recentOnlyItem, 14, 'younger', nowMs)).toBe(true)
-        expect(matchesAttributionAgeFilter(recentOnlyItem, 14, 'older', nowMs)).toBe(false)
+        expect(!!matchesCutoffFilter(item, '14d', 'before', [], nowMs, 'attributed')).toBe(true)
+        expect(!!matchesCutoffFilter(item, '14d', 'after', [], nowMs, 'attributed')).toBe(false)
+        expect(!!matchesCutoffFilter(recentOnlyItem, '14d', 'after', [], nowMs, 'attributed')).toBe(true)
+        expect(!!matchesCutoffFilter(recentOnlyItem, '14d', 'before', [], nowMs, 'attributed')).toBe(false)
     })
 
     it('flags and filters vulnerabilities without a rescored score or vector', () => {

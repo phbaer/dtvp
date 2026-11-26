@@ -65,8 +65,9 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
     inconsistencyReasonFilter: [],
     versionFilterList: [],
     cvssVersionMismatchOnly: false,
-    attributionAgeDays: null,
-    attributionAgeMode: 'older',
+    cutoff: '',
+    cutoffMode: 'before',
+    cutoffBasis: 'published',
     lifecycleFilters: ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL', 'READY_FOR_APPROVAL'],
     analysisFilters: ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED'],
     sortBy: 'score',
@@ -556,7 +557,7 @@ describe('vulnListViewModel', () => {
         expect(index.groupLookup.groupById.get('CVE-2026-0002')).toBe(secondGroup)
     })
 
-    it('applies attribution age to matching rows and analysis counts consistently', () => {
+    it('applies the first-seen cutoff to matching rows and analysis counts consistently', () => {
         const oldItem = makeGroup({ id: 'CVE-2026-0001' })
         const recentItem = makeGroup({
             id: 'CVE-2026-0002',
@@ -588,12 +589,13 @@ describe('vulnListViewModel', () => {
 
         const items = buildVulnListItems([oldItem, recentItem], {}, {})
         const view = deriveVulnListViewModel(items, baseFilters({
-            attributionAgeDays: 28,
-            attributionAgeMode: 'older',
+            cutoff: '28d',
+            cutoffMode: 'before',
+            cutoffBasis: 'attributed',
         }))
 
         expect(view.matchingItems.map(item => item.id)).toEqual(['CVE-2026-0001'])
-        expect(view.attributionAgeCount).toBe(1)
+        expect(view.cutoffCount).toBe(1)
         expect(view.analysisCounts.NOT_SET).toBe(1)
     })
 
@@ -635,6 +637,6 @@ describe('vulnListViewModel', () => {
         expect(counts.analysis.FALSE_POSITIVE).toBe(0)
         expect(counts.dependency_relationship).toEqual({ direct: 1, transitive: 0, unknown: 0 })
         expect(counts.team_tags).toEqual({ 'team-a': { open: 1, assessed: 0 } })
-        expect(counts.attribution_age).toBe(1)
+        expect(counts.cutoff).toBe(1)
     })
 })

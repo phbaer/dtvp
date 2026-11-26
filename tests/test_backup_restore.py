@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from dtvp.assessment_outbox_services import AssessmentOutboxStore
-from dtvp.backup import restore, sqlite_target
+from dtvp.backup import restore, schemas, sqlite_target
 from dtvp.backup.errors import DumpError
 from dtvp.backup.export import export_dump
 from dtvp.backup.restore import RestoreOptions, recover, restore_dump, verify_deep
@@ -164,6 +164,32 @@ def test_a_restore_ends_restored_sessions_and_revives_no_revoked_one(
         "gone", "replaced", "c-new",
     )
     assert lifecycle.last_read("p-lifecycle")["went"] == {"replaced": 1}
+
+
+def test_saved_views_and_defaults_come_back(source_dump, tmp_path, monkeypatch):
+    target = _fresh(monkeypatch, tmp_path / "target")
+    assert restore_dump(source_dump.dump).ok
+    from dtvp.saved_view_services import SavedViewStore
+
+    views = SavedViewStore(target.database)
+    # Every view's code still resolves.
+    assert {view.name for view in views.list_for("alice", "Imaging Suite")} == {"My open", "Release 7.1"}
+    defaults = views.defaults_for("alice", "ANALYST", "Imaging Suite")
+    assert defaults["effective"]["source"] == "user"
+    assert defaults["effective"]["query"] == "cutoff=2026-11-01&lifecycle=OPEN"
+    assert views.defaults_for("carl", "ANALYST", "Other")["effective"]["name"] == "Release 7.1"
+
+
+def test_a_dump_of_format_minor_0_restores_without_saved_views(tmp_path, monkeypatch):
+    # The frozen fixture predates saved views: it does not list them.
+    manifest = json.loads((FIXTURE_V1 / "manifest.json").read_text())
+    assert manifest["format_minor"] == 0
+    assert "saved_view" not in manifest["entities"]
+    dump = build_dump(tmp_path / "minor0.zip")
+    target = _fresh(monkeypatch, tmp_path / "target")
+    assert restore_dump(dump, options=RestoreOptions(accept_dt_url_change=True)).ok
+    with target.sql() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM saved_views").fetchone()[0] == 0
 
 
 def test_a_new_revision_gets_an_id_above_the_sequence(source_dump, tmp_path, monkeypatch):
@@ -514,7 +540,7 @@ def test_f6_newer_minor_needs_allow_unknown(tmp_path, monkeypatch):
     records[0]["future_field"] = 1
 
     def newer(manifest):
-        manifest["format_minor"] = 1
+        manifest["format_minor"] = schemas.FORMAT_MINOR + 1
 
     dump = build_dump(tmp_path / "newer.zip", records={"known_project": records}, change_manifest=newer)
     _refused("F6", dump)

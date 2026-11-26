@@ -122,7 +122,7 @@ Retired in ADR 0004 step 5: `DTVP_DT_PROJECT_LIST_TTL_SECONDS` (a stored project
 | `DTVP_CORS_ORIGINS` | Comma-separated CORS origins. A set value replaces the built-in list (the localhost development origins, `DTVP_FRONTEND_URL`, and the host name) for the application; the startup page shown while DTVP loads adds it to that list instead | unset |
 | `VITE_DTVP_API_URL` | Frontend API base override, read by the Vite dev server and at frontend build time only. Setting `DTVP_API_URL` on the container has no effect | empty |
 | `DTVP_DEFAULT_PROJECT_FILTER` | Dashboard default project filter | empty |
-| `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` | Attribution-age presets | `7d,14d,28d` |
+| `DTVP_CUTOFF_PRESET_DAYS` | Rolling presets of the [cutoff](review-workflows.md#cutoff), in days before today. Replaces `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` (breaking: renamed without an alias in the release with saved views; the old name is ignored) | `7d,14d,28d` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
 | `BUILD_NUMBER` | Compose image build number, baked into DTVP startup logs | `unknown` |
 

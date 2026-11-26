@@ -35,6 +35,29 @@ const matchesLifecycle = (group: GroupedTaskItem, filters: string[]) => {
     );
 };
 
+// The cutoff (ADR 0015), as dtvp/first_seen.py decides it from
+// list_metadata.cutoff_dates[basis].
+const cutoffEnd = (cutoff: string) => {
+    const relative = /^(\d+)d$/.exec(cutoff);
+    const day = relative
+        ? new Date(Date.now() - Number(relative[1]) * 86400000).toISOString().slice(0, 10)
+        : cutoff;
+    return Date.parse(`${day}T00:00:00Z`) + 86400000;
+};
+const cutoffStatus = (group: GroupedTaskItem, cutoff: string, mode: string, versions: string[], basis = 'published') => {
+    if (!cutoff) return 'known';
+    const end = cutoffEnd(cutoff);
+    const scope = versions.length ? new Set(versions.map(v => v.toLowerCase())) : null;
+    const dates = group.list_metadata?.cutoff_dates?.[basis] || { by_version: {}, unknown: [] };
+    const byVersion: Record<string, number[]> = dates.by_version || {};
+    for (const [label, [low, high]] of Object.entries(byVersion)) {
+        if (scope && !scope.has(label.toLowerCase())) continue;
+        if (mode === 'after' ? high! >= end : low! < end) return 'known';
+    }
+    const unknown: string[] = dates.unknown || [];
+    return unknown.some(label => !scope || scope.has(label.toLowerCase())) ? 'unknown' : null;
+};
+
 // Small API-shaped counters; keep browser fixtures independent of Vite-only modules.
 const countsForGroups = (groups: GroupedTaskItem[]) => {
     const lifecycle = Object.fromEntries(['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL', 'READY_FOR_APPROVAL', 'ASSESSED', 'ASSESSED_LEGACY'].map(key => [key, 0]));
@@ -60,10 +83,27 @@ const countsForGroups = (groups: GroupedTaskItem[]) => {
     return { total: groups.length, lifecycle, analysis, dependency_relationship, tags, team_tags, cvss_version_mismatch: 0, awaiting_review };
 };
 
+/** No saved views and the built-in default (ADR 0015); specs override it. */
+export async function mockNoSavedViews(page: Page) {
+    await page.route('**/api/views?**', route => route.fulfill({
+        json: {
+            views: [],
+            defaults: {
+                user_project: null, user_all: null, role_project: null, role_all: null, roles: {},
+                effective: { source: 'builtin', code: null, query: null },
+            },
+            role: 'REVIEWER',
+            can_manage_global: true,
+            limits: {},
+        },
+    }));
+}
+
 export async function mockGroupedVulnTask(
     page: Page,
     { taskId, groups }: MockGroupedVulnTaskOptions,
 ) {
+    await mockNoSavedViews(page);
     // A reviewer's card asks whether Repair Assessments applies to its
     // vulnerability (Repair…). By default nothing does; a spec that needs a
     // repair routes this again after calling this helper, which then wins.
@@ -101,7 +141,13 @@ export async function mockGroupedVulnTask(
         const selectedTeams = [...url.searchParams.getAll('teams'), ...(team ? [team] : [])].map(name => name.toLowerCase());
         const awaitingReview = url.searchParams.get('awaiting_review') === 'true';
         const textTerms = (url.searchParams.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean);
+        const cutoff = url.searchParams.get('cutoff') || '';
+        const cutoffMode = url.searchParams.get('cutoff_mode') || 'before';
+        const cutoffBasis = url.searchParams.get('cutoff_basis') || 'published';
+        const versions = url.searchParams.getAll('versions').flatMap(value => value.split(',')).filter(Boolean);
         const filteredGroups = groups.filter(group => {
+            if (versions.length && !(group.affected_versions || []).some((v: any) => versions.includes(v.project_version))) return false;
+            if (cutoffStatus(group, cutoff, cutoffMode, versions, cutoffBasis) === null) return false;
             const tags = (group.tags || []).map((tag: string) => tag.toLowerCase());
             if (selectedTeams.length && !selectedTeams.some(name => tags.includes(name))) return false;
             const searchable = [group.id, group.title, group.description, ...tags].join(' ').toLowerCase();
@@ -129,7 +175,13 @@ export async function mockGroupedVulnTask(
                 items,
                 counts: {
                     all: countsForGroups(groups),
-                    filtered: countsForGroups(filteredGroups),
+                    filtered: {
+                        ...countsForGroups(filteredGroups),
+                        cutoff: filteredGroups.length,
+                        cutoff_unknown: cutoff
+                            ? filteredGroups.filter(group => cutoffStatus(group, cutoff, cutoffMode, versions, cutoffBasis) === 'unknown').length
+                            : 0,
+                    },
                 },
                 total: groups.length,
                 filtered: filteredGroups.length,
@@ -140,6 +192,7 @@ export async function mockGroupedVulnTask(
                 has_more: hasMore,
                 sort: url.searchParams.get('sort') || 'rescored-severity',
                 order: url.searchParams.get('order') || 'desc',
+                cutoff_basis: cutoffBasis,
                 result_mode: 'summary',
                 source_result_mode: 'summary',
             }),

@@ -296,7 +296,7 @@ Schema: `dtvp/resources/dump-schemas/1/manifest.schema.json`
 | :--- | :--- |
 | `format` | `"dtvp.dump"` |
 | `format_version` | `1`; a reader accepts only its major version |
-| `format_minor` | `0` |
+| `format_minor` | `1` (saved views); `0` before |
 | `required_features` | Features a reader must know. Known: `"credentials"` (the dump holds access-token digests) |
 | `dump_id` | A UUIDv4 |
 | `created_at` | RFC 3339, UTC |
@@ -360,6 +360,8 @@ Entities are written in this order, each sorted as listed:
 | `finding_presence` | `finding_presence` (namespace `finding_lifecycle`, in the assessment records' file) | finding key | `key, vuln_id, component_name, component_version, component_purl, component_identity, first_seen_at, status` (`reported`, `gone`), `gone_at, last_seen_at, gone_reason` (`replaced`, `component_removed`, `no_longer_matched`, `undetermined`, `missing_at_export` or null), `successor_component_uuid, carry_over` (`carried`, `conflict`, `own_assessment`, `undetermined` or null), `returned_at`; optional `acknowledged_by, acknowledged_at`, present only for an acknowledged gone finding; optional `gone_cause` ("CPE changed from … to …"), present only when the stored BOMs told why; optional `predates_tracking` (`true`), present only for a finding followed from an assessment record older than finding tracking, whose `first_seen_at` is then empty. DTVP's record of findings the source stopped reporting; it cannot be read from the source again. These optional fields were added within dump version 1 and the schema allows no other fields, so a release from before them refuses to restore a dump that has them: restore such a dump with this release or later |
 | `finding_read` | `finding_reads` | `project_uuid` | `project_uuid, read_at, went` (counts by reason; `went_raw` when not a JSON object), `returned, carried_over, not_carried` |
 | `session_version` | `session_versions` (in the access-token file) | `username` | `username, version, revoked_at`. Not a credential, so it is in every dump; it keeps logouts and revocations effective after a restore. A restore writes each version one higher: every restored user signs in again, and no session revoked before or after the dump comes back. Users without a version keep any session signed with the same key; to end every session after a restore, rotate `DTVP_SESSION_SECRET_KEY` |
+| `saved_view` | `saved_views` (namespace `saved_views`, in the main database) | `code` | `code, scope` (`personal`, `global`), `name`, `project` (null for any project), `query` (the canonical filter query), `owner, created_at, updated_at, updated_by`. Saved views; the code is the short link ([ADR 0015](adr/0015-saved-views-cutoff-and-short-links.md)). Added in format minor 1 |
+| `saved_view_default` | `saved_view_defaults` (namespace `saved_views`) | `subject_kind, subject, project` | `subject_kind` (`user`, `role`), `subject` (user name or role), `project` (`""` for all projects), `code, updated_at, updated_by`. Default views of users and roles. Added in format minor 1 |
 | `tmrescore_proposal` | `tmrescore_proposals.json` | `project_name` | `project_name, snapshot` (an object), as stored |
 | `instance_metadata` | `store_metadata` key `active_projects` | key | `key, value`; zero or one record |
 
@@ -400,7 +402,10 @@ Three axes are versioned separately.
    strictly. A dump of a newer minor version may carry entities and fields
    the reader does not know: `verify` reports them as warnings; `restore`
    refuses them unless `--allow-unknown` is given, which drops them with a
-   warning. A future major version ships a pure upcaster from version 1 and
+   warning. Minor version 1 added the entities `saved_view` and
+   `saved_view_default`: a dump of minor version 0 does not list them and
+   restores with none; a release from before them refuses to restore a
+   minor 1 dump unless `--allow-unknown` drops the saved views. A future major version ships a pure upcaster from version 1 and
    keeps the version 1 reader for at least one release line.
 2. **Entity schema** (`dtvp.dump.<entity>/<n>`). An added optional field
    changes nothing. A rename, a change of meaning (including the markup of

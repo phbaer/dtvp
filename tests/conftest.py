@@ -30,6 +30,7 @@ os.environ["DTVP_TMRESCORE_CACHE_PATH"] = os.path.join(
 
 from dtvp import dt_cache, main  # noqa: E402
 from dtvp.access_token_services import access_token_store  # noqa: E402
+from dtvp.saved_view_services import saved_view_store  # noqa: E402
 from dtvp.dt_client import DTClient  # noqa: E402
 
 
@@ -49,6 +50,8 @@ def reset_cache_manager(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("DTVP_ACCESS_TOKENS_ENABLED", raising=False)
     access_token_store.reset()
+    # Follows DTVP_DT_CACHE_PATH: the database of this test.
+    saved_view_store.reset()
     # A project load left over from the previous test must not be joined by
     # this one: it read that test's source and may still be writing.
     main.tasks.clear()

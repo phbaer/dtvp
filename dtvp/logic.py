@@ -1205,6 +1205,8 @@ def group_vulnerabilities(
                 "vulnerability_uuid": vuln.get("uuid"),
                 "finding_uuid": finding_key(proj_uuid, finding),
                 "attributed_on": attributed_on,
+                # When the source published the vulnerability (ADR 0015).
+                "published": vuln.get("published"),
                 "analysis_state": analysis.get("state")
                 or analysis.get("analysisState"),
                 "justification": analysis.get("justification")

@@ -5,6 +5,9 @@
 Paths and commands refer to the repository root unless stated otherwise.
 
 - [Project Review](#project-review)
+  - [Cutoff](#cutoff)
+  - [Cutoff and the FDA guidance](#cutoff-and-the-fda-guidance)
+  - [Saved views and short links](#saved-views-and-short-links)
 - [Bulk Changes](#bulk-changes)
 - [Project Archives](#project-archives)
 
@@ -26,12 +29,12 @@ counts leave out their own category. The sidebar is described in the
 | Status: Open, Incomplete (with Conflicting), Ready for approval, Assessed | Sidebar | `lifecycle` (role default; old values `CONFLICTING`, `INCONSISTENT`, `ASSESSED_LEGACY` are mapped, `NEEDS_APPROVAL` see Awaiting review) |
 | Analysis state | Sidebar | `analysis` (all) |
 | Project versions | Sidebar | `versions` (all) |
+| [Cutoff](#cutoff) | Sidebar | `cutoff` (`YYYY-MM-DD` or `<N>d`), `cutoff_mode` (`before`), `cutoff_basis` (`published`; or `attributed`); old links: `attributed_before_days`, `attribution_mode`, `age_days`, `attribution_age_days` |
 | Sort | Sidebar | `sort`, `order` (`rescored-severity`, `desc`) |
 | Conflict reason | More filters | `inconsistency_reason` (none) |
 | New findings, not rescored, CVSS version mismatch | More filters | `new_findings`, `not_rescored`, `cvss_mismatch` (off) |
 | Original severity, SSVC priority, KEV/CISA evidence | More filters | `original_severity`, `ssvc`, `evidence` (none) |
 | Dependency | More filters | `dependency` (all) |
-| Attribution age | More filters | `attributed_before_days`, `attribution_mode` (old links: `age_days`, `attribution_age_days`) |
 | Threat-model proposal, automatic assessment, outcome, rescore | More filters, Legacy (removed in 2.1.0, #342) | `tmrescore`, `automatic_assessment` (old links: `auto_assessment`), `automatic_assessment_outcome`, `automatic_assessment_rescore` |
 
 Outcome choices (`Affected`, `Probably affected`, `Not affected`, and
@@ -90,6 +93,134 @@ find decisions that still lack a rescoring. The same filter is available as the
 `has:no_rescore` or `cvss:not-rescored` search token and the `not_rescored=true`
 URL and API parameter, and it also narrows Bulk Changes candidates (current
 list scope).
+
+### Cutoff
+
+The cutoff lists what was known by a date, on one of two dates
+([ADR 0015](adr/0015-saved-views-cutoff-and-short-links.md)):
+
+| Basis | Label | Date of a finding | Answers |
+| :--- | :--- | :--- | :--- |
+| `published` (default) | Published (premarket) | When the source published the vulnerability: the earliest Dependency-Track `published` among the records of the vulnerability and its aliases that the project's findings carry (an alias no finding carries is not looked up) | What was publicly known by the date: scoping a release or submission |
+| `attributed` | First attributed (postmarket) | The earliest Dependency-Track attribution (`attributedOn`) of the vulnerability on the same component (package URL without the version, else group and name) in any version of the project. New and re-uploaded versions keep the earlier date; a component new to the project brings its own; a finding that went and came back with a new attribution only takes the new date | Since when monitoring knows of it, which starts the postmarket 30/60-day clocks; only as good as the monitoring cadence |
+
+- **On or before** (default) lists a vulnerability when at least one of its
+  findings in scope (the selected project versions, else all) is dated on or
+  before the date, the whole day included (UTC). **After** lists what is
+  dated later.
+- The date is `YYYY-MM-DD`, or **rolling** `<N>d`: N days before today,
+  moving with the date (presets from `DTVP_CUTOFF_PRESET_DAYS`).
+- Findings without a date on the basis are **listed**, never hidden, and the
+  sidebar says how many vulnerabilities are listed for that reason only
+  (`counts.filtered.cutoff_unknown`).
+- The URL always names the basis with a cutoff, and a saved view stores it.
+  The chip names it ("Published by 2026-03-01", "First attributed after
+  2026-03-01"); its title says which purpose the date serves.
+- The cutoff selects vulnerabilities, not findings: the detail lists every
+  finding and marks those dated after the cutoff **After cutoff**. A save or
+  a Bulk Changes run on the current list applies to the whole vulnerability,
+  those findings included, as with the version filter.
+- It replaces the attribution-age filter. Old links and API calls with
+  `attributed_before_days=N&attribution_mode=older|younger` are read as
+  `cutoff=Nd&cutoff_mode=before|after&cutoff_basis=attributed`; the browser
+  rewrites the address. The relative form counts whole UTC days.
+
+It applies on the server to the list, the option counts, Bulk Changes
+"Current list", and the MCP tool `search_vulnerabilities`
+([AI access](ai-access.md#mcp-tools)); responses name the basis
+(`cutoff_basis`).
+
+### Cutoff and the FDA guidance
+
+DTVP supports these processes; it is not regulatory advice.
+
+- **Premarket.** FDA, "Cybersecurity in Medical Devices: Quality Management
+  System Considerations and Content of Premarket Submissions", issued
+  February 3, 2026 (supersedes the June 27, 2025 version)
+  ([guidance](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/cybersecurity-medical-devices-quality-management-system-considerations-and-content-premarket),
+  [PDF](https://www.fda.gov/media/119933/download)), section V.A.4
+  "Third-Party Software Components":
+
+  > "As part of the premarket submission, manufacturers should also identify
+  > all known vulnerabilities associated with the device and the software
+  > components, including those identified in CISA's Known Exploited
+  > Vulnerabilities Catalog. For each known vulnerability, manufacturers
+  > should describe how the vulnerabilities were discovered … A safety and
+  > security risk assessment of each known vulnerability …"
+
+  The guidance does not define a "known as of" date; unresolved anomalies
+  are listed "at the time of submission" (section V.A.5). Also: "A device
+  should be designed to eliminate or mitigate known vulnerabilities"
+  (section V.A.2).
+- **Postmarket.** FDA, "Postmarket Management of Cybersecurity in Medical
+  Devices", issued December 28, 2016, still final
+  ([guidance](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/postmarket-management-cybersecurity-medical-devices),
+  [PDF](https://www.fda.gov/media/95862/download)), section VI.B
+  "Uncontrolled Risk to Safety and Essential Performance":
+
+  > "As soon as possible but no later than 30 days after learning of the
+  > vulnerability, the manufacturer communicates with its customers …"
+
+  and
+
+  > "… no later than 60 days after learning of the vulnerability, the
+  > manufacturer fixes the vulnerability …"
+
+  Its program elements include "monitoring third party software components
+  for new vulnerabilities throughout the device's total product lifecycle".
+
+According to the FDA guidance, the published date answers "what was publicly
+known by date X" (premarket scope), and the first-attributed date answers
+"when did our monitoring learn of it", which starts the postmarket 30/60-day
+clocks.
+
+**A cutoff is a planning aid, not a compliance boundary.** Every
+vulnerability known at submission must be assessed, so before a submission
+review the list with the cutoff at the submission date, or without a cutoff.
+The cutoff control shows this note and the purpose of each date (the info
+button next to the basis).
+
+### Saved views and short links
+
+**Views** in the filter sidebar header keeps filter states, so long filter
+lists do not need to be shared by hand
+([ADR 0015](adr/0015-saved-views-cutoff-and-short-links.md)).
+
+- **Save current filters as…** stores the filters as a named view for this
+  project, or for all projects. Views are **personal**; reviewers can also
+  save views **shared with everyone** or share a personal view (globe icon).
+  Choosing a view applies it; the trigger shows the name of the view the
+  filters match. Its owner (reviewers for shared views) can update it with
+  the current filters, rename or delete it.
+- The star makes a view **my default** for this project; the footer sets a
+  default for all projects. Reviewers set **role defaults** (Analysts,
+  Reviewers), for this project or all, from the shared views.
+- A project opened without filter parameters shows the first of: my default
+  for the project, my default for all projects, the role default for the
+  project, for all projects, then the built-in role default (Awaiting review
+  for reviewers). A link with filters always wins. **Reset** returns to that
+  default.
+- **Copy link** copies the full URL of the current filters and confirms it in
+  the Views panel. Every saved view has a **short link** `/v/<code>` (link icon).
+  A view for all projects names the current project (`/v/<code>?project=`).
+  Any signed-in user can open any code; codes do not expire.
+- A view keeps only filter parameters; filters at their built-in value are
+  left out, a cutoff keeps its basis. The server rejects unknown parameters.
+
+Limits: 100 personal views per user, 200 shared views. Codes have 8
+characters from `23456789abcdefghjkmnpqrstuvwxyz`.
+
+| Endpoint | Who | Purpose |
+| :--- | :--- | :--- |
+| `GET /api/views?project=` | everyone | My and shared views for the project (and for all projects), the defaults and the effective one |
+| `GET /api/views/{code}` | everyone | Resolve a code |
+| `POST /api/views` | everyone; `scope: global` reviewers | Save `{name, scope, project, query}` |
+| `PATCH /api/views/{code}` | owner; shared views reviewers | Change `name`, `query`, `project`, or share (`scope: global`) |
+| `DELETE /api/views/{code}` | as PATCH | Delete; defaults naming it are removed |
+| `PUT /api/views/defaults` | everyone; `target: role` reviewers | `{target, role, project, code}`; `code: null` clears |
+
+Views are records of the instance dump
+([Backup](backup-and-restore.md)).
 
 ### New findings
 

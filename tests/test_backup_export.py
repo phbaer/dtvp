@@ -115,6 +115,28 @@ def test_gone_findings_and_session_versions_are_records(instance):
     assert (session["username"], session["version"]) == ("alice", 2)
 
 
+def test_saved_views_and_defaults_are_records(instance):
+    members = _members(export_dump().path)
+    views = {record["scope"]: record for record in _records(members, "saved_view")}
+    assert set(views) == {"personal", "global"}
+    assert (views["personal"]["name"], views["personal"]["project"], views["personal"]["query"]) == (
+        "My open", "Imaging Suite", "cutoff=2026-11-01&lifecycle=OPEN",
+    )
+    assert views["global"]["project"] is None
+    defaults = {
+        (record["subject_kind"], record["subject"], record["project"]): record["code"]
+        for record in _records(members, "saved_view_default")
+    }
+    mine, shared = instance.keys["saved_views"]
+    assert defaults == {
+        ("user", "alice", "Imaging Suite"): mine,
+        ("role", "ANALYST", ""): shared,
+    }
+    for entity in ("saved_view", "saved_view_default"):
+        for record in _records(members, entity):
+            assert schemas.errors(entity, record) == [], record
+
+
 def test_storage_details_are_resolved(instance):
     members = _members(export_dump().path)
     assessments = _by_key(_records(members, "assessment"))

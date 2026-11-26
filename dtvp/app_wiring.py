@@ -447,7 +447,7 @@ def build_frontend_route_deps(
     get_frontend_url: Callable[[], str],
     get_dev_disable_auth: Callable[[], bool],
     get_default_project_filter: Callable[[], str],
-    get_attribution_age_filter_days: Callable[[], str],
+    get_cutoff_preset_days: Callable[[], str],
     get_jira_create_url: Callable[[], str],
     read_text: Callable[[str], str],
 ) -> FrontendRouteDeps:
@@ -457,7 +457,7 @@ def build_frontend_route_deps(
         get_frontend_url=get_frontend_url,
         get_dev_disable_auth=get_dev_disable_auth,
         get_default_project_filter=get_default_project_filter,
-        get_attribution_age_filter_days=get_attribution_age_filter_days,
+        get_cutoff_preset_days=get_cutoff_preset_days,
         get_jira_create_url=get_jira_create_url,
         read_text=read_text,
     )

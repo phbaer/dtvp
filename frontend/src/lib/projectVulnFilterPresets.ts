@@ -31,8 +31,11 @@ export interface FilterState {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
-    attributionAgeDays: number | null
-    attributionAgeMode: 'older' | 'younger'
+    /** First-seen cutoff (ADR 0015): `YYYY-MM-DD`, `<N>d`, or ''. */
+    cutoff: string
+    cutoffMode: 'before' | 'after'
+    /** Which date the cutoff compares: published (default) or first attributed. */
+    cutoffBasis: 'published' | 'attributed'
 }
 
 export interface FilterOption {

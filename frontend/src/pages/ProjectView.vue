@@ -13,6 +13,7 @@ import {
     getTeamMapping,
     getTeamMappingTeams,
     getTMRescoreProposals,
+    listSavedViews,
     startProjectArchiveExport,
     waitForProjectArchiveTask,
 } from '../lib/api'
@@ -21,7 +22,7 @@ import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import type { GroupedVuln, ProjectArchiveTask, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
 import { projectHeaderState } from '../lib/projectHeaderStore'
-import { useProjectVulnFilters } from '../lib/useProjectVulnFilters'
+import { filterQueryString, parseFilterQueryString, useProjectVulnFilters } from '../lib/useProjectVulnFilters'
 import {
     SEARCH_TOKEN_SHORTCUTS,
     useProjectVulnSearchControls,
@@ -74,6 +75,7 @@ import VulnDetailInspector from '../components/VulnDetailInspector.vue'
 import BulkWorkflowModal from '../components/BulkWorkflowModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
+import SavedViewsMenu from '../components/SavedViewsMenu.vue'
 import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from '@lucide/vue'
 import CycloneDxExportMenu from '../components/CycloneDxExportMenu.vue'
 import SourceSyncMenu from '../components/SourceSyncMenu.vue'
@@ -349,6 +351,8 @@ const fetchVulns = async () => {
     let queuedPartialWindow: { taskId: string; status: TaskResponse } | null = null
     const loadInitialTaskWindow = async (message: string, progress: number) => {
         setLoadingStep(message, progress)
+        // The first window uses the filters of the URL or the default view.
+        await filtersSettled()
         await loadTaskGroupWindow({ reset: true })
     }
     const reloadCompletedTaskWindow = async (taskId: string | null) => {
@@ -527,8 +531,9 @@ const {
     notRescoredOnly,
     newFindingsOnly,
     awaitingReviewOnly,
-    attributionAgeDays,
-    attributionAgeMode,
+    cutoff,
+    cutoffMode,
+    cutoffBasis,
     lifecycleFilters,
     teamAssessmentFilter,
     inconsistencyReasonFilters,
@@ -548,7 +553,12 @@ const {
     selectedAutomaticAssessmentRescoreFilters,
     copiedUrl,
     copyFilterUrl,
+    filterUrl,
     resetFilters,
+    savedViewQuery,
+    applyFilterQuery,
+    loadDefaultView,
+    defaultViewQuery,
     filterState,
     handleFilterUpdate,
     defaultTeamAssessmentFilter,
@@ -562,7 +572,24 @@ const {
     route,
     router,
     currentUserRole,
+    // ADR 0015: a project opened without filters shows the effective default view.
+    resolveDefaultQuery: async () => {
+        const name = routeProjectName()
+        if (!name) return null
+        return (await listSavedViews(name)).defaults.effective.query ?? null
+    },
 })
+const currentViewQuery = computed(() => savedViewQuery())
+const filtersSettled = () => filtersReady.value
+    ? Promise.resolve()
+    : new Promise<void>(resolve => {
+        const stop = watch(filtersReady, ready => {
+            if (!ready) return
+            stop()
+            resolve()
+        })
+    })
+provide('filterCutoff', computed(() => ({ cutoff: cutoff.value, mode: cutoffMode.value, basis: cutoffBasis.value })))
 
 const meaningfulTMRescoreProposalIds = computed(() =>
     buildMeaningfulTMRescoreProposalIds(tmrescoreProposals.value)
@@ -637,8 +664,9 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
-    attributionAgeDays: attributionAgeDays.value,
-    attributionAgeMode: attributionAgeMode.value,
+    cutoff: cutoff.value,
+    cutoffMode: cutoffMode.value,
+    cutoffBasis: cutoffBasis.value,
     tmrescoreFilters: selectedTMRescoreProposalFilters.value,
     allTMRescoreFilterValues: allTMRescoreFilterValues.value,
     meaningfulTMRescoreProposalIds: meaningfulTMRescoreProposalIds.value,
@@ -766,8 +794,9 @@ const listFilterOptions = computed(() => ({
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
-    attributionAgeDays: attributionAgeDays.value,
-    attributionAgeMode: attributionAgeMode.value,
+    cutoff: cutoff.value,
+    cutoffMode: cutoffMode.value,
+    cutoffBasis: cutoffBasis.value,
     lifecycleFilters: lifecycleFilters.value,
     analysisFilters: analysisFilters.value,
 }))
@@ -1364,8 +1393,9 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
-    attributionAgeDays: attributionAgeDays.value,
-    attributionAgeMode: attributionAgeMode.value,
+    cutoff: cutoff.value,
+    cutoffMode: cutoffMode.value,
+    cutoffBasis: cutoffBasis.value,
 }))
 
 const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
@@ -1429,9 +1459,10 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
             // Through the update, so a reviewer's choice outlives a reload.
             handleFilterUpdate({ ...filterState.value, awaitingReviewOnly: false })
             break
-        case 'attributionAge':
-            attributionAgeDays.value = null
-            attributionAgeMode.value = 'older'
+        case 'cutoff':
+            cutoff.value = ''
+            cutoffMode.value = 'before'
+            cutoffBasis.value = 'published'
             break
     }
 }
@@ -1451,7 +1482,7 @@ const customFilterArgs = computed(() => ({
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
-    attributionAgeDays: attributionAgeDays.value,
+    cutoff: cutoff.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
     lifecycleFilters: lifecycleFilters.value,
@@ -1486,7 +1517,11 @@ const bulkScopeLabels = computed(() => [...smartSearchChips.value, ...activeFilt
 
 const filterSidebarProps = computed(() => ({
     filters: filterState.value,
-    hasCustomFilters: hasCustomFilterState.value,
+    // Reset also returns from other filters to a default view (ADR 0015).
+    hasCustomFilters: hasCustomFilterState.value || (
+        defaultViewQuery.value != null
+        && filterQueryString(parseFilterQueryString(defaultViewQuery.value)) !== currentViewQuery.value
+    ),
     availableVersions: availableVersions.value,
     lifecycleOptions: LIFECYCLE_OPTIONS,
     inconsistencyReasonOptions: INCONSISTENCY_REASON_OPTIONS,
@@ -1810,6 +1845,8 @@ watch(currentUserRole, (role) => {
                 <span
                     v-for="chip in activeFilterChips"
                     :key="chip.key"
+                    :title="chip.title"
+                    :data-testid="`filter-chip-${chip.key}`"
                     class="inline-flex max-w-full items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-300"
                 >
                     <span class="truncate">{{ chip.label }}</span>
@@ -1861,7 +1898,17 @@ watch(currentUserRole, (role) => {
                 @update:filters="handleFilterUpdate"
                 @copy-filter-url="copyFilterUrl"
                 @reset-filters="resetFilters"
-            />
+            >
+                <template #header-actions>
+                    <SavedViewsMenu
+                        :project="($route.params.name as string)"
+                        :current-query="currentViewQuery"
+                        :current-url="filterUrl"
+                        @apply="applyFilterQuery"
+                        @defaults-changed="loadDefaultView"
+                    />
+                </template>
+            </StatsSidebar>
         </div>
 
         <div
@@ -2119,7 +2166,17 @@ watch(currentUserRole, (role) => {
                     @update:filters="handleFilterUpdate"
                     @copy-filter-url="copyFilterUrl"
                     @reset-filters="resetFilters"
-                />
+                >
+                    <template #header-actions>
+                        <SavedViewsMenu
+                            :project="($route.params.name as string)"
+                            :current-query="currentViewQuery"
+                            :current-url="filterUrl"
+                            @apply="applyFilterQuery"
+                            @defaults-changed="loadDefaultView"
+                        />
+                    </template>
+                </StatsSidebar>
             </aside>
         </div>
     </Teleport>

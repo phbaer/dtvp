@@ -987,7 +987,9 @@ def test_get_task_groups_filters_sorts_and_windows(client):
         "WITH_PROPOSAL": 1,
         "WITHOUT_PROPOSAL": 1,
     }
-    assert data["counts"]["filtered"]["attribution_age"] == 2
+    # Retired attribution-age parameters are read as a relative cutoff (ADR 0015).
+    assert data["counts"]["filtered"]["cutoff"] == 2
+    assert data["counts"]["filtered"]["cutoff_unknown"] == 0
 
 
 def test_get_task_groups_filters_by_inconsistency_reason(client):

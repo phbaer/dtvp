@@ -145,6 +145,22 @@ def check_manifest(
         if not allow_unknown:
             raise DumpError("F6", message + ". Use --allow-unknown to drop them.")
         checked.warnings.append(Finding("F6", message + "; they are dropped"))
+    # A dump of an older minor version does not list the entities added
+    # since; it holds none of them.
+    missing = [
+        name for name in schemas.OPTIONAL_ENTITIES if name not in manifest["entities"]
+    ]
+    if missing:
+        manifest = {
+            **manifest,
+            "entities": {
+                **manifest["entities"],
+                **{
+                    name: {"schema": schemas.entity_schema_id(name), "records": 0, "parts": []}
+                    for name in missing
+                },
+            },
+        }
     checked.manifest = manifest
 
     for name in schemas.ENTITY_ORDER:

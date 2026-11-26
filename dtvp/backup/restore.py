@@ -750,7 +750,7 @@ def _scratch_stores(directory: str) -> InstanceStores:
     main = SqliteStore(
         "main",
         os.path.join(real, "dtvp.sqlite3"),
-        ("local_store", "assessment_outbox", "finding_lifecycle", "access_tokens"),
+        ("local_store", "assessment_outbox", "finding_lifecycle", "access_tokens", "saved_views"),
     )
     results = SqliteStore(
         "code_analysis_results",

@@ -45,6 +45,7 @@ from .file_io_services import atomic_write_bytes
 from .finding_lifecycle_services import FINDING_LIFECYCLE_MIGRATION_NAMESPACE
 from .grouped_vuln_summary_index_services import get_grouped_vuln_summary_index_path
 from .local_store import LOCAL_STORE_MIGRATION_NAMESPACE, get_database_path
+from .saved_view_services import SAVED_VIEWS_MIGRATION_NAMESPACE
 from .settings_files import SETTINGS_FILES
 from .ssvc_enrichment_services import get_ssvc_cache_path
 from .tmrescore_cache_services import get_tmrescore_cache_path
@@ -173,6 +174,8 @@ def resolve_instance_stores(dt_cache_dir: str | None = None) -> InstanceStores:
             FINDING_LIFECYCLE_MIGRATION_NAMESPACE,
         ),
         ("access_tokens", get_access_tokens_path(), ACCESS_TOKEN_MIGRATION_NAMESPACE),
+        # Saved views and short links (ADR 0015): in the main database.
+        ("main", get_database_path(dt_cache), SAVED_VIEWS_MIGRATION_NAMESPACE),
         (
             "code_analysis_results",
             get_code_analysis_results_sqlite_path(),

@@ -398,8 +398,9 @@ export interface TaskVulnGroupListQuery {
     not_rescored?: boolean;
     new_findings?: boolean;
     awaiting_review?: boolean;
-    attributed_before_days?: number | null;
-    attribution_mode?: 'older' | 'younger';
+    cutoff?: string;
+    cutoff_mode?: 'before' | 'after';
+    cutoff_basis?: 'published' | 'attributed';
     tmrescore?: string[];
     tmrescore_proposal_ids?: string[];
     automatic_assessment?: string[];
@@ -598,7 +599,8 @@ export interface TaskVulnGroupListCounts {
         AMBIGUOUS: number;
         NO_HISTORY: number;
     };
-    attribution_age?: number;
+    cutoff?: number;
+    cutoff_unknown?: number;
 }
 
 export interface TaskVulnGroupListResponse {
@@ -615,6 +617,8 @@ export interface TaskVulnGroupListResponse {
     cursor?: string | null;
     next_cursor?: string | null;
     has_more?: boolean;
+    /** The date the cutoff compared (ADR 0015). */
+    cutoff_basis?: 'published' | 'attributed';
     sort: string;
     order: 'asc' | 'desc';
     result_mode?: 'full' | 'summary';
@@ -2771,4 +2775,80 @@ export const requestSourceAnalysis = async (
 ): Promise<{ requested: string[]; already_running: string[] }> => {
     const res = await api.post('/sync/analysis-requests', target)
     return res.data
+}
+
+
+// Saved views and short links (ADR 0015).
+export type SavedViewScope = 'personal' | 'global';
+
+export interface SavedView {
+    code: string;
+    scope: SavedViewScope;
+    name: string;
+    project: string | null;
+    query: string;
+    owner: string;
+    created_at: string;
+    updated_at: string;
+    updated_by: string;
+    editable: boolean;
+}
+
+export interface SavedViewDefaults {
+    user_project: string | null;
+    user_all: string | null;
+    role_project: string | null;
+    role_all: string | null;
+    roles: Record<string, { project: string | null; all: string | null }>;
+    effective: {
+        source: 'user' | 'role' | 'builtin';
+        code: string | null;
+        query: string | null;
+        name?: string | null;
+    };
+}
+
+export interface SavedViewList {
+    views: SavedView[];
+    defaults: SavedViewDefaults;
+    role: string;
+    can_manage_global: boolean;
+    limits: Record<string, number>;
+}
+
+export async function listSavedViews(project: string): Promise<SavedViewList> {
+    return (await api.get<SavedViewList>('/views', { params: { project } })).data;
+}
+
+export async function getSavedView(code: string): Promise<SavedView> {
+    return (await api.get<SavedView>(`/views/${encodeURIComponent(code)}`)).data;
+}
+
+export async function createSavedView(request: {
+    name: string;
+    scope: 'personal' | 'global';
+    project: string | null;
+    query: string;
+}): Promise<SavedView> {
+    return (await api.post<SavedView>('/views', request)).data;
+}
+
+export async function updateSavedView(
+    code: string,
+    changes: Partial<Pick<SavedView, 'name' | 'project' | 'query'>> & { scope?: 'personal' | 'global' },
+): Promise<SavedView> {
+    return (await api.patch<SavedView>(`/views/${encodeURIComponent(code)}`, changes)).data;
+}
+
+export async function deleteSavedView(code: string): Promise<void> {
+    await api.delete(`/views/${encodeURIComponent(code)}`);
+}
+
+export async function setDefaultView(request: {
+    target: 'user' | 'role';
+    role?: string | null;
+    project: string | null;
+    code: string | null;
+}): Promise<SavedViewDefaults> {
+    return (await api.put<SavedViewDefaults>('/views/defaults', request)).data;
 }

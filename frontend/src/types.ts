@@ -77,6 +77,11 @@ export interface Instance {
     vulnerability_uuid: string;
     finding_uuid: string;
     attributed_on?: string | number | null;
+    /** First seen in the project (ADR 0015): the earliest attribution of the
+     * same vulnerability and component identity in any version; null when unknown. */
+    first_seen_ms?: number | null;
+    /** When the source published the vulnerability, earliest across aliases. */
+    published_ms?: number | null;
     /** Added after the vulnerability was assessed and not assessed yet. */
     is_new_finding?: boolean;
     analysis_state: string;
@@ -159,6 +164,8 @@ export interface GroupedVulnListMetadata {
     versions?: string[];
     attributed_on_ms_values?: number[];
     oldest_attributed_on_ms?: number | null;
+    /** Per cutoff basis: date bounds per version, and versions with an undated finding. */
+    cutoff_dates?: Record<string, { by_version: Record<string, number[]>, unknown: string[] }>;
     instance_count?: number;
     dependency_relationship?: GroupedVulnDependencyRelationship;
     cvss_version_mismatch?: boolean;

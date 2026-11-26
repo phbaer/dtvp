@@ -74,6 +74,8 @@ from .app_wiring import (
 )
 from .access_token_routes import create_access_token_router
 from .access_token_services import access_token_store
+from .saved_view_routes import create_saved_view_router
+from .saved_view_services import saved_view_store
 from .auth import (
     add_request_listener,
     apply_session_refresh,
@@ -1252,6 +1254,15 @@ api_router.include_router(
 
 
 api_router.include_router(
+    create_saved_view_router(
+        saved_view_store,
+        current_user_dependency=get_current_user,
+        get_user_role=lambda user: get_user_role(user),
+    )
+)
+
+
+api_router.include_router(
     create_sync_router(
         lambda: cache_manager.sync_state,
         current_user_dependency=get_current_user,
@@ -1306,8 +1317,8 @@ register_frontend_routes(
         get_frontend_url=lambda: auth_settings.FRONTEND_URL or "",
         get_dev_disable_auth=lambda: auth_settings.DEV_DISABLE_AUTH,
         get_default_project_filter=lambda: os.getenv("DTVP_DEFAULT_PROJECT_FILTER", ""),
-        get_attribution_age_filter_days=lambda: os.getenv(
-            "DTVP_ATTRIBUTION_AGE_FILTER_DAYS",
+        get_cutoff_preset_days=lambda: os.getenv(
+            "DTVP_CUTOFF_PRESET_DAYS",
             "7d,14d,28d",
         ),
         get_jira_create_url=lambda: os.getenv("DTVP_JIRA_CREATE_URL", ""),

@@ -179,8 +179,24 @@ counts exclude their own category; result totals and bulk actions include all
 filters. Specialist controls live under **More filters**; the threat-model and
 automatic-assessment filters sit in its legacy section until their removal in
 2.1.0. Selections persist in shared URLs (retired parameters of saved links are
-mapped; see [filters](docs/review-workflows.md#project-review)); Reset clears
-filters. Legacy assessments retain a **Legacy** badge.
+mapped; see [filters](docs/review-workflows.md#project-review)); Reset returns
+to the default view. Legacy assessments retain a **Legacy** badge.
+
+The **Cutoff** lists what was known by a date (`cutoff=YYYY-MM-DD`, or rolling
+`<N>d`) on one of two dates (`cutoff_basis`): **Published (premarket)**, the
+earliest publication of the vulnerability and its aliases, for scoping a
+release or submission; or **First attributed (postmarket)**, the earliest
+Dependency-Track attribution to the component in any version of the project,
+since when monitoring knows of it. Undated findings stay listed and are
+counted. A cutoff is a planning aid, not a compliance boundary
+([details and the FDA guidance](docs/review-workflows.md#cutoff-and-the-fda-guidance)).
+It replaces the attribution-age filter.
+**Views** in the filter sidebar saves filter states as personal or (reviewers)
+shared views with a short link `/v/<code>`, sets my default per project or for
+all projects and role defaults; unsaved filters are shared as the full URL; a
+project opened without filters shows the default view
+([saved views](docs/review-workflows.md#saved-views-and-short-links),
+[ADR 0015](docs/adr/0015-saved-views-cutoff-and-short-links.md)).
 Combined Team and Version selections require team ownership in one of the
 selected project versions; ownership in another release does not match.
 

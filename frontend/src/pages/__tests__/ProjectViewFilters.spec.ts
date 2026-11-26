@@ -442,17 +442,18 @@ describe('ProjectView Filters', () => {
 
         expect(wrapper.findAll('.vuln-card').length).toBe(2)
 
-        // V-OLD was attributed 29 days ago, V-NEW 7 days ago. "younger" keeps
-        // recent findings, "older" keeps the aged ones.
-        ;(wrapper.vm as any).attributionAgeDays = 14
-        ;(wrapper.vm as any).attributionAgeMode = 'younger'
+        // V-OLD was first seen 29 days ago, V-NEW 7 days ago. A cutoff 14
+        // days ago keeps the aged ones; "after" keeps the recent ones.
+        ;(wrapper.vm as any).cutoffBasis = 'attributed'
+        ;(wrapper.vm as any).cutoff = '14d'
+        ;(wrapper.vm as any).cutoffMode = 'after'
         await wrapper.vm.$nextTick()
 
         let cards = wrapper.findAll('.vuln-card')
         expect(cards.length).toBe(1)
         expect(cards[0]?.text()).toContain('V-NEW')
 
-        ;(wrapper.vm as any).attributionAgeMode = 'older'
+        ;(wrapper.vm as any).cutoffMode = 'before'
         await wrapper.vm.$nextTick()
 
         cards = wrapper.findAll('.vuln-card')

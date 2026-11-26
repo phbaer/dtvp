@@ -22,7 +22,7 @@ import {
     computeListTeamCounts,
     compileVulnListFilters,
     compileVulnStateFilters,
-    matchesCompiledAttributionAgeFilter,
+    matchesCompiledCutoffFilter,
     matchesCompiledDependencySelection,
     matchesCompiledLifecycleFilter,
     parseVulnSearchQuery,
@@ -60,8 +60,9 @@ export interface VulnListViewFilters {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
-    attributionAgeDays: number | null
-    attributionAgeMode: 'older' | 'younger'
+    cutoff: string
+    cutoffMode: 'before' | 'after'
+    cutoffBasis?: 'published' | 'attributed'
     lifecycleFilters: string[]
     analysisFilters: string[]
     sortBy: string
@@ -89,7 +90,7 @@ export interface VulnListFilterModel extends VulnListStaticStats {
     dependencyRelationshipCounts: RelationshipCounts
     tmrescoreProposalCounts: Record<TMRescoreProposalFilter, number>
     automaticAssessmentCounts: Record<AutomaticAssessmentFilter, number>
-    attributionAgeCount: number
+    cutoffCount: number
     analysisCounts: Record<string, number>
 }
 
@@ -183,7 +184,8 @@ export const deriveVulnListResultCounts = (
             AMBIGUOUS: 0,
             NO_HISTORY: 0,
         },
-        attribution_age: items.length,
+        cutoff: items.length,
+        cutoff_unknown: 0,
     }
 
     for (const item of items) {
@@ -540,7 +542,7 @@ export const deriveVulnListFilterModel = (
     const tmrescoreProposalCounts = createTMRescoreCounts()
     const automaticAssessmentCounts = createAutomaticAssessmentCounts()
     const analysisCounts = createAnalysisCounts()
-    let attributionAgeCount = 0
+    let cutoffCount = 0
 
     const listFilterInput = compileVulnListFilters({
         originalSeverityFilters: filters.originalSeverityFilters,
@@ -564,8 +566,9 @@ export const deriveVulnListFilterModel = (
         notRescoredOnly: filters.notRescoredOnly,
         newFindingsOnly: filters.newFindingsOnly,
         awaitingReviewOnly: filters.awaitingReviewOnly,
-        attributionAgeDays: filters.attributionAgeDays,
-        attributionAgeMode: filters.attributionAgeMode,
+        cutoff: filters.cutoff,
+        cutoffMode: filters.cutoffMode,
+        cutoffBasis: filters.cutoffBasis,
     })
 
     const parsedSearch = typeof filters.smartSearch === 'string'
@@ -602,10 +605,10 @@ export const deriveVulnListFilterModel = (
                         continue
                     }
 
-                    const matchesAge = matchesCompiledAttributionAgeFilter(item, listFilterInput)
+                    const matchesAge = matchesCompiledCutoffFilter(item, listFilterInput)
 
-                    if (listFilterInput.attributionAgeActive && matchesAge) {
-                        attributionAgeCount++
+                    if (listFilterInput.cutoff && matchesAge) {
+                        cutoffCount++
                     }
 
                     if (matchesAge) {
@@ -633,7 +636,7 @@ export const deriveVulnListFilterModel = (
         dependencyRelationshipCounts,
         tmrescoreProposalCounts,
         automaticAssessmentCounts,
-        attributionAgeCount,
+        cutoffCount,
         analysisCounts,
         needsApprovalGroups: staticStats.needsApprovalGroups,
         incompleteGroups: staticStats.incompleteGroups,
