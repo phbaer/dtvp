@@ -1,4 +1,4 @@
--- River's record of what happened to findings: when the source reported
+-- DTVP's record of what happened to findings: when the source reported
 -- them, when it stopped and why. Not source data: it cannot be imported
 -- again, so it lives next to the assessment records.
 

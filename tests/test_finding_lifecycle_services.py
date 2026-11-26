@@ -10,11 +10,13 @@ from dtvp.finding_lifecycle_services import (
     ReportedIndex,
     choose_carry_over,
     classify_gone,
+    get_finding_lifecycle_migrations_path,
     index_bom,
     plan_carry_over,
     plan_gone,
     reported_finding,
 )
+from dtvp.sqlite_migration_services import load_sqlite_migrations, run_sqlite_migrations
 
 
 # -- why a finding went -----------------------------------------------------
@@ -199,6 +201,51 @@ def test_carry_over_needs_agreement_except_for_the_review_marker():
 
 
 # -- the store --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("deployed_version", [1, 3, 4])
+def test_the_store_upgrades_deployed_dtvp_migrations(tmp_path, deployed_version):
+    # Checksums shipped before the rename (main 7d9ced5d). Comments are part
+    # of the checksum too; fresh-database tests cannot detect edits to them.
+    deployed_checksums = {
+        1: "5755986ea714d744f4f0b62c8a840da791bcf2d86c3c3f428b4618cd0deb5a05",
+        2: "ccd0657234578b536e98390d23c23184dd6c288c2f581dc31820727715014b94",
+        3: "ca07de0525b2561bfbae77e1ecb4954652b660b02e7d39f73d51ef44283b3897",
+        4: "73566a2bf9a904955336ec53301db261ff3f0f4c539d1a3563b49bb3943f4206",
+    }
+    migrations = load_sqlite_migrations(get_finding_lifecycle_migrations_path())
+    deployed_path = tmp_path / "deployed_migrations"
+    deployed_path.mkdir()
+    for migration in migrations:
+        if migration.version <= deployed_version:
+            (deployed_path / migration.path.name).write_text(migration.sql, encoding="utf-8")
+
+    path = tmp_path / "dtvp.sqlite3"
+    with sqlite3.connect(path) as connection:
+        run_sqlite_migrations(connection, namespace="finding_lifecycle", migrations_path=deployed_path)
+        connection.executemany(
+            "UPDATE schema_migrations SET checksum = ? WHERE namespace = 'finding_lifecycle' AND version = ?",
+            [(checksum, version) for version, checksum in deployed_checksums.items() if version <= deployed_version],
+        )
+        connection.execute(
+            """INSERT INTO finding_presence (
+                project_uuid, component_uuid, vulnerability_uuid, first_seen_at, status, gone_reason
+            ) VALUES ('p1', 'c1', 'v1', '2026-11-01', 'gone', 'component_removed')"""
+        )
+
+    # Same entry point used by CacheManager during application startup.
+    store = FindingLifecycleStore(str(path))
+    assert store.backfill_once(lambda: []) == 0
+    row = store.gone_row(("p1", "c1", "v1"))
+    assert row["first_seen_at"] == "2026-11-01"
+    assert row["gone_reason"] == "component_removed"
+    assert FindingLifecycleStore(str(path)).backfill_once(lambda: []) is None
+    with sqlite3.connect(path) as connection:
+        applied = dict(connection.execute(
+            "SELECT version, checksum FROM schema_migrations WHERE namespace = 'finding_lifecycle'"
+        ))
+    assert set(applied) == {migration.version for migration in migrations}
+    assert {version: applied[version] for version in deployed_checksums} == deployed_checksums
 
 
 def test_the_store_migrates_and_backfills_once(tmp_path):

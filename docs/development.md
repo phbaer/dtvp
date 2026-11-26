@@ -176,3 +176,15 @@ when it closes; run it alone with
 To exercise apply conflicts, edit the same finding in two sessions or change it
 through mock Dependency-Track before submitting. The expected dialog is shown
 in `docs/screenshots/conflict-resolution.png`.
+
+## SQLite Migrations
+
+Applied files in `dtvp/migrations/` are immutable, including comments and
+whitespace. The migration runner hashes the full SQL text and compares it with
+`schema_migrations`; changing branding in a comment can therefore prevent an
+existing instance from starting. Add a new numbered migration for schema changes
+and retain the original files and checksum validation.
+
+`tests/test_finding_lifecycle_services.py` checks upgrades from deployed lifecycle
+versions 1, 3 and 4 against their pre-rename checksums, preserves existing finding
+data and migration records, and verifies that the upgraded store reopens.

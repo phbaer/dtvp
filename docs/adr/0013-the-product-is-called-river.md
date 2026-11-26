@@ -45,6 +45,9 @@ this product, and four consonants are hard to say and to remember.
 | 3 | The import package `dtvp` and its logger names | Not started |
 | 4 | Names stored in data: see below | Not started |
 
+Historical SQL migration files also remain unchanged, including comments; see the
+[migration policy](../development.md#sqlite-migrations).
+
 Names stored in data, sent to other systems or held by clients, which step 1 leaves
 unchanged:
 

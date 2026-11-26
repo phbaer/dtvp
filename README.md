@@ -14,6 +14,8 @@ River was called DTVP before. Identifiers such as the `DTVP_*` variables, the
 tagline and the story behind them are in [Brand](docs/brand.md).
 The redesigned vulnerability list and assessment workspace use the same River branding;
 existing saved views, assessments and deployment settings remain compatible.
+Historical SQL migrations retain their original checksums; see the
+[migration policy](docs/development.md#sqlite-migrations).
 Dependency diagrams use consistently sized components in a bounded, scrollable view
 ([Screen guide](docs/screens.md)).
 

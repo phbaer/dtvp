@@ -170,6 +170,11 @@ Deployment rules:
 - The River container startup script prints its packaged project version and
   image build number before importing the application, so deployment identity
   remains visible in Docker logs even if initialization fails.
+- Early River rename builds changed comments in finding-lifecycle migrations
+  1, 3 and 4, causing `SQLite migration checksum changed` on existing DTVP
+  databases. Deploy the corrected build, which restores the original files;
+  this upgrade failure requires no database edits. See the
+  [migration policy](development.md#sqlite-migrations).
 - `/api/performance-status` reports grouped-query/build/post-processing
   saturation, retained task counts, process-local cache pressure, and the
   active Python/GIL state.
