@@ -6,6 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from dtvp import dt_cache
+from dtvp.assessment_review import (
+    REQUEST_CHANGES_ORIGIN,
+    WITHDRAW_CHANGES_ORIGIN,
+    changes_requests,
+)
 from dtvp.assessment_services import (
     AssessmentServiceDeps,
     build_assessment_payloads,
@@ -17,6 +22,7 @@ from dtvp.assessment_use_cases import (
     AssessmentPermissionError,
     AssessmentRequest,
     AssessmentValidationError,
+    request_assessment_changes,
     save_assessment,
     seen_assessments,
 )
@@ -1141,3 +1147,120 @@ async def test_a_pending_general_decision_that_covers_a_team_can_be_approved(dep
     )
 
     assert _PENDING not in _stored()["analysisDetails"]
+
+
+async def _request_changes(deps, instances, team="TeamA", rationale="Check the patch.",
+                           revisions=None, **options):
+    return await request_assessment_changes(
+        deps, instances, team=team, rationale=rationale, user="rita",
+        revisions=revisions if revisions is not None else {
+            instance["finding_uuid"]: (_stored(instance) or {}).get("dtvpRevision", 0)
+            for instance in instances
+        },
+        **options,
+    )
+
+
+async def test_changes_request_preserves_verdict_and_blocks_forced_approval(deps):
+    await _store(deps, _GENERAL_PENDING, _TEAM_A_STORED, instance=_TEAMS_INSTANCE)
+    original = _stored()
+    with pytest.raises(AssessmentPermissionError, match="Only reviewers"):
+        await _request_changes(deps, [_TEAMS_INSTANCE])
+    deps.get_user_role = lambda _user: "REVIEWER"
+    with pytest.raises(AssessmentValidationError, match="submitted team"):
+        await _request_changes(deps, [_TEAMS_INSTANCE], team="TeamB")
+    with pytest.raises(AssessmentConflictError):
+        await _request_changes(deps, [_TEAMS_INSTANCE], revisions={"f1": 0})
+    await _request_changes(deps, [_TEAMS_INSTANCE])
+
+    assert _stored()["analysisState"] == original["analysisState"] == "NOT_AFFECTED"
+    assert _teams()["TeamA"]["assessed_by"] == "alice"
+    [feedback] = changes_requests(_stored()["analysisDetails"])
+    assert (feedback["team"], feedback["rationale"], feedback["reviewer"]) == (
+        "TeamA", "Check the patch.", "rita",
+    )
+    with pytest.raises(AssessmentValidationError, match="resubmit"):
+        await _reviewer_save(deps, approve=True, force=True)
+
+    await delete_assessment(deps, [_TEAMS_INSTANCE], team=None, user="rita")
+    assert changes_requests(_stored()["analysisDetails"]) == [feedback]
+    with pytest.raises(AssessmentValidationError, match="resubmit"):
+        await _reviewer_save(deps, approve=True, force=True)
+    await _request_changes(deps, [INSTANCE], rationale=None, withdraw=True)
+    assert changes_requests(_stored()["analysisDetails"]) == []
+
+    history = dt_cache.cache_manager.assessment_outbox.list_revisions(("p1", "c1", "v1"))
+    assert history[0]["origin"] == WITHDRAW_CHANGES_ORIGIN
+    assert any(
+        event["origin"] == REQUEST_CHANGES_ORIGIN
+        and changes_requests(event["analysisDetails"]) == [feedback]
+        for event in history
+    )
+
+
+async def test_explicit_resubmit_checks_scope_and_displayed_revisions(deps):
+    await _store(deps, _TEAM_A_STORED, _TEAM_B_STORED, instance=_TEAMS_INSTANCE)
+    deps.get_user_role = lambda _user: "REVIEWER"
+    await _request_changes(deps, [_TEAMS_INSTANCE])
+    stale_revision = _stored()["dtvpRevision"]
+    await _request_changes(deps, [_TEAMS_INSTANCE], team="TeamB")
+
+    request = {
+        "instances": [dict(_TEAMS_INSTANCE)],
+        "team": "TeamA",
+        "state": "NOT_AFFECTED",
+        "fields": {"pending_review": False, "teams": [
+            {**_TEAM_A_STORED, "details": "Patch confirmed."},
+            {**_TEAM_B_STORED, "details": "Stale and unrelated change."},
+        ]},
+        "force": True,
+        "resubmit_changes": True,
+    }
+    with pytest.raises(AssessmentValidationError, match="full vulnerability"):
+        await save_assessment(deps, _request(**request), user="alice", role="ANALYST", client=None)
+    request.update(review_task_id="task", review_group_id="group")
+    with pytest.raises(AssessmentConflictError):
+        await save_assessment(
+            deps, _request(**request, original_analysis={"f1": {"dtvpRevision": stale_revision}}),
+            user="alice", role="ANALYST", client=None, approval_instances=[_TEAMS_INSTANCE],
+        )
+    await save_assessment(
+        deps, _request(**request, original_analysis={"f1": {"dtvpRevision": _stored()["dtvpRevision"]}}),
+        user="alice", role="ANALYST", client=None, approval_instances=[_TEAMS_INSTANCE],
+    )
+    assert [feedback["team"] for feedback in changes_requests(_stored()["analysisDetails"])] == ["TeamB"]
+    assert _teams()["TeamA"]["details"] == "Patch confirmed."
+    assert _teams()["TeamB"]["details"] == _TEAM_B_STORED["details"]
+    assert _PENDING in _stored()["analysisDetails"]
+
+
+async def test_approval_guards_canonical_finding_omitted_from_payload(deps):
+    sibling = {**_TEAMS_INSTANCE, "component_uuid": "c2", "finding_uuid": "f2"}
+    group = [_TEAMS_INSTANCE, sibling]
+    for instance in group:
+        await _store(deps, _GENERAL_PENDING, _TEAM_A_STORED, instance=instance)
+    deps.get_user_role = lambda _user: "REVIEWER"
+    await _request_changes(deps, [sibling])
+
+    with pytest.raises(AssessmentValidationError, match="resubmit"):
+        await save_assessment(
+            deps, _request(instances=[_TEAMS_INSTANCE], approve=True, force=True, team=None),
+            user="rita", client=None, approval_instances=group,
+        )
+    assert _PENDING in _stored()["analysisDetails"]
+
+
+async def test_approval_revision_guard_covers_an_unwritten_sibling(deps):
+    sibling = {**_TEAMS_INSTANCE, "component_uuid": "c2", "finding_uuid": "f2"}
+    group = [_TEAMS_INSTANCE, sibling]
+    for instance in group:
+        await _store(deps, _GENERAL_PENDING, _TEAM_A_STORED, instance=instance)
+    deps.cache_manager = _RacingCache(dt_cache.cache_manager, {**_RACING, "component_uuid": "c2"})
+    req = _request(instances=[_TEAMS_INSTANCE], approve=True, force=True, team=None)
+
+    with pytest.raises(AssessmentConflictError) as conflict:
+        await save_assessment(deps, req, user="rita", role="REVIEWER", client=None,
+                              approval_instances=group)
+
+    assert conflict.value.conflicts[0]["finding_uuid"] == "f2"
+    assert _PENDING in _stored()["analysisDetails"]

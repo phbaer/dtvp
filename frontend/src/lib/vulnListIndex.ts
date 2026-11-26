@@ -5,6 +5,7 @@ import type { CodeAnalysisAssessmentIndexRecord } from './api'
 import { ORIGINAL_SEVERITIES } from './ssvc'
 import { evidenceSources } from './evidence'
 import { resolveCanonicalTeamName } from './team-mapping'
+import { getGroupChangesRequestedTeams } from './assessmentChanges'
 import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
@@ -47,6 +48,7 @@ export interface VulnListItem {
     tagsLower: string[]
     normalizedTags: string[]
     assessedTeams: Set<string>
+    changesRequestedTeams?: string[]
     missingTeamTagsLower: string[]
     componentNames: string[]
     componentNamesLower: string[]
@@ -741,6 +743,8 @@ export function buildVulnListItem(
         ? new Set(normalizeTags(metadata.assessed_teams, teamMapping))
         : getMatchedAssessedTeams(group, normalizedTags, teamMapping)
     const assessedTeamsLower = new Set(Array.from(assessedTeams).map(lower))
+    const changesRequestedTeams = normalizeTags(getGroupChangesRequestedTeams(group), teamMapping)
+    const changesRequestedTeamsLower = new Set(changesRequestedTeams.map(lower))
     const allTagText = unique([...rawTags, ...normalizedTags])
     const componentNames = metadataStringArray(metadata?.component_names) ?? unique(
         (group.affected_versions || [])
@@ -858,11 +862,13 @@ export function buildVulnListItem(
         tagsLower,
         normalizedTags,
         assessedTeams,
+        changesRequestedTeams,
         // The same rule as the team counters (coversAllTeams).
-        missingTeamTagsLower: coversAllTeams ? [] : allTagText.filter(tag => {
+        missingTeamTagsLower: allTagText.filter(tag => {
             const canonical = normalizeTags([tag], teamMapping)[0] || tag
-            return lower(canonical) !== 'unassigned'
-                && !assessedTeamsLower.has(lower(canonical))
+            const team = lower(canonical)
+            return team !== 'unassigned' && (changesRequestedTeamsLower.has(team)
+                || (!coversAllTeams && !assessedTeamsLower.has(team)))
         }).map(lower),
         componentNames,
         componentNamesLower,
@@ -1373,7 +1379,7 @@ export function computeListTeamCounts(items: VulnListItem[]): Record<string, Tea
         if (!item.normalizedTags.length) continue
 
         addTeamCounts(counts, item.normalizedTags, item.assessedTeams,
-            ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle) && !item.isPending)
+            item.coversAllTeams, item.changesRequestedTeams)
     }
 
     return counts

@@ -34,6 +34,7 @@ from .assessment_model import (
     analysis_response,
     set_shared_response,
 )
+from .assessment_review import changes_requests
 from .assessment_use_cases import (
     AssessmentConflictError,
     AssessmentRequest,
@@ -232,6 +233,7 @@ class McpToolService:
         shared_text, blocks = parse_assessment_blocks(details)
         return {
             "pending_review": "[status: pending review]" in details.casefold(),
+            "changes_requested": changes_requests(details),
             # What is done about the finding; part of the Global assessment
             # and set by reviewers in the web form, not through these tools.
             "response": analysis_response(details),

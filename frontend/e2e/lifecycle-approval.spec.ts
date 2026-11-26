@@ -24,6 +24,7 @@ const finding = (index: number, overrides: Record<string, unknown> = {}) => ({
     vulnerability_uuid: 'v-1',
     analysis_state: 'IN_TRIAGE',
     analysis_details: PENDING_TEXT,
+    dtvp_revision: 0,
     tags: ['Core', 'K-Core'],
     ...overrides,
 });
@@ -130,6 +131,7 @@ async function mockShell(page: Page, group: typeof pendingGlobal) {
                     isSuppressed: false,
                     analysisDetails: finding?.analysis_details || '',
                     analysisComments: [],
+                    dtvpRevision: finding?.dtvp_revision ?? 0,
                 },
             };
         })));
@@ -205,5 +207,113 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
         await expect(why).toContainText('Approval is possible once it is ready for approval.');
         await expect(why).toContainText('1 of 2 finding instances have no analysis state');
         expect(errors).toEqual([]);
+    });
+
+    test('returns a team assessment for changes and waits for resubmission', async ({ page }) => {
+        const group = groupOf('NEEDS_APPROVAL', [finding(1, { dtvp_revision: 2 }), finding(2, { dtvp_revision: 3 })]);
+        const rationale = 'Add evidence for the revised version range – café.';
+        const marker = Buffer.from(JSON.stringify({
+            team: 'K-Core', rationale, reviewer: 'rita', requested_at_ms: 1794822866568,
+        })).toString('base64url');
+        const requests: unknown[] = [];
+        const resubmissions: unknown[] = [];
+        const updateFindings = (details: string) => [...findingsOf(group)].map(([uuid, entry]) => {
+            entry.analysis_details = details;
+            entry.dtvp_revision = Number(entry.dtvp_revision) + 1;
+            return { status: 'success', uuid, new_details: details, new_state: entry.analysis_state, revision: entry.dtvp_revision };
+        });
+        await mockShell(page, group);
+        await page.route('**/api/assessments/request-changes', async route => {
+            requests.push(route.request().postDataJSON());
+            Object.assign(group.list_metadata, {
+                lifecycle: 'INCOMPLETE', is_approval_ready: false, changes_requested_teams: ['K-Core'],
+            });
+            await route.fulfill({ json: updateFindings(`[Team Changes Requested: ${marker}]\n\n${PENDING_TEXT}`) });
+        });
+        await page.route('**/api/assessment', async route => {
+            resubmissions.push(route.request().postDataJSON());
+            Object.assign(group.list_metadata, {
+                lifecycle: 'NEEDS_APPROVAL', is_approval_ready: true, changes_requested_teams: [],
+            });
+            await route.fulfill({ json: updateFindings(PENDING_TEXT.replace('Not reachable.', 'Revised evidence.')) });
+        });
+        await page.setViewportSize({ width: 1600, height: 1000 });
+        const inspector = await openAssessment(page, group);
+        await inspector.getByTestId('review-team-tab').filter({ hasText: 'K-Core' }).click();
+        const openRequest = inspector.getByRole('button', { name: 'Request changes', exact: true });
+        await expect(openRequest).toBeVisible();
+
+        await inspector.getByTestId('workspace-toggle').click();
+        const workspace = page.getByRole('dialog', { name: `Assessment workspace for ${group.id}` });
+        const pane = workspace.getByTestId('workspace-assessment-pane');
+        await pane.getByTestId('review-team-tab').filter({ hasText: 'K-Core' }).click();
+        const workspaceRequest = pane.getByRole('button', { name: 'Request changes', exact: true });
+        await workspaceRequest.click();
+        const dialog = page.getByRole('dialog', { name: 'Request changes from K-Core' });
+        await expect(dialog.getByLabel('Rationale')).toBeFocused();
+        await expect(dialog.getByRole('button', { name: 'Request changes' })).toBeDisabled();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toHaveCount(0);
+        await expect(workspace).toBeVisible();
+
+        const details = pane.locator('#analysis-details-textarea');
+        await details.fill('Revised evidence.');
+        await workspaceRequest.click();
+        await dialog.getByLabel('Rationale').fill(rationale);
+        await dialog.getByRole('button', { name: 'Request changes' }).click();
+        await expect(pane.getByTestId('assessment-changes-requested')).toContainText(rationale);
+        expect(requests).toEqual([{
+            task_id: 'task-ws', group_id: group.id, team: 'K-Core', rationale, revisions: { 'f-1': 2, 'f-2': 3 },
+        }]);
+        await expect(pane.locator('#analysis-state-select')).toContainText('Not Affected');
+        await expect(details).toHaveValue('Revised evidence.');
+        await expect(workspace.getByTestId('assessment-approve-button')).toHaveCount(0);
+
+        const resubmit = workspace.getByTestId('assessment-submit-button');
+        await expect(resubmit).toHaveText('Resubmit K-Core for review');
+        await resubmit.click();
+        await page.getByRole('button', { name: 'Submit', exact: true }).click();
+        await expect.poll(() => resubmissions).toEqual([expect.objectContaining({
+            team: 'K-Core', resubmit_changes: true, review_task_id: 'task-ws', review_group_id: group.id,
+        })]);
+        await expect(pane.getByTestId('assessment-changes-requested')).toHaveCount(0);
+    });
+
+    test('withdraws an orphaned request from Global without editing the assessment', async ({ page }) => {
+        const rationale = 'Confirm the old owner’s evidence.';
+        const marker = Buffer.from(JSON.stringify({
+            team: 'Former Team', rationale, reviewer: 'rita', requested_at_ms: 1794822866568,
+        })).toString('base64url');
+        const group = groupOf('INCOMPLETE', [finding(1, {
+            dtvp_revision: 4, analysis_details: `[Team Changes Requested: ${marker}]\n\n${PENDING_TEXT}`,
+        })]);
+        Object.assign(group.list_metadata, { changes_requested_teams: ['Former Team'] });
+        const withdrawals: unknown[] = [];
+        await mockShell(page, group);
+        await page.route('**/api/assessments/request-changes', async route => {
+            withdrawals.push(route.request().postDataJSON());
+            const entry = findingsOf(group).get('f-1')!;
+            entry.analysis_details = PENDING_TEXT;
+            entry.dtvp_revision = 5;
+            Object.assign(group.list_metadata, {
+                lifecycle: 'NEEDS_APPROVAL', is_approval_ready: true, changes_requested_teams: [],
+            });
+            await route.fulfill({
+                json: [{ status: 'success', uuid: 'f-1', new_details: PENDING_TEXT, new_state: 'IN_TRIAGE', revision: 5 }],
+            });
+        });
+        await page.setViewportSize({ width: 1280, height: 900 });
+        const inspector = await openAssessment(page, group);
+        const requests = inspector.getByTestId('assessment-changes-requested');
+        await expect(requests).toContainText(rationale);
+        await requests.getByRole('button', { name: 'Withdraw request for Former Team' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Withdraw request for Former Team' });
+        await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+        await dialog.getByRole('button', { name: 'Withdraw request', exact: true }).click();
+        await expect(requests).toHaveCount(0);
+        expect(withdrawals).toEqual([{
+            action: 'withdraw', task_id: 'task-ws', group_id: group.id, team: 'Former Team', revisions: { 'f-1': 4 },
+        }]);
+        await expect(inspector.getByTestId('assessment-approve-button')).toBeVisible();
     });
 });

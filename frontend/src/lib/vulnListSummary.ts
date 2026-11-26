@@ -5,6 +5,7 @@ import {
     normalizeTags,
 } from './assessment-helpers'
 import { classifyGroup } from './group-classifier'
+import { getGroupChangesRequestedTeams } from './assessmentChanges'
 
 const hasFullDetailFields = (group: GroupedVuln) =>
     (group.affected_versions || []).some(version =>
@@ -90,10 +91,12 @@ export const summarizeGroupForList = (
             inconsistency_reasons: inconsistencyReasons,
             is_pending: classification.isPending,
             is_approval_ready: classification.isApprovalReady,
+            covers_all_teams: classification.coversAllTeams,
             is_open: classification.isOpen,
             is_assessed: isAssessed,
             technical_state: classification.technicalState,
             assessed_teams: normalizeAssessedTeams(getAssessedTeams(group), teamMapping),
+            changes_requested_teams: normalizeAssessedTeams(getGroupChangesRequestedTeams(group), teamMapping),
             assessment_restore_count: group.assessment_restore_count ?? 0,
             assessment_restore_recoverable_count: group.assessment_restore_recoverable_count ?? 0,
             assessment_restore_reasons: group.assessment_restore_reasons ? [...group.assessment_restore_reasons] : [],

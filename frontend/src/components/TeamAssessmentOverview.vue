@@ -55,6 +55,7 @@ const stateClass = (state: string) => ({
 const statusClass = (row: TeamOverviewRow) => ({
     approved: 'border-green-700/50 text-green-300',
     pending: 'border-amber-700/50 text-amber-200',
+    'changes-requested': 'border-amber-500/60 bg-amber-950/50 text-amber-200',
     submitted: 'border-blue-700/50 text-blue-200',
     missing: 'border-gray-700 text-gray-500',
 })[row.status]

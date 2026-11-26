@@ -15,6 +15,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .assessment_review import (
+    changes_requests,
+    normalize_changes_requests,
+    render_changes_request,
+    strip_changes_requests,
+)
+
 FORM_STRUCTURED = "structured"  # at least one team block
 FORM_TEXT = "text"  # text without team blocks (legacy or plain)
 FORM_EMPTY = "empty"
@@ -348,7 +355,8 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
     from .logic import parse_assessment_blocks  # logic imports nothing from here
 
     raw = str(details or "")
-    shared, blocks = parse_assessment_blocks(raw)
+    shared, blocks = parse_assessment_blocks(strip_changes_requests(raw))
+    requests = changes_requests(raw)
     score = _SCORE.search(shared)
     vector = _VECTOR.search(shared)
     general = next(
@@ -378,6 +386,7 @@ def parse_assessment(state: Any, details: Any, suppressed: Any) -> dict[str, Any
         "free_text": free_text,
         "form": FORM_STRUCTURED if teams else FORM_TEXT if raw.strip() else FORM_EMPTY,
         "teams": teams,
+        **({"changes_requested": requests} if requests else {}),
     }
 
 
@@ -394,7 +403,7 @@ def _header_value(value: Any) -> str:
 
 def _body(value: Any) -> str:
     """Text that cannot be read as the start of another team block."""
-    return _BLOCK_START.sub("- - -", str(value or "")).strip()
+    return _BLOCK_START.sub("- - -", strip_changes_requests(value)).strip()
 
 
 def _score(value: Any) -> str | None:
@@ -482,6 +491,7 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
     vector = _header_value(fields.get("rescored_vector") or "") or None
     response = normalize_response(fields.get("response"))
     override = normalize_version_override(fields.get("version_override"))
+    requests = normalize_changes_requests(fields.get("changes_requested"))
     return {
         "state": str(fields.get("state") or "NOT_SET"),
         "suppressed": bool(fields.get("suppressed")),
@@ -498,6 +508,7 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
             or fields.get("pending_review")
         ) else FORM_EMPTY,
         "teams": teams,
+        **({"changes_requested": requests} if requests else {}),
     }
 
 
@@ -515,6 +526,8 @@ def _render_clean(fields: dict[str, Any]) -> str:
         None,
     )
     parts: list[str] = []
+    if fields.get("changes_requested"):
+        parts.append("\n".join(render_changes_request(value) for value in fields["changes_requested"]))
     shared = []
     # Written beside the teams only when it is not the General assessment's
     # own rescoring, which its block carries.

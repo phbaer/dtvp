@@ -35,6 +35,10 @@ def build_assessment_group_index(
                 if finding_uuid:
                     by_finding_uuid.setdefault(finding_uuid, set()).add(group_id)
                 identity = assessment_identity_key(component)
+                if identity is None and not component.get("project_uuid"):
+                    identity = assessment_identity_key({
+                        **component, "project_uuid": affected_version.get("project_uuid"),
+                    })
                 if identity is not None:
                     by_identity.setdefault(identity, set()).add(group_id)
 

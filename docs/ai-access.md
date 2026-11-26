@@ -98,6 +98,11 @@ claude mcp add --transport http dtvp https://dtvp.example.com/dtvp/mcp \
 the number of active agent entries and analyzer runs (without benchmark-derived
 records) for the vulnerability.
 
+Each assessment variant can include `changes_requested` with the
+[outstanding team feedback](assessment-model.md#changes-requested). A
+reviewer requests or withdraws changes in the browser. An ordinary MCP
+draft preserves any outstanding request.
+
 The resource `dtvp://assessment-rules` returns the valid states, the team
 mapping, and the CVSS rescoring rules in force. Team groups are reviewer-only
 in the REST API and are not included.

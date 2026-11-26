@@ -222,8 +222,8 @@ export const deriveVulnListResultCounts = (
         incrementUniqueResultCounts(counts.assignees, item.group.assignees || [])
         incrementUniqueResultCounts(counts.components, item.componentNames)
 
-        addTeamCounts(counts.team_tags!, teams, item.assessedTeams, item.coversAllTeams)
-        addTeamCounts(counts.canonical_team_tags!, teams, item.assessedTeams, item.coversAllTeams)
+        addTeamCounts(counts.team_tags!, teams, item.assessedTeams, item.coversAllTeams, item.changesRequestedTeams)
+        addTeamCounts(counts.canonical_team_tags!, teams, item.assessedTeams, item.coversAllTeams, item.changesRequestedTeams)
         for (const reason of item.inconsistencyReasons) {
             incrementResultCount(counts.inconsistency_reason!, reason)
         }
@@ -369,7 +369,7 @@ const updateTeamCounts = (
     counts: Record<string, TeamCounts>,
     item: VulnListItem,
 ) => {
-    addTeamCounts(counts, item.normalizedTags, item.assessedTeams, item.coversAllTeams)
+    addTeamCounts(counts, item.normalizedTags, item.assessedTeams, item.coversAllTeams, item.changesRequestedTeams)
 }
 
 export const sortVulnListItems = (

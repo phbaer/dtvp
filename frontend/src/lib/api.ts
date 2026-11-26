@@ -1264,6 +1264,22 @@ export const updateAssessment = async (payload: AssessmentPayload) => {
     return res.data;
 };
 
+export interface AssessmentChangesTarget {
+    task_id: string;
+    group_id: string;
+    team: string;
+    revisions: Record<string, number>;
+}
+
+export type AssessmentChangesRequest = AssessmentChangesTarget & (
+    { action?: 'request'; rationale: string } | { action: 'withdraw' }
+);
+
+export const requestAssessmentChanges = async (payload: AssessmentChangesRequest) => {
+    const res = await api.post('/assessments/request-changes', payload);
+    return res.data;
+};
+
 /**
  * Delete one team's assessment of the given findings (`"General"` for the
  * global one), or with `null` the whole assessment. Exported like a save.

@@ -3248,6 +3248,15 @@ class CacheManager:
             )
         except AssessmentOutboxConflictError as exc:
             raise PendingUpdateExistsError(str(exc)) from exc
+        # Review feedback can be carried forward by the store while holding
+        # the write lock. Snapshot refresh and results must use that value.
+        stored_details = {
+            assessment_key(entry["payload"]): entry["payload"].get("details")
+            for entry in entries
+        }
+        for payload in payloads:
+            if assessment_key(payload) in stored_details:
+                payload["details"] = stored_details[assessment_key(payload)]
         async with self.lock:
             self.pending_updates = self._load_pending_updates()
             self._invalidate_cache_status()

@@ -10,6 +10,7 @@ import {
     normalizeTags,
 } from './assessment-helpers'
 import { INCONSISTENCY_REASON_OPTIONS } from './inconsistency'
+import { getGroupChangesRequestedTeams } from './assessmentChanges'
 
 export interface AssessmentSyncIssue {
     code: string
@@ -54,6 +55,16 @@ const globalAwaitsApproval = (group: GroupedVuln): boolean =>
     isPendingReview(group) && hasGlobalAssessmentForGroup(group)
 
 const APPROVE_GLOBAL = 'Approve the Global assessment to complete it.'
+const changesRequestedIssue = (group: GroupedVuln): AssessmentSyncIssue | undefined => {
+    const teams = getGroupChangesRequestedTeams(group)
+    if (!teams.length) return
+    return {
+        code: 'CHANGES_REQUESTED',
+        kind: 'incomplete',
+        label: 'Changes requested',
+        detail: `Waiting for ${teams.join(', ')} to resubmit for review.`,
+    }
+}
 
 const incompleteIssues = (
     group: GroupedVuln,
@@ -61,6 +72,8 @@ const incompleteIssues = (
     teamMapping: Record<string, string | string[]>,
 ): AssessmentSyncIssue[] => {
     const issues: AssessmentSyncIssue[] = []
+    const changes = changesRequestedIssue(group)
+    if (changes) issues.push(changes)
     const allInstances = (group.affected_versions || []).flatMap(version => version.components || [])
     const missingInstances = allInstances.filter(instance =>
         (instance.analysis_state || instance.analysisState || 'NOT_SET') === 'NOT_SET'
@@ -194,6 +207,8 @@ export const getApprovalUnavailableReason = (
     group: GroupedVuln,
     options: AssessmentSyncIssueOptions = {},
 ): string => {
+    const changes = changesRequestedIssue(group)
+    if (changes) return changes.detail
     if (!isPendingReview(group)) return ''
     const teamMapping = options.teamMapping || {}
     const requiredTeamsOrTags = options.requiredTeamsOrTags || group.tags || []

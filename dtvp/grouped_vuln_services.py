@@ -283,6 +283,8 @@ def _normalize_block_signature(block: Dict[str, Any]) -> str:
 
 
 def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
+    from .assessment_review import changes_requests
+
     instances = [
         component
         for affected_version in group.get("affected_versions", [])
@@ -345,6 +347,11 @@ def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
         "instance_blocks": instance_blocks,
         "blocks": blocks,
         "assessed_teams": assessed_teams,
+        "changes_requested_teams": {
+            request["team"]
+            for instance in instances
+            for request in changes_requests(_instance_details(instance))
+        },
         "has_any_assessment": any(state != "NOT_SET" for state in component_states),
         "has_missing_component": "NOT_SET" in component_states,
         "has_global_assessment": bool(global_state),
@@ -492,6 +499,9 @@ def _derive_group_lifecycle(
         else _derive_group_inconsistency_reasons(group, summary)
     ):
         return "INCONSISTENT"
+
+    if summary["changes_requested_teams"]:
+        return "INCOMPLETE"
 
     assessed_keys = _assessed_team_keys(summary["assessed_teams"], team_mapping)
     missing_teams = [
@@ -666,7 +676,11 @@ def _build_group_list_metadata(
     # Pending review is not done, even when all currently visible team blocks
     # are populated. Lifecycle filters still keep NEEDS_APPROVAL separate from
     # OPEN; team counters use assessed_teams independently of this flag.
-    is_open = lifecycle == "OPEN" or summary["is_pending_review"]
+    is_open = (
+        lifecycle == "OPEN"
+        or summary["is_pending_review"]
+        or bool(summary["changes_requested_teams"])
+    )
     is_approval_ready = (
         summary["is_pending_review"] and lifecycle == "NEEDS_APPROVAL"
     )
@@ -701,6 +715,9 @@ def _build_group_list_metadata(
         "is_assessed": lifecycle in {"ASSESSED", "ASSESSED_LEGACY"},
         "technical_state": summary["technical_state"],
         "assessed_teams": sorted(summary["assessed_teams"]),
+        "changes_requested_teams": sorted(
+            _normalize_group_tags(list(summary["changes_requested_teams"]), team_mapping)
+        ),
         "component_names": _unique_non_empty_strings(
             [component.get("component_name") for component in components]
         ),

@@ -963,3 +963,18 @@ def test_awaiting_review_is_part_of_the_query_cache_key():
     assert _query(index)["filtered"] == 2
     assert _query(index, awaiting_review=True)["filtered"] == 1
     assert _query(index)["filtered"] == 2
+
+
+def test_team_with_review_feedback_is_missing_despite_global_coverage():
+    group = _group(1)
+    group["tags"] = ["Core", "Platform"]
+    group["list_metadata"].update(
+        lifecycle="INCOMPLETE", covers_all_teams=True, assessed_teams=["Core"],
+        changes_requested_teams=["Core Team"],
+    )
+    index = query_services.build_task_group_query_index([group])
+    aliases = {"core team": "Core"}
+
+    assert _query(index, team="Core", team_assessment="MISSING", team_aliases=aliases)["filtered"] == 1
+    assert _query(index, team="Core", team_assessment="DOCUMENTED", team_aliases=aliases)["filtered"] == 0
+    assert _query(index, team="Platform", team_assessment="DOCUMENTED", team_aliases=aliases)["filtered"] == 1

@@ -811,6 +811,33 @@ describe('vulnListIndex', () => {
         })
     })
 
+    it('opens only the requested team when a pending Global decision covers both teams', () => {
+        const group = makeGroup({ tags: ['team-a', 'team-b'] })
+        const component = group.affected_versions[0]!.components[0]!
+        const assessment = [
+            '--- [Team: General] [State: IN_TRIAGE] ---',
+            'Decision pending review.',
+            '--- [Team: team-a] [State: NOT_AFFECTED] ---',
+            'The code is absent.',
+            '[Status: Pending Review]',
+        ].join('\n')
+        const encoded = Buffer.from(JSON.stringify({
+            team: 'team-a', rationale: 'Explain the affected versions.', reviewer: 'rita', requested_at_ms: 1,
+        })).toString('base64url')
+        const marker = `[Team Changes Requested: ${encoded}]`
+        component.analysis_state = 'IN_TRIAGE'
+        component.analysis_details = `Reviewer prose\n${marker}\n\n${assessment}`
+        expect(buildVulnListItems([group], {}, {})[0]?.changesRequestedTeams).toEqual([])
+
+        component.analysis_details = `${marker}\n\n${assessment}`
+        const items = buildVulnListItems([group], {}, {})
+        expect(items[0]).toMatchObject({ lifecycle: 'INCOMPLETE', missingTeamTagsLower: ['team-a'] })
+        expect(computeListTeamCounts(items)).toEqual({
+            'team-a': { open: 1, assessed: 0 },
+            'team-b': { open: 0, assessed: 1 },
+        })
+    })
+
     it('ignores tmrescore proposals that do not change the vector', () => {
         const group = makeGroup({ id: 'CVE-2026-1234' })
 

@@ -4,6 +4,7 @@ import { History, RefreshCw } from '@lucide/vue'
 import { getAssessmentHistory } from '../lib/api'
 import type { AssessmentRevision } from '../lib/api'
 import type { Instance } from '../types'
+import { readTeamChangesRequests, stripTeamChangesRequests } from '../lib/assessmentChanges'
 
 const props = defineProps<{
     instances: Instance[]
@@ -19,6 +20,9 @@ const ORIGIN_LABELS: Record<string, string> = {
     'mcp-assessment': 'Saved by an agent',
     'bulk-workflow': 'Bulk change',
     'assessment-deletion': 'Cleared',
+    'assessment-changes-requested': 'Changes requested',
+    'assessment-changes-resubmitted': 'Resubmitted for review',
+    'assessment-changes-withdrawn': 'Request withdrawn',
     'export-discarded': 'Export discarded, previous value restored',
     'import': 'Changed in Dependency-Track',
     'conflict-resolution': 'Conflict resolved',
@@ -193,10 +197,16 @@ watch(() => props.refreshKey, () => {
                             {{ expanded.has(entry.key) ? 'Hide text' : 'Show text' }}
                         </button>
                     </div>
-                    <pre
-                        v-if="expanded.has(entry.key)"
-                        class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded border border-gray-800 bg-gray-900 p-2 text-[11px] text-gray-300"
-                    >{{ entry.analysisDetails || '(No assessment text)' }}</pre>
+                    <div v-if="expanded.has(entry.key)" class="mt-2 space-y-2">
+                        <p
+                            v-for="request in readTeamChangesRequests(entry.analysisDetails)"
+                            :key="request.team"
+                            class="whitespace-pre-wrap break-words text-xs text-amber-200"
+                        ><strong>{{ request.team }}</strong> · {{ request.reviewer }} · {{ request.rationale }}</p>
+                        <pre
+                            class="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-gray-800 bg-gray-900 p-2 text-[11px] text-gray-300"
+                        >{{ stripTeamChangesRequests(entry.analysisDetails) || '(No assessment text)' }}</pre>
+                    </div>
                 </li>
             </ol>
         </div>

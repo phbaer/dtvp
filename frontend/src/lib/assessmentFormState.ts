@@ -1,5 +1,6 @@
 import type { AssessmentBlock } from './assessment-helpers'
 import { parseAssessmentBlocks, parseJustificationFromText, STATE_PRIORITY, stripAssessmentResponseTags } from './assessment-helpers'
+import { stripTeamChangesRequests } from './assessmentChanges'
 
 export interface AssessmentInstanceState {
     analysis_state?: string
@@ -40,7 +41,7 @@ export const stripPendingReviewStatus = (details: string): string => {
 }
 
 export const cleanStructuredAssessmentDetails = (details: string): string => {
-    const cleaned = stripPendingReviewStatus(details)
+    const cleaned = stripTeamChangesRequests(stripPendingReviewStatus(details))
         .replaceAll(/---\s*\[Team:[^\n]*---\s*/g, '')
         .replaceAll(/\[Rescored:\s*[\d.]+\]/g, '')
         .replaceAll(/\[Rescored Vector:\s*[^\]]+\]/g, '')

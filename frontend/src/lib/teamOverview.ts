@@ -17,7 +17,7 @@ export interface TeamOverviewInput {
     source: 'team' | 'automatic' | 'missing'
 }
 
-export type TeamOverviewStatus = 'approved' | 'pending' | 'submitted' | 'missing'
+export type TeamOverviewStatus = 'approved' | 'pending' | 'changes-requested' | 'submitted' | 'missing'
 
 export interface TeamOverviewRow {
     team: string
@@ -58,6 +58,7 @@ export interface TeamOverviewOptions {
     componentsByTeam?: Map<string, string[]>
     /** The vulnerability carries [Status: Pending Review]. */
     pendingReview?: boolean
+    changesRequestedTeams?: string[]
     /** The state in the Global form; NOT_SET for none. */
     globalState?: string
 }
@@ -77,6 +78,7 @@ export const stateLabel = (state: string): string => {
 export const statusLabel = (status: TeamOverviewStatus): string => ({
     approved: 'approved',
     pending: 'pending review',
+    'changes-requested': 'changes requested',
     submitted: 'submitted',
     missing: 'no assessment',
 })[status]
@@ -113,10 +115,14 @@ const majorityState = (states: string[]): string => {
     return ranked[0]![0]
 }
 
-const rank = (row: TeamOverviewRow) => (row.disagrees ? 0 : row.status === 'missing' ? 1 : 2)
+const rank = (row: TeamOverviewRow) => (
+    row.status === 'changes-requested' || row.disagrees ? 0 : row.status === 'missing' ? 1 : 2
+)
 
 export const buildTeamOverview = (options: TeamOverviewOptions): TeamOverview => {
     const aliasGroups = options.aliasGroups || {}
+    const changesRequested = new Set((options.changesRequestedTeams || [])
+        .map(team => key(resolveTeamAlias(team, aliasGroups))))
     const pendingReview = !!options.pendingReview
     const globalState = hasState(options.globalState) ? options.globalState! : ''
     const active = options.blocks.filter(block => !block.historical)
@@ -135,7 +141,9 @@ export const buildTeamOverview = (options: TeamOverviewOptions): TeamOverview =>
         if (seen.has(teamKey)) return
         seen.add(teamKey)
         const block = newest((teamBlocks.get(teamKey) || []).filter(candidate => hasState(candidate.state)))
-        const status = statusOf(block, pendingReview, globalDecided)
+        const status = changesRequested.has(teamKey)
+            ? 'changes-requested'
+            : statusOf(block, pendingReview, globalDecided)
         const draft = input.source === 'team' && hasState(input.state) && (
             !block
             || block.state !== input.state
@@ -232,5 +240,5 @@ export const visibleTeamOverviewRows = (
 ): TeamOverviewRow[] => (
     showAll || rows.length <= limit
         ? rows
-        : rows.filter(row => row.disagrees || row.status === 'missing')
+        : rows.filter(row => row.disagrees || row.status === 'missing' || row.status === 'changes-requested')
 )

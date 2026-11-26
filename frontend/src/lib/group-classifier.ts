@@ -3,6 +3,7 @@
  */
 
 import type { GroupedVuln } from '../types'
+import { getGroupChangesRequestedTeams } from './assessmentChanges'
 import {
     getGroupLifecycle,
     isPendingReview,
@@ -149,11 +150,13 @@ export function addTeamCounts(
     teams: readonly string[],
     assessedTeams: Iterable<string>,
     closed = false,
+    changesRequestedTeams: Iterable<string> = [],
 ): void {
     const assessed = new Set(Array.from(assessedTeams, team => team.toLowerCase()))
+    const changesRequested = new Set(Array.from(changesRequestedTeams, team => team.toLowerCase()))
     for (const team of new Set(teams)) {
         const entry = counts[team] ||= { open: 0, assessed: 0 }
-        if (closed || assessed.has(team.toLowerCase())) entry.assessed++
+        if (!changesRequested.has(team.toLowerCase()) && (closed || assessed.has(team.toLowerCase()))) entry.assessed++
         else entry.open++
     }
 }
@@ -173,7 +176,8 @@ export function computeTeamCounts(
 
         const assessed = g.list_metadata?.assessed_teams ?? Array.from(getAssessedTeams(g))
         const covered = coversAllTeamsOf(g, teamMapping)
-        addTeamCounts(counts, teams, normalizeTags(assessed, teamMapping), covered)
+        addTeamCounts(counts, teams, normalizeTags(assessed, teamMapping), covered,
+            normalizeTags(getGroupChangesRequestedTeams(g), teamMapping))
     }
 
     return counts

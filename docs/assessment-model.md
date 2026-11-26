@@ -148,6 +148,7 @@ has version overrides.
 | Rule | Condition | Lifecycle (API) |
 | :--- | :--- | :--- |
 | R1 | Any inconsistency reason | `INCONSISTENT` |
+| R1a | An outstanding [request for changes](#changes-requested) | `INCOMPLETE` |
 | R2 | Pending review, and no finding has a state | `OPEN` |
 | R3 | Pending review, and a finding has no state | `INCOMPLETE` |
 | R4 | Pending review, a required team has not assessed, and no General block decides | `INCOMPLETE` |
@@ -237,10 +238,36 @@ example a finding without a state, or a team without an assessment and no
 General decision). The server checks the same rule on the stored texts of
 the findings the request names and refuses an approval of anything else with
 422 (`approval_blocker`); a request whose findings hold nothing pending is a
-reviewer's ordinary save and is not refused. A reviewer can complete a
-vulnerability without every team's own assessment: record the final Global
-decision (it stays pending review), which makes it Ready for approval, then
-approve it.
+reviewer's ordinary save when there are no outstanding change requests.
+When teams are missing assessments and there are no outstanding requests, a
+reviewer can record a final Global decision. It stays pending review and can
+then be approved.
+
+#### Changes requested
+
+A reviewer can return a current submitted team assessment with a required
+rationale. This records a review decision independently of the technical
+state. The affected team counts as having work to do and the vulnerability
+cannot be approved while the request is outstanding. A Global decision
+cannot satisfy a change request for a team.
+
+An explicit resubmission marks the selected team's revised assessment pending
+review and resolves its outstanding request. A reviewer can also withdraw
+an obsolete request, including after team ownership changes. Requests for
+other teams are preserved. The assessment history keeps the rationale and
+reviewer. An
+outstanding request is stored in the assessment details and follows normal
+Dependency-Track exports.
+
+The browser uses `POST /api/assessments/request-changes` with the grouped
+task and vulnerability IDs, team, rationale and displayed finding revisions.
+Withdrawal uses the same endpoint with `action: "withdraw"`.
+Resubmission uses `POST /api/assessment` with `resubmit_changes: true`, the
+full grouped finding set and the revisions the analyst viewed. A stale
+review action must be retried after reloading. A legacy approval request
+can require a fresh grouped task when DTVP detects outstanding feedback
+in the project family.
+See [ADR 0016](adr/0016-team-assessment-changes-requested.md).
 
 #### Names
 

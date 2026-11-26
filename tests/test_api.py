@@ -2223,6 +2223,91 @@ def test_assessment_update_refreshes_grouped_task_windows(client, mock_dt_client
     mock_dt_client.update_analysis.assert_not_called()
 
 
+def test_reviewer_can_return_team_assessment_from_its_grouped_view(client, mock_dt_client):
+    mock_dt_client.get_analysis.return_value = {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": False,
+    }
+    task_id = "review-team-assessment"
+    group_id = "CVE-REVIEW-TEAM"
+    finding = {
+        "project_uuid": "review-project",
+        "project_version": "1.0",
+        "component_uuid": "review-library",
+        "component_name": "library",
+        "vulnerability_uuid": "review-vulnerability",
+        "finding_uuid": "review-finding",
+        "tags": ["Core"],
+    }
+    group = {
+        "id": group_id,
+        "tags": ["Core"],
+        "affected_versions": [{
+            "project_uuid": finding["project_uuid"],
+            "project_version": finding["project_version"],
+            "components": [finding],
+        }],
+    }
+    task = {
+        "_owner": "another-user",
+        "status": "completed",
+        "result_mode": "summary",
+        "result": summarize_grouped_vulnerabilities([group], {}),
+        "_full_result": [group],
+        "_full_result_by_id": {group_id: group},
+    }
+    submission = {
+        "instances": [finding],
+        "team": "Core",
+        "state": "NOT_AFFECTED",
+        "fields": {"teams": [{
+            "team": "Core",
+            "state": "NOT_AFFECTED",
+            "details": "Based on the current lockfile.",
+        }]},
+    }
+    main.tasks[task_id] = task
+    try:
+        with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+            assert client.post("/api/assessment", json=submission).status_code == 200
+            details = client.post("/api/assessments/details", json={"instances": [finding]})
+            assert details.status_code == 200
+            revision = details.json()[0]["analysis"]["dtvpRevision"]
+            request = {
+                "task_id": task_id,
+                "group_id": group_id,
+                "team": "Core",
+                "rationale": "Check the shipped artifact as well.",
+                "revisions": {finding["finding_uuid"]: revision},
+            }
+            assert client.post("/api/assessments/request-changes", json=request).status_code == 403
+
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            assert client.post("/api/assessments/request-changes", json=request).status_code == 404
+            task["_owner"] = "testuser"
+            returned = client.post("/api/assessments/request-changes", json=request)
+            assert returned.status_code == 200, returned.text
+            assert returned.json()[0]["status"] == "success"
+            blocked = client.post("/api/assessment", json={
+                **submission,
+                "approve": True,
+                "force": True,
+                "review_task_id": task_id,
+                "review_group_id": group_id,
+            })
+            assert blocked.status_code == 422
+            assert "resubmit" in blocked.json()["detail"].lower()
+
+        window = client.get(f"/api/tasks/{task_id}/groups", params={"lifecycle": "INCOMPLETE"})
+        assert window.status_code == 200
+        metadata = window.json()["items"][0]["list_metadata"]
+        assert metadata["changes_requested_teams"] == ["Core"]
+        assert metadata["technical_state"] == "NOT_AFFECTED"
+    finally:
+        main.tasks.pop(task_id, None)
+
+
 def test_assessment_update_failure(client, mock_dt_client):
     mock_dt_client.update_analysis.side_effect = Exception("Analysis update failed")
 
@@ -2276,3 +2361,48 @@ def test_spa_routing(client):
     # 2. Static assets
     response = client.get("/assets/test.css")
     assert response.status_code == 200
+
+
+def test_assessment_changes_review_api_uses_the_complete_task_group(client):
+    team = "Team A"
+    group_id = "CVE-REVIEW"
+    task_id = "assessment-review-task"
+    instances = [
+        {"project_uuid": "p1", "component_uuid": f"c{n}",
+         "vulnerability_uuid": "v1", "finding_uuid": f"f{n}"}
+        for n in (1, 2)
+    ]
+    group = {
+        "id": group_id, "tags": [team],
+        "affected_versions": [{"project_uuid": "p1", "components": instances}],
+    }
+    main.tasks[task_id] = {
+        "_owner": "testuser", "status": "completed", "result": [group],
+    }
+    saved = client.post("/api/assessment", json={
+        "instances": instances, "team": team, "state": "NOT_AFFECTED",
+        "details": "The vulnerable code is unreachable.",
+    })
+    assert saved.status_code == 200
+    revisions = {entry["uuid"]: entry["revision"] for entry in saved.json()}
+    body = {"task_id": task_id, "group_id": group_id, "team": team,
+            "rationale": "Check the version with optional plugins.", "revisions": revisions}
+    url = "/api/assessments/request-changes"
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        assert client.post(url, json=body).status_code == 403
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        assert client.post(url, json={**body, "revisions": {"f1": revisions["f1"]}}).status_code == 422
+        response = client.post(url, json=body)
+        assert response.status_code == 200, response.text
+        assert {item["uuid"] for item in response.json()} == {"f1", "f2"}
+        assert client.post(url, json=body).status_code == 409
+        approval = client.post("/api/assessment", json={
+            "instances": instances[:1], "state": "NOT_AFFECTED", "approve": True,
+            "force": True,
+        })
+        assert approval.status_code == 422
+        assert "resubmit" in approval.json()["detail"]
+        body.update(action="withdraw", rationale=None,
+                    revisions={item["uuid"]: item["revision"] for item in response.json()})
+        withdrawal = client.post(url, json=body)
+        assert withdrawal.status_code == 200, withdrawal.text

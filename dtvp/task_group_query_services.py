@@ -26,7 +26,7 @@ from .first_seen import (
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 20
+TASK_GROUP_QUERY_INDEX_VERSION = 21
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -322,6 +322,9 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "assignees_lower": [_lower(value) for value in assignees],
         "assessed_teams_lower": {
             _lower(value) for value in _string_list(assessed_teams)
+        },
+        "changes_requested_teams_lower": {
+            _lower(value) for value in _string_list(metadata.get("changes_requested_teams"))
         },
         "versions": versions,
         "versions_lower": versions_lower,
@@ -961,10 +964,14 @@ def _canonical_assessed_teams(
     teams = set(fields["assessed_teams_lower"])
     if fields["covers_all_teams"]:
         teams.update(_lower(team) for team in fields["tags"])
+    requested = {
+        _lower(team_aliases.get(team, team))
+        for team in fields.get("changes_requested_teams_lower", ())
+    }
     return {
         _lower(team_aliases.get(team, team))
         for team in teams
-    }
+    } - requested
 
 
 def _team_count_rows(

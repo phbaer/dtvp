@@ -20,3 +20,4 @@ Decision status and implementation status are tracked separately in each record.
 | [0012: The team mapping is organised by team](0012-team-centric-mapping.md) | Accepted | Implemented |
 | [0014: One lifecycle decision table; a pending Global decision is ready for approval](0014-lifecycle-decision-table.md) | Accepted | Implemented |
 | [0015: A cutoff on the published or first-attributed date, and saved views with short links](0015-saved-views-cutoff-and-short-links.md) | Accepted | Implemented ([PR #360](https://git.baer.one/phbaer/dtvp/pulls/360)) |
+| [0016: Changes requested for a team assessment](0016-team-assessment-changes-requested.md) | Proposed | Implemented |

@@ -1585,6 +1585,9 @@ def _parse_assessment_blocks_uncached(details: str) -> Tuple[str, List[Dict[str,
     if not details:
         return "", []
 
+    from .assessment_review import strip_changes_requests
+
+    details = strip_changes_requests(details)
     blocks = []
 
     # JSON is a separate payload, never assessment prose or team headers. A

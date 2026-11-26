@@ -2,6 +2,7 @@ import { combineLifecycles, getAssessmentScopes, hasPendingReviewMarker, scopedG
 import type { GroupedVuln, InconsistencyReason, Tags, TagValue } from '../types';
 import { normalizeInconsistencyReasons } from './inconsistency';
 import { maskSsvcDetails, ssvcDetailsPattern, stripSsvcDetails, stripSsvcDocumentation } from './ssvc';
+import { getGroupChangesRequestedTeams, stripTeamChangesRequests } from './assessmentChanges';
 
 export interface AssessmentBlock {
     ssvc?: string;
@@ -156,7 +157,7 @@ export const parseVersionOverride = (fullText: string | undefined | null): Versi
 
 /** Text ahead of the blocks without the tags that are fields of their own. */
 const stripSharedFieldTags = (text: string): string =>
-    stripVersionOverrideTags(stripAssessmentResponseTags(text));
+    stripTeamChangesRequests(stripVersionOverrideTags(stripAssessmentResponseTags(text)));
 
 function splitAtFirstTeamBlock(fullText: string): [string, string] {
     const source = fullText || '';
@@ -312,7 +313,7 @@ export const blocksInTeamOrder = (fullText: string): string => {
  * `parseAssessmentResponse`). As the server's ``_without_optional_decisions``.
  */
 const withoutOptionalDecisions = (details: string): string =>
-    stripSsvcDocumentation(String(details || ''))
+    stripTeamChangesRequests(stripSsvcDocumentation(String(details || '')))
         .replace(/\[SSVC:\s*([^\]]+)\]/g, '')
         .replace(responseTagPattern(), '');
 
@@ -672,7 +673,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const ssvcDetails = [...originalContent.matchAll(ssvcDetailsPattern())].map(match => match[0].trimStart()).join('\n\n');
         // Only what the server removes: the text of a block stays as
         // written, so both sides read the same record.
-        const content = stripAssessmentResponseTags(stripSsvcDetails(originalContent))
+        const content = stripTeamChangesRequests(stripAssessmentResponseTags(stripSsvcDetails(originalContent)))
             .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/gi, '')
             .replace(/\bAssessed\s*--\s*\S+/g, '')
@@ -1464,6 +1465,7 @@ const getGroupLifecycleFromSummary = (
     if (getGroupInconsistencyReasonsFromSummary(group, summary).length > 0) {
         return 'INCONSISTENT';
     }
+    if (getGroupChangesRequestedTeams(group).length) return 'INCOMPLETE';
 
     const assessedKeys = assessedTeamKeys(
         blocks.filter(b => b.state !== 'NOT_SET').map(b => b.team),

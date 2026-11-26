@@ -6,6 +6,12 @@ from dtvp.assessment_outbox_services import (
     AssessmentRevisionConflictError,
 )
 
+from dtvp.assessment_review import (
+    REQUEST_CHANGES_ORIGIN,
+    WITHDRAW_CHANGES_ORIGIN,
+    with_changes_requests,
+)
+
 
 def _payload(state: str = "IN_TRIAGE", details: str = "Reviewing") -> dict:
     return {
@@ -1161,3 +1167,21 @@ def test_expected_records_guard_a_save_and_what_it_supersedes(tmp_path):
         replace=True,
     ) == []
     assert store.get_overlay(new)["analysisDetails"] == "Newer"
+
+
+def test_discarding_an_export_cannot_change_review_feedback(tmp_path):
+    store = _store(tmp_path)
+    _synced(store, details="Agreed")
+    reported = with_changes_requests("Agreed", [{
+        "team": "TeamA", "rationale": "Check exposure.", "reviewer": "rita",
+        "requested_at_ms": 1,
+    }])
+    request = store.enqueue_many([_payload(details=reported)], origin=REQUEST_CHANGES_ORIGIN)[0]
+
+    assert store.discard_many([request["id"]]) == []
+    assert store.get_overlay(KEY)["analysisDetails"] == reported
+    assert store.mark_synced(KEY, request["revision"])
+    withdrawal = store.enqueue_many([_payload(details="Agreed")], origin=WITHDRAW_CHANGES_ORIGIN)[0]
+
+    assert store.discard_many([withdrawal["id"]]) == []
+    assert store.get_overlay(KEY)["analysisDetails"] == "Agreed"

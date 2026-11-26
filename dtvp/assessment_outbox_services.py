@@ -13,6 +13,14 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from .assessment_model import PENDING_REVIEW_MARKER, parse_assessment, version_override
+from .assessment_review import (
+    REQUEST_CHANGES_ORIGIN,
+    RESUBMIT_CHANGES_ORIGIN,
+    WITHDRAW_CHANGES_ORIGIN,
+    changes_requests,
+    normalize_changes_requests,
+    with_changes_requests,
+)
 from .local_store import get_database_path
 from .sqlite_migration_services import run_sqlite_migrations
 from .startup_progress import report_startup_progress
@@ -797,6 +805,23 @@ class AssessmentOutboxStore:
         with self._lock:
             with closing(self._connect()) as connection:
                 with connection:
+                    if expected_revisions:
+                        connection.execute("BEGIN IMMEDIATE")
+                    # Approval can depend on sibling findings it does not write.
+                    for key, expected in (expected_revisions or {}).items():
+                        if key in deduplicated:
+                            continue
+                        row = connection.execute(
+                            """
+                            SELECT revision FROM assessment_state
+                            WHERE project_uuid = ? AND component_uuid = ?
+                              AND vulnerability_uuid = ?
+                            """,
+                            key,
+                        ).fetchone()
+                        current = int(row["revision"]) if row is not None else 0
+                        if current != expected:
+                            raise AssessmentRevisionConflictError(key, expected, current)
                     for key, payload in deduplicated.items():
                         existing_state = connection.execute(
                             """
@@ -856,6 +881,29 @@ class AssessmentOutboxStore:
                                     continue
                                 raise
 
+                        if origin not in {
+                            REQUEST_CHANGES_ORIGIN,
+                            RESUBMIT_CHANGES_ORIGIN,
+                            WITHDRAW_CHANGES_ORIGIN,
+                        }:
+                            existing_details = (
+                                existing_state["analysis_details"] if existing_state is not None
+                                else ((bases or {}).get(key) or {}).get("details", "")
+                            )
+                            inherited_requests = changes_requests(existing_details)
+                            for predecessor in (supersedes or {}).get(key, ()):
+                                earlier = self._states.get(predecessor)
+                                inherited_requests += changes_requests(
+                                    earlier.get("analysisDetails") if earlier else ""
+                                )
+                            if isinstance(payload.get("details"), str) or inherited_requests:
+                                payload["details"] = with_changes_requests(
+                                    payload.get("details"),
+                                    normalize_changes_requests(sorted(
+                                        inherited_requests,
+                                        key=lambda value: value["requested_at_ms"],
+                                    )),
+                                )
                         revision = current_revision + 1
                         update_id = str(uuid.uuid4())
                         value = assessment_value(
@@ -1004,6 +1052,17 @@ class AssessmentOutboxStore:
         with self._lock:
             state = self._states.get(key)
             return copy.deepcopy(state) if state is not None else None
+
+    def has_changes_requests(self, project_uuids: set[str]) -> bool:
+        """Whether approval needs a full group snapshot for these projects."""
+        self._ensure_initialized()
+        with self._lock:
+            return any(
+                key[0] in project_uuids
+                and state["sync_status"] not in {SYNC_INACTIVE, SYNC_SUPERSEDED}
+                and changes_requests(state["analysisDetails"])
+                for key, state in self._states.items()
+            )
 
     def keys_with_text_and_no_state(self, project_uuid: str) -> set[AssessmentKey]:
         """Findings of a project whose record has a text and no state.
@@ -2092,8 +2151,8 @@ class AssessmentOutboxStore:
         known (changes queued before bases were recorded) the local value
         is kept and marked cancelled; the next import replaces it.
 
-        Returns the findings whose export was dropped. Unknown ids are
-        ignored.
+        Returns the findings whose export was dropped. Unknown IDs and
+        exports whose discard would change review feedback are skipped.
         """
         wanted = {str(update_id) for update_id in update_ids}
         self._ensure_initialized()
@@ -2106,6 +2165,7 @@ class AssessmentOutboxStore:
             ]
             if not targets:
                 return []
+            discarded = []
             with closing(self._connect()) as connection:
                 with connection:
                     for key in targets:
@@ -2118,6 +2178,13 @@ class AssessmentOutboxStore:
                             key,
                         ).fetchone()
                         state = self._state_record(row) if row is not None else None
+                        if state is not None:
+                            base_details = (state["base"] or {}).get("details")
+                            if changes_requests(state["analysisDetails"]) != changes_requests(base_details):
+                                # Discarding a queued export cannot undo a
+                                # review decision or revive resolved feedback.
+                                continue
+                        discarded.append(key)
                         if state is not None and state["base"] is not None:
                             self._adopt_value(
                                 connection, key, state, state["base"],
@@ -2147,8 +2214,8 @@ class AssessmentOutboxStore:
                             """,
                             (SYNC_CANCELLED, now, *key),
                         )
-                self._reload_keys(connection, targets)
-            return targets
+                self._reload_keys(connection, discarded)
+            return discarded
 
     def import_legacy(self, entries: Iterable[dict[str, Any]]) -> int:
         self._ensure_initialized()

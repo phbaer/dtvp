@@ -135,7 +135,10 @@ constraints, and CI conventions.
    on the Global assessment shows what every team decided, disagreeing and
    missing teams first. A save never drops another team's assessment; a
    block it leaves out is kept as historical, and a team's historical block
-   stays beside its new assessment.
+   stays beside its new assessment. Reviewers can [request changes to a
+   team assessment](docs/review-workflows.md#requesting-changes) with a
+   rationale. The team's technical decision stays visible while approval
+   waits for its resubmission.
 4. Use **Bulk Changes** to apply automatic assessments, run the combined
    repair (synchronization, former-team assessments kept as historical, CVSS
    restore, the SSVC record and response the findings agree on, rescoring), or restore lost team assessments from a

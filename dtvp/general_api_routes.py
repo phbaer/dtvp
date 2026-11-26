@@ -44,6 +44,7 @@ from .project_archive_services import get_project_archive_path
 from .team_mapping import normalize_team_values
 from .version import get_app_version
 from .assessment_outbox_services import AssessmentRevisionConflictError, assessment_key
+from .assessment_review import MAX_REVIEW_RATIONALE
 from .assessment_use_cases import (
     AssessmentConflictError,
     AssessmentPermissionError,
@@ -52,6 +53,7 @@ from .assessment_use_cases import (
     accepted_assessment_results as _accepted_assessment_results,
     clean_up_assessment,
     delete_assessment,
+    request_assessment_changes,
     record_code_analysis_applications as _record_code_analysis_applications,
     save_assessment,
 )
@@ -183,6 +185,15 @@ class AssessmentDeletionRequest(BaseModel):
     instances: list[dict]
     # A team name, "General", or omitted/null for the whole assessment.
     team: Optional[str] = None
+
+
+class AssessmentChangesRequest(BaseModel):
+    task_id: str = Field(min_length=1, max_length=200)
+    group_id: str = Field(min_length=1, max_length=200)
+    team: str = Field(min_length=1, max_length=200)
+    rationale: str | None = Field(default=None, max_length=MAX_REVIEW_RATIONALE)
+    action: Literal["request", "withdraw"] = "request"
+    revisions: dict[str, Annotated[int, Field(ge=0)]]
 
 
 class AssessmentCleanupRequest(BaseModel):
@@ -1815,6 +1826,97 @@ def _completed_task_full_groups(
     raise HTTPException(status_code=409, detail="Full task result is unavailable")
 
 
+def _assessment_group_instances(group: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            **component,
+            "project_uuid": component.get("project_uuid") or version.get("project_uuid"),
+            "project_version": component.get("project_version") or version.get("project_version"),
+            "tags": component.get("tags") or group.get("tags") or [],
+        }
+        for version in group.get("affected_versions") or []
+        for component in version.get("components") or []
+    ]
+
+
+def _assessment_review_scope(
+    deps: GeneralApiRouteDeps, task_id: str, group_id: str, user: str
+) -> list[dict[str, Any]]:
+    groups = _completed_task_full_groups(deps, task_id, user)
+    for group in groups:
+        if group.get("id") == group_id:
+            return _assessment_group_instances(group)
+    raise HTTPException(status_code=404, detail="Vulnerability not found")
+
+
+def _assessment_approval_scope(
+    deps: GeneralApiRouteDeps, req: AssessmentRequest, user: str
+) -> list[dict[str, Any]] | None:
+    """Include related findings even when a legacy approval names a subset."""
+    if req.approve and deps.get_user_role(user).upper() != "REVIEWER":
+        raise AssessmentPermissionError("Only reviewers can approve an assessment")
+    submitted = {assessment_key(instance) for instance in req.instances}
+    scope: list[dict[str, Any]] | None = None
+    if req.review_task_id or req.review_group_id:
+        if not req.review_task_id or not req.review_group_id:
+            raise AssessmentValidationError("Name both the review task and vulnerability")
+        scope = _assessment_review_scope(deps, req.review_task_id, req.review_group_id, user)
+        if not submitted or None in submitted or not submitted <= {
+            assessment_key(instance) for instance in scope
+        }:
+            raise AssessmentValidationError("Reload the vulnerability before saving its review")
+        if not req.approve:
+            return scope
+    if not req.approve:
+        return None
+    related = {assessment_key(instance): instance for instance in req.instances}
+    if scope is not None:
+        related.update({
+            key: instance for instance in scope
+            if (key := assessment_key(instance)) is not None
+        })
+    found_group = scope is not None
+    identities = {key for key in submitted if key is not None}
+    for task in list(deps.tasks.values()):
+        if not isinstance(task, dict) or task.get("status") != "completed":
+            continue
+        full_result = task.get("_full_result")
+        if isinstance(full_result, list):
+            groups = full_result
+            index_name = "_assessment_full_group_index"
+        elif task.get("result_mode") != "summary" and isinstance(task.get("result"), list):
+            groups = task["result"]
+            index_name = "_assessment_result_group_index"
+        else:
+            continue
+        index = _get_or_build_assessment_group_index(task, index_name, groups)
+        for group_id in find_assessment_group_ids(index, (), identities):
+            group = groups[index["positions"][group_id]]
+            found_group = True
+            related.update({
+                key: instance for instance in _assessment_group_instances(group)
+                if (key := assessment_key(instance)) is not None
+            })
+    if not found_group:
+        manager = deps.cache_manager
+        outbox = getattr(manager, "assessment_outbox", None)
+        if outbox is not None:
+            projects = {key[0] for key in submitted if key is not None}
+            cached = manager.get_cached_project_versions()
+            requested_names = {
+                item.get("name") for item in cached if item.get("uuid") in projects
+            } - {None, ""}
+            projects.update(
+                item["uuid"] for item in cached
+                if item.get("uuid") and item.get("name") in requested_names
+            )
+            if outbox.has_changes_requests(projects):
+                raise AssessmentValidationError(
+                    "Reload the full vulnerability before approving; the project has review requests"
+                )
+    return list(related.values())
+
+
 def _assessment_filter_ids(
     records: list[dict[str, Any]],
     requested_ids: list[str] | None = None,
@@ -3196,6 +3298,41 @@ def _register_assessment_routes(
 
         return results
 
+    @router.post("/assessments/request-changes")
+    async def request_assessment_changes_route(
+        req: AssessmentChangesRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+        scope = _assessment_review_scope(deps, req.task_id, req.group_id, user)
+
+        async def refresh(payloads: list[tuple[dict[str, Any], dict[str, Any]]]) -> None:
+            try:
+                await asyncio.to_thread(
+                    _refresh_grouped_vuln_task_snapshots,
+                    deps.tasks, payloads, deps.load_team_mapping(),
+                )
+            except Exception:
+                deps.logger.exception("Failed to refresh assessment review snapshots")
+
+        try:
+            return await request_assessment_changes(
+                deps, scope, team=req.team, rationale=req.rationale, user=user,
+                revisions=req.revisions, withdraw=req.action == "withdraw",
+                after_persist=refresh,
+            )
+        except AssessmentConflictError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "conflict", "conflicts": exc.conflicts},
+            )
+        except AssessmentPermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except AssessmentValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @router.post("/assessment/delete")
     async def delete_assessment_route(
         req: AssessmentDeletionRequest,
@@ -3608,6 +3745,7 @@ def _register_assessment_routes(
                 user=user,
                 client=client,
                 after_persist=refresh_task_snapshots,
+                approval_instances=_assessment_approval_scope(deps, req, user),
             )
         except AssessmentConflictError as exc:
             return JSONResponse(

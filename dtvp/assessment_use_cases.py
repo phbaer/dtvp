@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
@@ -27,6 +28,7 @@ from .assessment_model import (
     parse_assessment,
     preserve_or_share_response,
     render_assessment,
+    render_team_block,
     version_override,
     with_response,
     with_version_override,
@@ -35,12 +37,23 @@ from .assessment_outbox_services import (
     AssessmentRevisionConflictError,
     assessment_key,
 )
+from .assessment_review import (
+    MAX_REVIEW_RATIONALE,
+    REQUEST_CHANGES_ORIGIN,
+    RESUBMIT_CHANGES_ORIGIN,
+    WITHDRAW_CHANGES_ORIGIN,
+    changes_requests,
+    normalize_changes_requests,
+    strip_changes_requests,
+    with_changes_requests,
+)
 from .code_analysis_assessment_services import record_application_eligible
 from .logic import (
     active_assessment_block,
     calculate_aggregated_state,
     historical_blocks_of,
     insert_assessment_blocks,
+    parse_assessment_blocks,
     remove_assessment_blocks,
     replace_assessment_block,
     without_historical_blocks,
@@ -151,6 +164,9 @@ class AssessmentRequest(BaseModel):
     # The reviewer's explicit approval: the only thing that removes pending
     # review from a stored assessment. Reviewers only.
     approve: bool = False
+    resubmit_changes: bool = False
+    review_task_id: str | None = None
+    review_group_id: str | None = None
     # The revision each finding had when the use case read it, keyed by
     # (project, component, vulnerability); never client input.
     _stored_revisions: dict[tuple[str, str, str], int] = PrivateAttr(default_factory=dict)
@@ -190,13 +206,15 @@ def approval_blocker(
     (docs/assessment-model.md#lifecycle-decision-table, ADR 0014): every
     finding has a state, they agree, and every required team has its own
     assessment or a General decision covers it. Read from the stored texts,
-    as the card reads them; nothing pending means there is nothing to
-    approve and nothing to refuse.
+    as the card reads them. Outstanding requests still block approval after
+    a clear removes the pending marker.
     """
     # Imported here: the grouped services import much of the application.
     from .assessment_scopes import has_pending_review_marker
     from .grouped_vuln_services import summarize_grouped_vulnerabilities
 
+    if any(changes_requests(item.get("details")) for item in stored):
+        return "A team must resubmit its assessment before approval"
     if not any(has_pending_review_marker(str(item.get("details") or "")) for item in stored):
         return None
     tags = list(dict.fromkeys(
@@ -334,11 +352,12 @@ def local_assessment_conflict(
     deps: AssessmentUseCaseDeps,
     req: AssessmentRequest,
     exc: AssessmentRevisionConflictError,
+    additional_instances: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     instance = next(
         (
             candidate
-            for candidate in req.instances
+            for candidate in [*req.instances, *(additional_instances or [])]
             if assessment_key(candidate) == exc.key
         ),
         {},
@@ -665,6 +684,7 @@ async def save_assessment(
     after_persist: Callable[[AssessmentPayloads], Awaitable[None]] | None = None,
     workflow_id: str = "individual-assessment",
     suppressed_by_finding: dict[str, bool] | None = None,
+    approval_instances: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Validate and durably record one assessment change.
 
@@ -683,6 +703,29 @@ async def save_assessment(
         role = deps.get_user_role(user)
     if req.approve and str(role or "").upper() != "REVIEWER":
         raise AssessmentPermissionError("Only reviewers can approve an assessment")
+    load_team_mapping = getattr(deps, "load_team_mapping", None)
+    mapping = load_team_mapping() if load_team_mapping and (req.approve or req.resubmit_changes) else {}
+    resubmitted_team: str | None = None
+    if req.resubmit_changes:
+        if req.approve or not req.team or _is_general(req.team):
+            raise AssessmentValidationError("Resubmit a named team's assessment without approving it")
+        supplied = {
+            (assessment_key(instance), instance.get("finding_uuid"))
+            for instance in req.instances
+        }
+        if (
+            not req.review_task_id or not req.review_group_id or not approval_instances
+            or len(supplied) != len(req.instances)
+            or any(key is None or not finding_uuid for key, finding_uuid in supplied)
+            or supplied != {
+                (assessment_key(instance), instance.get("finding_uuid"))
+                for instance in approval_instances
+            }
+        ):
+            raise AssessmentValidationError("Reload the full vulnerability before resubmitting")
+        resubmitted_team = _review_team_key(req.team, mapping)
+        if resubmitted_team not in _review_owning_teams(approval_instances, mapping):
+            raise AssessmentValidationError("Only an owning team can resubmit its assessment")
     if req.fields is not None:
         # The assessment arrives as fields. Its text, which the checks and
         # the store work with, is rendered here and nowhere in the client.
@@ -692,19 +735,34 @@ async def save_assessment(
             raise AssessmentValidationError(str(exc)) from exc
         req = req.model_copy(update={"details": rendered})
         req.model_fields_set.add("details")
+    else:
+        clean_text = strip_changes_requests(req.details)
+        if req.details != clean_text:
+            req = req.model_copy(update={"details": clean_text})
     # The stored text, never a client's view of it, is what a save may not
     # lose and where the SSVC record and the response are kept from.
     stored = await asyncio.to_thread(
         deps.cache_manager.get_cached_assessments, req.instances
     )
     stored_details = [current["details"] for current in stored]
+    review_revisions: dict[tuple[str, str, str], int] = {}
     if req.approve:
-        load_team_mapping = getattr(deps, "load_team_mapping", None)
+        review_instances = approval_instances if approval_instances is not None else req.instances
+        review_stored = stored
+        if review_instances is not req.instances:
+            review_stored = await asyncio.to_thread(
+                deps.cache_manager.get_cached_assessments, review_instances
+            )
         blocker = approval_blocker(
-            req.instances, stored, load_team_mapping() if load_team_mapping else {}
+            review_instances, review_stored, mapping
         )
         if blocker:
             raise AssessmentValidationError(blocker)
+        review_revisions = {
+            key: int(current["revision"])
+            for instance, current in zip(review_instances, review_stored, strict=True)
+            if (key := assessment_key(instance)) is not None
+        }
     req._stored_revisions = {
         key: int(current["revision"])
         for instance, current in zip(req.instances, stored)
@@ -738,9 +796,50 @@ async def save_assessment(
     evidence_ids = _validate_code_evidence(deps, req)
 
     payloads = deps.build_assessment_payloads(req, user, role)
+    open_requests = [
+        changes_requests(current.get("details"))
+        for current in stored
+    ]
+    resubmitted_revisions: dict[tuple[str, str, str], int] = {}
+    if resubmitted_team is not None:
+        def team_is_requested(requests: list[dict[str, Any]]) -> bool:
+            return any(
+                _review_team_key(request["team"], mapping) == resubmitted_team
+                for request in requests
+            )
+
+        if not any(team_is_requested(requests) for requests in open_requests):
+            raise AssessmentValidationError("This team has no outstanding changes request")
+        for (instance, payload), current, requests in zip(payloads, stored, open_requests, strict=True):
+            block = _review_team_block(payload["details"], resubmitted_team, mapping)
+            if not block or block.get("state") in (None, "", "NOT_SET"):
+                raise AssessmentValidationError("Set a decision for the team before resubmitting")
+            if team_is_requested(requests):
+                key = assessment_key(instance)
+                original = (req.original_analysis or {}).get(instance.get("finding_uuid"))
+                revision = original.get("dtvpRevision") if isinstance(original, dict) else None
+                if type(revision) is not int or revision != int(current["revision"]):
+                    raise AssessmentConflictError([{
+                        "finding_uuid": instance.get("finding_uuid"),
+                        "current": deps.cache_manager.get_assessment_overlay(*key) or {},
+                    }])
+                resubmitted_revisions[key] = revision
+            # An explicit resubmission changes just the addressed team.
+            # Read the other teams and free text anew from the stored record.
+            base = current.get("details") or ""
+            before = _review_team_block(base, resubmitted_team, mapping)
+            rendered = render_team_block({**block, "reviewer": None})
+            if before:
+                base = replace_assessment_block(base, before["team"], rendered)
+            else:
+                base = insert_assessment_blocks(base, [rendered])
+            payload["details"] = base
+            payload["state"] = calculate_aggregated_state(base)
+            payload["suppressed"] = bool(current["suppressed"])
+        workflow_id = RESUBMIT_CHANGES_ORIGIN
     keep_ssvc = "ssvc" not in req.model_fields_set
     keep_response = not _changes_response(req, role)
-    if keep_ssvc or keep_response:
+    if not req.resubmit_changes and (keep_ssvc or keep_response):
         # Never trust client-supplied original_analysis/headers as authority
         # for what reviewers decide with the Global assessment: the SSVC
         # record and the response. Preserve each finding's stored value; a
@@ -771,18 +870,32 @@ async def save_assessment(
             finding_uuid = instance.get("finding_uuid")
             if finding_uuid in suppressed_by_finding:
                 payload["suppressed"] = bool(suppressed_by_finding[finding_uuid])
+    for (_instance, payload), requests in zip(payloads, open_requests):
+        if resubmitted_team is not None:
+            requests = [
+                request for request in requests
+                if _review_team_key(request["team"], mapping) != resubmitted_team
+            ]
+            if not _PENDING_REVIEW.search(payload["details"]):
+                payload["details"] = f'{payload["details"].rstrip()}\n\n[Status: Pending Review]'
+        payload["details"] = with_changes_requests(payload["details"], requests)
+    expected = expected_assessment_revisions(req)
+    if req.approve:
+        expected = {**review_revisions, **req._stored_revisions, **expected}
+    if req.resubmit_changes:
+        expected = {**req._stored_revisions, **expected, **resubmitted_revisions}
     try:
         persisted = await deps.cache_manager.persist_assessment_updates(
             [payload for _instance, payload in payloads],
             replace=True,
-            expected_revisions=expected_assessment_revisions(req),
+            expected_revisions=expected,
             author=user,
             origin=workflow_id,
             seen=seen_assessments(req),
         )
     except AssessmentRevisionConflictError as exc:
         raise AssessmentConflictError(
-            [local_assessment_conflict(deps, req, exc)]
+            [local_assessment_conflict(deps, req, exc, approval_instances)]
         ) from exc
 
     if after_persist is not None:
@@ -809,6 +922,114 @@ async def save_assessment(
 
 
 ORIGIN_DELETION = "assessment-deletion"
+
+
+def _review_team_key(team: str, mapping: dict[str, Any]) -> str:
+    from .team_assessment_restore_services import canonical_team_key
+
+    return canonical_team_key(team, mapping)
+
+
+def _review_owning_teams(instances: list[dict[str, Any]], mapping: dict[str, Any]) -> set[str]:
+    return {
+        _review_team_key(tag, mapping)
+        for instance in instances for tag in instance.get("tags") or []
+    }
+
+
+def _review_team_block(details: str, key: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
+    _, blocks = parse_assessment_blocks(details)
+    return next((
+        block for block in blocks
+        if not block.get("historical") and _review_team_key(block.get("team") or "", mapping) == key
+    ), None)
+
+
+async def request_assessment_changes(
+    deps: AssessmentUseCaseDeps,
+    instances: list[dict[str, Any]],
+    *,
+    team: str,
+    rationale: str | None,
+    user: str,
+    revisions: dict[str, int],
+    withdraw: bool = False,
+    after_persist: Callable[[AssessmentPayloads], Awaitable[None]] | None = None,
+) -> list[dict[str, Any]]:
+    from .assessment_scopes import has_pending_review_marker
+
+    if deps.get_user_role(user).upper() != "REVIEWER":
+        raise AssessmentPermissionError("Only reviewers can request assessment changes")
+    if not instances or any(assessment_key(instance) is None for instance in instances):
+        raise AssessmentValidationError("The vulnerability has no reviewable findings")
+    [feedback] = normalize_changes_requests([{
+        "team": team,
+        "rationale": rationale,
+        "reviewer": user,
+        "requested_at_ms": int(time.time() * 1000),
+    }]) or [None]
+    if feedback is None and not withdraw:
+        raise AssessmentValidationError(
+            f"Name a non-Global team and enter a rationale of 1 to {MAX_REVIEW_RATIONALE} characters"
+        )
+    load_team_mapping = getattr(deps, "load_team_mapping", None)
+    mapping = load_team_mapping() if load_team_mapping else {}
+    team_key = _review_team_key(team, mapping)
+    if not withdraw and team_key not in _review_owning_teams(instances, mapping):
+        raise AssessmentValidationError("Only an owning team's assessment can be returned")
+    identities = {
+        str(instance.get("finding_uuid") or "") for instance in instances
+    }
+    if "" in identities or len(identities) != len(instances) or identities != revisions.keys():
+        raise AssessmentValidationError("Reload the vulnerability before requesting changes")
+    stored = await asyncio.to_thread(deps.cache_manager.get_cached_assessments, instances)
+    payloads: AssessmentPayloads = []
+    expected: dict[tuple[str, str, str], int] = {}
+    has_submission = False
+    has_request = False
+    for instance, current in zip(instances, stored, strict=True):
+        key = assessment_key(instance)
+        revision = int(current["revision"])
+        if revisions[instance["finding_uuid"]] != revision:
+            raise AssessmentConflictError([{
+                "finding_uuid": instance["finding_uuid"],
+                "current": deps.cache_manager.get_assessment_overlay(*key) or {},
+            }])
+        details = current.get("details") or ""
+        requests = changes_requests(details)
+        requests_for_other_teams = [
+            request for request in requests
+            if _review_team_key(request["team"], mapping) != team_key
+        ]
+        has_matching_request = len(requests_for_other_teams) != len(requests)
+        has_request = has_request or has_matching_request
+        if has_matching_request and not withdraw:
+            raise AssessmentValidationError("Changes are already requested for this team")
+        expected[key] = revision
+        if withdraw and not has_matching_request:
+            continue
+        block = _review_team_block(details, team_key, mapping) if not withdraw else None
+        if (
+            block and block.get("state") not in (None, "", "NOT_SET")
+            and not block.get("reviewer") and has_pending_review_marker(details)
+        ):
+            has_submission = True
+        payloads.append((instance, _payload(
+            instance, current["state"], with_changes_requests(
+                details, requests_for_other_teams if withdraw else [*requests, feedback]
+            ),
+            current["suppressed"],
+        )))
+    if withdraw and not has_request:
+        raise AssessmentValidationError("This team has no outstanding changes request")
+    if not withdraw and not has_submission:
+        raise AssessmentValidationError("Only a submitted team assessment can be returned")
+    return await _persist_explicit_change(
+        deps, payloads, expected, user=user, origin=(
+            WITHDRAW_CHANGES_ORIGIN if withdraw else REQUEST_CHANGES_ORIGIN
+        ),
+        after_persist=after_persist,
+    )
 
 
 async def delete_assessment(
@@ -857,6 +1078,9 @@ async def delete_assessment(
         payload = _cleared_payload(instance, current, team, reviewer)
         if payload is None:
             continue
+        payload["details"] = with_changes_requests(
+            payload["details"], changes_requests(current.get("details"))
+        )
         expected[assessment_key(instance)] = int(current["revision"])
         payloads.append((instance, payload))
     if not payloads:

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component, type Ref } from 'vue'
-import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment, previewGroupRepair } from '../lib/api'
-import type { EarlierAssessment } from '../lib/api'
+import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment, previewGroupRepair, requestAssessmentChanges } from '../lib/api'
+import type { AssessmentChangesTarget, EarlierAssessment } from '../lib/api'
 import EarlierAssessments from './EarlierAssessments.vue'
 import { marked } from 'marked'
 
@@ -12,6 +12,8 @@ import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBloc
 import { AMBIGUOUS_SCOPE, BASE_SCOPE, getAssessmentScopes } from '../lib/assessmentScopes'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getApprovalUnavailableReason, getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
+import { getGroupChangesRequestedTeams, teamChangesRequestsForFindings } from '../lib/assessmentChanges'
+import { hasPendingReviewMarker } from '../lib/assessmentScopes'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
@@ -35,11 +37,12 @@ import BulkWorkflowModal from './BulkWorkflowModal.vue'
 import AssessmentHistory from './AssessmentHistory.vue'
 import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
+import RequestAssessmentChangesDialog from './RequestAssessmentChangesDialog.vue'
 import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
 import DetailSection from './DetailSection.vue'
 import VulnAboutSummary from './VulnAboutSummary.vue'
 import TeamAssessmentOverview from './TeamAssessmentOverview.vue'
-import { buildTeamOverview, stateLabel as stateLabelOf } from '../lib/teamOverview'
+import { buildTeamOverview, resolveTeamAlias, stateLabel as stateLabelOf } from '../lib/teamOverview'
 import { sortVersions } from '../lib/version'
 import type { CodeAnalysisAssessResponse, CodeAnalysisCvssAdjustment } from '../lib/api'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
@@ -253,6 +256,10 @@ const emitRefreshedAssessment = () => {
 const showClearModal = ref(false)
 const clearingAssessment = ref(false)
 const clearAssessmentError = ref('')
+const reviewRequest = ref<(AssessmentChangesTarget & { withdraw: boolean }) | null>(null)
+const requestingChanges = ref(false)
+const requestChangesError = ref('')
+const requestChangesStale = ref(false)
 const historyRefreshKey = ref(0)
 const assessedTeamNames = computed(() => {
     const names = new Map<string, string>()
@@ -689,7 +696,8 @@ const handleReviewCancel = () => {
 const confirmApplyDraftBeforeLeave = async (): Promise<boolean> => {
     if (!hasUnsavedDraft.value) return true
 
-    const actionLabel = isReviewer.value ? 'Save' : 'Submit'
+    const resubmit = Boolean(selectedTeamChangeRequests.value.length)
+    const actionLabel = resubmit ? 'Resubmit' : isReviewer.value ? 'Save' : 'Submit'
     const shouldApply = await promptConfirm(
         'Unsaved assessment',
         `${actionLabel} this assessment before leaving? Discard closes without saving, while Stay keeps the local edits open.`,
@@ -700,7 +708,7 @@ const confirmApplyDraftBeforeLeave = async (): Promise<boolean> => {
 
     if (!hasUnsavedDraft.value) return true
 
-    await handleUpdate(false)
+    await handleUpdate(false, false, resubmit)
     return !hasUnsavedDraft.value
 }
 
@@ -717,6 +725,7 @@ const hasOpenOverlay = () => Boolean(
     || showCalculatorModal.value
     || showClearModal.value
     || reviewModal.value.show
+    || Boolean(reviewRequest.value)
     || showMoreMenu.value
 )
 
@@ -821,6 +830,7 @@ const totalTargeted = computed(() => {
 const displayState = computed(() => {
     return getGroupLifecycle(props.group, effectiveTags.value, teamMapping?.value)
 })
+const changesRequestedTeams = computed(() => getGroupChangesRequestedTeams(props.group))
 
 const assessmentSyncIssues = computed(() => getGroupAssessmentSyncIssues(props.group, {
     lifecycle: displayState.value,
@@ -854,7 +864,8 @@ const assessedIconClass = computed(() => {
 // Approval is for a vulnerability that is Ready for approval only; the
 // server refuses it otherwise (docs/assessment-model.md#lifecycle-decision-table).
 const canApprove = computed(() => {
-    return user?.value?.role === 'REVIEWER' && isPendingReview.value && displayState.value === 'NEEDS_APPROVAL'
+    return user?.value?.role === 'REVIEWER' && isPendingReview.value
+        && !changesRequestedTeams.value.length && displayState.value === 'NEEDS_APPROVAL'
 })
 const approvalUnavailableReason = computed(() => user?.value?.role === 'REVIEWER'
     ? getApprovalUnavailableReason(props.group, {
@@ -2024,9 +2035,9 @@ watch(() => props.group.id, () => {
     teamTabChosen.value = false
 })
 
-watch(() => props.group, () => {
+watch(() => props.group, (group, previousGroup) => {
     assessmentSubmitted.value = false
-    updateFormFromGroup(true)
+    updateFormFromGroup(group.id !== previousGroup?.id)
 }, { immediate: true })
 
 watch(formTouched, (touched) => {
@@ -2212,7 +2223,7 @@ const refreshDetails = async () => {
 }
 
 
-const handleUpdate = async (force: boolean = false, isApprove: boolean = false) => {
+const handleUpdate = async (force = false, isApprove = false, resubmit = false) => {
     if (!isReviewer.value && assessmentMissingFields.value.length > 0) {
         void revealAssessmentForm()
         await showAlert(
@@ -2292,6 +2303,11 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         const finalText = preparedSubmission.finalText
         const payload: AssessmentPayload = {
             ...preparedSubmission.payload,
+            ...((isApprove || resubmit) && vulnTaskId.value ? {
+                review_task_id: vulnTaskId.value,
+                review_group_id: props.group.id,
+            } : {}),
+            ...(resubmit ? { resubmit_changes: true } : {}),
             ...(ssvcTouched.value && !selectedTeam.value ? { ssvc: pendingSsvc.value && {
                 model: pendingSsvc.value.model,
                 version: pendingSsvc.value.version,
@@ -2309,7 +2325,12 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
 
         await handleAssessmentUpdateResults(results, finalState, finalText)
     } catch (err: any) {
-        await handleAssessmentUpdateError(err)
+        if (resubmit && err?.response?.status === 409) {
+            await showAlert('Resubmission changed',
+                'The saved assessment changed. Reload the details before resubmitting.')
+        } else {
+            await handleAssessmentUpdateError(err)
+        }
     } finally {
         updating.value = false
     }
@@ -2437,11 +2458,14 @@ const canApplyAssessment = computed(() => (
     !updating.value
     && !loadingDetails.value
     && totalTargeted.value > 0
-    && (formTouched.value || ((ssvcTouched.value || responseTouched.value) && !selectedTeam.value))
+    && (formTouched.value || ((ssvcTouched.value || responseTouched.value) && !selectedTeam.value)
+        || (Boolean(vulnTaskId.value) && selectedTeamChangeRequests.value.length > 0
+            && state.value !== 'NOT_SET' && Boolean(details.value.trim())))
     && assessmentMissingFields.value.length === 0
 ))
 const assessmentActionLabel = computed(() => {
     if (updating.value) return isReviewer.value ? 'Saving...' : 'Submitting...'
+    if (selectedTeamChangeRequests.value.length) return `Resubmit ${selectedTeam.value} for review`
     if (isReviewer.value) return 'Save assessment'
     return selectedTeam.value
         ? `Submit ${selectedTeam.value} for review`
@@ -2788,6 +2812,7 @@ const teamOverview = computed(() => buildTeamOverview({
     teams: effectiveTeamAssessments.value,
     blocks: mergedAssessmentData.value.blocks,
     aliasGroups: teamAliasGroups.value,
+    changesRequestedTeams: changesRequestedTeams.value,
     componentsByTeam: assessmentComponentsByTeam.value,
     pendingReview: mergedAssessmentData.value.isPending,
     globalState: selectedTeam.value ? '' : state.value,
@@ -2825,14 +2850,17 @@ const scopedAssessmentProgress = computed(() => {
         return { complete: false, pending: false }
     }
 
-    const teamKey = scopedAssessmentTeam.value.toLocaleLowerCase()
+    const teamKey = canonicalReviewTeam(scopedAssessmentTeam.value)
+    if (changesRequestedTeams.value.some(team => canonicalReviewTeam(team) === teamKey)) {
+        return { complete: false, pending: false }
+    }
     let pending = false
     const covered = visibleInstances.value.every(instance => {
         const rawInstance = instance as Record<string, any>
         const instanceDetails = String(rawInstance.analysis_details || rawInstance.analysisDetails || '')
         const blocks = parseAssessmentBlocks(instanceDetails).filter(block => !block.historical)
         const hasApplicableBlock = blocks.some(block => {
-            const blockTeam = block.team.toLocaleLowerCase()
+            const blockTeam = canonicalReviewTeam(block.team)
             return (
                 (blockTeam === 'general' || blockTeam === teamKey)
                 && Boolean(block.state)
@@ -3087,6 +3115,69 @@ const allComponentNames = computed(() => Array.from(new Set(
 
 /** The saved block of the Global or team assessment being edited. */
 const selectedBlockMeta = computed(() => teamBlockMeta(selectedTeam.value || 'General'))
+const changeRequests = computed(() => teamChangesRequestsForFindings(allInstances.value))
+const canonicalReviewTeam = (team: string) =>
+    resolveTeamAlias(team, teamAliasGroups.value).trim().toLowerCase()
+const selectedTeamChangeRequests = computed(() => selectedTeam.value
+    ? changeRequests.value.filter(request => canonicalReviewTeam(request.team) === canonicalReviewTeam(selectedTeam.value))
+    : [])
+const visibleChangeRequests = computed(() => selectedTeam.value
+    ? selectedTeamChangeRequests.value
+    : isReviewer.value ? changeRequests.value : [])
+const withdrawableRequestTeams = computed(() => isReviewer.value && vulnTaskId.value
+    ? [...new Set(visibleChangeRequests.value.map(request => request.team))]
+    : [])
+const canRequestChanges = computed(() => Boolean(
+    isReviewer.value && selectedTeam.value && vulnTaskId.value
+    && !selectedTeamChangeRequests.value.length && !updating.value && !loadingDetails.value
+    && allInstances.value.some(instance => {
+        const text = instance.analysis_details ?? instance.analysisDetails ?? ''
+        if (!hasPendingReviewMarker(text)) return false
+        const block = parseAssessmentBlocks(text).find(block =>
+            !block.historical && block.state && block.state !== 'NOT_SET'
+            && canonicalReviewTeam(block.team) === canonicalReviewTeam(selectedTeam.value))
+        return Boolean(block && !block.reviewer)
+    }),
+))
+const openReviewChangeAction = (team: string, withdraw = false) => {
+    const taskId = vulnTaskId.value
+    if (!taskId || loadingDetails.value || updating.value) return
+    if (withdraw ? !withdrawableRequestTeams.value.includes(team) : !canRequestChanges.value) return
+    const revisions: Record<string, number> = {}
+    for (const instance of allInstances.value) {
+        if (!instance.finding_uuid) continue
+        const stored = originalAnalysis.value[instance.finding_uuid]
+        revisions[instance.finding_uuid] = stored?.dtvpRevision ?? stored?.dtvp_revision ?? instance.dtvp_revision ?? 0
+    }
+    requestChangesError.value = ''
+    requestChangesStale.value = false
+    reviewRequest.value = { task_id: taskId, group_id: props.group.id, team, revisions, withdraw }
+}
+const submitRequestChanges = async (rationale: string) => {
+    if (!reviewRequest.value || requestingChanges.value || requestChangesStale.value) return
+    const { withdraw, ...target } = reviewRequest.value
+    if (!withdraw && !rationale.trim()) return
+    requestingChanges.value = true
+    requestChangesError.value = ''
+    try {
+        const results = await requestAssessmentChanges(withdraw
+            ? { ...target, action: 'withdraw' }
+            : { ...target, rationale })
+        reviewRequest.value = null
+        await refreshDetails()
+        historyRefreshKey.value += 1
+        emit('update:assessment', { dtvp_results: results })
+    } catch (error: any) {
+        requestChangesStale.value = error?.response?.status === 409
+        requestChangesError.value = requestChangesStale.value
+            ? 'The assessment changed. Close this dialog, reload the details, and try again.'
+            : typeof error?.response?.data?.detail === 'string'
+                ? error.response.data.detail
+                : 'The change request could not be saved. Try again.'
+    } finally {
+        requestingChanges.value = false
+    }
+}
 const selectedBlockMetaText = computed(() => {
     const block = selectedBlockMeta.value
     if (!block) return ''
@@ -3302,7 +3393,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                     </button>
                     <button
                         type="button"
-                        @click="() => handleUpdate(false)"
+                        @click="() => handleUpdate(false, false, selectedTeamChangeRequests.length > 0)"
                         :disabled="!canApplyAssessment"
                         :title="canApprove ? 'Saves your changes. The assessment stays pending review until you approve it.' : undefined"
                         data-testid="assessment-submit-button"
@@ -3773,6 +3864,10 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                                     ]"
                                 >
                                     {{ team }}
+                                    <span
+                                        v-if="changesRequestedTeams.some(requestedTeam => canonicalReviewTeam(requestedTeam) === canonicalReviewTeam(team))"
+                                        class="ml-1 text-amber-200"
+                                    >· Changes requested</span>
                                     <span v-if="assessedTeams.has(team)" class="ml-1 inline-block w-1.5 h-1.5 rounded-full" :class="teamBlockStateColor(teamBlockMeta(team)?.state)"></span>
                                 </button>
                             </div>
@@ -3819,7 +3914,41 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             </span>
                             <!-- Block header metadata (read-only) -->
                             <span v-if="selectedBlockMetaText" data-testid="assessment-block-meta">{{ selectedBlockMetaText }}</span>
+                            <button
+                                v-if="canRequestChanges"
+                                type="button"
+                                class="ml-auto rounded border border-amber-600/50 px-2 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-900/40"
+                                @click="openReviewChangeAction(selectedTeam)"
+                            >Request changes</button>
                         </div>
+
+                        <section
+                            v-if="visibleChangeRequests.length"
+                            data-testid="assessment-changes-requested"
+                            class="mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-3 text-xs text-amber-100"
+                        >
+                            <h5 class="font-semibold">Changes requested</h5>
+                            <div
+                                v-for="request in visibleChangeRequests"
+                                :key="`${request.team}-${request.requested_at_ms}-${request.reviewer}-${request.rationale}`"
+                                class="mt-2 space-y-1"
+                            >
+                                <p v-if="!selectedTeam" class="font-semibold">{{ request.team }}</p>
+                                <p class="whitespace-pre-wrap break-words">{{ request.rationale }}</p>
+                                <p class="text-amber-200/75">{{ request.reviewer }} · {{ new Date(request.requested_at_ms).toLocaleDateString() }}</p>
+                            </div>
+                            <p v-if="selectedTeam" class="mt-2 text-amber-200/75">Update this assessment and resubmit it for review.</p>
+                            <div v-if="withdrawableRequestTeams.length" class="mt-2 flex flex-wrap gap-2">
+                                <button
+                                    v-for="team in withdrawableRequestTeams"
+                                    :key="team"
+                                    type="button"
+                                    :disabled="updating || loadingDetails"
+                                    class="rounded border border-amber-600/50 px-2 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-900/40 disabled:opacity-50"
+                                    @click="openReviewChangeAction(team, true)"
+                                >Withdraw request for {{ team }}</button>
+                            </div>
+                        </section>
 
                         <div
                             v-if="selectedTeam && previousTeamAssessments.length && !teamBlockMeta(selectedTeam)"
@@ -4407,6 +4536,17 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
       @confirm="confirmClearAssessment"
       @cleaned="onAssessmentCleaned"
       @repair="openRepairModal"
+    />
+
+    <RequestAssessmentChangesDialog
+      v-if="reviewRequest"
+      :team="reviewRequest.team"
+      :withdraw="reviewRequest.withdraw"
+      :busy="requestingChanges"
+      :error="requestChangesError"
+      :stale="requestChangesStale"
+      @close="reviewRequest = null"
+      @request="submitRequestChanges"
     />
 
     <BulkWorkflowModal

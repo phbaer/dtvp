@@ -170,6 +170,7 @@ export interface GroupedVulnListMetadata {
     is_assessed?: boolean;
     technical_state?: string;
     assessed_teams?: string[];
+    changes_requested_teams?: string[];
     component_names?: string[];
     versions?: string[];
     attributed_on_ms_values?: number[];
@@ -249,6 +250,10 @@ export interface AssessmentPayload {
     force?: boolean;
     /** The reviewer's explicit approval; nothing else removes pending review. */
     approve?: boolean;
+    /** Explicitly resubmit the named team's assessment after changes were requested. */
+    resubmit_changes?: boolean;
+    review_task_id?: string;
+    review_group_id?: string;
     comparison_mode?: 'MERGE' | 'REPLACE';
     analysis_run_ids?: string[];
     /** Agent code evidence referenced in this draft; recorded on save. */

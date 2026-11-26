@@ -624,6 +624,23 @@ pending, whoever does it:
 A reviewer's assessment of something that was not pending is stored as the
 client sends it.
 
+### Requesting changes
+
+Open a submitted team's assessment and choose **Request changes**. Enter
+what the team should address. The reviewer and request time are saved with
+the rationale. The original technical assessment stays available.
+
+An outstanding request blocks Global approval and returns the team to
+**Needs my assessment**. The vulnerability can remain in **Awaiting review**
+while its pending status is set. On the team's assessment, read the feedback,
+edit the assessment and resubmit it for review. Another team's request stays
+open until that team resubmits or a reviewer withdraws it. See the
+[assessment rules](assessment-model.md#changes-requested).
+
+When a request is obsolete, a reviewer can choose **Withdraw request** for
+the team. This resolves the request and keeps the team's technical
+assessment. The feedback remains in assessment history.
+
 ### Response
 
 The form of the Global assessment has a **Response** select below the

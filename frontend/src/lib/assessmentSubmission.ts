@@ -150,6 +150,7 @@ export const seenAnalysis = (
             analysisState: instance.analysis_state || (instance as any).analysisState || 'NOT_SET',
             analysisDetails: details,
             isSuppressed: Boolean(instance.is_suppressed),
+            ...(instance.dtvp_revision !== undefined ? { dtvpRevision: instance.dtvp_revision } : {}),
         }
     }
     return seen
