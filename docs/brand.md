@@ -44,12 +44,14 @@ The mark is the triple tilde: three waves, nothing else.
 | Use | File |
 | :--- | :--- |
 | Icon, favicon, login screen (24 × 24) | [`data/river-mark.svg`](../data/river-mark.svg) |
-| README header (159 × 66) | [`data/river-wordmark.svg`](../data/river-wordmark.svg) |
+| README header (159 × 78, shown at twice that width) | [`data/river-wordmark.svg`](../data/river-wordmark.svg) |
 
 - Typeface: Share Tech Regular (SIL Open Font License 1.1, Copyright 2012 The Share Tech
   Project Authors). Share Tech has no ≋ glyph, so the three waves are its tilde `~`, stacked.
 - The wordmark is the waves directly followed by the lowercase word "river", with no
-  space and no tagline. The waves are centred on the x-height of the word.
+  space. The waves are centred on the x-height of the word. The acronym runs in one
+  line underneath, exactly as wide as waves and word together, with its initials in
+  the colour of the waves. It is small: show the wordmark at 300 px or wider.
 - Both files hold outlines, not text, so they look the same without the font installed.
 - Colour: waves `#378ADD`, word `#6B7F88`. The waves' contrast is 3.6:1 on white and
   5.0:1 on the app background `#121820`, so one file serves light and dark surfaces.

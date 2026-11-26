@@ -1,4 +1,4 @@
-<p align="center"><img src="data/river-wordmark.svg" alt="River" width="159"></p>
+<p align="center"><img src="data/river-wordmark.svg" alt="River: River Inspects Vulnerabilities and Evaluates Risks" width="318"></p>
 
 # ≋ River: River Inspects Vulnerabilities and Evaluates Risks
 
