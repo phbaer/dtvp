@@ -181,6 +181,13 @@ and [ADR 0006](adr/0006-agent-code-evidence-is-applied-by-a-person.md) for
 the decision. Evidence is never an assessment: a person uses it in an
 assessment draft and saves that draft as usual.
 
+The Code Evidence tab scopes agent entries by the visible finding UUIDs,
+including the selected release and team. Their dependency names can differ
+from the application names used for analyzer runs (for example `node-forge`
+versus `vp-est-srv`). Vulnerability-wide entries remain visible across those
+scopes; targeted entries appear only when a visible finding is among their
+recorded targets. Agent evidence also loads without a mapped analyzer target.
+
 Storage: the same SQLite file as the analyzer results
 (`DTVP_CODE_ANALYSIS_RESULTS_PATH`), migration
 `code_analysis_results/0004_code_evidence.sql`, in three tables:

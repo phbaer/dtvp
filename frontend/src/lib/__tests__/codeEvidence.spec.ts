@@ -55,6 +55,17 @@ describe('mergeEvidenceRows', () => {
         expect(groups[2].rows[0].id).toBe('b')
     })
 
+    it('uses dependency names for agents while preserving application scope for analyzers', () => {
+        const groups = mergeEvidenceRows(
+            [run('est-run', 'vp-est-srv', '2026-07-01T00:00:00Z'), run('auth-run', 'vp-auth-server', '2026-07-01T00:00:00Z')],
+            [evidence('est-evidence', { targets: [{ component: 'node-forge', finding_uuid: 'est-6156' }] })],
+            ['vp-est-srv'],
+            { agentComponentNames: ['node-forge'] },
+        )
+        expect(groups.map(group => group.label)).toEqual(['node-forge', 'vp-est-srv'])
+        expect(groups.flatMap(group => group.rows.map(row => row.id))).toEqual(['est-evidence', 'est-run'])
+    })
+
     it('keeps only the scope and filters by source', () => {
         const records = [run('a', 'lib-a', '2026-07-01T00:00:00Z'), run('x', 'other', '2026-07-01T00:00:00Z')]
         const agents = [evidence('ev_other', { targets: [{ component: 'other' }] }), evidence('ev_a')]

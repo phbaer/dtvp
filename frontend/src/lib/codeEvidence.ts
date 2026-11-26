@@ -42,6 +42,8 @@ export interface MergeEvidenceOptions {
     /** Component a run belongs to in this scope; null drops the run. */
     componentOf?: (record: CodeAnalysisResultRecord) => string | null | undefined
     filter?: EvidenceFilter
+    /** Vulnerable dependencies for agent evidence; analyzer scope uses application names. */
+    agentComponentNames?: string[]
 }
 
 const timestamp = (value?: string | null) => Date.parse(String(value || '')) || 0
@@ -119,6 +121,9 @@ export const mergeEvidenceRows = (
             .filter(Boolean)
             .map(name => [name.toLocaleLowerCase(), name] as const),
     )
+    const agentScope = options.agentComponentNames === undefined ? scope : new Map(
+        options.agentComponentNames.map(name => [name.toLocaleLowerCase(), name] as const),
+    )
     const componentOf = options.componentOf || defaultComponentOf
     const filter = options.filter || 'all'
     const groups = new Map<string, EvidenceGroup>()
@@ -155,7 +160,7 @@ export const mergeEvidenceRows = (
 
     if (filter !== 'analyzer') {
         for (const evidence of agentEvidence) {
-            const components = evidence.scope === 'vulnerability' ? [] : agentComponents(evidence, scope)
+            const components = evidence.scope === 'vulnerability' ? [] : agentComponents(evidence, agentScope)
             if (evidence.scope !== 'vulnerability' && components.length === 0) continue
             const label = components.length === 0 ? ALL_COMPONENTS : components.join(', ')
             groupFor(label).rows.push(agentRow(evidence))

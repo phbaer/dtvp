@@ -11,7 +11,7 @@ import {
     listCodeEvidence,
     withdrawCodeEvidence,
 } from '../lib/api'
-import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisComponentResult, CodeAnalysisLlmConversationTurn, CodeAnalysisResultRecord, CodeAnalysisStepFindings, CodeEvidence } from '../lib/api'
+import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisComponentResult, CodeAnalysisLlmConversationTurn, CodeAnalysisResultRecord, CodeAnalysisStepFindings, CodeEvidence, CodeEvidenceTarget } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import { isCodeAnalysisApplicable, codeAnalysisAssessmentState, isCodeAnalysisResultWorse } from '../lib/codeAnalysisResult'
 import type { CodeAnalysisComponentRun } from '../lib/codeAnalysisResult'
@@ -31,6 +31,8 @@ const props = defineProps<{
     projectName?: string
     cvssVector?: string
     componentNames: string[]
+    /** Visible vulnerable findings, distinct from analyzer application targets. */
+    evidenceTargets?: Pick<CodeEvidenceTarget, 'component' | 'finding_uuid'>[]
     componentTeams?: Record<string, string>
     teamScope?: string
     teamScopeAliases?: string[]
@@ -1236,12 +1238,18 @@ const scopeLine = computed(() => {
 })
 
 /** Resets the list's disclosures when the scope changes. */
-const evidenceScopeKey = computed(() => [props.vulnId, props.projectName || '', teamScopeKey.value, ...uniqueComponents.value].join('\u0000'))
+const evidenceScopeKey = computed(() => [props.vulnId, props.projectName || '', teamScopeKey.value, ...uniqueComponents.value, JSON.stringify(props.evidenceTargets)].join('\u0000'))
 
 const targetLabel = computed(() => String(props.currentTeam || '').trim() || 'General')
 
-const visibleAgentEvidence = computed(() => agentEvidence.value.filter(item => showWithdrawn.value || !item.withdrawn))
-const withdrawnCount = computed(() => agentEvidence.value.filter(item => item.withdrawn).length)
+const scopedAgentEvidence = computed(() => {
+    if (props.evidenceTargets === undefined) return agentEvidence.value
+    const findings = new Set(props.evidenceTargets.map(target => target.finding_uuid).filter(Boolean))
+    return agentEvidence.value.filter(item => item.scope === 'vulnerability'
+        || item.targets.some(target => Boolean(target.finding_uuid) && findings.has(target.finding_uuid)))
+})
+const visibleAgentEvidence = computed(() => scopedAgentEvidence.value.filter(item => showWithdrawn.value || !item.withdrawn))
+const withdrawnCount = computed(() => scopedAgentEvidence.value.filter(item => item.withdrawn).length)
 
 const evidenceGroups = computed(() => mergeEvidenceRows(
     persistedResults.value,
@@ -1250,6 +1258,7 @@ const evidenceGroups = computed(() => mergeEvidenceRows(
     {
         componentOf: record => recordVisibleComponent(record),
         filter: evidenceFilter.value,
+        agentComponentNames: props.evidenceTargets?.map(target => String(target.component || '').trim()).filter(Boolean),
     },
 ))
 
@@ -1284,7 +1293,7 @@ const startLabel = computed(() => {
 const loadAgentEvidence = async () => {
     const loadId = ++evidenceLoadCounter
     const projectName = String(props.projectName || '').trim()
-    if (!projectName || uniqueComponents.value.length === 0) {
+    if (!projectName || (props.evidenceTargets === undefined && uniqueComponents.value.length === 0)) {
         agentEvidence.value = []
         return
     }
@@ -1292,7 +1301,7 @@ const loadAgentEvidence = async () => {
     try {
         const listed = await listCodeEvidence(projectName, props.vulnId, {
             vuln_alias: [...(props.vulnAliases || [])],
-            component_name: [...uniqueComponents.value],
+            ...(props.evidenceTargets === undefined ? { component_name: [...uniqueComponents.value] } : {}),
             include_withdrawn: true,
         })
         if (loadId !== evidenceLoadCounter) return
@@ -1414,6 +1423,7 @@ watch([
     () => props.projectName || '',
     () => (props.vulnAliases || []).join('\u0000'),
     () => uniqueComponents.value.join('\u0000'),
+    () => JSON.stringify(props.evidenceTargets),
     teamScopeKey,
     () => [...teamScopeKeys.value].sort().join('\u0000'),
 ], (_current, previous) => {

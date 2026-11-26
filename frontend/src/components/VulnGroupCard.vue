@@ -3803,6 +3803,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                 :projectName="codeAnalysisProjectName"
                 :cvssVector="group.cvss_vector"
                 :componentNames="codeAnalysisComponents"
+                :evidenceTargets="visibleInstances.map(instance => ({ component: instance.component_name, finding_uuid: instance.finding_uuid }))"
                 :componentTeams="codeAnalysisComponentTeams"
                 :teamScope="activeTeamScope"
                 :teamScopeAliases="activeTeamScopeAliases"

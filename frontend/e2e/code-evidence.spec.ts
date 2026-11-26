@@ -69,6 +69,7 @@ test.describe('Code evidence from agents', () => {
                         project_version: '1.0',
                         project_uuid: 'p1',
                         component_name: 'lib-a',
+                        dependency_chains: ['lib-a -> vp-est-srv -> TestProject'],
                         component_version: '1.0',
                         component_uuid: 'c-a',
                         finding_uuid: 'f-a',
@@ -96,7 +97,7 @@ test.describe('Code evidence from agents', () => {
         await page.route('**/api/settings/mapping', route => route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({ 'lib-a': 'Security' }),
+            body: JSON.stringify({ 'vp-est-srv': 'Security' }),
         }));
         await page.route('**/api/settings/rescore-rules', route => route.fulfill({
             status: 200,
@@ -116,6 +117,31 @@ test.describe('Code evidence from agents', () => {
         await page.addInitScript(() => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.0');
         });
+    });
+
+    test('shows finding-scoped dependency evidence when analysis targets its parent application', async ({ page }) => {
+        const evidence = { ...EVIDENCE, scope: 'findings' };
+        const requests: URL[] = [];
+        await page.route('**/api/projects/*/vulnerabilities/*/code-evidence*', async route => {
+            const url = new URL(route.request().url());
+            requests.push(url);
+            const names = url.searchParams.getAll('component_name');
+            const items = names.length === 0 || names.includes('lib-a') ? [evidence] : [];
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items, withdrawn_count: 0 }) });
+        });
+        await page.goto('/project/TestProject?lifecycle=OPEN');
+        const listCard = page.locator('.vuln-card[data-group-id="CVE-2026-EVID"]');
+        await expect(listCard).toBeVisible({ timeout: 30000 });
+        await listCard.click();
+        const card = page.getByTestId('vuln-detail-inspector').locator('.vuln-card').first();
+        await card.getByRole('tab', { name: 'Code Evidence' }).click();
+        await expect(card.getByTestId('evidence-group')).toHaveAttribute('data-component', 'lib-a');
+        const row = card.locator('[data-testid="evidence-row"][data-id="ev_e2e"]');
+        await expect(row).toContainText(evidence.title);
+        await row.click();
+        await expect(card.getByTestId('evidence-reader').getByRole('heading', { name: 'Call graph' })).toBeVisible();
+        expect(requests.length).toBeGreaterThan(0);
+        expect(requests.every(url => ![...url.searchParams.keys()].some(key => key.startsWith('component_name')))).toBe(true);
     });
 
     test('reads agent evidence, uses it in the draft, and marks it used after the save', async ({ page }) => {

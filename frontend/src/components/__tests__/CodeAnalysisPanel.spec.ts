@@ -1785,6 +1785,48 @@ describe('CodeAnalysisPanel', () => {
             return wrapper
         }
 
+        it('shows dependency evidence under a different application analysis target', async () => {
+            const wrapper = await mountWithEvidence([agentEvidence({
+                scope: 'findings',
+                targets: [{ component: 'node-forge', finding_uuid: 'est-6156' }],
+            })], {
+                componentNames: ['vp-est-srv'],
+                evidenceTargets: [{ component: 'node-forge', finding_uuid: 'est-6156' }],
+            })
+            expect(mocks.listEvidence).toHaveBeenLastCalledWith('ExampleApp', 'CVE-2026-0001', {
+                vuln_alias: ['GHSA-ALIAS'], include_withdrawn: true,
+            })
+            expect(wrapper.get('[data-testid="evidence-row"][data-id="ev_1"]').text()).toContain('Parser entry point')
+            expect(wrapper.get('[data-testid="evidence-group"]').attributes('data-component')).toBe('node-forge')
+        })
+
+        it('limits agent evidence to visible findings and updates when the release or team changes', async () => {
+            const wrapper = await mountWithEvidence([
+                agentEvidence({ evidence_id: 'est', scope: 'findings', targets: [{ component: 'node-forge', finding_uuid: 'est-6156' }] }),
+                agentEvidence({ evidence_id: 'auth', scope: 'components', targets: [{ component: 'node-forge', finding_uuid: 'auth-6156' }] }),
+                agentEvidence({ evidence_id: 'older', scope: 'findings', targets: [{ component: 'node-forge', finding_uuid: 'est-6155' }] }),
+                agentEvidence({ evidence_id: 'general', scope: 'vulnerability' }),
+            ], {
+                componentNames: ['vp-est-srv'],
+                evidenceTargets: [{ component: 'node-forge', finding_uuid: 'est-6156' }],
+            })
+            const ids = () => wrapper.findAll('[data-testid="evidence-row"][data-kind="agent"]').map(row => row.attributes('data-id')).sort()
+            expect(ids()).toEqual(['est', 'general'])
+            await wrapper.setProps({ evidenceTargets: [{ component: 'node-forge', finding_uuid: 'auth-6156' }] })
+            await flushPromises()
+            expect(ids()).toEqual(['auth', 'general'])
+            await wrapper.setProps({ evidenceTargets: [] })
+            await flushPromises()
+            expect(ids()).toEqual(['general'])
+        })
+
+        it('loads evidence even when no application is mapped for analysis', async () => {
+            const wrapper = await mountWithEvidence([agentEvidence({
+                scope: 'findings', targets: [{ component: 'node-forge', finding_uuid: 'est-6156' }],
+            })], { componentNames: [], evidenceTargets: [{ component: 'node-forge', finding_uuid: 'est-6156' }] })
+            expect(wrapper.find('[data-testid="evidence-row"][data-id="ev_1"]').exists()).toBe(true)
+        })
+
         it('reloads evidence and runs after a save while it stays visible', async () => {
             // In the assessment workspace the panel is never hidden, so the
             // card signals each save through refreshKey.
