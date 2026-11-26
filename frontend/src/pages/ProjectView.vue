@@ -1930,12 +1930,11 @@ watch(currentUserRole, (role) => {
             <div v-else-if="error" class="text-red-500 text-center py-10">{{ error }}</div>
             <div
                 v-else
-                :class="[
-                    'shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden',
-                    isAnalysisWorkspaceActive ? 'h-full min-h-0' : ''
-                ]"
+                :class="viewMode === 'analysis'
+                    ? 'h-full min-h-0'
+                    : 'shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden'"
             >
-                <div :class="viewMode === 'analysis' ? 'flex h-full min-h-0 flex-col p-2' : 'p-3 space-y-3'">
+                <div :class="viewMode === 'analysis' ? 'flex h-full min-h-0 flex-col' : 'p-3 space-y-3'">
                     <div
                         v-if="showTaskListStatus"
                         class="mb-2 rounded-xl border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-100"
@@ -1971,7 +1970,7 @@ watch(currentUserRole, (role) => {
                         v-if="viewMode === 'analysis'"
                         :ref="setListScrollContainer"
                         data-testid="vuln-list-scroll"
-                        class="min-h-0 flex-1 overflow-y-auto pr-1 [overflow-anchor:none]"
+                        class="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
                     >
                         <template v-if="filteredGroupCount > 0">
                             <div

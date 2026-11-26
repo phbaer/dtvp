@@ -73,18 +73,16 @@ describe('Coverage Extras', () => {
         }
         const wrapper = mount(VulnGroupCard, { props: { group: infoGroup } })
 
-        const polygon = wrapper.find('[data-testid="severity-badge"] polygon')
-        expect(polygon.attributes('fill')).toBe('rgba(37, 99, 235, 0.4)')
-        expect(wrapper.find('[data-testid="severity-badge"]').text()).toBe('INFO')
+        expect(wrapper.get('[data-testid="severity-badge"]').classes()).toContain('text-slate-300')
+        expect(wrapper.get('[data-testid="severity-badge"]').text()).toBe('Info')
 
         const otherGroup = {
             id: 'G2', severity: 'UNKNOWN', affected_versions: [],
             tags: []
         }
         const wrapper2 = mount(VulnGroupCard, { props: { group: otherGroup } })
-        const polygon2 = wrapper2.find('[data-testid="severity-badge"] polygon')
-        expect(polygon2.attributes('fill')).toBe('rgba(75, 85, 99, 0.4)')
-        expect(wrapper2.find('[data-testid="severity-badge"]').text()).toBe('UNKNOWN')
+        expect(wrapper2.get('[data-testid="severity-badge"]').classes()).toContain('text-gray-400')
+        expect(wrapper2.get('[data-testid="severity-badge"]').text()).toBe('Unknown')
     })
 
     it('VulnGroupCard aggregates paths for same component', async () => {

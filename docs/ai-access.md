@@ -197,6 +197,10 @@ A token acts as its owner. Code evidence follows the rules in
 - The author is recorded as `user (via token name)`; the name is reduced to
   letters, digits, spaces, dots, underscores, and single hyphens.
 
+In the vulnerability list, **MCP** beside a team means a current assessment
+for that team was submitted through MCP. The marker comes from the stored
+author attribution. Historical assessments do not contribute to it.
+
 A token cannot create, list, or revoke tokens, and is never forwarded to
 Dependency-Track.
 

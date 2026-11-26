@@ -53,7 +53,7 @@ describe('VulnGroupCard Severity Colors', () => {
         }
         const wrapper = mount(VulnGroupCard, { props: { group: mediumGroup } })
 
-        const polygon = wrapper.find('[data-testid="severity-badge"] polygon')
-        expect(polygon.attributes('fill')).toBe('rgba(202, 138, 4, 0.4)')
+        expect(wrapper.get('[data-testid="severity-badge"]').classes()).toContain('text-amber-300')
+        expect(wrapper.get('[data-testid="severity-badge"]').text()).toBe('Medium')
     })
 })

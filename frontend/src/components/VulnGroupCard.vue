@@ -13,6 +13,8 @@ import { AMBIGUOUS_SCOPE, BASE_SCOPE, getAssessmentScopes } from '../lib/assessm
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getApprovalUnavailableReason, getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { getGroupChangesRequestedTeams, teamChangesRequestsForFindings } from '../lib/assessmentChanges'
+import { evidenceSources } from '../lib/evidence'
+import { cardSeverityTint, savedRescoredScore } from '../lib/vulnCardSeverity'
 import { hasPendingReviewMarker } from '../lib/assessmentScopes'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
@@ -45,7 +47,7 @@ import TeamAssessmentOverview from './TeamAssessmentOverview.vue'
 import { buildTeamOverview, resolveTeamAlias, stateLabel as stateLabelOf } from '../lib/teamOverview'
 import { sortVersions } from '../lib/version'
 import type { CodeAnalysisAssessResponse, CodeAnalysisCvssAdjustment } from '../lib/api'
-import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
+import { originalSeverityOf, scoreSeverity, parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 
 const props = defineProps<{
     group: GroupedVuln
@@ -95,9 +97,6 @@ const handleCloseOnEscape = (e: KeyboardEvent) => {
 onMounted(() => {
     globalThis.addEventListener('keydown', handleCloseOnEscape)
     globalThis.addEventListener('resize', handleViewportResize)
-    nextTick(() => {
-        if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
-    })
     getKnownUsers().then(users => { knownUsers.value = users }).catch(() => {})
     if (props.inModal && canApprove.value) void openApproval(false)
 })
@@ -614,7 +613,6 @@ const assessmentPaneEl = ref<HTMLElement | null>(null)
 const workspaceHeadingEl = ref<HTMLElement | null>(null)
 const formHighlight = ref(false)
 let formHighlightTimer: ReturnType<typeof setTimeout> | null = null
-const headerHeight = ref(48) // sensible default
 const detailsMaxHeight = ref('calc(100vh - 8rem)')
 
 const getStickyHeaderOffset = () => {
@@ -883,21 +881,6 @@ const technicalState = computed(() => {
 
 const isPendingReview = computed(() => {
     return isPendingReviewHelper(props.group)
-})
-
-const isAssessed = computed(() => {
-    return displayState.value === 'ASSESSED' || displayState.value === 'ASSESSED_LEGACY'
-})
-
-const assessedFoldClass = computed(() => {
-    if (displayState.value === 'INCOMPLETE') return 'bg-green-600/30'
-    if (displayState.value === 'ASSESSED_LEGACY') return 'bg-sky-600'
-    return 'bg-green-600'
-})
-
-const assessedIconClass = computed(() => {
-    if (displayState.value === 'INCOMPLETE') return 'text-white/40'
-    return 'text-white'
 })
 
 // Approval is for a vulnerability that is Ready for approval only; the
@@ -2110,10 +2093,6 @@ watch(expanded, (isOpen) => {
         refreshDetails()
         if (canApprove.value) void openApproval(false)
         nextTick(() => {
-            // Measure header for badge height
-            if (headerEl.value) {
-                headerHeight.value = headerEl.value.offsetHeight
-            }
             // Position the card header below the sticky app header.
             nextTick(() => {
                 alignHeaderBelowStickyTop()
@@ -2390,69 +2369,15 @@ const handleMappingUpdated = async () => {
     emit('update')
 }
 
-const originalSeverity = computed(() => {
-    const base = props.group.cvss ?? props.group.cvss_score
-    if (base != null && !Number.isNaN(Number(base))) return scoreSeverity(Number(base))
-    return props.group.severity || 'UNKNOWN'
-})
-
-const scoreSeverity = (score: number): string => {
-    if (score >= 9) return 'CRITICAL'
-    if (score >= 7) return 'HIGH'
-    if (score >= 4) return 'MEDIUM'
-    if (score >= 0.1) return 'LOW'
-    return 'INFO'
-}
-
-const rescoredSeverity = computed(() => {
-    // Use stable group data first, then fall back to pending edits
-    if (hasStableRescore.value) {
-        return scoreSeverity(stableRescoredScore.value!)
-    }
-    if (!isRescoredOrModified.value) return null
-    const score = Number(currentDisplayScore.value)
-    if (Number.isNaN(score)) return null
-    return scoreSeverity(score)
-})
-
-const hexToRgba = (hex: string, alpha: number) => {
-    const cleaned = hex.replace('#', '').trim()
-    const normalized = cleaned.length === 3
-        ? cleaned.split('').map((char) => char + char).join('')
-        : cleaned
-    if (normalized.length !== 6) return hex
-
-    const r = Number.parseInt(normalized.slice(0, 2), 16)
-    const g = Number.parseInt(normalized.slice(2, 4), 16)
-    const b = Number.parseInt(normalized.slice(4, 6), 16)
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
-
-const severityHexMap: Record<string, string> = {
-    'CRITICAL': '#dc2626', 'HIGH': '#ea580c', 'MEDIUM': '#ca8a04',
-    'LOW': '#16a34a', 'INFO': '#2563eb', 'UNKNOWN': '#4b5563'
-}
-const severityHex = computed(() => severityHexMap[originalSeverity.value] ?? '#4b5563')
-const originalSeverityFill = computed(() => hexToRgba(severityHex.value, 0.4))
-const rescoredSeverityHex = computed(() => {
-    if (!rescoredSeverity.value) return hexToRgba('#6b7280', 0.4)
-    return hexToRgba(severityHexMap[rescoredSeverity.value] ?? '#4b5563', 0.4)
-})
-
-
-const cardStyle = computed(() => {
-    switch (displayState.value) {
-        case 'NOT_SET':
-        case 'OPEN':
-        case 'EXPLOITABLE':
-            return 'bg-gray-800-warm border-gray-700 hover:bg-gray-750'
-        case 'INCONSISTENT':
-            return 'bg-gray-800 border-gray-700 hover:bg-gray-750 stripe-bg'
-        default:
-            return 'bg-gray-800 border-gray-700 hover:bg-gray-750'
-    }
-})
-
+const originalSeverity = computed(() => originalSeverityOf(props.group))
+const savedRescore = computed(() => savedRescoredScore(props.group))
+const displayedRescore = computed(() => savedRescore.value
+    ?? (isRescoredOrModified.value ? pendingScore.value : null))
+const rescoredSeverity = computed(() => displayedRescore.value == null
+    ? null : scoreSeverity(displayedRescore.value))
+const severityTint = computed(() => cardSeverityTint(
+    originalSeverity.value, savedRescore.value == null ? null : scoreSeverity(savedRescore.value),
+))
 
 const dependencyRelationship = dependencyInfo.dependencyRelationship
 const sortedAffectedProjectVersions = dependencyInfo.sortedAffectedProjectVersions
@@ -2937,7 +2862,7 @@ const pendingReviewForScope = computed(() => activeTeamScope.value
 )
 const codeAnalysisAvailableForScope = computed(() => activeTeamScope.value
     ? scopedCodeAnalysisAvailable.value
-    : Boolean(props.automaticAssessmentStatus)
+    : Boolean(props.hasAutomaticAssessment || props.automaticAssessmentStatus)
 )
 const codeAnalysisComponents = computed(() =>
     triggeringTaggedComponents.value.map(c => c.name)
@@ -3269,71 +3194,26 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
             isWorkspace ? 'flex h-full flex-col overflow-hidden'
                 : inModal ? 'h-full min-h-0 overflow-y-auto overscroll-contain'
                 : expanded ? 'overflow-visible z-40' : 'overflow-hidden',
-            cardStyle,
+            'border-gray-700 bg-gray-800',
         ]"
     >
-    <!-- Criticality Badges — header-height only -->
-    <div
-        class="absolute top-0 left-0 z-20 pointer-events-none flex"
-        :style="{ height: headerHeight + 'px' }"
-        data-testid="criticality-badge-slot"
-    >
-        <!-- Original severity badge with chevron and shadow -->
-        <div class="relative z-20 h-full w-10 flex items-center justify-center" data-testid="severity-badge">
-            <svg class="absolute inset-0 w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 40 100">
-                <defs>
-                    <filter id="badge-chevron-shadow" x="-8" y="-8" width="56" height="116" filterUnits="userSpaceOnUse">
-                        <feDropShadow dx="3" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.45)" />
-                    </filter>
-                </defs>
-                <polygon :fill="originalSeverityFill" filter="url(#badge-chevron-shadow)" points="0,0 32,0 40,50 32,100 0,100" />
-            </svg>
-            <span class="relative z-10 text-[9px] font-black uppercase tracking-[0.22em] [writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-white">
-                {{ originalSeverity }}
-            </span>
-        </div>
-        <!-- Rescored severity badge with inward left notch and right chevron -->
-        <div class="relative z-10 h-full w-9 -ml-2 flex items-center justify-end" data-testid="rescored-severity-badge">
-            <div
-                class="absolute inset-0"
-                :style="{
-                    backgroundColor: rescoredSeverityHex,
-                    clipPath: 'polygon(0 0, 77.78% 0, 100% 50%, 77.78% 100%, 0 100%, 22.22% 50%)'
-                }"
-            ></div>
-            <span class="relative z-10 pl-3 text-[8px] font-black uppercase tracking-[0.18em] [writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-white">
-                {{ rescoredSeverity || 'N/A' }}
-            </span>
-        </div>
-    </div>
-    <!-- Assessed Corner Fold -->
-    <div v-if="isAssessed && !inModal" class="absolute top-0 right-0 pointer-events-none z-20">
-        <div
-            class="w-8 h-8 flex justify-end items-start p-1 uppercase"
-            :class="assessedFoldClass"
-            :title="displayState === 'ASSESSED_LEGACY' ? 'Legacy assessed' : 'Assessed'"
-            style="clip-path: polygon(100% 0, 0 0, 100% 100%)"
-        >
-            <CheckCircle :size="12" :class="assessedIconClass" />
-        </div>
-    </div>
     <!-- Header -->
     <div
         ref="headerEl"
+        data-testid="expanded-vulnerability-header"
         @click="!inModal && (expanded = !expanded)"
-        class="pl-[76px] pr-4 py-3 flex items-start transition-all relative overflow-hidden"
-        :class="[inModal ? '' : 'cursor-pointer hover:bg-white/2', isWorkspace ? 'shrink-0' : '']"
+        class="flex items-start px-4 py-2 transition-colors"
+        :style="{ backgroundColor: severityTint }"
+        :class="[inModal ? '' : 'cursor-pointer', isWorkspace ? 'shrink-0' : '']"
     >
 
         <VulnGroupCardHeader
             :group="group"
             :displayState="displayState"
             :technicalState="technicalState"
-            :isRescoredOrModified="isRescoredOrModified || hasStableRescore"
-            :currentDisplayScore="currentDisplayScore"
-            :pendingScore="pendingScore"
-            :stableRescoredScore="stableRescoredScore"
-            :hasStableRescore="hasStableRescore"
+            :originalSeverity="originalSeverity"
+            :rescoredSeverity="rescoredSeverity"
+            :rescoredScore="displayedRescore"
             :normalizedTags="scopedHeaderTags"
             :assessedTeams="assessedTeams"
             @copy-id="copyId"
@@ -3342,15 +3222,15 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
             :approvalUnavailableReason="approvalUnavailableReason"
             :isPendingReview="isPendingReview"
             :dependencyRelationship="dependencyRelationship"
-            :assignees="group.assignees || []"
             :showExpandToggle="!inModal"
             :hasAutomaticAssessment="props.hasAutomaticAssessment"
             :automaticAssessmentStatus="props.automaticAssessmentStatus"
-            :hasTmrescoreAnalysis="!!matchedProposal"
             :scoreTitle="assessmentScoreTitle"
             :hasUnsavedDraft="hasUnsavedDraft"
             :instanceCountOverride="visibleInstances.length"
+            :versionCount="visibleProjectVersions.length"
             :suppressedCount="suppressedInstanceCount"
+            :changesRequestedTeams="changesRequestedTeams"
             :oldestAttributedOnMsOverride="scopedOldestAttributedOnMs"
             :componentSummaryOverride="scopedComponentSummary"
             @approve-assessment="requestApproval"
@@ -3408,7 +3288,14 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         :class="detailTabClass(tab.id)"
                         @click="setDetailTab(tab.id)"
                     >
-                        <component :is="tab.icon" :size="13" aria-hidden="true" />
+                        <component
+                            :is="tab.icon"
+                            :size="13"
+                            :class="{ 'text-blue-300': tab.id === 'analysis' && codeAnalysisAvailableForScope }"
+                            :title="tab.id === 'analysis' && codeAnalysisAvailableForScope ? 'Code-analysis result available' : undefined"
+                            :data-testid="tab.id === 'analysis' && codeAnalysisAvailableForScope ? 'automatic-assessment-badge' : undefined"
+                            aria-hidden="true"
+                        />
                         {{ tab.label }}
                         <span
                             v-if="detailTabStatus(tab.id)"
@@ -3676,7 +3563,9 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                 title="Description & references"
                 help="Understand the advisory before evaluating where it appears in this project."
             >
-                <h5 v-if="group.title && group.title !== group.id" class="mb-2 text-base font-semibold text-gray-100">{{ group.title }}</h5>
+                <p v-if="evidenceSources(group).includes('CISA_SSVC')" class="mb-2 text-xs text-gray-300">
+                    CISA Vulnrichment exploitation assessment available in the SSVC calculator.
+                </p>
                 <div
                     class="advisory-markdown text-sm text-gray-400 leading-relaxed"
                     data-testid="vuln-description"

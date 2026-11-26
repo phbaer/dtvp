@@ -277,6 +277,25 @@ def test_summary_list_metadata_includes_row_rollups():
     assert "dependency_chains" not in component
 
 
+def test_summary_marks_only_current_team_assessments_submitted_via_mcp():
+    group = {
+        "id": "CVE-2026-MCP",
+        "tags": ["Core", "Web"],
+        "affected_versions": [{"components": [{
+            "analysis_state": "IN_TRIAGE",
+            "analysis_details": (
+                "--- [Team: Core] [State: IN_TRIAGE] [Assessed By: alex (via Review Bot)] ---\n"
+                "--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: sam] ---\n"
+                "--- [Team: Web] [State: IN_TRIAGE] [Assessed By: sam (via Old Agent)] [Historical: yes] ---"
+            ),
+        }]}],
+    }
+
+    row = summarize_grouped_vulnerabilities([group], {})[0]
+
+    assert row["list_metadata"]["mcp_assessment_teams"] == ["Core"]
+
+
 def test_summary_approved_global_assessment_is_terminal_before_team_coverage():
     group = {
         "id": "CVE-2026-TEAM-COVERAGE",

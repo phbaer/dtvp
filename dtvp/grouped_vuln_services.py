@@ -347,6 +347,13 @@ def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
         "instance_blocks": instance_blocks,
         "blocks": blocks,
         "assessed_teams": assessed_teams,
+        "mcp_assessment_teams": {
+            block["team"]
+            for block in blocks
+            if block.get("team") in assessed_teams
+            and block.get("state") != "NOT_SET"
+            and re.search(r" \(via [A-Za-z0-9 ._-]+\)$", str(block.get("user") or ""))
+        },
         "changes_requested_teams": {
             request["team"]
             for instance in instances
@@ -715,6 +722,9 @@ def _build_group_list_metadata(
         "is_assessed": lifecycle in {"ASSESSED", "ASSESSED_LEGACY"},
         "technical_state": summary["technical_state"],
         "assessed_teams": sorted(summary["assessed_teams"]),
+        "mcp_assessment_teams": sorted(
+            _normalize_group_tags(list(summary["mcp_assessment_teams"]), team_mapping)
+        ),
         "changes_requested_teams": sorted(
             _normalize_group_tags(list(summary["changes_requested_teams"]), team_mapping)
         ),

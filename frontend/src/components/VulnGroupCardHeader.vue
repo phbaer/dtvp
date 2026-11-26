@@ -1,43 +1,44 @@
 <script setup lang="ts">
 import { computed, toRefs } from 'vue'
-import { CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from '@lucide/vue'
+import { Bot, CheckCircle, ChevronDown, ChevronUp, Layers, Package, RotateCcw } from '@lucide/vue'
 import type { GroupedVuln } from '../types'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 import { getGroupGlobalDecision, getGroupInconsistencyReasons } from '../lib/assessment-helpers'
 import { inconsistencyReasonLabel } from '../lib/inconsistency'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
-import { ssvcLabel } from '../lib/ssvc'
-import { evidenceSources, evidenceLabel } from '../lib/evidence'
+import { evidenceLabel, evidenceSources } from '../lib/evidence'
+import { severityTextColour } from '../lib/vulnCardSeverity'
+import VulnCardDates from './VulnCardDates.vue'
+import { originalSeverityOf } from '../lib/vulnListIndex'
 
 const props = defineProps<{
   group: GroupedVuln
   displayState: string
   technicalState: string
-  isRescoredOrModified: boolean
-  currentDisplayScore: number | string
-  pendingScore: number | null
-  stableRescoredScore: number | null
-  hasStableRescore: boolean
+  rescoredScore?: number | null
+  rescoredSeverity?: string | null
+  originalSeverity?: string
   normalizedTags: string[]
   assessedTeams: Set<string>
   expanded: boolean
   canApprove: boolean
   isPendingReview: boolean
   dependencyRelationship: 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
-  assignees: string[]
   compact?: boolean
+  workflowLabel?: string
+  reserveCornerSpace?: boolean
   showExpandToggle?: boolean
-  baseScoreDisplayOverride?: string
-  rescoredScoreDisplayOverride?: string
   scoreTitle?: string
   hasUnsavedDraft?: boolean
   instanceCountOverride?: number
+  versionCount?: number
   suppressedCount?: number
+  changesRequestedTeams?: string[]
+  syncFailed?: boolean
   oldestAttributedOnMsOverride?: number | null
   componentSummaryOverride?: string
   hasAutomaticAssessment?: boolean
   automaticAssessmentStatus?: AutomaticAssessmentStatus | null
-  hasTmrescoreAnalysis?: boolean
   /** Why a pending vulnerability cannot be approved yet, for reviewers. */
   approvalUnavailableReason?: string
 }>()
@@ -55,34 +56,14 @@ const codeAssessmentTitle = computed(() => {
     default: return 'No code-analysis assessment is available'
   }
 })
-const codeAssessmentClass = computed(() => {
-  switch (codeAssessmentStatus.value) {
-    case 'auto': return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
-    case 'manual': return 'border-blue-500/30 bg-blue-500/10 text-blue-300'
-    case 'mixed': return 'border-purple-500/30 bg-purple-500/10 text-purple-300'
-    case 'partial': return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-    default: return 'border-gray-600/40 bg-gray-950/30 text-gray-500'
-  }
-})
-
 const {
   group,
   displayState,
   technicalState,
-  isRescoredOrModified,
-  currentDisplayScore,
-  pendingScore,
-  stableRescoredScore,
-  hasStableRescore,
   normalizedTags,
   assessedTeams,
-  expanded,
   canApprove,
-  isPendingReview,
   dependencyRelationship,
-  assignees,
-  compact,
-  showExpandToggle,
 } = toRefs(props)
 
 const emit = defineEmits<{
@@ -90,32 +71,34 @@ const emit = defineEmits<{
   (e: 'copy-id'): void
 }>()
 
-const baseScoreDisplay = computed(() => {
-  if (props.baseScoreDisplayOverride !== undefined) return props.baseScoreDisplayOverride
-  const baseScore = group.value.cvss ?? group.value.cvss_score
-  return baseScore == null ? '—' : String(baseScore)
+const baseScore = computed(() => group.value.cvss ?? group.value.cvss_score)
+const formatScore = (score: number | null | undefined) =>
+  typeof score === 'number' && Number.isFinite(score) ? score.toFixed(1) : '—'
+const original = computed(() => props.originalSeverity || originalSeverityOf(group.value))
+const severityLabel = (severity: string) => severity === 'INFO' ? 'Info'
+  : severity.charAt(0) + severity.slice(1).toLowerCase()
+const advisoryTitle = computed(() => {
+  const title = group.value.title?.trim()
+  return title && title !== group.value.id ? title : ''
 })
-
-const rescoredScoreDisplay = computed(() => {
-  if (props.rescoredScoreDisplayOverride !== undefined) return props.rescoredScoreDisplayOverride
-  // Prefer stable group data, fallback to computed display score for pending edits
-  if (hasStableRescore.value && stableRescoredScore.value != null) {
-    return String(stableRescoredScore.value)
-  }
-  const score = currentDisplayScore.value
-  return score === undefined || score === null || score === '' || score === 'N/A' ? '—' : String(score)
-})
+const kev = computed(() => evidenceSources(group.value).includes('KEV'))
+const teamKey = (team: string) => team.trim().toLowerCase()
+const assessed = computed(() => new Set([...assessedTeams.value].map(teamKey)))
+const returned = computed(() => new Set((props.changesRequestedTeams || []).map(teamKey)))
+const mcpTeams = computed(() => new Set((group.value.list_metadata?.mcp_assessment_teams || []).map(teamKey)))
+const teamStatus = (team: string) => returned.value.has(teamKey(team)) ? 'Changes requested'
+  : assessed.value.has(teamKey(team)) ? 'Assessment recorded' : 'Missing assessment'
 
 const lifecycleClass = computed(() => {
   switch (displayState.value) {
     case 'OPEN':
-    case 'NOT_SET': return 'bg-red-500/15 text-red-400 border-red-500/30'
-    case 'INCOMPLETE': return 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-    case 'INCONSISTENT': return 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
-    case 'ASSESSED': return 'bg-green-500/15 text-green-400 border-green-500/30'
-    case 'ASSESSED_LEGACY': return 'bg-sky-500/15 text-sky-400 border-sky-500/30'
-    case 'NEEDS_APPROVAL': return 'bg-purple-500/15 text-purple-400 border-purple-500/30'
-    default: return 'bg-gray-500/15 text-gray-400 border-gray-500/30'
+    case 'NOT_SET': return 'text-red-300'
+    case 'INCOMPLETE': return 'text-amber-300'
+    case 'INCONSISTENT': return 'text-indigo-300'
+    case 'ASSESSED': return 'text-emerald-300'
+    case 'ASSESSED_LEGACY': return 'text-sky-300'
+    case 'NEEDS_APPROVAL': return 'text-violet-300'
+    default: return 'text-gray-400'
   }
 })
 
@@ -134,11 +117,11 @@ const lifecycleLabel = computed(() => {
 
 const analysisStateClass = computed(() => {
   switch (technicalState.value) {
-    case 'EXPLOITABLE': return 'bg-red-500/15 text-red-400 border-red-500/30'
-    case 'IN_TRIAGE': return 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-    case 'FALSE_POSITIVE': return 'bg-teal-500/15 text-teal-400 border-teal-500/30'
-    case 'RESOLVED': return 'bg-purple-500/15 text-purple-400 border-purple-500/30'
-    case 'NOT_AFFECTED': return 'bg-green-500/15 text-green-400 border-green-500/30'
+    case 'EXPLOITABLE': return 'text-red-300'
+    case 'IN_TRIAGE': return 'text-amber-300'
+    case 'FALSE_POSITIVE': return 'text-teal-300'
+    case 'RESOLVED': return 'text-emerald-300'
+    case 'NOT_AFFECTED': return 'text-emerald-300'
     default: return ''
   }
 })
@@ -150,7 +133,7 @@ const analysisStateLabel = computed(() => {
     case 'FALSE_POSITIVE': return 'False Positive'
     case 'RESOLVED': return 'Resolved'
     case 'NOT_AFFECTED': return 'Not Affected'
-    default: return ''
+    default: return 'Not Set'
   }
 })
 
@@ -235,51 +218,29 @@ const newFindingsTitle = computed(() => {
     + `${versions.length ? ` (version ${versions.join(', ')})` : ''}${since}. Not assessed yet.`
 })
 
-const DAY_MS = 24 * 60 * 60 * 1000
-
-const oldestAttributedOnMs = computed(() => {
-  if (props.oldestAttributedOnMsOverride !== undefined) {
-    return props.oldestAttributedOnMsOverride
-  }
-  const values = (group.value.affected_versions || [])
-    .flatMap(version => version.components || [])
-    .map(component => parseAttributionTimestamp(component.attributed_on))
-    .filter((value): value is number => value != null)
-
-  return values.length ? Math.min(...values) : null
+const scopeTitle = computed(() => {
+  const relationship = dependencyRelationship.value
+  const oldest = props.oldestAttributedOnMsOverride
+  return [
+    relationship === 'UNKNOWN' ? '' : relationship === 'DIRECT' ? 'Direct dependency' : 'Transitive dependency',
+    oldest == null ? '' : `Oldest attribution: ${new Date(oldest).toISOString().slice(0, 10)}`,
+  ].filter(Boolean).join(' · ')
 })
 
-const attributionAgeDays = computed(() => {
-  if (oldestAttributedOnMs.value == null) return null
-  return Math.max(0, Math.floor((Date.now() - oldestAttributedOnMs.value) / DAY_MS))
+const publishedOnMs = computed(() => {
+  const publication = group.value.list_metadata?.cutoff_dates?.published
+  const dates = publication
+    ? Object.values(publication.by_version || {}).map(([earliest]) => earliest)
+    : (group.value.affected_versions || []).flatMap(version =>
+        (version.components || []).map(component => component.published_ms))
+  const known = dates.filter((date): date is number => typeof date === 'number' && Number.isFinite(date) && date > 0)
+  return known.length ? Math.min(...known) : null
 })
 
-const formatAttributionAge = (days: number) => {
-  if (days <= 0) return 'today'
-  if (days < 14) return `${days}d`
-  if (days < 70) {
-    const weeks = Math.floor(days / 7)
-    const remainingDays = days % 7
-    return remainingDays > 0 ? `${weeks}w ${remainingDays}d` : `${weeks}w`
-  }
-  if (days < 365) return `${Math.floor(days / 30)}mo`
-
-  const years = Math.floor(days / 365)
-  const months = Math.floor((days % 365) / 30)
-  return months > 0 ? `${years}y ${months}mo` : `${years}y`
-}
-
-const attributionAgeLabel = computed(() => {
-  if (attributionAgeDays.value == null) return ''
-  return formatAttributionAge(attributionAgeDays.value)
-})
-
-const attributionAgeTitle = computed(() => {
-  if (oldestAttributedOnMs.value == null || attributionAgeDays.value == null) return ''
-  const date = new Date(oldestAttributedOnMs.value).toISOString().slice(0, 10)
-  const age = formatAttributionAge(attributionAgeDays.value)
-  return `Oldest attribution: ${date} (${attributionAgeDays.value === 0 ? age : `${age} ago`})`
-})
+const showCompactDates = computed(() => props.compact && (publishedOnMs.value != null || props.oldestAttributedOnMsOverride != null))
+const showFooter = computed(() => (props.compact || props.showExpandToggle !== false)
+  && (normalizedTags.value.length > 0 || codeAssessmentAvailable.value || showCompactDates.value))
+const newCount = computed(() => Math.max(newFindings.value.length, group.value.list_metadata?.new_finding_count || 0))
 
 const componentSummary = computed(() => {
   if (props.componentSummaryOverride !== undefined) return props.componentSummaryOverride
@@ -298,263 +259,164 @@ const componentSummary = computed(() => {
 </script>
 
 <template>
-  <div :class="['flex min-w-0 flex-1', compact ? 'items-center gap-2' : 'items-start gap-3']">
-    <div class="flex-1 min-w-0">
-      <!-- Primary row: ID + component context -->
-      <div :class="['flex items-center min-w-0', compact ? 'gap-1.5' : 'gap-2 flex-wrap']">
-        <span
-          data-testid="vuln-primary-id"
-          :class="[
-            'min-w-0 shrink overflow-hidden text-ellipsis whitespace-nowrap font-black text-yellow-400 tracking-tight leading-none cursor-pointer hover:underline',
-            compact ? 'text-sm' : 'text-base'
-          ]"
-          title="Click to copy ID"
-          @click.stop="emit('copy-id')"
-        >
-          {{ group.id }}
-        </span>
-
-        <span v-if="compact" class="inline-flex shrink-0 items-center gap-1 rounded border border-gray-700/70 bg-gray-950/40 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-200" data-testid="header-cvss-block" :title="props.scoreTitle || 'CVSS base score'">
-          <span class="text-gray-500">CVSS</span>
-          <span data-testid="base-score-value">{{ baseScoreDisplay }}</span>
-          <template v-if="isRescoredOrModified">
-            <span class="text-gray-600" data-testid="rescored-arrow">&rarr;</span>
-            <span :class="pendingScore !== null ? 'text-purple-400' : 'text-purple-500'" data-testid="rescored-value-badge" title="Rescored CVSS score after contextual analysis">
-              {{ rescoredScoreDisplay }}
-            </span>
-          </template>
-        </span>
-
-        <span v-if="componentSummary" :class="['inline-flex min-w-0 items-center gap-1 text-[10px] text-gray-500 font-medium truncate', compact ? 'max-w-[16rem]' : 'max-w-[20rem]']" :title="componentSummary" data-testid="component-summary">
-          <Package :size="9" class="shrink-0 text-gray-600" />
-          {{ componentSummary }}
-        </span>
-      </div>
-
-      <!-- Status row: lifecycle | analysis state | meta -->
-      <div :class="['flex items-center flex-wrap', compact ? 'mt-1 gap-1' : 'mt-1.5 gap-1.5']">
-        <!-- Lifecycle group -->
-        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l text-[10px] font-bold uppercase tracking-wide border-y border-l shrink-0', lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
-          <CircleDot :size="9" />
-          {{ lifecycleLabel }}
-        </span>
-        <!-- Analysis state (joined to lifecycle visually) -->
-        <span v-if="analysisStateLabel" :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase tracking-wide border-y border-r -ml-1.5 shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
-          <Bug v-if="technicalState === 'EXPLOITABLE'" :size="9" />
-          <Search v-else-if="technicalState === 'IN_TRIAGE'" :size="9" />
-          <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
-          <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
-          {{ analysisStateLabel }}
-          <span v-if="derivedDecision" data-testid="analysis-state-derived" class="font-normal normal-case opacity-70">· derived</span>
-        </span>
-        <!-- Close lifecycle pill if no analysis state -->
-        <span v-else class="-ml-1.5"></span>
-        <span v-if="displayState === 'ASSESSED_LEGACY'" data-testid="legacy-assessment-badge" class="rounded border border-sky-500/30 px-1.5 py-0.5 text-[10px] text-sky-300" title="Assessed before the structured team workflow">Legacy</span>
-
-        <span v-if="group.ssvc_summary && group.ssvc_summary.status !== 'UNASSESSED'" data-testid="ssvc-badge" class="rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-200" title="SSVC deployment priority (independent of CVSS)">SSVC: {{ ssvcLabel(group.ssvc_summary.status) }}</span>
-        <span v-for="source in evidenceSources(group).filter(value => ['KEV', 'CISA_SSVC'].includes(value))" :key="source" data-testid="evidence-badge"
-          class="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200"
-          :title="`Cached official evidence, independent of saved SSVC. ${evidenceSources(group).map(evidenceLabel).join('; ')}`">
-          {{ source === 'KEV' ? 'KEV' : 'CISA SSVC' }}
-        </span>
-
-        <span class="w-px h-3.5 bg-gray-700 mx-0.5 shrink-0"></span>
-
-        <span
+  <div class="@container min-w-0 flex-1 space-y-0.5">
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+      <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <button
           v-if="!compact"
-          class="inline-flex items-center gap-1 rounded border border-gray-700/70 bg-gray-950/50 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-200 shrink-0"
-          data-testid="header-cvss-block"
-          :title="props.scoreTitle || 'CVSS base score'"
-        >
-          <span class="text-gray-500">CVSS</span>
-          <span data-testid="base-score-value">{{ baseScoreDisplay }}</span>
-          <template v-if="isRescoredOrModified">
-            <span class="text-gray-600" data-testid="rescored-arrow">&rarr;</span>
-            <span :class="pendingScore !== null ? 'text-purple-400' : 'text-purple-500'" data-testid="rescored-value-badge" title="Rescored CVSS score after contextual analysis">
-              {{ rescoredScoreDisplay }}
-            </span>
-          </template>
-        </span>
-
-        <!-- Meta badges -->
-        <span v-if="dependencyRelationship !== 'UNKNOWN'"
-          :class="['inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0',
-            dependencyRelationship === 'DIRECT' ? 'bg-orange-500/10 text-orange-400/70 border-orange-500/20' : 'bg-gray-500/10 text-gray-500 border-gray-500/20']"
-          data-testid="dep-badge"
-          :title="dependencyRelationship === 'DIRECT' ? 'Direct dependency — used directly by the project' : 'Transitive dependency — pulled in indirectly through another package'"
-        >
-          <GitBranch :size="9" />
-          {{ dependencyRelationship === 'DIRECT' ? 'Direct' : 'Trans.' }}
-        </span>
-
-        <span class="inline-flex items-center gap-1 text-[10px] text-gray-600 shrink-0 tabular-nums" data-testid="instance-count" :title="`${instanceCount} affected component instance${instanceCount !== 1 ? 's' : ''} across all project versions`">
-          <Layers :size="9" />
-          {{ instanceCount }}&times;
-        </span>
-
-        <span v-if="attributionAgeLabel" class="inline-flex items-center gap-1 rounded border border-cyan-500/20 bg-cyan-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-300 shrink-0 tabular-nums" data-testid="attribution-age-chip" :title="attributionAgeTitle">
-          <CalendarClock :size="9" />
-          Age {{ attributionAgeLabel }}
-        </span>
-
-        <span v-if="suppressedCount > 0" class="inline-flex items-center gap-1 rounded border border-gray-500/40 bg-gray-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-300 shrink-0 tabular-nums" data-testid="suppressed-chip" :title="suppressedTitle">
-          Suppressed
-        </span>
-        <span v-if="newFindings.length > 0" class="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-300 shrink-0 tabular-nums" data-testid="new-findings-chip" :title="newFindingsTitle">
-          {{ newFindings.length }} new
-        </span>
-
+          type="button"
+          data-testid="vuln-primary-id"
+          class="text-left font-mono text-sm font-bold text-blue-200 [overflow-wrap:anywhere] hover:underline"
+          title="Copy vulnerability ID"
+          @click.stop="emit('copy-id')"
+        >{{ group.id }}</button>
         <span
-          class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border"
-          :class="props.hasTmrescoreAnalysis
-            ? 'border-teal-500/25 bg-teal-500/10 text-teal-300'
-            : 'border-gray-600/40 bg-gray-950/30 text-gray-500'"
-          data-testid="tmrescore-analysis-badge"
-          :data-availability="props.hasTmrescoreAnalysis ? 'available' : 'unavailable'"
-          role="img"
-          :title="props.hasTmrescoreAnalysis
-            ? 'TMRescore/vscorer analysis is available'
-            : 'No TMRescore/vscorer analysis is available'"
-          :aria-label="props.hasTmrescoreAnalysis
-            ? 'TMRescore analysis available'
-            : 'TMRescore analysis unavailable'"
-        >
-          <ShieldCheck
-            v-if="props.hasTmrescoreAnalysis"
-            :size="12"
-            class="block h-3 w-3 shrink-0"
-            aria-hidden="true"
-          />
-          <ShieldOff
-            v-else
-            :size="12"
-            class="block h-3 w-3 shrink-0"
-            aria-hidden="true"
-          />
-          <span class="sr-only">TMRescore {{ props.hasTmrescoreAnalysis ? 'available' : 'unavailable' }}</span>
-        </span>
-
-        <span
-          class="relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border"
-          :class="codeAssessmentClass"
-          data-testid="automatic-assessment-badge"
-          :data-availability="codeAssessmentAvailable ? 'available' : 'unavailable'"
-          :data-assessment-status="codeAssessmentStatus || 'none'"
-          role="img"
-          :title="codeAssessmentTitle"
-          :aria-label="codeAssessmentAvailable
-            ? `Code assessment available: ${codeAssessmentStatus}`
-            : 'Code assessment unavailable'"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="12"
-            height="12"
-            class="block h-3 w-3 shrink-0"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 3v3" />
-            <rect x="4" y="7" width="16" height="12" rx="3" />
-            <path d="M8 12h.01M16 12h.01M8 16h8" />
-          </svg>
-          <span
-            v-if="!codeAssessmentAvailable"
-            class="absolute h-px w-3 rotate-45 bg-current"
-            aria-hidden="true"
-          ></span>
-          <span class="sr-only">Code assessment {{ codeAssessmentAvailable ? 'available' : 'unavailable' }}</span>
-        </span>
-
-        <span v-if="isPendingReview && !canApprove" data-testid="header-review-chip" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" :title="props.approvalUnavailableReason || 'Assessment submitted by an analyst, awaiting reviewer approval'">
-          <Eye :size="9" />
-          Review
-        </span>
-
-        <span
-          v-if="props.hasUnsavedDraft"
-          class="inline-flex items-center gap-1 rounded border border-amber-700/40 bg-amber-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200 shrink-0"
-          data-testid="header-draft-chip"
-          title="This expanded card has local assessment edits that have not been applied"
-        >
-          <AlertTriangle :size="9" />
-          Unsaved draft
-        </span>
-
-        <template v-if="compact">
-          <span
-            v-for="tag in normalizedTags"
-            :key="tag"
-            class="inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight transition-all [overflow-wrap:anywhere]"
-            :class="assessedTeams.has(tag)
-              ? 'bg-green-500/10 text-green-400 border-green-500/20'
-              : 'bg-red-500/8 text-red-400/70 border-red-500/15'"
-            data-testid="team-tag"
-          >
-            <CheckCircle v-if="assessedTeams.has(tag)" :size="9" class="shrink-0 text-green-400" />
-            <AlertTriangle v-else :size="8" class="shrink-0 text-red-400/60" />
-            <span class="min-w-0">{{ tag }}</span>
+          v-else
+          data-testid="vuln-primary-id"
+          class="font-mono text-sm font-bold text-blue-200 [overflow-wrap:anywhere]"
+        >{{ group.id }}</span>
+        <h2 v-if="advisoryTitle && !compact" class="text-sm font-semibold text-gray-100 [overflow-wrap:anywhere]">{{ advisoryTitle }}</h2>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <template v-if="!compact">
+          <span v-if="lifecycleLabel !== 'Assessed' || (!isPendingReview && !returned.size)" data-testid="lifecycle-badge" :class="['font-semibold', lifecycleClass]" :title="lifecycleTooltip">
+            {{ lifecycleLabel }}
           </span>
-
+          <span v-if="displayState === 'ASSESSED_LEGACY'" class="text-sky-300" data-testid="legacy-assessment-badge">Legacy</span>
           <span
-            v-for="assignee in assignees"
-            :key="assignee"
-            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium border bg-blue-500/10 text-blue-300 border-blue-500/20"
-            data-testid="assignee-chip"
-          >
-            <User :size="8" class="text-blue-400" />
-            {{ assignee }}
-          </span>
+            v-if="isPendingReview && displayState !== 'NEEDS_APPROVAL'"
+            data-testid="header-review-chip"
+            class="text-violet-300"
+            :title="approvalUnavailableReason || 'Assessment submitted for reviewer approval'"
+          >Awaiting review</span>
+          <span v-if="hasUnsavedDraft" data-testid="header-draft-chip" class="font-semibold text-amber-300">Unsaved draft</span>
+          <button
+            v-if="canApprove && !expanded"
+            type="button"
+            data-testid="approve-btn"
+            class="rounded border border-green-600/50 px-2 py-1 font-semibold text-green-300 hover:bg-green-600/20"
+            title="Open the Global assessment to check and approve it"
+            @click.stop="emit('approve-assessment', $event)"
+          >Approve</button>
         </template>
-
-        <button v-if="canApprove && !expanded" @click.stop="emit('approve-assessment', $event)"
-          class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer ml-auto"
-          data-testid="approve-btn"
-          title="Open the Global assessment to check and approve it"
-        >
-          <CheckCircle :size="9" />
-          Approve
-        </button>
-      </div>
-
-      <!-- Team tags row -->
-      <div v-if="!compact && normalizedTags.length > 0" class="flex flex-wrap items-center gap-1 mt-1.5">
-        <span
-          v-for="tag in normalizedTags"
-          :key="tag"
-          class="inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight transition-all [overflow-wrap:anywhere]"
-          :class="assessedTeams.has(tag)
-            ? 'bg-green-500/10 text-green-400 border-green-500/20'
-            : 'bg-red-500/8 text-red-400/70 border-red-500/15'"
-          data-testid="team-tag"
-        >
-          <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="shrink-0 text-green-400" />
-          <AlertTriangle v-else :size="9" class="shrink-0 text-red-400/60" />
-          <span class="min-w-0">{{ tag }}</span>
-        </span>
-      </div>
-
-      <!-- Assignee chips row -->
-      <div v-if="!compact && assignees.length > 0" class="flex flex-wrap items-center gap-1 mt-1">
-        <span
-          v-for="assignee in assignees"
-          :key="assignee"
-          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-500/10 text-blue-300 border-blue-500/20"
-          data-testid="assignee-chip"
-        >
-          <User :size="9" class="text-blue-400" />
-          {{ assignee }}
-        </span>
+        <slot name="actions"></slot>
+        <component v-if="!compact && showExpandToggle !== false" :is="expanded ? ChevronUp : ChevronDown" :size="14" class="text-gray-400" />
       </div>
     </div>
 
-    <slot name="actions"></slot>
+    <span v-if="compact && workflowLabel !== lifecycleLabel" data-testid="lifecycle-badge" class="sr-only" :title="lifecycleTooltip">{{ lifecycleLabel }}</span>
+    <span v-if="compact && displayState === 'ASSESSED_LEGACY'" data-testid="legacy-assessment-badge" class="sr-only">Legacy</span>
+    <div :class="compact
+      ? 'space-y-0.5'
+      : 'grid gap-x-5 gap-y-0.5 @[34rem]:grid-cols-[20rem_minmax(0,1fr)] @[34rem]:items-center @[34rem]:border-t @[34rem]:border-gray-700/80 @[34rem]:pt-0.5'"
+    >
+      <div
+        class="min-w-0 text-[11px] text-gray-300"
+        :class="compact
+          ? 'flex flex-wrap items-baseline gap-x-2'
+          : 'grid w-fit max-w-full grid-cols-[minmax(5.5rem,1fr)_minmax(5.5rem,auto)] items-start gap-x-3 @[34rem]:col-start-2 @[34rem]:row-start-1 @[34rem]:justify-self-end'"
+      >
+        <div v-if="(compact && advisoryTitle) || componentSummary" class="flex min-w-0 max-w-full items-baseline gap-x-2" :class="compact ? 'grow basis-32' : ''">
+          <span v-if="compact && advisoryTitle" class="min-w-0 truncate font-medium text-gray-100" :title="advisoryTitle">
+            {{ advisoryTitle }}
+          </span>
+          <span v-if="componentSummary" class="inline-flex min-w-0 items-center gap-1" data-testid="component-summary" :title="componentSummary">
+            <Package v-if="!compact" :size="12" class="shrink-0 text-gray-400" aria-hidden="true" />
+            <span class="truncate">{{ componentSummary }}</span>
+          </span>
+        </div>
+        <span data-testid="instance-count" class="inline-flex items-start gap-1 tabular-nums" :class="compact ? 'shrink-0 whitespace-nowrap' : 'col-start-2 row-start-1 min-w-0'" :title="scopeTitle || undefined">
+          <Layers v-if="!compact" :size="12" class="mt-[2px] shrink-0 text-gray-400" aria-hidden="true" />
+          <span>
+            {{ instanceCount }} {{ instanceCount === 1 ? 'finding' : 'findings' }}
+            <template v-if="!compact && versionCount"> across {{ versionCount }} {{ versionCount === 1 ? 'version' : 'versions' }}</template>
+          </span>
+        </span>
+        <VulnCardDates v-if="!compact" :publishedOnMs="publishedOnMs" :attributedOnMs="oldestAttributedOnMsOverride" />
+        <div v-if="newCount || suppressedCount || kev || syncFailed" :class="compact ? 'contents' : 'col-span-2 flex flex-wrap gap-x-2'">
+          <span v-if="newCount" class="text-emerald-300" data-testid="new-findings-chip" :title="newFindingsTitle || undefined">{{ newCount }} new</span>
+          <span v-if="suppressedCount" class="text-gray-300" data-testid="suppressed-chip" :title="suppressedTitle">{{ suppressedCount }} suppressed</span>
+          <span v-if="kev" data-testid="evidence-badge" class="font-semibold text-amber-300" :title="`Listed in CISA KEV. ${evidenceSources(group).map(evidenceLabel).join('; ')}`">
+            {{ compact ? 'KEV' : 'Known exploited (CISA KEV)' }}
+          </span>
+          <span v-if="syncFailed" data-testid="header-sync-failed" class="font-semibold text-red-300">Export failed</span>
+        </div>
+      </div>
 
-    <!-- Expand indicator -->
-    <component v-if="!compact && showExpandToggle !== false" :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0 mt-0.5" />
+      <dl
+        data-testid="header-cvss-block"
+        class="grid max-w-[20rem] grid-cols-[minmax(0,1.2fr)_repeat(2,minmax(0,1fr))] gap-x-2 border-t border-gray-700/80 pt-0.5"
+        :class="[
+          reserveCornerSpace && !showFooter ? 'w-[calc(100%_-_1rem)]' : 'w-full',
+          !compact && '@[34rem]:col-start-1 @[34rem]:row-start-1 @[34rem]:border-0 @[34rem]:pt-0',
+        ]"
+        :title="scoreTitle"
+      >
+        <div class="min-w-0">
+          <dt class="text-[10px] text-gray-300">Effective verdict</dt>
+          <dd data-testid="analysis-state-badge" :title="analysisStateTooltip" :class="['text-xs font-semibold', analysisStateClass || 'text-gray-300']">
+            {{ analysisStateLabel }}
+            <span v-if="derivedDecision" data-testid="analysis-state-derived" class="text-[10px] font-normal text-gray-300">· Derived</span>
+          </dd>
+        </div>
+        <div class="min-w-0">
+          <dt class="text-[10px] text-gray-300">Original severity</dt>
+          <dd class="flex flex-wrap items-baseline gap-x-1 text-xs">
+            <span class="text-[10px] tabular-nums text-gray-300">
+              <span class="sr-only">CVSS </span><span data-testid="base-score-value">{{ formatScore(baseScore) }}</span>
+            </span>
+            <span data-testid="severity-badge" :class="['font-semibold', severityTextColour(original)]">{{ severityLabel(original) }}</span>
+          </dd>
+        </div>
+        <div class="min-w-0">
+          <dt class="text-[10px] text-gray-300">Rescored severity</dt>
+          <dd v-if="rescoredSeverity && rescoredScore != null" class="flex flex-wrap items-baseline gap-x-1 text-xs">
+            <span class="text-[10px] tabular-nums text-gray-300">
+              <span class="sr-only">CVSS </span><span data-testid="rescored-value-badge">{{ formatScore(rescoredScore) }}</span>
+            </span>
+            <span data-testid="rescored-severity-badge" :class="['font-semibold', severityTextColour(rescoredSeverity)]">
+              {{ severityLabel(rescoredSeverity) }}
+            </span>
+          </dd>
+          <dd v-else data-testid="rescored-severity-badge" class="text-xs font-semibold text-gray-400">Not rescored</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div v-if="showFooter" class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-gray-300" :class="{ 'pr-4': reserveCornerSpace }">
+      <span
+        v-for="team in normalizedTags"
+        :key="team"
+        data-testid="team-tag"
+        class="inline-flex max-w-full items-center gap-1 [overflow-wrap:anywhere]"
+        :title="`${team}: ${teamStatus(team)}`"
+        role="img"
+        :aria-label="`${team}: ${teamStatus(team)}${mcpTeams.has(teamKey(team)) ? ', submitted via MCP' : ''}`"
+      >
+        <span>{{ team }}</span>
+        <RotateCcw v-if="returned.has(teamKey(team))" :size="10" class="shrink-0 text-red-300" aria-hidden="true" />
+        <CheckCircle v-else-if="assessed.has(teamKey(team))" :size="10" class="shrink-0 text-emerald-300" aria-hidden="true" />
+        <span v-else class="size-2 shrink-0 rounded-full border border-amber-300" aria-hidden="true"></span>
+        <span v-if="mcpTeams.has(teamKey(team))" data-testid="team-mcp" class="shrink-0 font-semibold text-violet-300" title="Current team assessment submitted via MCP">MCP</span>
+      </span>
+      <VulnCardDates
+        v-if="showCompactDates"
+        class="ml-auto"
+        :publishedOnMs="publishedOnMs"
+        :attributedOnMs="oldestAttributedOnMsOverride"
+        compact
+      />
+      <span
+        v-if="codeAssessmentAvailable"
+        data-testid="automatic-assessment-badge"
+        class="inline-flex shrink-0 items-center text-blue-300"
+        :class="{ 'ml-auto': !showCompactDates }"
+        data-availability="available"
+        :data-assessment-status="codeAssessmentStatus || undefined"
+        role="img"
+        :title="codeAssessmentTitle"
+        :aria-label="codeAssessmentTitle"
+      ><Bot :size="15" aria-hidden="true" /></span>
+    </div>
   </div>
 </template>

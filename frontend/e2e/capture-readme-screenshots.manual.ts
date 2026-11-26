@@ -891,6 +891,8 @@ async function mockCommonShell(page: Page) {
                                         component_uuid: 'c1',
                                         finding_uuid: 'f1',
                                         vulnerability_uuid: 'v1',
+                                        published_ms: Date.UTC(2024, 1, 8),
+                                        attributed_on: Date.UTC(2026, 3, 6),
                                         analysis_state: 'IN_TRIAGE',
                                         analysis_details: '--- [Team: LegacyPlatformAlias] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1710000000000] [Justification: CODE_NOT_PRESENT] ---\nLegacy alias assessment block retained for compatibility.',
                                         tags: ['LegacyPlatformAlias'],
@@ -1557,6 +1559,7 @@ test.describe('Capture README screenshots', () => {
         const card = await openProjectCard(page, 'CVE-2024-3001')
         const workspace = await openWorkspace(card)
         // The reviewer approves the Global form; the team evidence is on the left.
+        await workspace.getByRole('button', { name: 'Review & approve' }).click()
         await expect(workspace.getByTestId('assessment-approve-button')).toHaveText('Approve')
         const evidence = workspace.getByTestId('workspace-context-pane').getByTestId('vulnerability-assessments')
         await expect(evidence).toContainText('EdgeTeam')
@@ -1719,7 +1722,7 @@ test.describe('Capture README screenshots', () => {
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/lifecycle-badges.png')
     })
 
-    test('capture assignee chips and approve button screenshot', async ({ page }) => {
+    test('capture ready for approval card screenshot', async ({ page }) => {
         await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
@@ -1727,9 +1730,7 @@ test.describe('Capture README screenshots', () => {
         const needsApprovalCard = page.locator('.vuln-card').filter({ hasText: /CVE-2024-3001/ }).first()
         await expect(needsApprovalCard).toBeVisible({ timeout: 20000 })
 
-        // Verify assignee chips are visible on the card header
-        await expect(needsApprovalCard.locator('[data-testid="assignee-chip"]').first()).toBeVisible({ timeout: 5000 })
-        await expect(needsApprovalCard.getByText('Ready for approval', { exact: true })).toBeVisible({ timeout: 5000 })
+        await expect(needsApprovalCard.getByTestId('workflow-state-badge')).toHaveText('Ready for approval', { timeout: 5000 })
 
         await captureWithPadding(needsApprovalCard, '../docs/screenshots/assignee-chips-approve.png')
     })
@@ -1742,9 +1743,8 @@ test.describe('Capture README screenshots', () => {
         const rescoredCard = page.locator('.vuln-card').filter({ hasText: /CVE-2024-6004/ }).first()
         await expect(rescoredCard).toBeVisible({ timeout: 20000 })
 
-        // Verify rescored score is displayed (arrow from base to rescored)
-        await expect(rescoredCard.locator('[data-testid="rescored-arrow"]')).toBeVisible({ timeout: 5000 })
-        await expect(rescoredCard.locator('[data-testid="rescored-value-badge"]')).toBeVisible({ timeout: 5000 })
+        await expect(rescoredCard.getByTestId('base-score-value')).toHaveText('7.2', { timeout: 5000 })
+        await expect(rescoredCard.getByTestId('rescored-value-badge')).toHaveText('4.1', { timeout: 5000 })
 
         await captureWithPadding(rescoredCard, '../docs/screenshots/rescored-cvss.png')
     })

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { GroupedVuln } from '../types'
-import type { VulnListItem } from '../lib/vulnListIndex'
+import { scoreSeverity, type VulnListItem } from '../lib/vulnListIndex'
+import { cardSeverityTint, savedRescoredScore } from '../lib/vulnCardSeverity'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import { CheckCircle, RefreshCw } from '@lucide/vue'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
@@ -30,47 +31,20 @@ const displayState = computed(() => listItem.value.lifecycle)
 const technicalState = computed(() => listItem.value.technicalState)
 const isPendingReview = computed(() => listItem.value.isPending)
 const isAssessed = computed(() => listItem.value.isAssessed)
-const stableRescoredScore = computed(() => listItem.value.stableRescoredScore)
-const hasStableRescore = computed(() => listItem.value.hasStableRescore)
-const currentDisplayScore = computed(() => listItem.value.currentDisplayScore)
-const isRescoredOrModified = computed(() => listItem.value.isRescoredOrModified)
-
-const cardStyle = computed(() => props.selected
-    ? 'bg-blue-950/40 border-blue-500/70 ring-1 ring-blue-400/50'
-    : 'bg-gray-800 border-gray-700 hover:bg-gray-700/80'
-)
-
-// Severity colours for badge
-const severityHexMap: Record<string, string> = {
-    'CRITICAL': '#dc2626', 'HIGH': '#ea580c', 'MEDIUM': '#ca8a04',
-    'LOW': '#16a34a', 'INFO': '#2563eb', 'UNKNOWN': '#4b5563',
-}
-
-const hexToRgba = (hex: string, alpha: number) => {
-    const cleaned = hex.replace('#', '').trim()
-    const normalized = cleaned.length === 3
-        ? cleaned.split('').map((char) => char + char).join('')
-        : cleaned
-    if (normalized.length !== 6) return hex
-    const r = Number.parseInt(normalized.slice(0, 2), 16)
-    const g = Number.parseInt(normalized.slice(2, 4), 16)
-    const b = Number.parseInt(normalized.slice(4, 6), 16)
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
-
-const originalSeverity = computed(() => listItem.value.originalSeverity)
-const originalSeverityFill = computed(() => hexToRgba(severityHexMap[originalSeverity.value] ?? '#4b5563', 0.4))
-
-const rescoredSeverity = computed(() => listItem.value.rescoredSeverity)
-const rescoredSeverityHex = computed(() => {
-    if (!rescoredSeverity.value) return hexToRgba('#6b7280', 0.4)
-    return hexToRgba(severityHexMap[rescoredSeverity.value] ?? '#4b5563', 0.4)
-})
+const rescore = computed(() => savedRescoredScore(group.value))
+const rescoredSeverity = computed(() => rescore.value == null ? null : scoreSeverity(rescore.value))
+const tint = computed(() => cardSeverityTint(listItem.value.originalSeverity, rescoredSeverity.value))
+const suppressedCount = computed(() => (group.value.affected_versions || []).reduce((count, version) =>
+    count + (version.components || []).filter(component => component.is_suppressed).length, 0))
+const syncFailed = computed(() => (group.value.affected_versions || []).some(version =>
+    (version.components || []).some(component =>
+        ['error', 'failed'].includes(component.dtvp_sync_status || component.sync_status || '')),
+))
 
 const handleClick = () => emit('select', group.value)
 const handleReload = () => emit('reload', group.value)
 
-type WorkflowTone = 'amber' | 'cyan' | 'blue' | 'green' | 'purple'
+type WorkflowTone = 'amber' | 'cyan' | 'blue' | 'green' | 'purple' | 'indigo'
 const activeAnalyses = computed(() => {
     const vulnerabilityIds = new Set(
         [group.value.id, ...(group.value.aliases || [])]
@@ -90,12 +64,15 @@ const activeAnalyses = computed(() => {
     }))
 })
 const workflowState = computed<{ label: string; tone: WorkflowTone }>(() => {
+    if (displayState.value === 'INCONSISTENT') return { label: 'Conflicting', tone: 'indigo' }
+    if (listItem.value.changesRequestedTeams?.length) return { label: 'Changes requested', tone: 'amber' }
+    if (listItem.value.isApprovalReady) return { label: 'Ready for approval', tone: 'purple' }
+    if (isAssessed.value && !isPendingReview.value) return { label: 'Assessed', tone: 'green' }
     if (activeAnalyses.value.length) return {
         label: activeAnalyses.value.some(item => item.status === 'running') ? 'Analysis running' : 'Analysis queued',
         tone: 'cyan',
     }
     if (isPendingReview.value) return { label: 'Awaiting review', tone: 'purple' }
-    if (isAssessed.value) return { label: 'Complete', tone: 'green' }
     if (normalizedTags.value.filter(team => team.toLocaleLowerCase() !== 'automation').length === 0) {
         return { label: 'Needs mapping', tone: 'amber' }
     }
@@ -105,129 +82,90 @@ const workflowState = computed<{ label: string; tone: WorkflowTone }>(() => {
 })
 
 const workflowStateClass = computed(() => ({
-    amber: 'border-amber-700/50 bg-amber-950/45 text-amber-200',
-    cyan: 'border-cyan-700/50 bg-cyan-950/45 text-cyan-200',
-    blue: 'border-blue-700/50 bg-blue-950/45 text-blue-200',
-    green: 'border-green-700/50 bg-green-950/45 text-green-200',
-    purple: 'border-purple-700/50 bg-purple-950/45 text-purple-200',
+    amber: 'text-amber-300',
+    cyan: 'text-cyan-300',
+    blue: 'text-blue-300',
+    green: 'text-emerald-300',
+    purple: 'text-violet-300',
+    indigo: 'text-indigo-300',
 }[workflowState.value.tone]))
+const showAssessedCorner = computed(() => workflowState.value.label === 'Assessed')
 </script>
 
 <template>
     <div
-        :class="['vuln-card @container relative min-h-[5rem] border rounded-lg transition-colors overflow-hidden cursor-pointer hover:brightness-110', cardStyle]"
+        class="vuln-card relative min-w-0 cursor-pointer rounded-lg border bg-gray-800 transition-colors"
+        :class="selected ? 'border-blue-400' : 'border-gray-700 hover:border-gray-500'"
+        :style="{ backgroundColor: tint }"
         :data-group-id="group.id"
         :aria-selected="selected ? 'true' : 'false'"
         @click="handleClick"
     >
-        <!-- Criticality Badges -->
-        <div class="absolute inset-y-0 left-0 z-20 pointer-events-none flex">
-            <!-- Original severity badge -->
-            <div class="relative z-20 h-full w-8 flex items-center justify-center" data-testid="severity-badge">
-                <svg class="absolute inset-0 w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 32 100">
-                    <defs>
-                        <filter id="badge-chevron-shadow-compact" x="-8" y="-8" width="56" height="116" filterUnits="userSpaceOnUse">
-                            <feDropShadow dx="3" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.45)" />
-                        </filter>
-                    </defs>
-                    <polygon :fill="originalSeverityFill" filter="url(#badge-chevron-shadow-compact)" points="0,0 25.6,0 32,50 25.6,100 0,100" />
-                </svg>
-                <span class="relative z-10 text-[8px] font-black uppercase tracking-[0.18em] [writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-white">
-                    {{ originalSeverity }}
-                </span>
-            </div>
-            <!-- Rescored severity badge -->
-            <div class="relative z-10 h-full w-7 -ml-1.5 flex items-center justify-end" data-testid="rescored-severity-badge">
-                <div
-                    class="absolute inset-0"
-                    :style="{
-                        backgroundColor: rescoredSeverityHex,
-                        clipPath: 'polygon(0 0, 77.78% 0, 100% 50%, 77.78% 100%, 0 100%, 22.22% 50%)'
-                    }"
-                ></div>
-                <span class="relative z-10 pl-2.5 text-[7px] font-black uppercase tracking-[0.14em] [writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-white">
-                    {{ rescoredSeverity || 'N/A' }}
-                </span>
-            </div>
-        </div>
-
-        <!-- Assessed corner fold -->
-        <div v-if="isAssessed" class="absolute top-0 right-0 pointer-events-none z-20">
-            <div
-                class="w-8 h-8 flex justify-end items-start p-1"
-                :class="displayState === 'ASSESSED_LEGACY' ? 'bg-sky-600' : displayState === 'INCOMPLETE' ? 'bg-green-600/30' : 'bg-green-600'"
-                style="clip-path: polygon(100% 0, 0 0, 100% 100%)"
+        <div class="min-w-0 px-3 py-1.5" data-testid="compact-vulnerability-header">
+            <VulnGroupCardHeader
+                :group="group"
+                :displayState="displayState"
+                :technicalState="technicalState"
+                :originalSeverity="listItem.originalSeverity"
+                :rescoredSeverity="rescoredSeverity"
+                :rescoredScore="rescore"
+                :normalizedTags="normalizedTags"
+                :assessedTeams="assessedTeams"
+                :changesRequestedTeams="listItem.changesRequestedTeams"
+                :expanded="false"
+                :canApprove="false"
+                :isPendingReview="isPendingReview"
+                :dependencyRelationship="dependencyRelationship"
+                :instanceCountOverride="listItem.instanceCount"
+                :oldestAttributedOnMsOverride="listItem.oldestAttributedOnMs"
+                :componentSummaryOverride="listItem.componentSummary"
+                :hasAutomaticAssessment="listItem.hasAutomaticAssessment"
+                :automaticAssessmentStatus="listItem.automaticAssessmentStatus"
+                :syncFailed="syncFailed"
+                :suppressedCount="suppressedCount"
+                :workflowLabel="workflowState.label"
+                :reserveCornerSpace="showAssessedCorner && !activeAnalyses.length"
+                compact
             >
-                <CheckCircle :size="12" :class="displayState === 'INCOMPLETE' ? 'text-white/40' : 'text-white'" />
-            </div>
-        </div>
-
-        <!-- Header row -->
-        <div
-            class="relative flex min-h-[5rem] items-start gap-2 overflow-hidden pb-11 pl-[62px] pr-3 pt-2 @min-[26rem]:py-2 @min-[26rem]:pr-40"
-            data-testid="compact-vulnerability-header"
-        >
-            <div class="min-w-0 flex-1">
-                <VulnGroupCardHeader
-                    :group="group"
-                    :displayState="displayState"
-                    :technicalState="technicalState"
-                    :isRescoredOrModified="isRescoredOrModified || hasStableRescore"
-                    :currentDisplayScore="currentDisplayScore"
-                    :pendingScore="null"
-                    :stableRescoredScore="stableRescoredScore"
-                    :hasStableRescore="hasStableRescore"
-                    :normalizedTags="normalizedTags"
-                    :assessedTeams="assessedTeams"
-                    :expanded="false"
-                    :canApprove="false"
-                    :isPendingReview="isPendingReview"
-                    :dependencyRelationship="dependencyRelationship"
-                    :assignees="group.assignees || []"
-                    :baseScoreDisplayOverride="listItem.baseScoreDisplay"
-                    :rescoredScoreDisplayOverride="listItem.rescoredScoreDisplay"
-                    :instanceCountOverride="listItem.instanceCount"
-                    :oldestAttributedOnMsOverride="listItem.oldestAttributedOnMs"
-                    :componentSummaryOverride="listItem.componentSummary"
-                    :hasAutomaticAssessment="listItem.hasAutomaticAssessment"
-                    :automaticAssessmentStatus="listItem.automaticAssessmentStatus"
-                    :hasTmrescoreAnalysis="listItem.hasTmrescoreProposal"
-                    compact
-                />
-                <div v-if="activeAnalyses.length" class="mt-2 space-y-2 text-xs text-cyan-200" data-testid="analysis-progress">
-                    <div v-for="analysis in activeAnalyses" :key="analysis.queue_id" :title="analysis.job_id ? `Analyzer job ${analysis.job_id}` : undefined">
-                        <div class="flex min-w-0 gap-2">
-                            <span class="min-w-0 flex-1 truncate" :title="`${analysis.component_name}: ${analysis.activity}`">{{ analysis.component_name }}: {{ analysis.activity }}</span>
-                            <span v-if="analysis.percent !== null" class="shrink-0 font-mono">{{ analysis.percent }}%</span>
-                        </div>
-                        <div v-if="analysis.percent !== null" role="progressbar" :aria-label="`${analysis.component_name} analysis steps completed`" :aria-valuenow="analysis.percent" :aria-valuemin="0" :aria-valuemax="100" class="mt-1 h-1 rounded bg-gray-700">
-                            <div class="h-full rounded bg-cyan-400 transition-all" :style="{ width: `${analysis.percent}%` }"></div>
-                        </div>
+                <template #actions>
+                    <span
+                        data-testid="workflow-state-badge"
+                        :class="['font-semibold', workflowStateClass]"
+                    ><span
+                        :data-testid="['Conflicting', 'Ready for approval', 'Assessed'].includes(workflowState.label) ? 'lifecycle-badge' : undefined"
+                    >{{ workflowState.label }}</span></span>
+                    <button
+                        type="button"
+                        data-testid="reload-vulnerability"
+                        class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-300 hover:bg-white/10 disabled:cursor-wait disabled:opacity-70"
+                        :class="{ 'text-red-300': reloadError }"
+                        :disabled="reloading"
+                        :title="reloadError || 'Reload vulnerability assessments from Dependency-Track'"
+                        :aria-label="reloading ? `Reloading ${group.id}` : `Reload ${group.id}`"
+                        @click.stop="handleReload"
+                    >
+                        <RefreshCw :size="14" :class="{ 'animate-spin': reloading }" />
+                    </button>
+                </template>
+            </VulnGroupCardHeader>
+            <div v-if="activeAnalyses.length" class="mt-2 space-y-2 text-xs text-cyan-200" :class="{ 'pr-4': showAssessedCorner }" data-testid="analysis-progress">
+                <div v-for="analysis in activeAnalyses" :key="analysis.queue_id" :title="analysis.job_id ? `Analyzer job ${analysis.job_id}` : undefined">
+                    <div class="flex min-w-0 gap-2">
+                        <span class="min-w-0 flex-1 truncate" :title="`${analysis.component_name}: ${analysis.activity}`">{{ analysis.component_name }}: {{ analysis.activity }}</span>
+                        <span v-if="analysis.percent !== null" class="shrink-0 font-mono">{{ analysis.percent }}%</span>
+                    </div>
+                    <div v-if="analysis.percent !== null" class="mt-1 h-1 rounded bg-gray-700" role="progressbar" :aria-label="`${analysis.component_name} analysis steps completed`" :aria-valuenow="analysis.percent" :aria-valuemin="0" :aria-valuemax="100">
+                        <div class="h-full rounded bg-cyan-400 transition-all" :style="{ width: `${analysis.percent}%` }"></div>
                     </div>
                 </div>
             </div>
-            <button
-                type="button"
-                data-testid="reload-vulnerability"
-                class="absolute bottom-2 right-3 z-30 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-gray-950/50 transition-colors disabled:cursor-wait disabled:opacity-70"
-                :class="reloadError
-                    ? 'border-red-500/50 text-red-300 hover:bg-red-950/40'
-                    : 'border-gray-600/70 text-gray-400 hover:border-blue-400/50 hover:bg-blue-950/40 hover:text-blue-200'"
-                :disabled="reloading"
-                :title="reloadError || 'Reload vulnerability assessments from Dependency-Track'"
-                :aria-label="reloading ? `Reloading ${group.id}` : `Reload ${group.id}`"
-                @click.stop="handleReload"
-            >
-                <RefreshCw :size="14" :class="{ 'animate-spin': reloading }" />
-            </button>
-            <span
-                data-testid="workflow-state-badge"
-                class="absolute bottom-2 right-12 z-20 inline-flex rounded border px-2 py-1 text-[9px] font-black uppercase tracking-wide"
-                :class="workflowStateClass"
-            >
-                {{ workflowState.label }}
-            </span>
             <span v-if="reloadError" class="sr-only" role="status">{{ reloadError }}</span>
         </div>
+        <span
+            v-if="showAssessedCorner"
+            data-testid="assessed-corner"
+            aria-hidden="true"
+            class="pointer-events-none absolute right-0 bottom-0 flex size-7 items-end justify-end rounded-br-[7px] bg-emerald-700 p-[3px] text-emerald-50 [clip-path:polygon(100%_0,100%_100%,0_100%)]"
+        ><CheckCircle :size="11" /></span>
     </div>
 </template>

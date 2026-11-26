@@ -9,11 +9,9 @@ const mountHeader = (displayState: string, affected_versions: any[] = []) => mou
             list_metadata: { lifecycle: displayState, assessed_teams: ['Team A'] },
         },
         displayState, technicalState: 'NOT_AFFECTED',
-        isRescoredOrModified: false, currentDisplayScore: 5, pendingScore: null,
-        stableRescoredScore: null, hasStableRescore: false,
         normalizedTags: ['Team A', 'Team B'], assessedTeams: new Set(['Team A']),
         expanded: false, canApprove: false, isPendingReview: false,
-        dependencyRelationship: 'UNKNOWN', assignees: [],
+        dependencyRelationship: 'UNKNOWN',
     },
 })
 

@@ -296,6 +296,100 @@ test.describe('Assessment workspace', () => {
         for (const tag of await tags.all()) await expect(tag).toBeInViewport({ ratio: 1 });
     });
 
+    test('keeps the full ID and the severity comparison readable beside the inspector', async ({ page }) => {
+        await page.clock.setFixedTime(new Date('2026-11-26T12:00:00Z'));
+        const published = Date.UTC(2024, 4, 20);
+        const attributed = Date.UTC(2026, 2, 14);
+        const group = {
+            ...workspaceGroup,
+            original_severity: 'CRITICAL',
+            rescored_cvss: 5.4,
+            affected_versions: workspaceGroup.affected_versions.map(version => ({
+                ...version,
+                components: version.components.map(finding => ({ ...finding, published_ms: published, attributed_on: attributed })),
+            })),
+            list_metadata: {
+                assessed_teams: ['Security'], mcp_assessment_teams: ['Security'],
+                cutoff_dates: { published: { by_version: { '2.0': [published, published] }, unknown: [] } },
+            },
+        };
+        await mockGroupedVulnTask(page, { taskId: 'task-ws', groups: [group] });
+        await page.route('**/api/tasks/task-ws/groups/*', route => route.fulfill(json(group)));
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const inspector = await selectVulnerability(page);
+        const row = page.locator(`.vuln-card[data-group-id="${group.id}"]`);
+        const listCardBounds = await row.boundingBox();
+        const detailCardBounds = await inspector.locator('.vuln-card').first().boundingBox();
+        expect(listCardBounds?.y).toBeCloseTo(detailCardBounds!.y);
+
+        await expect(row.getByTestId('vuln-primary-id')).toHaveText(group.id);
+        await expect(row.getByTestId('vuln-primary-id')).toBeInViewport({ ratio: 1 });
+        await expect(row.getByTestId('severity-badge')).toHaveText('Critical');
+        await expect(row.getByTestId('rescored-severity-badge')).toHaveText('Medium');
+        await expect(row.getByTestId('team-mcp')).toHaveText('MCP');
+        const listDates = row.getByTestId('vulnerability-dates');
+        await expect(listDates.getByTitle('Published 2024-05-20')).toContainText('Published 2y');
+        await expect(listDates.getByTitle('First attributed 2026-03-14')).toContainText('First attributed 8mo');
+        await expect(listDates.getByTitle('Published 2024-05-20').locator('svg[aria-hidden="true"]')).toBeVisible();
+        await expect(listDates.getByTitle('First attributed 2026-03-14').locator('svg[aria-hidden="true"]')).toBeVisible();
+        const detailDates = inspector.getByTestId('vulnerability-dates');
+        await expect(detailDates.getByTitle('Published 2024-05-20')).toHaveText('Published 2024-05-20');
+        await expect(detailDates.getByTitle('First attributed 2026-03-14')).toHaveText('First attributed 2026-03-14');
+        await expect(inspector.getByTestId('team-tag')).toHaveCount(0);
+        await expect(inspector.getByTestId('rescored-value-badge')).toHaveText('5.4');
+
+        const labels = row.getByTestId('header-cvss-block').locator('dt');
+        const original = await labels.nth(1).boundingBox();
+        const rescored = await labels.nth(2).boundingBox();
+        expect(original?.y).toBe(rescored?.y);
+        expect(rescored?.x).toBeGreaterThan(original!.x);
+
+        const header = inspector.getByTestId('expanded-vulnerability-header');
+        for (const surface of [row, header]) {
+            const headings = surface.getByTestId('header-cvss-block').locator('dt');
+            const originalScore = await surface.getByTestId('base-score-value').boundingBox();
+            const rescoredScore = await surface.getByTestId('rescored-value-badge').boundingBox();
+            expect(originalScore?.x).toBeCloseTo((await headings.nth(1).boundingBox())!.x);
+            expect(rescoredScore?.x).toBeCloseTo((await headings.nth(2).boundingBox())!.x);
+        }
+        const scores = await header.getByTestId('header-cvss-block').boundingBox();
+        const findingSummary = header.getByTestId('instance-count');
+        const componentSummary = header.getByTestId('component-summary');
+        await expect(findingSummary.locator('svg')).toBeVisible();
+        await expect(componentSummary.locator('svg')).toBeVisible();
+        const findings = await findingSummary.boundingBox();
+        const components = await componentSummary.boundingBox();
+        const publicationDate = await detailDates.getByTitle('Published 2024-05-20').boundingBox();
+        const attributionDate = await detailDates.getByTitle('First attributed 2026-03-14').boundingBox();
+        expect(publicationDate?.x).toBeCloseTo(components!.x);
+        expect(attributionDate?.x).toBeCloseTo(findings!.x);
+        expect(publicationDate?.y).toBeCloseTo(attributionDate!.y);
+        expect(publicationDate!.y).toBeGreaterThan(findings!.y);
+        expect(scores).not.toBeNull();
+        expect(findings).not.toBeNull();
+        expect(findings!.x).toBeGreaterThan(scores!.x + scores!.width);
+        expect(findings!.y).toBeLessThan(scores!.y + scores!.height);
+        expect(findings!.y + findings!.height).toBeGreaterThan(scores!.y);
+
+        const baseColour = await page.evaluate(() => {
+            const swatch = document.createElement('div');
+            swatch.style.backgroundColor = 'var(--color-gray-800)';
+            document.body.append(swatch);
+            const colour = getComputedStyle(swatch).backgroundColor;
+            swatch.remove();
+            return colour;
+        });
+        const lightness = (colour: string) => Number(/^oklch\(([\d.]+)/.exec(colour)?.[1]);
+        const rowColour = await row.evaluate(el => getComputedStyle(el).backgroundColor);
+        expect(rowColour).not.toBe(baseColour);
+        expect(lightness(rowColour)).toBeCloseTo(lightness(baseColour), 3);
+        await expect(header).toHaveCSS('background-color', rowColour);
+
+        await row.hover();
+        await expect(row).toHaveCSS('background-color', rowColour);
+        await expect(row).toHaveCSS('filter', 'none');
+    });
+
     test('summarises the vulnerability before the decision, folded in the workspace', async ({ page }) => {
         const errors = collectConsoleErrors(page);
         await page.setViewportSize({ width: 1440, height: 900 });

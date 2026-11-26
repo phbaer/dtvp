@@ -143,12 +143,12 @@ describe('VulnGroupCard', () => {
         })
 
         expect(wrapper.text()).toContain('CVE-2023-1234')
-        expect(wrapper.text()).toContain('CRITICAL') // cvss 9.8 maps to CRITICAL via scoreSeverity
+        expect(wrapper.text()).toContain('Critical')
         expect(wrapper.text()).toContain('9.8')
 
         const instanceCount = wrapper.find('[data-testid="instance-count"]')
         expect(instanceCount.exists()).toBe(true)
-        expect(instanceCount.text()).toContain('1×')
+        expect(instanceCount.text()).toContain('1 finding')
 
         const lifecycleBadge = wrapper.find('[data-testid="lifecycle-badge"]')
         expect(lifecycleBadge.exists()).toBe(true)
@@ -157,72 +157,38 @@ describe('VulnGroupCard', () => {
         expect(versionChips.length).toBe(0) // not expanded yet
     })
 
-    it('shows cached source badges without requiring a saved SSVC assessment', async () => {
+    it('shows known exploitation in the header and CISA Vulnrichment under Context', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: { ...mockGroup, evidence_sources: ['KEV', 'CISA_SSVC', 'STALE'] } },
         })
-        expect(wrapper.findAll('[data-testid="evidence-badge"]').map(badge => badge.text())).toEqual(['KEV', 'CISA SSVC'])
+        expect(wrapper.get('[data-testid="evidence-badge"]').text()).toBe('Known exploited (CISA KEV)')
+        await wrapper.find('.cursor-pointer').trigger('click')
+        expect(wrapper.text()).toContain('CISA Vulnrichment exploitation assessment available')
         expect(wrapper.get('[data-testid="evidence-badge"]').attributes('title')).toContain('Stale cached data')
         await wrapper.setProps({ group: { ...mockGroup, evidence_sources: ['NOT_CHECKED'] } })
         expect(wrapper.findAll('[data-testid="evidence-badge"]')).toHaveLength(0)
         wrapper.unmount()
     })
 
-    it('renders the criticality badge as a fixed overlay marker', () => {
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup }
-        })
-
-        const severitySlot = wrapper.get('[data-testid="criticality-badge-slot"]')
-        const severityBadge = wrapper.get('[data-testid="severity-badge"]')
-
-        expect(severitySlot.classes()).toContain('absolute')
-        expect(severitySlot.classes()).toContain('top-0')
-        expect(severitySlot.classes()).toContain('left-0')
-        expect(severityBadge.classes()).toContain('w-10')
-        expect(severityBadge.classes()).toContain('h-full')
-        expect(severityBadge.text()).toContain('CRITICAL') // cvss 9.8 maps to CRITICAL
-    })
-
-    it('keeps the vulnerability id on one line without break-all wrapping', () => {
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup }
-        })
-
+    it('keeps the full vulnerability ID visible and copyable', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         const primaryId = wrapper.get('[data-testid="vuln-primary-id"]')
-
-        expect(primaryId.classes()).toContain('whitespace-nowrap')
-        expect(primaryId.classes()).toContain('overflow-hidden')
-        expect(primaryId.classes()).toContain('text-ellipsis')
-        expect(primaryId.classes()).not.toContain('break-all')
+        expect(primaryId.element.tagName).toBe('BUTTON')
+        expect(primaryId.text()).toBe(mockGroup.id)
+        expect(primaryId.classes()).not.toContain('text-ellipsis')
     })
 
-    it('renders the CVSS base score as a header chip', () => {
+    it('pairs original and rescored severity with their CVSS values', () => {
         const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup }
+            props: { group: { ...mockGroup, rescored_cvss: 7.2 } },
         })
-
-        const primaryId = wrapper.get('[data-testid="vuln-primary-id"]').element
-        const cvssBlock = wrapper.get('[data-testid="header-cvss-block"]')
-        const position = primaryId.compareDocumentPosition(cvssBlock.element)
-
-        expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        expect(cvssBlock.classes()).toContain('rounded')
-        expect(cvssBlock.text()).toContain('CVSS')
-        expect(cvssBlock.text()).toContain('9.8')
-        expect(cvssBlock.text()).not.toContain('CVSS Base')
-    })
-
-    it('shows base and rescored score as base arrow rescored', () => {
-        const wrapper = mount(VulnGroupCard, {
-            props: {
-                group: { ...mockGroup, rescored_cvss: 7.2 },
-            }
-        })
-
-        expect(wrapper.get('[data-testid="base-score-value"]').text()).toBe('9.8')
-        expect(wrapper.get('[data-testid="rescored-arrow"]').text()).toContain('→')
-        expect(wrapper.get('[data-testid="rescored-value-badge"]').text()).toBe('7.2')
+        const cvss = wrapper.get('[data-testid="header-cvss-block"]')
+        expect(cvss.findAll('dt').map(label => label.text()))
+            .toEqual(['Effective verdict', 'Original severity', 'Rescored severity'])
+        expect(cvss.get('[data-testid="severity-badge"]').text()).toBe('Critical')
+        expect(cvss.get('[data-testid="base-score-value"]').text()).toBe('9.8')
+        expect(cvss.get('[data-testid="rescored-severity-badge"]').text()).toBe('High')
+        expect(cvss.get('[data-testid="rescored-value-badge"]').text()).toBe('7.2')
     })
 
     it('shows No score when no base score is available', () => {
@@ -235,12 +201,12 @@ describe('VulnGroupCard', () => {
         expect(wrapper.get('[data-testid="base-score-value"]').text()).toBe('—')
     })
 
-    it('shows transitive dependency badge', () => {
+    it('makes the dependency relationship available at the finding count', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
         })
 
-        expect(wrapper.text()).toContain('Trans.')
+        expect(wrapper.get('[data-testid="instance-count"]').attributes('title')).toContain('Transitive dependency')
     })
 
     it('shows vulnerability age from the oldest attribution date', () => {
@@ -269,9 +235,7 @@ describe('VulnGroupCard', () => {
                 },
             })
 
-            const ageChip = wrapper.get('[data-testid="attribution-age-chip"]')
-            expect(ageChip.text()).toContain('Age 4w')
-            expect(ageChip.attributes('title')).toContain('2026-06-01')
+            expect(wrapper.get('[data-testid="instance-count"]').attributes('title')).toContain('Oldest attribution: 2026-06-01')
         } finally {
             vi.useRealTimers()
         }
@@ -1096,7 +1060,7 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         expect(wrapper.get('[data-testid="vulnerability-team-scope"]').text()).toContain('1 of 2 findings shown')
-        expect(wrapper.get('[data-testid="instance-count"]').text()).toContain('1×')
+        expect(wrapper.get('[data-testid="instance-count"]').text()).toContain('1 finding')
         expect(wrapper.get('[data-testid="component-summary"]').text()).toContain('lib')
         expect(wrapper.get('[data-testid="component-summary"]').text()).not.toContain('worker')
         expect(wrapper.get('[data-testid="finding-matrix"]').text()).toContain('lib')
@@ -1209,37 +1173,15 @@ describe('VulnGroupCard', () => {
         expect(updateAssessment).not.toHaveBeenCalled()
     })
 
-    it('shows whether a tmrescore/vscorer analysis is available in the header', () => {
-        const withoutAnalysis = mount(VulnGroupCard, {
-            props: { group: mockGroup },
+    it('marks an available analysis on the Code Evidence tab in the inspector', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup, inModal: true, hasAutomaticAssessment: true },
         })
-
-        const unavailableBadge = withoutAnalysis.get('[data-testid="tmrescore-analysis-badge"]')
-        expect(unavailableBadge.text()).toContain('TMRescore unavailable')
-        expect(unavailableBadge.attributes('data-availability')).toBe('unavailable')
-        expect(unavailableBadge.attributes('title')).toBe('No TMRescore/vscorer analysis is available')
-        expect(withoutAnalysis.get('[data-testid="automatic-assessment-badge"]').attributes('data-availability')).toBe('unavailable')
-
-        const withAnalysis = mount(VulnGroupCard, {
-            props: { group: mockGroup },
-            global: {
-                provide: {
-                    tmrescoreProposals: ref({
-                        'CVE-2023-1234': {
-                            original_score: 9.8,
-                            rescored_score: 4.2,
-                            original_vector: mockGroup.cvss_vector,
-                            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:L/I:L/A:N',
-                        },
-                    }),
-                },
-            },
-        })
-
-        const availableBadge = withAnalysis.get('[data-testid="tmrescore-analysis-badge"]')
-        expect(availableBadge.text()).toContain('TMRescore available')
-        expect(availableBadge.attributes('data-availability')).toBe('available')
-        expect(availableBadge.attributes('title')).toBe('TMRescore/vscorer analysis is available')
+        const codeTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Code Evidence'))!
+        expect(codeTab.find('[data-testid="automatic-assessment-badge"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="tmrescore-analysis-badge"]').exists()).toBe(false)
+        await wrapper.setProps({ hasAutomaticAssessment: false })
+        expect(wrapper.find('[data-testid="automatic-assessment-badge"]').exists()).toBe(false)
     })
 
     const openReviewTab = async (wrapper: ReturnType<typeof mount>) => {
@@ -1440,36 +1382,12 @@ describe('VulnGroupCard', () => {
 
 
 
-    it('covers color branches', () => {
-        const criticalGroup = { ...mockGroup, severity: 'CRITICAL' }
+    it('keeps original and rescored severity visually distinct', () => {
         const wrapper = mount(VulnGroupCard, {
-            props: { group: criticalGroup }
+            props: { group: { ...mockGroup, original_severity: 'CRITICAL', rescored_cvss: 0.5 } },
         })
-        // Severity badge now uses SVG polygon with rgba fill instead of bg-* classes
-        const polygon = wrapper.find('[data-testid="severity-badge"] polygon')
-        expect(polygon.attributes('fill')).toContain('220, 38, 38') // #dc2626 as rgba
-
-        const lowGroup = { ...mockGroup, severity: 'LOW', cvss: 0.5, cvss_score: 0.5 }
-        const wrapper2 = mount(VulnGroupCard, {
-            props: { group: lowGroup }
-        })
-        const polygon2 = wrapper2.find('[data-testid="severity-badge"] polygon')
-        expect(polygon2.attributes('fill')).toContain('22, 163, 74') // #16a34a as rgba
-
-        // Test card style branches (brighter colors)
-        const unassessedWrapper = mount(VulnGroupCard, { props: { group: { ...mockGroup, severity: 'CRITICAL' } } })
-        expect(unassessedWrapper.find('.border.rounded-lg').classes()).toContain('bg-gray-800-warm')
-
-        const mixedGroup = {
-            ...mockGroup,
-            tags: ['Security'],
-            affected_versions: [
-                { components: [{ analysis_state: 'EXPLOITABLE', analysis_details: '--- [Team: Security] [State: EXPLOITABLE] ---' }] },
-                { components: [{ analysis_state: 'FALSE_POSITIVE', analysis_details: '--- [Team: Security] [State: FALSE_POSITIVE] ---' }] }
-            ]
-        }
-        const mixedWrapper = mount(VulnGroupCard, { props: { group: mixedGroup as any } })
-        expect(mixedWrapper.find('.border.rounded-lg').classes()).toContain('stripe-bg')
+        expect(wrapper.get('[data-testid="severity-badge"]').classes()).toContain('text-red-300')
+        expect(wrapper.get('[data-testid="rescored-severity-badge"]').classes()).toContain('text-blue-300')
     })
 
     it('renders vulnerability aliases in expanded details', async () => {
@@ -1612,7 +1530,7 @@ describe('VulnGroupCard', () => {
         const badge = wrapper.find('[data-testid="lifecycle-badge"]')
         expect(badge.exists()).toBe(true)
         expect(badge.text()).toBe('Open')
-        expect(badge.classes()).toContain('text-red-400')
+        expect(badge.classes()).toContain('text-red-300')
     })
 
     it('asks analysts to submit an unsaved draft before leaving the card', async () => {

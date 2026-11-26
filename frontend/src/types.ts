@@ -171,6 +171,7 @@ export interface GroupedVulnListMetadata {
     technical_state?: string;
     assessed_teams?: string[];
     changes_requested_teams?: string[];
+    mcp_assessment_teams?: string[];
     component_names?: string[];
     versions?: string[];
     attributed_on_ms_values?: number[];

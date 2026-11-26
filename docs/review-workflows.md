@@ -744,10 +744,12 @@ another save was stored in between.
 Each vulnerability card can reload its current assessment directly from
 Dependency-Track; the refreshed task snapshot updates the card, lifecycle
 filters, and counts together.
-Vulnerability headers use compact status icons to show both available and
-unavailable states for tmrescore/vscorer and code-analysis assessments. In the
-compact list, the Dependency-Track reload action stays at the bottom-right of
-the header so it does not overlap the assessed corner marker.
+The list places reload next to the workflow status. **Ready for approval**
+means the reviewer can approve. **Awaiting review** can also include findings
+that still need work. **Conflicting** and **Changes requested** remain visible.
+The robot marks an available code-analysis result. In the expanded card it
+appears on **Code Evidence**. Team review indicators and **MCP** attribution
+wrap in the list. Individual assignees are shown in the assessment form.
 
 ## Bulk Changes
 

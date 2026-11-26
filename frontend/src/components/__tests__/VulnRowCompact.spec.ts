@@ -47,10 +47,7 @@ describe('VulnRowCompact', () => {
 
         expect(wrapper.emitted('reload')).toEqual([[group]])
         expect(wrapper.emitted('select')).toBeUndefined()
-        expect(wrapper.get('[data-testid="compact-vulnerability-header"]').classes())
-            .toEqual(expect.arrayContaining(['relative', 'min-h-[5rem]', 'pb-11', '@min-[26rem]:pr-40']))
-        expect(wrapper.get('[data-testid="reload-vulnerability"]').classes())
-            .toEqual(expect.arrayContaining(['absolute', 'bottom-2', 'right-3']))
+        expect(wrapper.get('[data-testid="reload-vulnerability"]').attributes('aria-label')).toBe(`Reload ${group.id}`)
         expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Needs mapping')
     })
 
@@ -71,7 +68,7 @@ describe('VulnRowCompact', () => {
         expect(wrapper.text()).toContain('Reload failed')
     })
 
-    it('shows available tmrescore and code-assessment status icons', () => {
+    it('shows the code-analysis robot and keeps TMRescore outside the list header', () => {
         const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
         const item = buildVulnListItem(
             { ...group, tags: ['Security'], cvss_vector: vector, code_assessment_status: 'auto' },
@@ -93,31 +90,14 @@ describe('VulnRowCompact', () => {
         )
         const wrapper = mount(VulnRowCompact, { props: { item } })
 
-        const tmrescoreStatus = wrapper.get('[data-testid="tmrescore-analysis-badge"]')
-        expect(tmrescoreStatus.attributes('data-availability')).toBe('available')
-        expect(tmrescoreStatus.attributes('aria-label')).toBe('TMRescore analysis available')
-        expect(tmrescoreStatus.classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
-        expect(tmrescoreStatus.get('.sr-only').text()).toBe('TMRescore available')
-
-        const codeAssessmentStatus = wrapper.get('[data-testid="automatic-assessment-badge"]')
-        expect(codeAssessmentStatus.attributes('data-availability')).toBe('available')
-        expect(codeAssessmentStatus.attributes('data-assessment-status')).toBe('auto')
-        expect(codeAssessmentStatus.attributes('aria-label')).toBe('Code assessment available: auto')
-        expect(codeAssessmentStatus.classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
-        expect(codeAssessmentStatus.get('.sr-only').text()).toBe('Code assessment available')
+        expect(wrapper.find('[data-testid="tmrescore-analysis-badge"]').exists()).toBe(false)
+        const robot = wrapper.get('[data-testid="automatic-assessment-badge"]')
+        expect(robot.attributes('data-assessment-status')).toBe('auto')
+        expect(robot.attributes('aria-label')).toBe('Automatic code-analysis assessment is available')
         expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Result ready')
-
-        const tmrescoreIcon = tmrescoreStatus.get('svg')
-        const codeAssessmentIcon = codeAssessmentStatus.get('svg')
-        expect(tmrescoreIcon.classes()).toEqual(expect.arrayContaining(['h-3', 'w-3']))
-        expect(codeAssessmentIcon.classes()).toEqual(expect.arrayContaining(['h-3', 'w-3']))
-        expect(tmrescoreIcon.attributes('width')).toBe('12')
-        expect(tmrescoreIcon.attributes('height')).toBe('12')
-        expect(codeAssessmentIcon.attributes('width')).toBe('12')
-        expect(codeAssessmentIcon.attributes('height')).toBe('12')
     })
 
-    it('prioritizes active analysis for the vulnerability or one of its aliases', () => {
+    it('keeps the completed marker visible during analysis of a vulnerability alias', async () => {
         analysisQueueStore.items.value = [{
             queue_id: 'queue-running',
             vuln_id: 'ghsa-alias',
@@ -136,6 +116,19 @@ describe('VulnRowCompact', () => {
         const wrapper = mount(VulnRowCompact, { props: { item } })
 
         expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Analysis running')
+
+        await wrapper.setProps({ item: buildVulnListItem({
+            ...item.group, list_metadata: { lifecycle: 'ASSESSED', is_assessed: true },
+        }, {}) })
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Assessed')
+        expect(wrapper.get('[data-testid="assessed-corner"]').attributes('aria-hidden')).toBe('true')
+        expect(wrapper.get('[data-testid="analysis-progress"]').text()).toContain('library-a')
+
+        await wrapper.setProps({ item: buildVulnListItem({
+            ...item.group, list_metadata: { lifecycle: 'NEEDS_APPROVAL', is_pending: true },
+        }, {}) })
+        expect(wrapper.find('[data-testid="assessed-corner"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Ready for approval')
     })
 
     it('updates component progress and clears it when analysis finishes', async () => {
@@ -168,20 +161,37 @@ describe('VulnRowCompact', () => {
         expect(wrapper.find('[data-testid="analysis-progress"]').exists()).toBe(false)
     })
 
-    it('shows unavailable tmrescore and code-assessment status icons', () => {
+    it('keeps the header clear when there is no code-analysis result', () => {
+        const wrapper = mount(VulnRowCompact, { props: { item: buildVulnListItem(group, {}) } })
+        expect(wrapper.find('[data-testid="tmrescore-analysis-badge"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="automatic-assessment-badge"]').exists()).toBe(false)
+    })
+
+    it('uses the original severity for the tint until a rescore is saved', async () => {
+        const original = { ...group, original_severity: 'CRITICAL' }
+        const wrapper = mount(VulnRowCompact, { props: { item: buildVulnListItem(original, {}) } })
+        expect(wrapper.attributes('style')).toContain('oklch(from var(--color-gray-800) l 0.028 25)')
+        expect(wrapper.get('[data-testid="rescored-severity-badge"]').text()).toBe('Not rescored')
+
+        await wrapper.setProps({ item: buildVulnListItem({ ...original, rescored_cvss: 5.4 }, {}) })
+        expect(wrapper.attributes('style')).toContain('oklch(from var(--color-gray-800) l 0.024 88)')
+        expect(wrapper.get('[data-testid="severity-badge"]').text()).toBe('Critical')
+        expect(wrapper.get('[data-testid="rescored-severity-badge"]').text()).toBe('Medium')
+    })
+
+    it('attributes MCP submissions to the matching team only', () => {
         const wrapper = mount(VulnRowCompact, {
-            props: { item: buildVulnListItem(group, {}) },
+            props: {
+                item: buildVulnListItem({
+                    ...group,
+                    tags: ['Core', 'Web'],
+                    list_metadata: { assessed_teams: ['Core'], mcp_assessment_teams: ['Core'] },
+                }, {}),
+            },
         })
-
-        const tmrescoreStatus = wrapper.get('[data-testid="tmrescore-analysis-badge"]')
-        expect(tmrescoreStatus.attributes('data-availability')).toBe('unavailable')
-        expect(tmrescoreStatus.attributes('title')).toBe('No TMRescore/vscorer analysis is available')
-        expect(tmrescoreStatus.get('.sr-only').text()).toBe('TMRescore unavailable')
-
-        const codeAssessmentStatus = wrapper.get('[data-testid="automatic-assessment-badge"]')
-        expect(codeAssessmentStatus.attributes('data-availability')).toBe('unavailable')
-        expect(codeAssessmentStatus.attributes('data-assessment-status')).toBe('none')
-        expect(codeAssessmentStatus.attributes('title')).toBe('No code-analysis assessment is available')
-        expect(codeAssessmentStatus.get('.sr-only').text()).toBe('Code assessment unavailable')
+        const [core, web] = wrapper.findAll('[data-testid="team-tag"]')
+        expect(core.get('[data-testid="team-mcp"]').text()).toBe('MCP')
+        expect(web.attributes('aria-label')).toBe('Web: Missing assessment')
+        expect(web.find('[data-testid="team-mcp"]').exists()).toBe(false)
     })
 })

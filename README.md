@@ -244,8 +244,15 @@ draft ([screen](docs/screens.md#settings-team-mapping)). The backend's
 resolved finding tags drive the list and detail views. Mapping edits rerun the
 project query so both views use the same ownership.
 
-Team badges wrap in the vulnerability list, including beside an open detail
-panel. The [assessment form](docs/screens.md#assessment-tab) starts with the team
+Vulnerability cards group the effective verdict, original severity and
+rescored severity in left-aligned columns. Wide headers show finding scope and
+evidence beside the scores. The tint follows the saved rescore, falling back to
+original severity. A green folded corner marks **Assessed** list cards.
+The list cards sit flush with the assessment card in the split view. Team
+names and review markers wrap in the list. The expanded header keeps
+vulnerability-level information above the tabs. Publication and first
+attribution appear as ages in the list and dates in the expanded header.
+The [assessment form](docs/screens.md#assessment-tab) starts with the team
 selector and Global option for reviewers. The advisory summary and decision
 fields scroll with the card while tabs and actions stay in view. From a
 1280px wide viewport the vulnerability detail can open a

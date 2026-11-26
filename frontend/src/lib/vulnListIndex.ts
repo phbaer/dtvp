@@ -216,12 +216,23 @@ const metadataDependencyRelationship = (value: unknown): DependencyRelationship 
         : null
 }
 
-const scoreSeverity = (score: number): string => {
+export const scoreSeverity = (score: number): string => {
     if (score >= 9) return 'CRITICAL'
     if (score >= 7) return 'HIGH'
     if (score >= 4) return 'MEDIUM'
     if (score >= 0.1) return 'LOW'
     return 'INFO'
+}
+
+export const originalSeverityOf = (group: GroupedVuln): string => {
+    const original = group.original_severity?.toUpperCase() || ''
+    if (ORIGINAL_SEVERITIES.includes(original)) return original
+    const score = group.cvss ?? group.cvss_score
+    if (typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 10) {
+        return scoreSeverity(score)
+    }
+    const severity = group.severity?.toUpperCase() || ''
+    return group.rescored_cvss == null && ORIGINAL_SEVERITIES.includes(severity) ? severity : 'UNKNOWN'
 }
 
 const scoreSeverityRank = (score: number | undefined | null): number => {
@@ -920,10 +931,7 @@ export function buildVulnListItem(
         stableRescoredScore,
         hasStableRescore,
         isRescoredOrModified,
-        originalSeverity: ORIGINAL_SEVERITIES.includes(group.original_severity || '') ? group.original_severity!
-            : typeof baseScoreValue === 'number' && Number.isFinite(baseScoreValue) && baseScoreValue >= 0 && baseScoreValue <= 10
-                ? scoreSeverity(baseScoreValue)
-                : group.rescored_cvss == null && ORIGINAL_SEVERITIES.includes(group.severity?.toUpperCase() || '') ? group.severity!.toUpperCase() : 'UNKNOWN',
+        originalSeverity: originalSeverityOf(group),
         rescoredSeverity,
     }
 }

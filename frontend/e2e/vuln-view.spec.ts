@@ -379,11 +379,26 @@ test.describe('Vulnerability View and Rescoring', () => {
 
         await page.getByRole('button', { name: /^Open\s/ }).click();
         await page.getByRole('button', { name: /^Assessed\s/ }).click();
-        await expect(cards.filter({ hasText: 'CVE-2023-ASSESSED' })).toBeVisible();
+        const assessed = cards.filter({ hasText: 'CVE-2023-ASSESSED' });
+        const corner = assessed.getByTestId('assessed-corner');
+        await expect(corner).toBeVisible();
+        await expect(assessed.getByTestId('workflow-state-badge')).toHaveText('Assessed');
+        const cardBounds = (await assessed.boundingBox())!;
+        const cornerBounds = (await corner.boundingBox())!;
+        const reloadBounds = (await assessed.getByTestId('reload-vulnerability').boundingBox())!;
+        expect(cardBounds.x + cardBounds.width - cornerBounds.x - cornerBounds.width).toBeCloseTo(1);
+        expect(cardBounds.y + cardBounds.height - cornerBounds.y - cornerBounds.height).toBeCloseTo(1);
+        expect(cornerBounds.y).toBeGreaterThan(reloadBounds.y + reloadBounds.height);
         const legacy = cards.filter({ hasText: 'CVE-LEGACY' });
+        await expect(legacy.getByTestId('assessed-corner')).toBeVisible();
         await expect(legacy.getByTestId('lifecycle-badge')).toHaveText('Assessed');
         await expect(legacy.getByTestId('legacy-assessment-badge')).toHaveText('Legacy');
         await expect(cards).toHaveCount(2);
+
+        await assessed.click();
+        const header = page.getByTestId('expanded-vulnerability-header');
+        await expect(header.getByTestId('lifecycle-badge')).toHaveText('Assessed');
+        await expect(header.getByTestId('assessed-corner')).toHaveCount(0);
     });
 
 });

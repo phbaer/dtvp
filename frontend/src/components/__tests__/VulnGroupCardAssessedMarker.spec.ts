@@ -170,7 +170,7 @@ describe('VulnGroupCard Assessment Markers', () => {
         expect(teamBTag?.findComponent(CheckCircle).exists()).toBe(false)
     })
 
-    it('shows a distinct legacy assessed fold badge for legacy assessed issues', () => {
+    it('shows a distinct legacy assessment label for legacy assessed issues', () => {
         const legacyGroup = JSON.parse(JSON.stringify(defaultGroup))
         legacyGroup.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
         legacyGroup.affected_versions[0].components[0].analysis_details = ''
@@ -186,9 +186,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const fold = wrapper.find('.absolute.top-0.right-0 > div')
-        expect(fold.exists()).toBe(true)
-        expect(fold.classes()).toContain('bg-sky-600')
+        expect(wrapper.get('[data-testid="legacy-assessment-badge"]').text()).toBe('Legacy')
     })
 
     it('shows checkmark for multiple assessed teams', () => {

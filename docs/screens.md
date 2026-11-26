@@ -92,6 +92,12 @@ Opening a vulnerability looks its exploitation evidence up; the list asks again 
 ![Lifecycle badges](screenshots/lifecycle-badges.png)
 
 The lifecycle view shows Open, Incomplete, Conflicting, Ready for approval, and Assessed categories ([definitions](assessment-model.md#lifecycle-decision-table)), alongside rescored CVSS values.
+Completed list cards have a green folded corner with a checkmark. **Assessed**
+uses the standard status format in the list and expanded header.
+The calendar icon marks publication. The package-with-magnifier icon marks
+first attribution. The list shows ages. Hover for the date and its meaning.
+The expanded header aligns component names and finding counts above the
+exact UTC dates. First attribution follows the visible findings.
 
 ## Vulnerability Review Details
 
@@ -142,11 +148,12 @@ Show differences opens the comparison in the left pane. Apply, Adopt, Use for al
 
 On the Global form **Approve** saves and approves the decision in place. With a team selected or Global unset, **Review & approve** opens the Global form and prepares a draft from the team decisions if needed. If approval is unavailable for a pending assessment, the reason appears below the tabs and actions. The workspace button or Esc leaves the workspace and lands on the Assessment tab with every unsaved edit kept. Esc first closes an open menu or dialog, and Esc in a text field stays with the field; on a checkbox, a button or plain text it leaves the workspace. While the workspace is open, Tab and Shift+Tab wrap inside it, and a click on plain text keeps focus in it. Close (X) still asks about unsaved edits. Below 1280px the button is not offered, and the workspace closes when the window becomes narrower than that, with focus on the Assessment tab.
 
-### Assignee Chips And Approval
+### Ready For Approval
 
-![Assignee chips and approval](screenshots/assignee-chips-approve.png)
+![Vulnerability ready for approval](screenshots/assignee-chips-approve.png)
 
-Cards show assigned users and reviewer approval actions when an analyst-submitted assessment is waiting for review.
+Cards distinguish **Ready for approval** from **Awaiting review**. Reviewer
+actions and individual assignees are in the Assessment form.
 
 ### Assignee Filter
 
@@ -198,7 +205,13 @@ When findings carry different assessments, each one has a letter in the matrix a
 
 ![Rescored CVSS](screenshots/rescored-cvss.png)
 
-Rescored vulnerabilities show the original CVSS score, the contextual score, and the direction of the change.
+The original and rescored severity columns left-align each CVSS score and
+severity label under its heading. Scores retain one decimal place. Wide headers
+place affected components, finding counts and evidence alongside the scores.
+An unrescored vulnerability shows **Not rescored**. The row and expanded
+header use the saved rescored severity as a tint at the base background's
+lightness, with original severity as the fallback. The effective verdict has
+its own colour.
 
 ### Global Review CVSS And Rescoring
 
