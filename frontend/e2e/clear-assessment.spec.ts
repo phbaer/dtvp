@@ -3,8 +3,8 @@ import ssvcModel from '../../dtvp/resources/ssvc/deployer-1.0.0.json' with { typ
 import { mockGroupedVulnTask } from './helpers/grouped-task';
 import { routeMappingTeams } from './helpers/mapping-teams';
 
-// One vulnerability in two versions, assessed by the Security team; an
-// analyst clears that team's assessment from the More menu.
+// One vulnerability in two versions with an assessment from the Security team.
+const GLOBAL_TEXT = '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_REACHABLE] ---\nReviewed globally.';
 const TEAM_TEXT = '--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: ana] [Justification: CODE_NOT_PRESENT] ---\nThe parser is not shipped.';
 
 const finding = (version: string, index: number) => ({
@@ -35,10 +35,10 @@ const group = {
     ],
 };
 
-async function mockShell(page: Page, state: { details: string, clears: unknown[] }) {
+async function mockShell(page: Page, state: { details: string, clears: unknown[] }, reviewer = false) {
     const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
-    await page.route('**/auth/me', route => route.fulfill(json({ username: 'ana', role: 'ANALYST' })));
+    await page.route('**/auth/me', route => route.fulfill(json(reviewer ? { username: 'rita', role: 'REVIEWER' } : { username: 'ana', role: 'ANALYST' })));
     await page.route('**/api/version', route => route.fulfill(json({ version: '1.0.0', build: 'test' })));
     await page.route('**/api/cache-status', route => route.fulfill(json({
         fully_cached: true, last_refreshed_at: new Date().toISOString(), projects: 1, active_projects: 1,
@@ -77,8 +77,20 @@ async function mockShell(page: Page, state: { details: string, clears: unknown[]
     await page.route('**/api/events/interest', route => route.fulfill({ status: 204, body: '' }));
 
     await page.route('**/api/tasks/group-vulns*', route => route.fulfill(json({ task_id: 'task-clear' })));
-    await mockGroupedVulnTask(page, { taskId: 'task-clear', groups: [group] });
-    await page.route('**/api/tasks/task-clear/groups/*', route => route.fulfill(json(group)));
+    const currentGroup = () => ({
+        ...group,
+        affected_versions: group.affected_versions.map(version => ({
+            ...version,
+            components: version.components.map(instance => ({
+                ...instance,
+                analysis_state: state.details ? 'NOT_AFFECTED' : 'NOT_SET',
+                analysis_details: state.details,
+            })),
+        })),
+    });
+    const groups = [currentGroup()];
+    await mockGroupedVulnTask(page, { taskId: 'task-clear', groups });
+    await page.route('**/api/tasks/task-clear/groups/*', route => route.fulfill(json(currentGroup())));
 
     await page.route('**/api/assessments/details', async (route) => {
         const body = route.request().postDataJSON();
@@ -100,9 +112,10 @@ async function mockShell(page: Page, state: { details: string, clears: unknown[]
     await page.route('**/api/assessment/delete', async (route) => {
         const body = route.request().postDataJSON();
         state.clears.push(body);
-        state.details = '';
+        state.details = body.team === 'General' ? TEAM_TEXT : '';
+        groups[0] = currentGroup();
         await route.fulfill(json((body.instances || []).map((instance: any) => ({
-            status: 'success', uuid: instance.finding_uuid, new_state: 'NOT_SET', new_details: '', revision: 2,
+            status: 'success', uuid: instance.finding_uuid, new_state: state.details ? 'NOT_AFFECTED' : 'NOT_SET', new_details: state.details, revision: 2,
         }))));
     });
 
@@ -132,9 +145,8 @@ test.describe('Clear assessment', () => {
         // Analysts see no generated text and no raw text editor.
         await expect(inspector.getByText('Raw Assessment Text')).toHaveCount(0);
 
-        // Rarely used: in the More menu of the action bar.
-        await inspector.getByTestId('assessment-more-button').click();
-        await inspector.getByTestId('assessment-clear-button').click();
+        const clear = inspector.getByRole('button', { name: 'Clear Security assessment…' });
+        await clear.click();
         const dialog = page.getByRole('dialog', { name: 'Clear assessment' });
         await expect(dialog).toBeVisible();
         await expect(dialog).toContainText('Only the Security assessment');
@@ -148,8 +160,7 @@ test.describe('Clear assessment', () => {
         await expect(dialog).toHaveCount(0);
         expect(state.clears).toEqual([]);
 
-        await inspector.getByTestId('assessment-more-button').click();
-        await inspector.getByTestId('assessment-clear-button').click();
+        await clear.click();
         await page.getByTestId('clear-confirm').click();
         await expect(page.getByRole('dialog', { name: 'Clear assessment' })).toHaveCount(0);
 
@@ -159,5 +170,52 @@ test.describe('Clear assessment', () => {
         // The form shows the cleared assessment.
         await expect(inspector.locator('#analysis-state-select')).toContainText('Not Set');
         expect(errors).toEqual([]);
+    });
+
+    test('clears the saved Global decision from Not Set and keeps the effective team verdict', async ({ page }) => {
+        const state = { details: `${GLOBAL_TEXT}\n\n${TEAM_TEXT}`, clears: [] as unknown[] };
+        await mockShell(page, state, true);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto('/project/TestProject?awaiting_review=false');
+        await page.locator(`.vuln-card[data-group-id="${group.id}"]`).click();
+
+        const inspector = page.getByTestId('vuln-detail-inspector');
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        const editor = inspector.locator('#analysis-state-select');
+        const rationale = inspector.locator('#analysis-details-textarea');
+        await expect(rationale).toHaveValue('Reviewed globally.');
+        await rationale.fill('Unsaved Global edit.');
+
+        const dialog = page.getByRole('dialog', { name: 'Clear assessment' });
+        await inspector.getByRole('button', { name: 'Clear Global assessment…' }).click();
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toHaveCount(0);
+        expect(state.clears).toEqual([]);
+        await expect(rationale).toHaveValue('Unsaved Global edit.');
+
+        await editor.click();
+        await page.getByTestId('custom-select-menu').getByRole('button', { name: 'Not Set', exact: true }).click();
+        await expect(dialog).toContainText('Only the Global assessment');
+        await expect(dialog.getByTestId('clear-all')).toHaveCount(0);
+        await dialog.getByTestId('clear-confirm').click();
+        await expect(dialog).toHaveCount(0);
+        expect(state.clears).toEqual([expect.objectContaining({ team: 'General' })]);
+        await expect(editor).toContainText('Not Set');
+        await expect(rationale).toHaveValue('');
+        await expect(inspector.getByText('Effective state: Not affected, derived from team assessments.')).toBeVisible();
+
+        await inspector.getByTestId('review-team-tab').click();
+        await expect(editor).toContainText('Not Affected');
+        await expect(rationale).toHaveValue('The parser is not shipped.');
+        await inspector.getByRole('button', { name: 'Global', exact: true }).click();
+        await expect(editor).toContainText('Not Set');
+        await expect(inspector.getByTestId('clear-selected-assessment')).toHaveCount(0);
+
+        await page.reload();
+        await page.locator(`.vuln-card[data-group-id="${group.id}"]`).click();
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        await expect(editor).toContainText('Not Set');
     });
 });

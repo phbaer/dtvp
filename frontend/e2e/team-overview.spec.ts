@@ -222,13 +222,14 @@ test.describe('Team overview on the Global assessment', () => {
         const chip = inspector.getByTestId('analysis-state-badge').first();
         await expect(chip.getByTestId('analysis-state-derived')).toBeVisible();
         await expect(chip).toHaveAttribute('title', /Derived: no reviewer has set the Global decision; it is the worst of the team assessments \(H-Core\)/);
-        // The Global form holds the derived worst; Approve says it records it.
+        // The Global form stays unset until the reviewer requests an approval draft.
         await inspector.getByRole('tab', { name: /Assessment/ }).click();
-        await expect(inspector.locator('#analysis-state-select')).toContainText('Exploitable');
+        await expect(inspector.locator('#analysis-state-select')).toContainText('Not Set');
         const approve = inspector.getByTestId('assessment-approve-button');
+        await expect(approve).toHaveText('Review & approve');
+        await approve.click();
+        await expect(inspector.locator('#analysis-state-select')).toContainText('Exploitable');
         await expect(approve).toHaveAttribute('title', /the worst team assessment unless you changed it/);
-        // A reviewer opening a pending vulnerability lands on the filled
-        // Global form, which says what Approve records.
         const note = inspector.getByTestId('approval-prefilled-note');
         await expect(note).toContainText('it is derived: the worst of the team assessments, Exploitable (H-Core)');
         await expect(note).toContainText('Approve records it as the Global assessment unless you change it here');

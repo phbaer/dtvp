@@ -155,6 +155,9 @@ constraints, and CI conventions.
 | **Ready for approval** | Only the reviewer's approval is left, including a pending Global decision that covers teams without their own assessment |
 | **Assessed** | Complete with no pending approval; includes legacy assessments |
 
+Use the clear button in **Decision & rationale** to remove a saved Global or
+team assessment. Clearing Global leaves the team verdicts available.
+
 Without a reviewer's Global decision, the decision is derived: the worst team
 assessment ([the Global decision](docs/assessment-model.md#the-global-decision)).
 The exact rules, their order, the API values and who resolves each state are

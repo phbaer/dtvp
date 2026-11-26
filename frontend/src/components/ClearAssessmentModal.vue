@@ -32,6 +32,8 @@ const props = defineProps<{
     show: boolean
     /** `clear` (default) clears for every finding; `cleanup` picks versions and findings. */
     mode?: 'clear' | 'cleanup'
+    /** The action on the form can clear only the assessment the user opened. */
+    scopeOnly?: boolean
     /** Every finding of the vulnerability, with its project version (cleanup). */
     instances?: any[]
     /** The Repair Assessments stages that apply to this vulnerability (cleanup). */
@@ -66,11 +68,14 @@ const has = (team: string) => props.assessedTeams.some(
     assessed => assessed.toLocaleLowerCase() === team.toLocaleLowerCase())
 const canClearScope = computed(() =>
     has(scopeName.value) && (props.isReviewer || scopeName.value.toLocaleLowerCase() !== 'general'))
-const canClearAll = computed(() => props.isReviewer && props.assessedTeams.length > 0)
+const canClearAll = computed(() => !props.scopeOnly && props.isReviewer && props.assessedTeams.length > 0)
+const clearDialog = ref<HTMLDialogElement | null>(null)
+watch(clearDialog, dialog => dialog?.showModal?.())
 
 const choice = ref<'scope' | 'all'>('scope')
 watch(() => props.show, (visible) => {
     if (visible) choice.value = canClearScope.value ? 'scope' : 'all'
+    else if (clearDialog.value?.open) clearDialog.value.close()
 })
 
 const MAX_LISTED = 4
@@ -88,7 +93,11 @@ const appliesTo = computed(() => {
     ].filter(Boolean).join(' ')
 })
 
-const confirm = () => emit('confirm', choice.value === 'all' ? null : scopeName.value)
+const confirm = () => {
+    if (props.busy) return
+    if (choice.value === 'scope' && canClearScope.value) emit('confirm', scopeName.value)
+    else if (choice.value === 'all' && canClearAll.value) emit('confirm', null)
+}
 
 // --- cleanup ----------------------------------------------------------------
 
@@ -246,23 +255,21 @@ const applyCleanup = async () => {
 
 <template>
     <teleport to="body">
-        <div
+        <dialog
             v-if="show && mode !== 'cleanup'"
-            class="fixed inset-0 flex min-h-screen items-center justify-center overflow-y-auto bg-black/80 px-4 py-6"
-            style="z-index: 10000"
-            role="dialog"
-            aria-modal="true"
+            ref="clearDialog"
+            class="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-lg border border-red-700 bg-gray-800 text-gray-200 shadow-2xl backdrop:bg-black/80"
             aria-labelledby="clear-assessment-title"
             data-testid="clear-assessment-modal"
-            @keydown.esc="emit('close')"
+            @cancel.prevent="!busy && emit('close')"
         >
-            <div class="w-full max-w-xl rounded-lg border border-red-700 bg-gray-800 shadow-2xl">
+            <div>
                 <div class="flex items-center justify-between border-b border-gray-700 p-4">
                     <h3 id="clear-assessment-title" class="flex items-center gap-2 text-lg font-bold text-red-300">
                         <Eraser :size="18" aria-hidden="true" />
                         Clear assessment
                     </h3>
-                    <button type="button" class="text-xl font-bold text-gray-400 hover:text-white" aria-label="Close" @click="emit('close')">✕</button>
+                    <button type="button" class="text-xl font-bold text-gray-400 hover:text-white" aria-label="Close" :disabled="busy" @click="emit('close')">✕</button>
                 </div>
 
                 <div class="space-y-3 p-4 text-sm text-gray-200">
@@ -281,6 +288,7 @@ const applyCleanup = async () => {
                                     Its decision and text are removed. Other teams' assessments stay as they are.
                                     <template v-if="scopeName.toLocaleLowerCase() === 'general'">
                                         The SSVC decision and the response stored with it are removed too.
+                                        Any remaining team verdicts determine the effective state.
                                     </template>
                                 </span>
                             </span>
@@ -306,7 +314,7 @@ const applyCleanup = async () => {
                 </div>
 
                 <div class="flex justify-end gap-3 border-t border-gray-700 p-4">
-                    <button type="button" class="rounded bg-gray-700 px-4 py-2 text-sm font-bold text-white hover:bg-gray-600" @click="emit('close')">
+                    <button type="button" autofocus :disabled="busy" class="rounded bg-gray-700 px-4 py-2 text-sm font-bold text-white hover:bg-gray-600" @click="emit('close')">
                         Cancel
                     </button>
                     <button
@@ -320,7 +328,7 @@ const applyCleanup = async () => {
                     </button>
                 </div>
             </div>
-        </div>
+        </dialog>
         <div
             v-if="show && mode === 'cleanup'"
             class="fixed inset-0 flex min-h-screen items-center justify-center overflow-y-auto bg-black/80 px-4 py-6"

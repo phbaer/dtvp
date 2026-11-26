@@ -609,7 +609,8 @@ decision or the CVSS vector where needed and presses Approve, which saves the Gl
 removes the pending status in one step. On a collapsed card the Approve button
 in the header opens this view; it does not approve by itself. In the assessment
 workspace the form is always visible, so on the Global form the button reads
-Approve directly.
+Approve directly once the Global decision is recorded or the reviewer has
+prepared a draft with **Review & approve**.
 
 Only this approval removes the pending status. The server asks for it in so
 many words: `POST /api/assessment` accepts `approve: true` from reviewers, and
@@ -664,14 +665,15 @@ so it can be assessed without a mapping.
 
 The "More" menu next to Save holds the rarely used actions: **Repair…**
 (reviewers, when a repair applies; see [Bulk Changes](#bulk-changes)), **Clean up
-assessment…** (see [Inconsistencies and differences](#inconsistencies-and-differences)), **Clear
-assessment…** and, for reviewers on the Global assessment, suppressing the
-finding in Dependency-Track. Clearing removes the open team's assessment (or,
-on the Global tab, the Global one; reviewers can also clear the whole
-assessment) after a confirmation that names the findings, components and
-versions. It is a new revision without a decision or text, exported, so
-Dependency-Track is cleared too; analysts' clears leave what remains pending
-review, and the history keeps the previous assessment. See
+assessment…** (see [Inconsistencies and differences](#inconsistencies-and-differences)),
+**Clear assessment…** and, for reviewers on the Global assessment, suppressing
+the finding in Dependency-Track.
+
+**Decision & rationale** offers a clear button for the saved assessment that
+is open. Choosing **Not Set** for a saved decision opens the same scoped
+confirmation. Clearing Global returns its editor to **Not Set**. The team
+verdicts still determine the effective state. Reviewers can use the **More**
+menu to clear the whole assessment. See
 [Clearing an assessment](import-export.md#clearing-an-assessment).
 
 The assessment text stored and exported is generated from the form's fields.

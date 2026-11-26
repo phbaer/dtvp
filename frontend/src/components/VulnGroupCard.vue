@@ -8,7 +8,7 @@ import { marked } from 'marked'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Eraser, Brush, Wrench, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
 
-import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupGlobalDecision, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentVariantKey, type AssessmentBlock } from '../lib/assessment-helpers'
+import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupGlobalDecision, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTeamKey, assessmentVariantKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { AMBIGUOUS_SCOPE, BASE_SCOPE, getAssessmentScopes } from '../lib/assessmentScopes'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getApprovalUnavailableReason, getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
@@ -99,7 +99,7 @@ onMounted(() => {
         if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
     })
     getKnownUsers().then(users => { knownUsers.value = users }).catch(() => {})
-    if (props.inModal && canApprove.value) void openApproval()
+    if (props.inModal && canApprove.value) void openApproval(false)
 })
 
 onUnmounted(() => {
@@ -129,7 +129,7 @@ const emit = defineEmits([
 ])
 
 const ANALYSIS_STATES = [
-    { value: 'NOT_SET', label: 'Not Set', description: 'No analysis has been performed yet.' },
+    { value: 'NOT_SET', label: 'Not Set', description: 'No decision for this assessment.' },
     { value: 'NOT_AFFECTED', label: 'Not Affected', description: 'The component is not affected by this vulnerability.' },
     { value: 'EXPLOITABLE', label: 'Exploitable', description: 'The vulnerability is exploitable in this component.' },
     { value: 'IN_TRIAGE', label: 'In Triage', description: 'The vulnerability is currently being investigated.' },
@@ -368,10 +368,27 @@ const canChangeSuppression = computed(() => (
 const suppressedInstanceCount = computed(() => allInstances.value.filter(instance => instance.is_suppressed).length)
 
 const clearModalMode = ref<'clear' | 'cleanup'>('clear')
-const openClearModal = () => {
+const clearSelectedOnly = ref(false)
+const selectedAssessmentName = computed(() => selectedTeam.value || 'Global')
+const canClearSelectedAssessment = computed(() => (
+    selectedTeam.value
+        ? assessedTeamNames.value.some(team => assessmentTeamKey(team) === assessmentTeamKey(selectedTeam.value))
+        : isReviewer.value && hasSavedGlobalAssessment.value
+))
+const openClearModal = (selectedOnly = false) => {
     clearAssessmentError.value = ''
     clearModalMode.value = 'clear'
+    clearSelectedOnly.value = selectedOnly
     showClearModal.value = true
+}
+const changeAssessmentState = (value: string) => {
+    if (value === 'NOT_SET' && canClearSelectedAssessment.value) {
+        openClearModal(true)
+        return
+    }
+    state.value = value
+    formTouched.value = true
+    markSelectedTeamAssessmentManual()
 }
 /** The assessment cleanup: versions of the assessment, kept or cleared per finding. */
 const openCleanupModal = () => {
@@ -445,6 +462,27 @@ const confirmClearAssessment = async (team: string | null) => {
     try {
         await deleteAssessment(allInstances.value, team)
         showClearModal.value = false
+        const clearedKey = assessmentTeamKey(team)
+        if (team === null) {
+            discardUnsavedDraft()
+        } else {
+            for (const name of teamDrafts.value.keys()) {
+                if (assessmentTeamKey(name) === clearedKey) teamDrafts.value.delete(name)
+            }
+            for (const name of takeoverSources.value.keys()) {
+                if (assessmentTeamKey(name) === clearedKey) takeoverSources.value.delete(name)
+            }
+            if (clearedKey === 'general') {
+                ssvcTouched.value = false
+                responseTouched.value = false
+                pendingSsvc.value = savedSsvc.value.record
+                approvalPrefilled.value = false
+            }
+            if (clearedKey === assessmentTeamKey(selectedTeam.value || 'General')) {
+                formTouched.value = false
+                codeAnalysisDraftApplied.value = false
+            }
+        }
         await refreshDetails()
         historyRefreshKey.value += 1
         emitRefreshedAssessment()
@@ -1474,7 +1512,7 @@ const isRescoredOrModified = computed(() => {
 })
 
 const hasSavedGlobalAssessment = computed(() => activeAssessmentBlocks.value.some(block =>
-    block.team.toLocaleLowerCase() === 'general' && block.state !== 'NOT_SET'
+    assessmentTeamKey(block.team) === 'general' && block.state !== 'NOT_SET'
 ))
 /** True while the Global form holds a decision taken over from the teams. */
 const approvalPrefilled = ref(false)
@@ -1492,10 +1530,10 @@ const whenDetailsLoaded = () => loadingDetails.value
 
 /**
  * Brings a reviewer to the one place where a pending assessment is approved:
- * the Global assessment, with the team decisions already taken over when no
- * Global assessment exists. Nothing is saved here.
+ * the Global assessment. An explicit approval action can prepare a draft
+ * from the team decisions when there is no saved Global decision.
  */
-const openApproval = async () => {
+const openApproval = async (prefill = true) => {
     if (!canApprove.value) return
     if (!expanded.value) expanded.value = true
     await nextTick()
@@ -1503,7 +1541,7 @@ const openApproval = async () => {
     if (!canApprove.value) return
     if (!reviewVisible.value) setDetailTab('review', true)
     if (selectedTeam.value) await moveToGlobalForm()
-    if (!hasSavedGlobalAssessment.value && !formTouched.value && effectiveAssessmentWorst.value) {
+    if (prefill && !hasSavedGlobalAssessment.value && !formTouched.value && effectiveAssessmentWorst.value) {
         await applyEffectiveAssessmentSummary()
         approvalPrefilled.value = true
     }
@@ -1519,7 +1557,11 @@ const approvalBlockedReason = computed(() => {
     if (assessmentMissingFields.value.length > 0) return `Still needed: ${assessmentMissingFields.value.join(', ')}.`
     return ''
 })
-const approvalAtForm = computed(() => reviewVisible.value && !selectedTeam.value)
+const approvalAtForm = computed(() => (
+    reviewVisible.value && !selectedTeam.value
+    && !(state.value === 'NOT_SET' && !hasSavedGlobalAssessment.value
+        && !formTouched.value && effectiveAssessmentWorst.value)
+))
 const canApproveNow = computed(() => (
     canApprove.value
     && approvalAtForm.value
@@ -2066,7 +2108,7 @@ watch(expanded, (isOpen) => {
         const shouldLockAfterScroll = openCardCount === 0
         openCardCount += 1
         refreshDetails()
-        if (canApprove.value) void openApproval()
+        if (canApprove.value) void openApproval(false)
         nextTick(() => {
             // Measure header for badge height
             if (headerEl.value) {
@@ -2823,7 +2865,7 @@ const teamOverview = computed(() => buildTeamOverview({
     changesRequestedTeams: changesRequestedTeams.value,
     componentsByTeam: assessmentComponentsByTeam.value,
     pendingReview: mergedAssessmentData.value.isPending,
-    globalState: selectedTeam.value ? '' : state.value,
+    globalState: selectedTeam.value ? '' : (state.value === 'NOT_SET' ? groupGlobalDecision.value.state : state.value),
 }))
 /** "Open" in the overview: the team's tab, shown even when the team filter hides it. */
 const openTeamFromOverview = (team: string) => {
@@ -4021,6 +4063,18 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         data-testid="assessment-decision-section"
                         :class="formHighlight ? 'ring-2 ring-indigo-400' : ''"
                     >
+                        <template #actions>
+                            <button
+                                v-if="canClearSelectedAssessment"
+                                type="button"
+                                :class="[actionButton, 'border-red-800/70 text-red-300 hover:bg-red-950/50']"
+                                :disabled="updating || loadingDetails || clearingAssessment"
+                                data-testid="clear-selected-assessment"
+                                @click="openClearModal(true)"
+                            >
+                                Clear {{ selectedAssessmentName }} assessment…
+                            </button>
+                        </template>
                     <p
                         v-if="assessmentMissingFields.length"
                         data-testid="assessment-completeness"
@@ -4090,10 +4144,16 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                                         id="analysis-state-select"
                                         aria-labelledby="analysis-state-label"
                                         :modelValue="state"
-                                        @update:modelValue="state = $event; formTouched = true; markSelectedTeamAssessmentManual()"
+                                        @update:modelValue="changeAssessmentState"
                                         :options="ANALYSIS_STATES"
                                         size="sm"
                                     />
+                                    <p
+                                        v-if="isReviewer && !selectedTeam && state === 'NOT_SET' && groupGlobalDecision.source === 'derived'"
+                                        class="mt-1 text-xs text-gray-400"
+                                    >
+                                        Effective state: {{ stateLabelOf(groupGlobalDecision.state) }}, derived from team assessments.
+                                    </p>
                                 </div>
 
                                 <div v-if="state === 'NOT_AFFECTED'">
@@ -4540,6 +4600,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
     <ClearAssessmentModal
       :show="showClearModal"
       :mode="clearModalMode"
+      :scope-only="clearSelectedOnly"
       :instances="cleanupInstances"
       :repair-stages="repairStages"
       :team="selectedTeam"

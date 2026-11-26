@@ -230,16 +230,16 @@ exported.
 
 Clearing is an explicit operation, so that it can be told apart from
 Dependency-Track merely reporting nothing (which DTVP repairs by exporting the
-assessment again). In the **Assessment** tab of a vulnerability, **More** →
-**Clear assessment…** in the action bar offers, after a confirmation that
-names the findings, components and versions it applies to:
+assessment again). Use the clear button in **Decision & rationale** to
+clear the open assessment, or **More** → **Clear assessment…** to choose the
+scope. The confirmation names the affected findings, components and versions:
 
 - **Only the open team's assessment** (or the General assessment, on the
   General tab). The other teams' text, and the team's own historical
   assessments, are kept exactly as they were; only when historical
   assessments are all the team has are they deleted. Clearing the
-  General (Global) assessment also removes the SSVC decision and the response stored
-  with it.
+  General (Global) assessment also removes the SSVC decision and response.
+  The effective state is derived from any remaining team verdicts.
 - **The whole assessment**: every team, the General assessment, rescoring,
   SSVC, and suppression. The vulnerability is open again.
 

@@ -223,9 +223,10 @@ In triage; Not affected) and the finding matrix use the same order.
   worst of team assessments: Exploitable (H-Core)", or "Global: set by
   reviewer: Not affected" with "differs from the worst team assessment
   (Exploitable, H-Core)" and **Use worst** when they differ. The card's state
-  chip carries "· derived" and says so in its tooltip.
-- **Approval** records the effective decision: without a General block the
-  Global form is filled with the derived worst, and the approval stores it
+  chip carries "· derived" and says so in its tooltip. The editable Global
+  state stays **Not Set** when the decision comes from the teams.
+- **Approval** records the effective decision. Without a General block,
+  **Review & approve** prepares a draft of the derived worst. Approval stores it
   as the General block unless the reviewer changed it. The server does the
   same for API clients (`with_derived_global_block`), without applying a
   rescoring rule.

@@ -186,6 +186,11 @@ describe('VulnGroupCard Branch Coverage', () => {
                         component_version: '1.0', 
                         analysis_state: 'EXPLOITABLE',
                         analysis_details: '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: user1] [Justification: CODE_NOT_PRESENT] ---\nBlock says NOT_AFFECTED'
+                    }, {
+                        component_uuid: 'c2',
+                        component_name: 'C2',
+                        component_version: '1.0',
+                        analysis_state: 'NOT_SET',
                     }]
                 }
             ]
@@ -330,7 +335,7 @@ describe('VulnGroupCard Branch Coverage', () => {
         expect(calledWith3.justification).toBe('CODE_NOT_PRESENT')
     })
 
-    it('pulls justification from another NOT_AFFECTED instance during single sync fallback', () => {
+    it('pulls justification from another NOT_AFFECTED instance for a legacy assessment', () => {
         const group = {
             ...baseGroup,
             affected_versions: [
@@ -341,7 +346,7 @@ describe('VulnGroupCard Branch Coverage', () => {
                         component_name: 'C1',
                         component_version: '1.0',
                         analysis_state: 'NOT_AFFECTED',
-                        analysis_details: '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: user1] ---\nAssessed as not affected'
+                        analysis_details: 'Assessed as not affected'
                     }]
                 },
                 {
@@ -351,7 +356,8 @@ describe('VulnGroupCard Branch Coverage', () => {
                         component_name: 'C2',
                         component_version: '1.0',
                         analysis_state: 'NOT_AFFECTED',
-                        analysis_details: '--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: user2] [Justification: CODE_NOT_PRESENT] ---\nSafe path'
+                        analysis_details: 'Safe path',
+                        justification: 'CODE_NOT_PRESENT'
                     }]
                 }
             ]

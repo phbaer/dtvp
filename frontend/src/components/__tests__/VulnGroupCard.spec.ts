@@ -814,8 +814,7 @@ describe('VulnGroupCard', () => {
         await flushPromises()
         expect((wrapper.vm as any).selectedTeam).toBe('Security')
 
-        await wrapper.get('[data-testid="assessment-more-button"]').trigger('click')
-        await wrapper.get('[data-testid="assessment-clear-button"]').trigger('click')
+        await wrapper.get('[data-testid="clear-selected-assessment"]').trigger('click')
         const dialog = wrapper.get('[data-testid="clear-assessment-modal"]')
         expect(dialog.text()).toContain('Only the Security assessment')
         expect(dialog.get('[data-testid="clear-applies-to"]').text()).toContain('the finding of lib in version 1.0')
@@ -2695,7 +2694,8 @@ describe('VulnGroupCard', () => {
             expect((wrapper.vm as any).activeDetailTab).toBe('overview')
             expect((wrapper.vm as any).selectedTeam).toBe('')
             const approve = () => wrapper.get('[data-vuln-card-sticky-nav] [data-testid="assessment-approve-button"]')
-            expect(approve().text()).toBe('Approve')
+            expect((wrapper.vm as any).state).toBe('NOT_SET')
+            expect(approve().text()).toBe('Review & approve')
 
             ;(wrapper.vm as any).selectedTeam = 'Security'
             await flushPromises()

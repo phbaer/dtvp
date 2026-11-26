@@ -174,8 +174,12 @@ export const resolveAssessmentFormValues = ({
         return DEFAULT_FORM_VALUES
     }
 
-    const generalBlock = teamBlocks.find(block => block.team === 'General')
-    if (generalBlock && generalBlock.state !== 'NOT_SET') {
+    const isGeneral = (block: AssessmentBlock) => block.team.trim().toLowerCase() === 'general'
+    const generalBlock = teamBlocks.find(isGeneral)
+    // The finding's state can come from the team blocks. It stays in the
+    // effective decision summary, outside the editable Global decision.
+    if ((generalBlock && generalBlock.state !== 'NOT_SET')
+        || teamBlocks.some(block => !isGeneral(block))) {
         return blockToFormValues(generalBlock)
     }
 
