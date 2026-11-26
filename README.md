@@ -12,6 +12,10 @@ River was called DTVP before. Identifiers such as the `DTVP_*` variables, the
 `dtvp` package and the `/dtvp` path keep that name for now; see
 [ADR 0013](docs/adr/0013-the-product-is-called-river.md). The name, the
 tagline and the story behind them are in [Brand](docs/brand.md).
+The redesigned vulnerability list and assessment workspace use the same River branding;
+existing saved views, assessments and deployment settings remain compatible.
+Dependency diagrams use consistently sized components in a bounded, scrollable view
+([Screen guide](docs/screens.md)).
 
 [Main repository](https://git.baer.one/phbaer/dtvp/) ·
 [GitHub mirror](https://github.com/phbaer/dtvp/)

@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { projectHeaderState } from './lib/projectHeaderStore'
 import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
-import { markIconUrl } from './lib/brand'
+import { inlineWordmarkUrl } from './lib/brand'
 import { buildVersionStore, recordServerIdentity } from './lib/buildVersion'
 import { eventStream } from './lib/eventStream'
 import {
@@ -430,11 +430,10 @@ const reloadForUpdate = () => {
                 <div class="flex flex-wrap items-center gap-3">
                     <router-link
                         to="/"
-                        class="inline-flex items-center gap-2 text-lg font-black uppercase tracking-[0.3em] text-slate-100 hover:text-white transition-colors"
+                        class="inline-flex shrink-0 items-center rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400"
                         data-testid="brand"
                     >
-                        <img :src="markIconUrl" alt="" class="h-6 w-6" />
-                        River
+                        <img :src="inlineWordmarkUrl" alt="River" class="h-9 w-auto" />
                     </router-link>
 
                     <template v-if="showProjectHeaderButtons">

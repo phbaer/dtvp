@@ -1,9 +1,11 @@
 // The River logo: the triple tilde. The canonical files are in data/
-// (river-mark.svg, river-wordmark.svg); the Docker image copies the icon for the
-// frontend build.
+// (standalone mark, full wordmark, inline wordmark); Docker copies all three
+// for the frontend build.
 import markIconUrl from '../../../data/river-mark.svg'
+import wordmarkUrl from '../../../data/river-wordmark.svg'
+import inlineWordmarkUrl from '../../../data/river-wordmark-inline.svg'
 
-export { markIconUrl }
+export { markIconUrl, wordmarkUrl, inlineWordmarkUrl }
 
 /** Point the page's icon at the River mark. */
 export const applyFavicon = (doc: Document = document) => {

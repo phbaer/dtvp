@@ -160,6 +160,54 @@ test.describe('Assessment workspace', () => {
         await mockShell(page);
     });
 
+    for (const width of [430, 1440]) {
+        for (const branching of [false, true]) {
+            test(`bounds dependency components at ${width}px with ${branching ? 'branching' : 'direct'} paths`, async ({ page }) => {
+                await page.setViewportSize({ width, height: 900 });
+                const branchNames = Array.from({ length: 7 }, (_, index) => `branch-${index}-with-a-component-name-that-exceeds-the-node-width`);
+                const paths = branching
+                    ? branchNames.map(name => `TestProject -> ${name} -> lib-a`)
+                    : ['TestProject -> lib-a'];
+                const mapping = { 'lib-a': 'Security', ...Object.fromEntries(branchNames.map((name, index) => [name, `Team ${index}`])) };
+                await routeMappingTeams(page, mapping);
+                await page.route('**/api/settings/mapping', route => route.fulfill({ json: mapping }));
+                const group = {
+                    ...workspaceGroup,
+                    affected_versions: [{ ...workspaceGroup.affected_versions[0], components: [component({ dependency_chains: paths })] }],
+                };
+                await mockGroupedVulnTask(page, { taskId: 'task-ws', groups: [group] });
+                await page.route('**/api/tasks/task-ws/groups/*', route => route.fulfill({ json: group }));
+                const inspector = await selectVulnerability(page);
+                await inspector.getByRole('tab', { name: /Context/ }).click();
+                await inspector.getByTestId('finding-matrix-row-toggle').first().click();
+                await inspector.getByRole('button', { name: 'chains', exact: true }).first().click();
+                const viewport = inspector.getByTestId('dependency-viewport').first();
+                await expect(viewport).toBeVisible();
+                const bounds = (await viewport.boundingBox())!;
+                expect(bounds.height).toBeLessThanOrEqual(320);
+                expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+                if (branching) expect(await viewport.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+                const graph = viewport.getByTestId('dependency-graph');
+                expect((await graph.boundingBox())!.width).toBeCloseTo(Number(await graph.getAttribute('width')), 0);
+                // Names, teams and role labels fit their own component rectangles.
+                const nodes = graph.getByTestId('dependency-node');
+                for (const node of await nodes.all()) {
+                    expect(await node.evaluate(element => {
+                        const box = element.querySelector('rect')!.getBBox();
+                        return [...element.querySelectorAll('text')].every(text => {
+                            const label = text.getBBox();
+                            return label.x >= box.x && label.y >= box.y
+                                && label.x + label.width <= box.x + box.width
+                                && label.y + label.height <= box.y + box.height;
+                        });
+                    })).toBe(true);
+                }
+                if (branching) await expect(nodes.locator('title').filter({ hasText: branchNames[0] })).toHaveCount(1);
+                await expect(page.getByTestId('brand').getByRole('img', { name: 'River', exact: true })).toBeVisible();
+            });
+        }
+    }
+
     test('shows the context beside the form, scrolls them apart and keeps edits', async ({ page }) => {
         const errors = collectConsoleErrors(page);
         await page.setViewportSize({ width: 1440, height: 900 });

@@ -5,7 +5,7 @@
 | | |
 | :--- | :--- |
 | Status | Name and mark: accepted and implemented ([ADR 0013](adr/0013-the-product-is-called-river.md)). Tagline: accepted (2026-11-25, repository owner), used in the README. "Spoilers": proposed, not implemented. |
-| Verified | 2026-11-25: the logo files and their use in the frontend. The rest is agent-written and not reviewed. |
+| Verified | 2026-11-26: the logo files, frontend use, production build, frontend unit suite and vulnerability/workspace checks in Chromium, Firefox and WebKit against the integrated card redesign. The rest is agent-written and not reviewed. |
 
 ## Name
 
@@ -43,20 +43,25 @@ The mark is the triple tilde: three waves, nothing else.
 
 | Use | File |
 | :--- | :--- |
-| Icon, favicon, login screen (24 × 24) | [`data/river-mark.svg`](../data/river-mark.svg) |
-| README header (159 × 78, shown at twice that width) | [`data/river-wordmark.svg`](../data/river-wordmark.svg) |
+| Standalone icon and favicon (24 × 24) | [`data/river-mark.svg`](../data/river-mark.svg) |
+| README header and login (159 × 78, shown at twice that width) | [`data/river-wordmark.svg`](../data/river-wordmark.svg) |
+| App header, without the small acronym (135 × 46) | [`data/river-wordmark-inline.svg`](../data/river-wordmark-inline.svg) |
+
+Use the combined wordmark whenever the waves and name appear together. The login
+uses the full wordmark; the app header uses its compact variant so the acronym
+is not reduced to unreadable text. The standalone waves remain the favicon.
 
 - Typeface: Share Tech Regular (SIL Open Font License 1.1, Copyright 2012 The Share Tech
   Project Authors). Share Tech has no ≋ glyph, so the three waves are its tilde `~`, stacked.
 - The wordmark is the waves directly followed by the lowercase word "river", with no
   space. The waves are centred on the x-height of the word. The acronym runs in one
   line underneath, exactly as wide as waves and word together, with its initials in
-  the colour of the waves. It is small: show the wordmark at 300 px or wider.
-- Both files hold outlines, not text, so they look the same without the font installed.
+  the colour of the waves. It is small: show the full wordmark with acronym at 300 px or wider.
+- All files hold outlines, not text, so they look the same without the font installed.
 - Colour: waves `#378ADD`, word `#6B7F88`. The waves' contrast is 3.6:1 on white and
   5.0:1 on the app background `#121820`, so one file serves light and dark surfaces.
 - The frontend reads the icon through `frontend/src/lib/brand.ts`; the Docker builds copy
-  it by file name.
+  all three brand assets by file name.
 
 As a character the mark is **≋** (U+224B, TRIPLE TILDE), for wherever an image cannot go:
 terminal banners, page titles, headings. Write it before the name with one space,

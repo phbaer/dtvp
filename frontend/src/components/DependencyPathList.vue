@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { DEFAULT_REPRESENTATIVE_PATH_LIMIT, getFirstMappedTeamOnPath, getPathParts, selectRepresentativePaths } from '../lib/dependency-team-selection'
 import { getTeamMappingTags, type TeamMapping } from '../lib/team-mapping'
 
@@ -13,6 +13,7 @@ const props = defineProps<{
 type GraphNode = {
   id: string
   name: string
+  labelLines: string[]
   teamNames: string[]
   tooltip: string
   preview: GapPreview | null
@@ -65,15 +66,30 @@ type HoveredPreview = GapPreview & {
 const normalizeName = (name: string): string => name.trim().toLowerCase()
 const REPRESENTATIVE_PATH_LIMIT = DEFAULT_REPRESENTATIVE_PATH_LIMIT
 const MAX_DISPLAY_BUBBLES = 5
-const H_PADDING = 22
-const V_PADDING = 18
-const COL_GAP = 54
-const ROW_GAP = 34
+const H_PADDING = 16
+const V_PADDING = 16
+const NODE_WIDTH = 196
+const NODE_HEIGHT = 80
+const COL_GAP = 36
+const ROW_GAP = 24
 const TOOLTIP_WIDTH = 360
 const TOOLTIP_HEIGHT = 190
 
 const containerRef = ref<HTMLElement | null>(null)
 const hoveredPreview = ref<HoveredPreview | null>(null)
+const arrowId = `dependency-arrow-${useId()}`
+
+// Bound labels in the diagram; the title and accessible summary keep the full text.
+const shortenLabel = (text: string, limit: number) => {
+  const characters = Array.from(text)
+  return characters.length > limit ? `${characters.slice(0, limit - 1).join('')}…` : text
+}
+const nameLines = (name: string) => {
+  const characters = Array.from(name)
+  return characters.length <= 24
+    ? [name]
+    : [characters.slice(0, 24).join(''), shortenLabel(characters.slice(24).join(''), 24)]
+}
 
 const teamMappingRecord = computed<TeamMapping>(() => {
   if (props.teamMapping) return props.teamMapping
@@ -293,20 +309,18 @@ const graphModel = computed(() => {
   const nodes: GraphNode[] = Array.from(nodeBuckets.values())
     .map((bucket) => {
       const rowCenter = bucket.positions.reduce((sum, value) => sum + value, 0) / bucket.positions.length
-      const labelLength = Math.max(bucket.name.length, getTeamLabel(bucket.teamNames).length)
-      const width = Math.max(118, Math.min(190, labelLength * 7 + 34))
-      const height = bucket.teamNames.length > 0 || bucket.isSource || bucket.isRoot ? 54 : 42
       return {
         id: bucket.id,
         name: bucket.name,
+        labelLines: nameLines(bucket.name),
         teamNames: bucket.teamNames,
         tooltip: bucket.tooltip,
         preview: bucket.preview,
         depth: bucket.depth,
-        x: H_PADDING + bucket.depth * (190 + COL_GAP),
-        y: V_PADDING + rowCenter * (54 + ROW_GAP),
-        width,
-        height,
+        x: H_PADDING + bucket.depth * (NODE_WIDTH + COL_GAP),
+        y: V_PADDING + rowCenter * (NODE_HEIGHT + ROW_GAP),
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
         isSource: bucket.isSource,
         isRoot: bucket.isRoot,
         isPrimary: bucket.isPrimary,
@@ -314,6 +328,13 @@ const graphModel = computed(() => {
       }
     })
     .sort((left, right) => left.depth - right.depth || left.y - right.y)
+
+  // Shared branches can average to the same row. Keep nodes in a column apart.
+  const columnBottoms = new Map<number, number>()
+  for (const node of nodes) {
+    node.y = Math.max(node.y, columnBottoms.get(node.depth) ?? V_PADDING)
+    columnBottoms.set(node.depth, node.y + node.height + ROW_GAP)
+  }
 
   const nodeMap = new Map(nodes.map(node => [node.id, node]))
   const edgeList = Array.from(edges.values())
@@ -387,7 +408,7 @@ const edgePath = (edge: GraphEdge) => {
 </script>
 
 <template>
-  <div ref="containerRef" class="relative text-xs">
+  <div ref="containerRef" class="relative min-w-0 max-w-full text-xs [contain:inline-size]">
     <div v-if="graphRows.length === 0" class="text-gray-500 italic">
       No dependency chains found.
     </div>
@@ -397,16 +418,24 @@ const edgePath = (edge: GraphEdge) => {
         Showing {{ displayedPathCount }} representative path{{ displayedPathCount === 1 ? '' : 's' }} from {{ uniquePathCount }} unique chain{{ uniquePathCount === 1 ? '' : 's' }}.
       </div>
 
-      <div class="overflow-x-auto rounded-md border border-slate-800/70 bg-slate-900/45 p-2">
+      <div
+        data-testid="dependency-viewport"
+        class="max-h-80 max-w-full overflow-auto overscroll-contain rounded-md border border-slate-800/70 bg-slate-900/45 p-2"
+        tabindex="0"
+        role="region"
+        aria-label="Dependency graph, scroll to explore"
+      >
         <svg
           data-testid="dependency-graph"
           :viewBox="`0 0 ${graphModel.width} ${graphModel.height}`"
-          class="min-w-[24rem] h-auto w-full"
+          :width="graphModel.width"
+          :height="graphModel.height"
+          class="block max-w-none"
           role="img"
           aria-label="Dependency graph"
         >
           <defs>
-            <marker id="dependency-arrow" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <marker :id="arrowId" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
               <path d="M 0 0 L 7 3.5 L 0 7 z" fill="#475569" />
             </marker>
           </defs>
@@ -418,11 +447,12 @@ const edgePath = (edge: GraphEdge) => {
             fill="none"
             stroke="#475569"
             stroke-width="2.25"
-            marker-end="url(#dependency-arrow)"
+            :marker-end="`url(#${arrowId})`"
             opacity="0.95"
           />
 
-          <g v-for="node in graphModel.nodes" :key="node.id">
+          <g v-for="node in graphModel.nodes" :key="node.id" data-testid="dependency-node">
+            <title>{{ [node.name, ...node.teamNames, node.tooltip].filter(Boolean).join(' · ') }}</title>
             <rect
               :data-testid="node.preview ? 'gap-node' : undefined"
               :x="node.x"
@@ -459,35 +489,35 @@ const edgePath = (edge: GraphEdge) => {
             />
             <text
               :x="node.x + node.width / 2"
-              :y="node.y + (node.teamNames.length > 0 || node.isSource || node.isRoot ? 18 : 24)"
+              :y="node.y + (node.labelLines.length === 1 ? 27 : 20)"
               text-anchor="middle"
-              font-size="11"
+              font-size="12"
               font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
               fill="#e5e7eb"
             >
-              {{ node.name }}
+              <tspan v-for="(line, index) in node.labelLines" :key="index" :x="node.x + node.width / 2" :dy="index ? 14 : 0">{{ line }}</tspan>
             </text>
             <text
-              v-if="node.teamNames.length > 0 || node.isSource || node.isRoot"
+              v-if="node.teamNames.length > 0"
               :x="node.x + node.width / 2"
-              :y="node.y + 34"
+              :y="node.y + 51"
               text-anchor="middle"
-              font-size="9"
+              font-size="10"
               font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
               :fill="node.isSource ? '#fcd34d' : node.isRoot ? '#7dd3fc' : node.isPrimary ? '#67e8f9' : '#5eead4'"
             >
-              {{ node.isSource ? 'SOURCE' : node.isRoot ? 'ROOT' : getTeamLabel(node.teamNames) }}
+              {{ shortenLabel(getTeamLabel(node.teamNames), 30) }}
             </text>
             <text
-              v-if="node.isPrimary"
+              v-if="node.isSource || node.isRoot || node.isPrimary"
               :x="node.x + node.width / 2"
-              :y="node.y + node.height - 8"
+              :y="node.y + node.height - 12"
               text-anchor="middle"
-              font-size="8"
+              font-size="9"
               font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
               fill="#67e8f9"
             >
-              PRIMARY
+              {{ [node.isSource ? 'SOURCE' : node.isRoot ? 'ROOT' : '', node.isPrimary ? 'PRIMARY' : ''].filter(Boolean).join(' · ') }}
             </text>
           </g>
         </svg>

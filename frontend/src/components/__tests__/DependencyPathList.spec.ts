@@ -12,6 +12,43 @@ const getGraphLabels = (wrapper: ReturnType<typeof mount>) => {
 }
 
 describe('DependencyPathList', () => {
+  it('bounds long names while retaining complete component and team names', () => {
+    const name = 'a-very-long-component-name-with-an-even-longer-package-identifier'
+    const team = 'A team whose full name does not fit inside a component node'
+    const wrapper = mount(DependencyPathList, {
+      props: { paths: [`source -> ${name} -> root`], teamMapping: { [name]: team } },
+    })
+    const node = wrapper.findAll('[data-testid="dependency-node"]').find(node => node.get('title').text().includes(name))!
+    expect(node.get('title').text()).toContain(team)
+    expect(node.findAll('tspan')).toHaveLength(2)
+    expect(node.findAll('tspan')[1].text()).toContain('…')
+    expect(node.findAll('text').every(text => text.text().length <= 48)).toBe(true)
+    expect(getGraphLabels(wrapper)).toContain(name)
+  })
+
+  it('keeps merged branches apart and uses equal node dimensions', () => {
+    const wrapper = mount(DependencyPathList, {
+      props: { paths: ['source -> shared -> a', 'source -> other -> a', 'source -> other -> b', 'source -> shared -> b'] },
+    })
+    const rectangles = wrapper.findAll('[data-testid="dependency-node"] rect').map(rect => ({
+      x: Number(rect.attributes('x')), y: Number(rect.attributes('y')),
+      width: Number(rect.attributes('width')), height: Number(rect.attributes('height')),
+    }))
+    expect(new Set(rectangles.map(rect => `${rect.width}x${rect.height}`)).size).toBe(1)
+    for (const [index, rect] of rectangles.entries()) {
+      for (const other of rectangles.slice(index + 1).filter(other => other.x === rect.x)) {
+        expect(Math.abs(rect.y - other.y)).toBeGreaterThanOrEqual(rect.height)
+      }
+    }
+  })
+
+  it('gives simultaneously rendered graphs independent arrow markers', () => {
+    const wrapper = mount({ components: { DependencyPathList }, template: '<DependencyPathList :paths="[\'a -> b\']" /><DependencyPathList :paths="[\'c -> d\']" />' })
+    const ids = wrapper.findAll('marker').map(marker => marker.attributes('id'))
+    expect(new Set(ids).size).toBe(2)
+    expect(wrapper.findAll('path[marker-end]').map(edge => edge.attributes('marker-end'))).toEqual(ids.map(id => `url(#${id})`))
+  })
+
   it('renders a compact dependency tree for shared prefixes', () => {
     const paths = ['Vuln -> Shared -> A', 'Vuln -> Shared -> B']
     const wrapper = mount(DependencyPathList, { props: { paths } })

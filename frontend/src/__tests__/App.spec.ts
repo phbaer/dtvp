@@ -5,6 +5,7 @@ import App from '../App.vue'
 import { getUserInfo, getVersion } from '../lib/api'
 import { projectHeaderState } from '../lib/projectHeaderStore'
 import { AUTH_EXPIRED_EVENT } from '../lib/authSession'
+import { inlineWordmarkUrl } from '../lib/brand'
 
 const mocks = vi.hoisted(() => ({
     route: {
@@ -172,6 +173,8 @@ describe('App bootstrap state', () => {
         expect(getUserInfo).toHaveBeenCalled()
         expect(wrapper.find('[data-testid="app-bootstrap-state"]').exists()).toBe(false)
         expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(true)
+        expect(wrapper.get('[data-testid="brand"] img').attributes('src')).toBe(inlineWordmarkUrl)
+        expect(wrapper.get('[data-testid="brand"] img').attributes('alt')).toBe('River')
     })
 
     it('moves an expired live session to sign-in and remembers the route', async () => {

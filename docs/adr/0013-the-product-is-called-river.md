@@ -96,8 +96,8 @@ This is not a legal clearance.
   and stored identifiers say `dtvp`. The README says so.
 - The analysis log classifies messages that start with "River" or "DTVP" as the product's
   own, so messages stored before the rename still show correctly.
-- The documentation screenshots still show the old name and icon until they are captured
-  again.
+- Documentation screenshots are captured from the River UI with the redesigned
+  vulnerability cards and assessment workspace.
 
 ## Confirmation
 

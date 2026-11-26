@@ -106,7 +106,7 @@ const docsAgentEvidence = {
     vuln_id: 'CVE-2024-9999',
     scope: 'components',
     targets: [
-        { component: 'platform-gateway', component_version: '2.5.0', project_version: '2.0.0', finding_uuid: 'docs-f2' },
+        { component: 'platform-gateway', component_version: '2.5.0', project_version: '2.0.0', finding_uuid: 'f3' },
     ],
     title: 'Parser initialization is reachable only behind authentication',
     body_markdown: [
@@ -1055,6 +1055,7 @@ async function mockCommonShell(page: Page) {
                     },
                     {
                         id: 'CVE-2024-4002',
+                        code_assessment_status: 'auto',
                         title: 'Incomplete assessment — RuntimeTeam has not yet assessed',
                         description: 'Some teams have assessed this vulnerability but others have not, leaving it in an incomplete state.',
                         severity: 'MEDIUM',
@@ -2010,7 +2011,11 @@ test.describe('Capture README screenshots', () => {
             }),
         }))
 
+        // The partial task window can still reset the modal when grouping finishes.
+        const completedTask = page.waitForResponse(async response =>
+            new URL(response.url()).pathname === '/api/tasks/task-docs' && (await response.json()).status === 'completed')
         await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await completedTask
         await page.waitForLoadState('networkidle')
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
 

@@ -29,7 +29,7 @@ export const CUTOFF_BASIS_OPTIONS: ReadonlyArray<{ value: CutoffBasis, label: st
 
 /** Shown with the control and in the docs. */
 export const CUTOFF_NOTE = 'A cutoff is a planning aid, not a compliance boundary: before a submission, review with the cutoff at the submission date or without one.'
-export const CUTOFF_DISCLAIMER = 'According to the FDA guidance; DTVP supports these processes, it is not regulatory advice.'
+export const CUTOFF_DISCLAIMER = 'According to the FDA guidance; River supports these processes, it is not regulatory advice.'
 export const CUTOFF_DOCS_URL = 'https://git.baer.one/phbaer/dtvp/src/branch/main/docs/review-workflows.md#cutoff-and-the-fda-guidance'
 
 /** The purpose of a basis, for titles (the chip). */

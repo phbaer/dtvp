@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { login } from '../lib/api'
-import { markIconUrl } from '../lib/brand'
+import { wordmarkUrl } from '../lib/brand'
 
 const route = useRoute()
 const sessionExpired = computed(() => route.query.expired === '1')
@@ -12,9 +12,9 @@ const sessionExpired = computed(() => route.query.expired === '1')
     <div class="min-h-screen bg-gray-900 flex items-center justify-center font-sans">
         <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-[400px] border border-gray-700">
             <div class="text-center mb-8">
-                <img :src="markIconUrl" alt="" class="mx-auto mb-3 h-14 w-14" data-testid="login-logo" />
-                <div class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">River</div>
-                <div class="text-gray-400 mt-2 text-sm">River Inspects Vulnerabilities and Evaluates Risks</div>
+                <h1>
+                    <img :src="wordmarkUrl" alt="River: River Inspects Vulnerabilities and Evaluates Risks" class="mx-auto h-auto w-[318px] max-w-full" data-testid="login-logo" />
+                </h1>
             </div>
             
             <div class="space-y-6">

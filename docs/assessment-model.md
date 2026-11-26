@@ -203,15 +203,15 @@ The **effective Global decision** of a vulnerability is:
   order; the justification is that of the first of them that has one;
 - otherwise **none**.
 
-The worst-state order, worst first, is the one order DTVP uses for every
+The worst-state order, worst first, is the one order River uses for every
 "worst": **Exploitable > In triage > False positive > Not affected >
 Resolved** (then Not set). Repair, the analyzer verdicts of Apply Automatic
 Assessments (Affected → Exploitable; Probably affected and Inconclusive →
 In triage; Not affected) and the finding matrix use the same order.
 
-- **Export.** The state DTVP writes to Dependency-Track for a finding is its
+- **Export.** The state River writes to Dependency-Track for a finding is its
   effective decision (`calculate_aggregated_state`): the same derived worst
-  when there is no General block. The justification is not derived: DTVP
+  when there is no General block. The justification is not derived: River
   exports none of its own, and Dependency-Track keeps its value.
 - **API.** `list_metadata.global_decision_source` (`manual`, `derived`,
   `none`), `global_decision_state`, `global_decision_justification`,
@@ -266,7 +266,7 @@ Withdrawal uses the same endpoint with `action: "withdraw"`.
 Resubmission uses `POST /api/assessment` with `resubmit_changes: true`, the
 full grouped finding set and the revisions the analyst viewed. A stale
 review action must be retried after reloading. A legacy approval request
-can require a fresh grouped task when DTVP detects outstanding feedback
+can require a fresh grouped task when River detects outstanding feedback
 in the project family.
 See [ADR 0016](adr/0016-team-assessment-changes-requested.md).
 

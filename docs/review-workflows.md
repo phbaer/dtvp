@@ -136,7 +136,7 @@ It applies on the server to the list, the option counts, Bulk Changes
 
 ### Cutoff and the FDA guidance
 
-DTVP supports these processes; it is not regulatory advice.
+River supports these processes; it is not regulatory advice.
 
 - **Premarket.** FDA, "Cybersecurity in Medical Devices: Quality Management
   System Considerations and Content of Premarket Submissions", issued
