@@ -700,7 +700,7 @@ describe('VulnGroupCard', () => {
 
         const review = wrapper.get(`#vuln-${mockGroup.id}-detail-panel-review`)
         const about = review.get('[data-testid="vuln-about"]')
-        // First in the form, before the scope and the decision.
+        // The advisory summary remains above the decision.
         expect(review.element.querySelector('[data-testid="vuln-about"]')!
             .compareDocumentPosition(review.get('[data-testid="assessment-decision-section"]').element)
             & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

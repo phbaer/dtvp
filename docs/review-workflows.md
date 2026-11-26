@@ -389,7 +389,7 @@ The detail workspace provides:
 | :--- | :--- |
 | Context | Three ordered sections: advisory and references; where it was found, a matrix of components by project versions with each component's team, the assessment state of each finding and the dependency chains of a component behind its row, and below it the team-mapped components that give those teams; existing assessment evidence |
 | Code Evidence | One list of analyzer runs and agent evidence grouped by component, with source filters; a row opens a reader with provenance, sanitised Markdown, collapsed technical details, and a separate "Apply to the assessment" box; Run analysis and More in the header; the worst case of the latest analyzer results at the bottom. See [Code evidence reader](screens.md#code-evidence-reader) |
-| Assessment | A short summary of the vulnerability (start of the description, affected components and versions, attack conditions from the CVSS vector, CWE, the source's fix advice, references), then the Global or team tabs and the decision and rationale, saved with the actions in the sticky bar; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage, with its reasons; why the vulnerability is inconsistent is stated once, in the banner above the tabs; global CVSS/rescoring controls |
+| Assessment | The Global or team tabs, a short advisory summary, then the decision and rationale. The tabs and actions stay visible while the card scrolls; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage, with its reasons; why the vulnerability is inconsistent is stated once, in the banner above the tabs; global CVSS/rescoring controls |
 
 From a 1280px wide viewport the detail can also open as a full-screen
 [assessment workspace](screens.md#assessment-workspace): the Context or Code
@@ -401,7 +401,8 @@ the Assessment tab.
 
 Compact vulnerability rows expose the current workflow state, such as mapping
 needed, analysis running, result ready, assessment needed, awaiting review, or
-complete. Inside the card, the tab status badges say what is still missing.
+complete. Team badges wrap when the list narrows. Inside the card, the tab
+status badges say what is still missing.
 
 All actions of a card sit in one place, the sticky bar next to the tabs:
 Approve (reviewers, while a review is pending), Save or Submit, Reload, and the

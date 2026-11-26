@@ -569,6 +569,7 @@ const onAssigneeInput = () => {
 
 const headerEl = ref<HTMLElement | null>(null)
 const detailsEl = ref<HTMLElement | null>(null)
+const cardEl = ref<HTMLElement | null>(null)
 // The two panes of the assessment workspace; plain wrappers in tab mode.
 const contextPaneEl = ref<HTMLElement | null>(null)
 const assessmentPaneEl = ref<HTMLElement | null>(null)
@@ -2565,7 +2566,14 @@ const setDetailTab = (tab: DetailTab, preserveReviewTeam = false) => {
     if (tab === 'review' && !preserveReviewTeam) autoSelectReviewTeam()
     activeDetailTab.value = tab
     nextTick(() => {
-        detailsEl.value?.scrollTo?.({ top: 0, behavior: 'smooth' })
+        const details = detailsEl.value
+        const card = cardEl.value
+        if (props.inModal && card && details) {
+            // Reset the tab's content without scrolling away a visible header.
+            card.scrollTop = Math.min(card.scrollTop, details.offsetTop)
+        } else {
+            details?.scrollTo?.({ top: 0, behavior: 'smooth' })
+        }
     })
 }
 
@@ -3212,7 +3220,16 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
 </script>
 
 <template>
-    <div :class="['vuln-card relative border rounded-lg transition-colors', inModal ? 'overflow-hidden' : (expanded ? 'overflow-visible z-40' : 'overflow-hidden'), isWorkspace ? 'flex h-full flex-col' : '', cardStyle]">
+    <div
+        ref="cardEl"
+        class="vuln-card relative rounded-lg border transition-colors"
+        :class="[
+            isWorkspace ? 'flex h-full flex-col overflow-hidden'
+                : inModal ? 'h-full min-h-0 overflow-y-auto overscroll-contain'
+                : expanded ? 'overflow-visible z-40' : 'overflow-hidden',
+            cardStyle,
+        ]"
+    >
     <!-- Criticality Badges — header-height only -->
     <div
         class="absolute top-0 left-0 z-20 pointer-events-none flex"
@@ -3331,12 +3348,12 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
         ref="detailsEl"
         :class="isWorkspace
             ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 border-t border-gray-700'
-            : 'px-4 pb-4 border-t border-gray-700 overflow-y-auto'"
-        :style="inModal ? {} : { maxHeight: detailsMaxHeight }"
+            : ['px-4 pb-4 border-t border-gray-700', !inModal && 'overflow-y-auto']"
+        :style="inModal ? undefined : { maxHeight: detailsMaxHeight }"
     >
         <div data-vuln-card-sticky-nav class="sticky top-0 z-30 -mx-4 mb-5 border-b border-gray-700/80 bg-gray-900/95 px-4 shadow-lg backdrop-blur" :class="isWorkspace ? 'shrink-0' : ''">
             <div class="-mx-4 flex flex-wrap items-end gap-2 px-4">
-                <div class="flex min-w-0 flex-1 flex-wrap items-end" role="tablist" aria-label="Vulnerability detail sections">
+                <div class="flex min-w-0 grow basis-[min(100%,22rem)] flex-wrap items-end" role="tablist" aria-label="Vulnerability detail sections">
                     <button
                         v-for="tab in visibleDetailTabs"
                         :key="tab.id"
@@ -3374,7 +3391,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                     <Loader2 v-else :size="12" class="animate-spin" />
                     {{ assessmentPersistenceStatus.label }}
                 </div>
-                <div class="my-1.5 flex shrink-0 items-center gap-2" data-testid="assessment-actions">
+                <div class="my-1.5 flex max-w-full flex-wrap items-center gap-2" data-testid="assessment-actions">
                     <button
                         v-if="canApprove"
                         type="button"
@@ -3540,13 +3557,13 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                 : 'border-white/10 bg-white/[0.03] text-slate-300'"
             role="status"
         >
-            <div class="flex min-w-0 flex-1 items-start gap-2">
+            <div class="flex min-w-0 grow basis-[min(100%,20rem)] items-start gap-2">
                 <!-- Only an inconsistency is a warning. Findings that carry
                      different assessments (teams or versions decide
                      differently) are expected and only noted. -->
                 <AlertTriangle v-if="inconsistencyIssues.length > 0" :size="14" class="mt-0.5 shrink-0 text-indigo-300" />
                 <Info v-else :size="14" class="mt-0.5 shrink-0 text-slate-400" />
-                <div class="min-w-0 space-y-1">
+                <div class="min-w-0 space-y-1 [overflow-wrap:anywhere]">
                     <div :class="inconsistencyIssues.length > 0 ? 'font-bold' : 'font-semibold'">
                         {{ inconsistencyIssues.length > 0 ? 'Why this is inconsistent' : 'Assessments differ between findings' }}
                     </div>
@@ -3802,26 +3819,6 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
             class="space-y-3"
             :role="isWorkspace ? 'region' : 'tabpanel'"
         >
-            <VulnAboutSummary
-                :vulnId="group.id"
-                :title="group.title"
-                :description="group.description"
-                :cwes="group.cwes"
-                :recommendation="group.recommendation"
-                :cvssVector="group.cvss_vector"
-                :components="uniqueComponents"
-                :projectVersions="visibleProjectVersions"
-                :links="externalLinks"
-                :collapsed="isWorkspace"
-            />
-            <div
-                v-if="codeAnalysisDraftApplied"
-                data-testid="code-analysis-draft-banner"
-                class="rounded border border-cyan-700/40 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-200"
-            >
-                {{ codeAnalysisDraftSummary || 'Code analysis draft loaded into the assessment fields.' }}
-                Review and {{ isReviewer ? 'save' : 'submit' }} when ready.
-            </div>
             <div class="h-fit space-y-4">
                     <!-- Who assesses: the Global or a team assessment. The tabs
                          are the heading; the scope note only says what the team
@@ -3857,7 +3854,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                                     @click="chooseTeamTab(team)"
                                     :aria-pressed="selectedTeam === team ? 'true' : 'false'"
                                     :class="[
-                                        '-mb-px px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
+                                        '-mb-px max-w-full px-3 py-1.5 text-left text-xs font-semibold border-b-2 transition-colors cursor-pointer [overflow-wrap:anywhere]',
                                         selectedTeam === team
                                             ? 'border-blue-500 text-blue-300 bg-blue-950/20'
                                             : 'border-transparent text-gray-500 hover:text-gray-300'
@@ -3996,6 +3993,27 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             @show-former="showFormerTeamAssessments"
                         />
                     </section>
+
+                    <VulnAboutSummary
+                        :vulnId="group.id"
+                        :title="group.title"
+                        :description="group.description"
+                        :cwes="group.cwes"
+                        :recommendation="group.recommendation"
+                        :cvssVector="group.cvss_vector"
+                        :components="uniqueComponents"
+                        :projectVersions="visibleProjectVersions"
+                        :links="externalLinks"
+                        :collapsed="isWorkspace"
+                    />
+                    <div
+                        v-if="codeAnalysisDraftApplied"
+                        data-testid="code-analysis-draft-banner"
+                        class="rounded border border-cyan-700/40 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-200"
+                    >
+                        {{ codeAnalysisDraftSummary || 'Code analysis draft loaded into the assessment fields.' }}
+                        Review and {{ isReviewer ? 'save' : 'submit' }} when ready.
+                    </div>
 
                     <DetailSection
                         title="Decision & rationale"

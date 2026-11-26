@@ -252,7 +252,7 @@ const vulnId = computed(() => props.entry.group.id)
             </div>
 
             <!-- Content: full VulnGroupCard in modal mode -->
-            <div class="min-h-0 grow overflow-y-auto overscroll-contain">
+            <div class="flex min-h-0 grow flex-col overflow-hidden">
                 <VulnGroupCard
                     :group="entry.group"
                     :inModal="true"

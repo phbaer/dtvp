@@ -48,7 +48,7 @@ describe('VulnRowCompact', () => {
         expect(wrapper.emitted('reload')).toEqual([[group]])
         expect(wrapper.emitted('select')).toBeUndefined()
         expect(wrapper.get('[data-testid="compact-vulnerability-header"]').classes())
-            .toEqual(expect.arrayContaining(['relative', 'min-h-[5rem]', 'pr-40']))
+            .toEqual(expect.arrayContaining(['relative', 'min-h-[5rem]', 'pb-11', '@min-[26rem]:pr-40']))
         expect(wrapper.get('[data-testid="reload-vulnerability"]').classes())
             .toEqual(expect.arrayContaining(['absolute', 'bottom-2', 'right-3']))
         expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Needs mapping')

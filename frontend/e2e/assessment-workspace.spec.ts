@@ -238,12 +238,70 @@ test.describe('Assessment workspace', () => {
         expect(errors).toEqual([]);
     });
 
-    test('summarises the vulnerability above the form, folded in the workspace', async ({ page }) => {
+    for (const width of [430, 1440]) {
+        test(`keeps team selection and assessment actions reachable at ${width}×560`, async ({ page }) => {
+            await page.setViewportSize({ width, height: 560 });
+            const inspector = await selectVulnerability(page);
+            const nav = inspector.locator('[data-vuln-card-sticky-nav]');
+            const lastParagraph = inspector.getByTestId('vuln-description').getByText(/Paragraph 12 of the advisory/);
+            await lastParagraph.scrollIntoViewIfNeeded();
+            await expect(nav).toBeInViewport({ ratio: 1 });
+
+            await nav.getByRole('tab', { name: /Assessment/ }).click();
+            const team = inspector.getByTestId('review-team-tab').filter({ hasText: 'Security' });
+            await expect(team).toBeInViewport({ ratio: 1 });
+            await team.click();
+            await expect(team).toHaveAttribute('aria-pressed', 'true');
+
+            const rationale = inspector.locator('#analysis-details-textarea');
+            await rationale.scrollIntoViewIfNeeded();
+            await rationale.fill('Reviewed for Security.');
+            await expect(rationale).toBeInViewport();
+            await expect(nav.getByTestId('assessment-actions')).toBeInViewport({ ratio: 1 });
+            await nav.getByRole('tab', { name: /Context/ }).click();
+            await nav.getByRole('tab', { name: /Assessment/ }).click();
+            await expect(team).toBeInViewport({ ratio: 1 });
+            await expect(rationale).toHaveValue('Reviewed for Security.');
+        });
+    }
+
+    test('shows every team in a compact card before and after opening the desktop inspector', async ({ page }) => {
+        const teams = [
+            'Application Security', 'Client Platform', 'Database Reliability', 'Embedded Systems',
+            'Infrastructure', 'Release Engineering', 'Security', 'System Verification',
+        ];
+        const group = {
+            ...workspaceGroup,
+            tags: teams,
+            affected_versions: workspaceGroup.affected_versions.map(version => ({
+                ...version,
+                components: version.components.map(component => ({ ...component, tags: teams })),
+            })),
+        };
+        await mockGroupedVulnTask(page, { taskId: 'task-ws', groups: [group] });
+        await page.route('**/api/tasks/task-ws/groups/*', route => route.fulfill(json(group)));
+
+        const row = page.locator(`.vuln-card[data-group-id="${group.id}"]`);
+        const tags = row.getByTestId('team-tag');
+        await page.setViewportSize({ width: 430, height: 900 });
+        await page.goto('/project/TestProject?awaiting_review=false');
+        await expect(tags).toHaveText(teams);
+        for (const tag of await tags.all()) await expect(tag).toBeInViewport({ ratio: 1 });
+
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await row.click();
+        const inspector = page.getByTestId('vuln-detail-inspector');
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        await expect(inspector.getByTestId('review-team-tab')).toHaveText(teams);
+        for (const tag of await tags.all()) await expect(tag).toBeInViewport({ ratio: 1 });
+    });
+
+    test('summarises the vulnerability before the decision, folded in the workspace', async ({ page }) => {
         const errors = collectConsoleErrors(page);
         await page.setViewportSize({ width: 1440, height: 900 });
         const inspector = await selectVulnerability(page);
 
-        // The Assessment tab starts with the summary, open, then the decision.
+        // The summary is open in the Assessment tab.
         await inspector.getByRole('tab', { name: /Assessment/ }).click();
         const about = inspector.getByTestId('vuln-about');
         await expect(about).toBeVisible();

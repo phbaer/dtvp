@@ -332,7 +332,7 @@ const componentSummary = computed(() => {
       </div>
 
       <!-- Status row: lifecycle | analysis state | meta -->
-      <div :class="['flex items-center flex-wrap', compact ? 'gap-1 mt-1 max-h-[3.1rem] overflow-hidden' : 'gap-1.5 mt-1.5']">
+      <div :class="['flex items-center flex-wrap', compact ? 'mt-1 gap-1' : 'mt-1.5 gap-1.5']">
         <!-- Lifecycle group -->
         <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l text-[10px] font-bold uppercase tracking-wide border-y border-l shrink-0', lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
           <CircleDot :size="9" />
@@ -489,15 +489,15 @@ const componentSummary = computed(() => {
           <span
             v-for="tag in normalizedTags"
             :key="tag"
-            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-tight transition-all border"
+            class="inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight transition-all [overflow-wrap:anywhere]"
             :class="assessedTeams.has(tag)
               ? 'bg-green-500/10 text-green-400 border-green-500/20'
               : 'bg-red-500/8 text-red-400/70 border-red-500/15'"
             data-testid="team-tag"
           >
-            <CheckCircle v-if="assessedTeams.has(tag)" :size="9" class="text-green-400" />
-            <AlertTriangle v-else :size="8" class="text-red-400/60" />
-            {{ tag }}
+            <CheckCircle v-if="assessedTeams.has(tag)" :size="9" class="shrink-0 text-green-400" />
+            <AlertTriangle v-else :size="8" class="shrink-0 text-red-400/60" />
+            <span class="min-w-0">{{ tag }}</span>
           </span>
 
           <span
@@ -526,15 +526,15 @@ const componentSummary = computed(() => {
         <span
           v-for="tag in normalizedTags"
           :key="tag"
-          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-tight transition-all border"
+          class="inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight transition-all [overflow-wrap:anywhere]"
           :class="assessedTeams.has(tag)
             ? 'bg-green-500/10 text-green-400 border-green-500/20'
             : 'bg-red-500/8 text-red-400/70 border-red-500/15'"
           data-testid="team-tag"
         >
-          <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="text-green-400" />
-          <AlertTriangle v-else :size="9" class="text-red-400/60" />
-          {{ tag }}
+          <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="shrink-0 text-green-400" />
+          <AlertTriangle v-else :size="9" class="shrink-0 text-red-400/60" />
+          <span class="min-w-0">{{ tag }}</span>
         </span>
       </div>
 

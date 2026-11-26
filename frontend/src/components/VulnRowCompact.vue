@@ -115,7 +115,7 @@ const workflowStateClass = computed(() => ({
 
 <template>
     <div
-        :class="['vuln-card relative min-h-[5rem] border rounded-lg transition-colors overflow-hidden cursor-pointer hover:brightness-110', cardStyle]"
+        :class="['vuln-card @container relative min-h-[5rem] border rounded-lg transition-colors overflow-hidden cursor-pointer hover:brightness-110', cardStyle]"
         :data-group-id="group.id"
         :aria-selected="selected ? 'true' : 'false'"
         @click="handleClick"
@@ -164,7 +164,7 @@ const workflowStateClass = computed(() => ({
 
         <!-- Header row -->
         <div
-            class="relative flex min-h-[5rem] items-start gap-2 overflow-hidden py-2 pl-[62px] pr-40"
+            class="relative flex min-h-[5rem] items-start gap-2 overflow-hidden pb-11 pl-[62px] pr-3 pt-2 @min-[26rem]:py-2 @min-[26rem]:pr-40"
             data-testid="compact-vulnerability-header"
         >
             <div class="min-w-0 flex-1">

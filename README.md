@@ -240,10 +240,11 @@ draft ([screen](docs/screens.md#settings-team-mapping)). The backend's
 resolved finding tags drive the list and detail views. Mapping edits rerun the
 project query so both views use the same ownership.
 
-The assessment form starts with a short
-[summary of the vulnerability](docs/screens.md#assessment-tab): the start of
-the description, affected components, attack conditions, CWE, fix advice and
-references. From a 1280px wide viewport the vulnerability detail can open a
+Team badges wrap in the vulnerability list, including beside an open detail
+panel. The [assessment form](docs/screens.md#assessment-tab) starts with the team
+selector and Global option for reviewers. The advisory summary and decision
+fields scroll with the card while tabs and actions stay in view. From a
+1280px wide viewport the vulnerability detail can open a
 full-screen [assessment workspace](docs/screens.md#assessment-workspace) with
 the context beside the assessment form.
 
