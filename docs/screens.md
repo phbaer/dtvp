@@ -98,7 +98,7 @@ The Context tab uses three clearly separated sections in a fixed reading order: 
 
 ![Assessment tab of a team](screenshots/vuln-card-team-assessment.png)
 
-The Assessment tab starts with **About this vulnerability**: the title, the first three lines of the description as plain text (sanitised like the Context rendering; **Show more** expands it in place) and the key facts on one line: the affected components and versions in scope, what an attacker needs according to the CVSS vector (for example "network, low complexity, no privileges, no user interaction"), the CWE, the source's fix advice and the references. The block folds to one line. Below it are the Global and team tabs with the component of the selected team and who assessed it last, then the decision and rationale. On the Global tab, reviewers see the [team overview](#team-overview) above the form. Below the decision, **Show generated text** (reviewers, collapsed) shows the stored text read-only with **Copy**; it is generated from the fields and is what is exported, so it is not editable. **More** → **Clear assessment…** in the action bar clears the open team's or the Global assessment, or the whole of it (see [Review workflows](review-workflows.md)), after a confirmation naming the findings, components and versions.
+The Assessment tab starts with **About this vulnerability**: the title, the first three lines of the description as plain text (sanitised like the Context rendering; **Show more** expands it in place) and the key facts on one line: the affected components and versions in scope, what an attacker needs according to the CVSS vector (for example "network, low complexity, no privileges, no user interaction"), the CWE, the source's fix advice and the references. The block folds to one line. Below it are the Global and team tabs with the component of the selected team and who assessed it last, then the decision and rationale. On the Global tab, reviewers see the [team overview](#team-overview) above the form. Below the decision, **Show generated text** (reviewers, collapsed) shows the stored text read-only with **Copy**; it is generated from the fields and is what is exported, so it is not editable. **More** → **Clean up assessment…** opens the [cleanup](#assessment-cleanup); **More** → **Clear assessment…** in the action bar clears the open team's or the Global assessment, or the whole of it (see [Review workflows](review-workflows.md)), after a confirmation naming the findings, components and versions.
 
 ![Clear assessment](screenshots/clear-assessment.png) While something required is missing, the decision section says what ("Still needed to submit: analysis details"); the Submit button is enabled once nothing is missing. The CWE and the fix advice are the ones Dependency-Track serves with the finding (`cwes`, `recommendation` of each grouped vulnerability).
 
@@ -166,7 +166,17 @@ The Assessment tab uses the same section hierarchy as Context and Code Evidence:
 
 ![Conflicting assessment](screenshots/inconsistent-assessment.png)
 
-A banner above the tabs (at the top of the context pane in the [assessment workspace](#assessment-workspace)) states why the vulnerability is inconsistent and what each team decided. It is the only place that says so; the Global form does not repeat it. Existing assessment evidence in Context shows the conflicting team blocks.
+A banner above the tabs (at the top of the context pane in the [assessment workspace](#assessment-workspace)) states why the vulnerability is inconsistent and what each team decided. It is the only place that says so; the Global form does not repeat it. Existing assessment evidence in Context shows the conflicting team blocks. A conflict is a team that contradicts itself, or two different values of a part the findings both have; teams that decide differently, and a block, response or SSVC record some findings lack, are not ([Assessment model](assessment-model.md#vulnerabilities-and-assessments)). When the findings only differ, the neutral banner offers **Clean up…** as well. **Clean up…** on the banner opens the assessment cleanup; **Repair…** (reviewers, when a rule-based repair applies; the tooltip names the stages) opens Repair Assessments for this vulnerability.
+
+![Repair one vulnerability](screenshots/vulnerability-repair.png)
+
+The dialog is the [Bulk Changes](#bulk-changes-dialog) preview of Repair Assessments for this vulnerability only, with the same per-finding detail, the new-findings checkbox and one Apply; afterwards the card shows the repaired assessment in place.
+
+### Assessment Cleanup
+
+![Assessment cleanup](screenshots/assessment-cleanup.png)
+
+When a rule-based repair would make the findings agree, the cleanup says so above the versions, with **Repair instead…**. The cleanup lists the versions of the assessment (A is the most common) with their findings, state, teams and the fields in which they differ, including the SSVC record. Keep one, tick the findings to change (by default those not on the kept version), choose the whole assessment, the Global one or a team's (teams the mapping does not know, or only as an alias, are marked), and use the kept version or clear it. **Preview** lists per finding what changes; **Save** writes exactly that, as new revisions exported to Dependency-Track. See [Cleaning up an inconsistent assessment](import-export.md#cleaning-up-an-inconsistent-assessment).
 
 ### Differences Between Findings
 
@@ -196,7 +206,7 @@ The CVSS modal provides an interactive vector editor for contextual score adjust
 
 ![Bulk Changes dialog](screenshots/bulk-sync-modal.png)
 
-The Bulk Changes dialog previews the selected workflow before applying it in one action. Repair Assessments labels each applicable repair per vulnerability; where a new version added findings, the row states their number and offers a checkbox to synchronize them as well ([New findings](review-workflows.md#new-findings)). Restore Team Assessments From Export first asks for a Dependency-Track export, shows the uploaded file (tool, project, export time, start of its SHA-256), and then lists per vulnerability the team assessments it would add as historical blocks, with the entries it could not match.
+The Bulk Changes dialog previews the selected workflow before applying it in one action. The scope line above the workflows chooses **Whole project** (all versions, no list filters; the default while the list shows only its role default) or **Current list** (the list's filters, named as its chips). Repair Assessments labels each applicable repair per vulnerability; where a new version added findings, the row states their number and offers a checkbox to synchronize them as well; **New findings** in the Select row ticks it for every vulnerability at once and selects them ([New findings](review-workflows.md#new-findings)). Restore Team Assessments From Export first asks for a Dependency-Track export, shows the uploaded file (tool, project, export time, start of its SHA-256), and then lists per vulnerability the team assessments it would add as historical blocks, with the entries it could not match.
 
 ### Conflict Resolution
 

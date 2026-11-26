@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component, type Ref } from 'vue'
-import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment } from '../lib/api'
+import { updateAssessment, getAssessmentDetails, getKnownUsers, deleteAssessment, previewGroupRepair } from '../lib/api'
 import type { EarlierAssessment } from '../lib/api'
 import EarlierAssessments from './EarlierAssessments.vue'
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Eraser, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Eraser, Brush, Wrench, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
 
-import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentTextKey, type AssessmentBlock } from '../lib/assessment-helpers'
+import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentVariantKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { AMBIGUOUS_SCOPE, BASE_SCOPE, getAssessmentScopes } from '../lib/assessmentScopes'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
@@ -31,6 +31,7 @@ import SsvcCalculator from './SsvcCalculator.vue'
 import { summarizeSsvc, ssvcReviewText, stripSsvcDocumentation, type SsvcSelection } from '../lib/ssvc'
 import ConflictResolutionModal from './ConflictResolutionModal.vue'
 import ClearAssessmentModal from './ClearAssessmentModal.vue'
+import BulkWorkflowModal from './BulkWorkflowModal.vue'
 import AssessmentHistory from './AssessmentHistory.vue'
 import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
@@ -114,6 +115,7 @@ const user = inject<any>('user', ref({ role: 'ANALYST' }))
 const teamMapping = inject<any>('teamMapping', ref({}))
 const rescoreRules = inject<any>('rescoreRules', ref({ transitions: [] }))
 const tmrescoreProposals = inject<any>('tmrescoreProposals', ref({}))
+const vulnTaskId = inject<Ref<string | null>>('vulnTaskId', ref(null))
 
 const emit = defineEmits([
     'update',
@@ -357,9 +359,75 @@ const canChangeSuppression = computed(() => (
 ))
 const suppressedInstanceCount = computed(() => allInstances.value.filter(instance => instance.is_suppressed).length)
 
+const clearModalMode = ref<'clear' | 'cleanup'>('clear')
 const openClearModal = () => {
     clearAssessmentError.value = ''
+    clearModalMode.value = 'clear'
     showClearModal.value = true
+}
+/** The assessment cleanup: versions of the assessment, kept or cleared per finding. */
+const openCleanupModal = () => {
+    clearAssessmentError.value = ''
+    clearModalMode.value = 'cleanup'
+    showClearModal.value = true
+}
+/** Every finding with the project version it belongs to, for the cleanup. */
+const cleanupInstances = computed(() => {
+    const versionOf = new Map<unknown, string>()
+    for (const version of props.group.affected_versions || []) {
+        for (const component of version.components || []) versionOf.set(component, version.project_version || '')
+    }
+    return allInstances.value.map(instance => (
+        instance.project_version ? instance : { ...instance, project_version: versionOf.get(instance) || '' }
+    ))
+})
+// Repair…: the bulk Repair Assessments workflow for this vulnerability only.
+// Offered when a repair applies; the stages are named from its preview.
+interface RepairStage { id: string; label: string }
+const repairStages = ref<RepairStage[]>([])
+const showRepairModal = ref(false)
+let repairCheck = 0
+const checkRepair = async () => {
+    const check = ++repairCheck
+    const taskId = vulnTaskId.value
+    if (!isReviewer.value || !taskId || !props.group?.id) {
+        repairStages.value = []
+        return
+    }
+    try {
+        const preview = await previewGroupRepair(taskId, props.group.id)
+        if (check !== repairCheck) return
+        const item = preview.items.find(entry => entry.group_id === props.group.id)
+        const topics = new Map((preview.topics || []).map(topic => [topic.id, topic.label]))
+        repairStages.value = item?.repairable
+            ? (Array.isArray(item.repairs) ? item.repairs : []).map((repair: any) => ({
+                id: String(repair.id),
+                label: topics.get(repair.id) || String(repair.label || repair.id),
+            }))
+            : []
+    } catch {
+        // No repair offered when the check fails; the bulk workflow remains.
+        if (check === repairCheck) repairStages.value = []
+    }
+}
+const repairTitle = computed(() => (repairStages.value.length
+    ? `Repair Assessments for this vulnerability: ${repairStages.value.map(stage => stage.label).join(', ')}`
+    : ''))
+const openRepairModal = () => {
+    showClearModal.value = false
+    showRepairModal.value = true
+}
+const onRepairApplied = async () => {
+    await refreshDetails()
+    historyRefreshKey.value += 1
+    emitRefreshedAssessment()
+}
+
+const onAssessmentCleaned = async () => {
+    showClearModal.value = false
+    await refreshDetails()
+    historyRefreshKey.value += 1
+    emitRefreshedAssessment()
 }
 
 const confirmClearAssessment = async (team: string | null) => {
@@ -1702,9 +1770,10 @@ const groupedAssessments = computed(() => {
             const suppressedVal = !!c.is_suppressed
 
             // Group by state, details, and suppression — different details
-            // get separate boxes. Writers differ in whitespace (a blank line
-            // after a block header or not); that alone is the same assessment.
-            const key = `${stateVal}|${assessmentTextKey(detailsVal)}|${suppressedVal}`
+            // get separate boxes, as in the finding matrix: whitespace, who
+            // assessed when, records of one finding and the order of the
+            // team blocks alone are the same assessment.
+            const key = `${stateVal}|${assessmentVariantKey(detailsVal)}|${suppressedVal}`
 
             if (!Object.hasOwn(groups, key)) {
                 groups[key] = {
@@ -3032,6 +3101,11 @@ const teamBlockStateColor = (state?: string): string => {
     return 'bg-yellow-500'
 }
 
+
+// Whether Repair… applies: checked again after every change of the assessment.
+watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefreshKey.value] as const, () => {
+    void checkRepair()
+}, { immediate: true })
 </script>
 
 <template>
@@ -3275,6 +3349,32 @@ const teamBlockStateColor = (state?: string): string => {
                                 type="button"
                                 role="menuitem"
                                 :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
+                                class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-indigo-200 hover:bg-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-40"
+                                data-testid="assessment-cleanup-button"
+                                @click="showMoreMenu = false; openCleanupModal()"
+                            >
+                                <Brush :size="12" /> Clean up assessment…
+                            </button>
+                            <button
+                                v-if="repairStages.length > 0"
+                                type="button"
+                                role="menuitem"
+                                :disabled="updating || loadingDetails"
+                                class="flex w-full items-start gap-1.5 px-3 py-2 text-left font-semibold text-amber-200 hover:bg-amber-950/40 disabled:cursor-not-allowed disabled:opacity-40"
+                                :title="repairTitle"
+                                data-testid="assessment-repair-button"
+                                @click="showMoreMenu = false; openRepairModal()"
+                            >
+                                <Wrench :size="12" class="mt-0.5 shrink-0" />
+                                <span>
+                                    Repair…
+                                    <span class="mt-0.5 block text-[10px] font-normal leading-snug text-gray-500">{{ repairStages.map(stage => stage.label).join(', ') }}</span>
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
                                 class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-red-300 hover:bg-red-950/50 disabled:cursor-not-allowed disabled:opacity-40"
                                 data-testid="assessment-clear-button"
                                 @click="showMoreMenu = false; openClearModal()"
@@ -3357,15 +3457,40 @@ const teamBlockStateColor = (state?: string): string => {
                     </div>
                 </div>
             </div>
-            <button
-                v-if="assessmentVariantCount > 1"
-                type="button"
-                :class="[actionButton, actionButtonSecondary]"
-                data-testid="card-differences-open"
-                @click="openDifferences"
-            >
-                Show differences
-            </button>
+            <div class="flex flex-wrap gap-2">
+                <button
+                    v-if="assessmentVariantCount > 1"
+                    type="button"
+                    :class="[actionButton, actionButtonSecondary]"
+                    data-testid="card-differences-open"
+                    @click="openDifferences"
+                >
+                    Show differences
+                </button>
+                <button
+                    v-if="(inconsistencyIssues.length > 0 || assessmentVariantCount > 1) && assessedTeamNames.length > 0"
+                    type="button"
+                    :class="[actionButton, actionButtonSecondary]"
+                    :disabled="updating || loadingDetails"
+                    title="Keep one version of the assessment for every finding, or clear stray ones, with a preview before saving"
+                    data-testid="card-differences-cleanup"
+                    @click="openCleanupModal"
+                >
+                    <Brush :size="12" /> Clean up…
+                </button>
+                <button
+                    v-if="repairStages.length > 0"
+                    type="button"
+                    :class="[actionButton, actionButtonSecondary]"
+                    :disabled="updating || loadingDetails"
+                    :title="repairTitle"
+                    :aria-label="repairTitle"
+                    data-testid="card-differences-repair"
+                    @click="openRepairModal"
+                >
+                    <Wrench :size="12" /> Repair…
+                </button>
+            </div>
         </div>
 
         <section
@@ -4165,6 +4290,17 @@ const teamBlockStateColor = (state?: string): string => {
                             <AlertTriangle :size="14" />
                             Sync all
                         </button>
+                        <button
+                            v-if="repairStages.length > 0"
+                            type="button"
+                            data-testid="sync-repair"
+                            :title="repairTitle"
+                            class="w-full mb-2 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600 font-bold py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                            @click="openRepairModal"
+                        >
+                            <Wrench :size="14" />
+                            Repair… <span class="font-normal text-gray-400">({{ repairStages.map(stage => stage.label).join(', ') }})</span>
+                        </button>
                     </div>
                     </DetailSection>
 
@@ -4210,6 +4346,9 @@ const teamBlockStateColor = (state?: string): string => {
 
     <ClearAssessmentModal
       :show="showClearModal"
+      :mode="clearModalMode"
+      :instances="cleanupInstances"
+      :repair-stages="repairStages"
       :team="selectedTeam"
       :assessed-teams="assessedTeamNames"
       :is-reviewer="isReviewer"
@@ -4220,6 +4359,17 @@ const teamBlockStateColor = (state?: string): string => {
       :error="clearAssessmentError"
       @close="showClearModal = false"
       @confirm="confirmClearAssessment"
+      @cleaned="onAssessmentCleaned"
+      @repair="openRepairModal"
+    />
+
+    <BulkWorkflowModal
+      v-if="isReviewer && vulnTaskId"
+      :show="showRepairModal"
+      :task-id="vulnTaskId"
+      :group-id="group.id"
+      @close="showRepairModal = false; void checkRepair()"
+      @applied="onRepairApplied"
     />
 
     <GenericModal

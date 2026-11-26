@@ -11,6 +11,10 @@ and applies consistent decisions across releases.
 
 - Team and global assessments, CVSS rescoring, the analysis response, SSVC prioritization, and exploitation evidence.
 - Bulk assessment repair, audit-backed recovery, and project archive import/export.
+- An assessment cleanup for inconsistent vulnerabilities: keep one version of
+  the assessment for selected findings, or clear stray ones and blocks of
+  teams that no longer exist, with a preview before saving
+  ([Import and export](docs/import-export.md#cleaning-up-an-inconsistent-assessment)).
 - Optional threat-model rescoring through tmrescore/vscorer and code analysis through Agentyzer.
 - Code-analysis proposals use Agentyzer's compact `assessment.details`, with the
   human review notice first. Detailed rationale stays in the saved run payload;
@@ -134,9 +138,11 @@ constraints, and CI conventions.
    stays beside its new assessment.
 4. Use **Bulk Changes** to apply automatic assessments, run the combined
    repair (synchronization, former-team assessments kept as historical, CVSS
-   restore, rescoring), or restore lost team assessments from a
+   restore, the SSVC record and response the findings agree on, rescoring), or restore lost team assessments from a
    Dependency-Track export as historical blocks; use archives to export and
-   restore project data.
+   restore project data. Bulk Changes looks at the whole project unless you
+   set list filters yourself; its scope line shows and switches it. Reviewers
+   run the same repair for one vulnerability with **Repair…** on its card.
 
 | Lifecycle | Meaning |
 | :--- | :--- |
@@ -153,7 +159,8 @@ including a team's submission while other teams are still open, and proposals
 saved pending review; `awaiting_review=true`), **Conflicting**, **New findings**
 and **All**. Analysts start with Needs my assessment, reviewers with Awaiting review.
 Untouched defaults follow role changes; custom status choices stay selected.
-Conflicting findings retain their badge and require repair before approval.
+Conflicting findings retain their badge and require repair before approval;
+**Clean up…** on the banner makes the findings agree.
 After an approval or save the list refreshes in place; when the selected
 vulnerability leaves it, the next one is selected
 ([stable list](docs/screens.md#stable-list)).

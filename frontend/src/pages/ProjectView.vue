@@ -162,6 +162,8 @@ const teamMapping = ref<Record<string, string | string[]>>({})
 const teamRoster = ref<TeamRosterEntry[]>([])
 const teamAliasGroups = computed(() => buildTeamAliasGroups(teamMapping.value, teamRoster.value))
 provide('teamMapping', teamMapping)
+// The card's Repair… runs the bulk Repair Assessments on this task, scoped to its group.
+provide('vulnTaskId', currentVulnTaskId)
 provide('teamRoster', teamRoster)
 
 const rescoreRules = ref<any>(null)
@@ -1434,7 +1436,7 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
     }
 }
 
-const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
+const customFilterArgs = computed(() => ({
     originalSeverityFilters: originalSeverityFilters.value,
     ssvcFilters: ssvcFilters.value,
     evidenceFilters: evidenceFilters.value,
@@ -1471,6 +1473,16 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     automaticAssessmentRescoreFilters: selectedAutomaticAssessmentRescoreFilters.value,
     defaultAutomaticAssessmentRescoreFilters: allAutomaticAssessmentRescoreFilterValues.value,
 }))
+const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState(customFilterArgs.value))
+// Bulk Changes: whether the list filters are the user's own (the sort does
+// not count), and what they are, for its scope.
+const bulkListFiltersCustom = computed(() => hasCustomProjectVulnFilterState({
+    ...customFilterArgs.value,
+    sortBy: 'rescored-severity',
+    sortOrder: 'desc',
+}))
+const bulkScopeLabels = computed(() => [...smartSearchChips.value, ...activeFilterChips.value]
+    .map(chip => String(chip.label || '')).filter(Boolean))
 
 const filterSidebarProps = computed(() => ({
     filters: filterState.value,
@@ -2116,6 +2128,8 @@ watch(currentUserRole, (role) => {
         :show="showBulkWorkflowModal"
         :task-id="currentVulnTaskId"
         :query="taskGroupListQuery"
+        :list-filters-custom="bulkListFiltersCustom"
+        :scope-labels="bulkScopeLabels"
         @close="showBulkWorkflowModal = false"
         @applied="handleBulkWorkflowApplied"
     />

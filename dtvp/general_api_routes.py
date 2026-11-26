@@ -50,6 +50,7 @@ from .assessment_use_cases import (
     AssessmentRequest,
     AssessmentValidationError,
     accepted_assessment_results as _accepted_assessment_results,
+    clean_up_assessment,
     delete_assessment,
     record_code_analysis_applications as _record_code_analysis_applications,
     save_assessment,
@@ -183,6 +184,20 @@ class AssessmentDeletionRequest(BaseModel):
     team: Optional[str] = None
 
 
+class AssessmentCleanupRequest(BaseModel):
+    # The findings to change.
+    instances: list[dict]
+    # "apply": give them the assessment of ``source``; "clear": remove theirs.
+    action: Literal["apply", "clear"]
+    # A team name, "General", or omitted/null for the whole assessment.
+    team: Optional[str] = None
+    # The finding whose stored assessment is kept (for "apply").
+    source: Optional[dict] = None
+    # "project|component|vulnerability" to the revision a preview showed.
+    revisions: Optional[dict[str, int]] = None
+    dry_run: bool = False
+
+
 class ExportRequest(BaseModel):
     # Omit to export everything that is due.
     update_ids: Optional[list[str]] = None
@@ -222,6 +237,9 @@ class BulkWorkflowFilters(BaseModel):
     automatic_assessment_ids: list[str] = Field(default_factory=list)
     automatic_assessment_outcome: list[str] = Field(default_factory=list)
     automatic_assessment_rescore: list[str] = Field(default_factory=list)
+    # One vulnerability group, by its exact id: a workflow run for that
+    # vulnerability only (the card's Repair…). The other filters still apply.
+    group_id: str = ""
 
 
 class BulkWorkflowRequest(BaseModel):
@@ -2099,6 +2117,12 @@ def _filter_bulk_workflow_task_groups(
         summary_index, base_filters,
         team_aliases=_team_alias_map(_team_document(deps, team_mapping)),
     )
+    if filters.group_id:
+        filtered_summaries = [
+            summary
+            for summary in filtered_summaries
+            if str(summary.get("id") or "") == filters.group_id
+        ]
     full_group_lookup = task.get("_full_result_by_id")
     if not isinstance(full_group_lookup, dict):
         full_group_lookup = {
@@ -3190,6 +3214,63 @@ def _register_assessment_routes(
             "the whole assessment" if req.team is None else f"the {req.team} assessment",
             len(results),
         )
+        return results
+
+    @router.post("/assessment/cleanup")
+    async def clean_up_assessment_route(
+        req: AssessmentCleanupRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        """Make the findings of a vulnerability agree: give the selected ones
+        the assessment of one finding, or remove theirs, for one team, the
+        Global assessment, or the whole assessment. With ``dry_run`` nothing
+        is written and every finding's before and after is returned."""
+
+        async def refresh_task_snapshots(
+            payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+        ) -> None:
+            try:
+                await asyncio.to_thread(
+                    _refresh_grouped_vuln_task_snapshots,
+                    deps.tasks,
+                    payloads,
+                    deps.load_team_mapping(),
+                )
+            except Exception:
+                deps.logger.exception(
+                    "Failed to refresh task snapshots after assessment cleanup"
+                )
+
+        try:
+            results = await clean_up_assessment(
+                deps,
+                req.instances,
+                action=req.action,
+                team=req.team,
+                source=req.source,
+                user=user,
+                revisions=req.revisions,
+                dry_run=req.dry_run,
+                after_persist=refresh_task_snapshots,
+            )
+        except AssessmentConflictError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "conflict", "conflicts": exc.conflicts},
+            )
+        except AssessmentPermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except AssessmentValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not req.dry_run:
+            deps.logger.info(
+                "%s cleaned up %s for %d finding(s) (%s)",
+                user,
+                "the whole assessment" if req.team is None else f"the {req.team} assessment",
+                len(results),
+                req.action,
+            )
         return results
 
     @router.get("/export")

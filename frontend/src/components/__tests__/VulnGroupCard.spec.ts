@@ -39,6 +39,9 @@ vi.mock('../../lib/api', async () => {
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
     getKnownUsers: vi.fn(() => Promise.resolve([])),
     deleteAssessment: vi.fn(() => Promise.resolve([])),
+    previewGroupRepair: vi.fn(() => Promise.resolve({ items: [], topics: [], selectable_group_ids: [] })),
+    getBulkWorkflowSummary: vi.fn(() => Promise.resolve({ workflows: [] })),
+    previewBulkWorkflow: vi.fn(() => new Promise(() => {})),
     }
 })
 
@@ -2105,8 +2108,8 @@ describe('VulnGroupCard', () => {
             project_uuid: 'p2',
             components: [{
                 ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f2',
-                // Differs only in what comparisons ignore (Version Coverage).
-                analysis_details: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] [Version Coverage: 2.0] ---\nNot shipped.',
+                // Rescored differently: checked on its own, not an inconsistency.
+                analysis_details: '[Rescored: 5.0] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L]\n\n--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.',
             }],
         })
         const wrapper = mount(VulnGroupCard, {
@@ -2121,6 +2124,78 @@ describe('VulnGroupCard', () => {
         expect(banner.attributes('data-inconsistent')).toBe('false')
         expect(banner.text()).toContain('Assessments differ between findings')
         expect(banner.text()).not.toContain('Why this is inconsistent')
+        expect(banner.find('[data-testid="card-differences-cleanup"]').exists()).toBe(true)
+    })
+
+    it('offers Repair… with its stages when a repair applies, for reviewers only', async () => {
+        const api = await import('../../lib/api')
+        vi.mocked(api.previewGroupRepair).mockResolvedValue({
+            task_id: 'task-1', workflow: {} as any, preview_token: 't', group_fingerprints: {},
+            selectable_group_ids: [mockGroup.id],
+            items: [{ group_id: mockGroup.id, repairable: true, repairs: [
+                { id: 'sync_findings', label: 'Synchronize 1 finding' },
+                { id: 'rescoring', label: 'Repair rescoring on 2 findings' },
+            ] }],
+            topics: [{ id: 'sync_findings', label: 'Synchronize' }, { id: 'rescoring', label: 'Rescoring' }],
+            summary: {},
+        } as any)
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        const first = group.affected_versions[0].components[0]
+        first.analysis_state = 'NOT_AFFECTED'
+        first.analysis_details = '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        group.affected_versions.push({
+            ...group.affected_versions[0], project_version: '2.0', project_uuid: 'p2',
+            components: [{ ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f2', analysis_state: 'EXPLOITABLE',
+                analysis_details: '--- [Team: General] [State: EXPLOITABLE] [Assessed By: rita] ---\nReachable.' }],
+        })
+        const mountAs = (role: string) => mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role, username: 'rita' }), teamMapping: ref({}), vulnTaskId: ref('task-1') } },
+        })
+
+        const wrapper = mountAs('REVIEWER')
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        expect(api.previewGroupRepair).toHaveBeenCalledWith('task-1', mockGroup.id)
+        const repair = wrapper.get('[data-testid="card-differences-repair"]')
+        expect(repair.attributes('title')).toBe('Repair Assessments for this vulnerability: Synchronize, Rescoring')
+        await wrapper.get('[data-testid="assessment-more-button"]').trigger('click')
+        expect(wrapper.get('[data-testid="assessment-repair-button"]').text()).toContain('Synchronize, Rescoring')
+
+        vi.mocked(api.previewGroupRepair).mockClear()
+        const analyst = mountAs('ANALYST')
+        await analyst.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+        expect(api.previewGroupRepair).not.toHaveBeenCalled()
+        expect(analyst.find('[data-testid="card-differences-repair"]').exists()).toBe(false)
+    })
+
+    it('does not count a review note or the order of the team blocks as a different assessment', async () => {
+        const group = JSON.parse(JSON.stringify(mockGroup))
+        const first = group.affected_versions[0].components[0]
+        const general = '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        const teamA = '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: ana] [Justification: CODE_NOT_PRESENT] ---\nNot used.'
+        const teamB = '--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: ben] [Justification: CODE_NOT_PRESENT] ---\nNot used.'
+        first.analysis_state = 'NOT_AFFECTED'
+        first.analysis_details = `${general}\n\n${teamA}\n\n${teamB}`
+        group.affected_versions.push({
+            ...group.affected_versions[0],
+            project_version: '2.0',
+            project_uuid: 'p2',
+            components: [{
+                ...first, project_version: '2.0', project_uuid: 'p2', finding_uuid: 'f2',
+                analysis_details: `${general.replace(' ---', ' [Version Coverage: 2.0] ---')}\n\n${teamB}\n\n${teamA}`,
+            }],
+        })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'rita' }), teamMapping: ref({}) } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="card-differences-banner"]').exists()).toBe(false)
     })
 
     it('lists the version overrides read-only, with pending approval', async () => {
@@ -2213,7 +2288,7 @@ describe('VulnGroupCard', () => {
         expect(updateAssessment).not.toHaveBeenCalled()
     })
 
-    it('says which teams disagree when one finding holds conflicting team assessments', async () => {
+    it('does not call teams that decide differently in one finding inconsistent', async () => {
         const group = JSON.parse(JSON.stringify(mockGroup))
         group.affected_versions[0].components[0].analysis_state = 'IN_TRIAGE'
         group.affected_versions[0].components[0].analysis_details =
@@ -2223,12 +2298,10 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
         await flushPromises()
 
-        const banner = wrapper.get('[data-testid="card-differences-banner"]')
-        expect(banner.text()).toContain('Why this is inconsistent')
-        expect(banner.get('[data-testid="card-team-states"]').text()).toContain('Platform in triage')
-        expect(banner.get('[data-testid="card-team-states"]').text()).toContain('Edge not affected')
-        // One finding, one assessment: nothing to compare between findings.
-        expect(banner.find('[data-testid="card-differences-open"]').exists()).toBe(false)
+        // Teams may disagree: a vulnerability affects components differently.
+        // One finding, one assessment: nothing differs between findings either.
+        expect((wrapper.vm as any).displayState).not.toBe('INCONSISTENT')
+        expect(wrapper.find('[data-testid="card-differences-banner"]').exists()).toBe(false)
     })
 
     it('does not count a historical record as a team\'s current assessment', async () => {

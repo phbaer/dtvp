@@ -418,7 +418,10 @@ export interface TaskVulnGroupListQuery {
 export type BulkWorkflowFilters = Omit<
     TaskVulnGroupListQuery,
     'sort' | 'order' | 'offset' | 'cursor' | 'limit' | 'include_counts' | 'generation'
->;
+> & {
+    /** One vulnerability group by its exact id (the card's Repair…). */
+    group_id?: string;
+};
 
 export interface BulkWorkflowMetadata {
     id: string;
@@ -815,6 +818,21 @@ export const previewBulkWorkflow = async (
         filters,
     }, sourceId));
     return waitForBulkWorkflowTask<BulkWorkflowPreviewResponse>(operationId, onProgress);
+};
+
+/**
+ * The Repair Assessments preview of one vulnerability, answered directly
+ * (not as a polled task): whether a repair applies, and which.
+ */
+export const previewGroupRepair = async (
+    taskId: string,
+    groupId: string,
+): Promise<BulkWorkflowPreviewResponse> => {
+    const res = await api.post('/bulk-workflows/assessment-repair/preview', {
+        task_id: taskId,
+        filters: { group_id: groupId },
+    });
+    return res.data;
 };
 
 export const applyBulkWorkflow = async (
@@ -1249,6 +1267,51 @@ export const updateAssessment = async (payload: AssessmentPayload) => {
 /** Clears one team's assessment ("General" for the Global one), or all of it with `null`. */
 export const deleteAssessment = async (instances: any[], team: string | null) => {
     const res = await api.post('/assessment/delete', { instances, team });
+    return res.data;
+};
+
+export interface AssessmentCleanupRequest {
+    /** The findings to change. */
+    instances: any[];
+    /** `apply`: give them the assessment of `source`; `clear`: remove theirs. */
+    action: 'apply' | 'clear';
+    /** A team, "General", or `null` for the whole assessment. */
+    team: string | null;
+    /** The finding whose stored assessment is kept (for `apply`). */
+    source?: { project_uuid: string; component_uuid: string; vulnerability_uuid: string } | null;
+    /** `project|component|vulnerability` to the revision the preview showed. */
+    revisions?: Record<string, number>;
+}
+
+export interface AssessmentCleanupValue {
+    state: string;
+    details: string;
+    suppressed: boolean;
+}
+
+/** One finding of a cleanup preview: what it holds and what it would hold. */
+export interface AssessmentCleanupPreview {
+    finding_uuid: string | null;
+    project_uuid: string;
+    component_uuid: string;
+    vulnerability_uuid: string;
+    revision: number;
+    /** The kept finding's revision, sent back on confirm; `null` for `clear`. */
+    source_revision: number | null;
+    changed: boolean;
+    before: AssessmentCleanupValue;
+    after: AssessmentCleanupValue | null;
+}
+
+/** What a cleanup would change, per finding; nothing is written. */
+export const previewAssessmentCleanup = async (request: AssessmentCleanupRequest): Promise<AssessmentCleanupPreview[]> => {
+    const res = await api.post('/assessment/cleanup', { ...request, dry_run: true });
+    return res.data;
+};
+
+/** Makes the findings agree as previewed; a change in between is a 409. */
+export const applyAssessmentCleanup = async (request: AssessmentCleanupRequest) => {
+    const res = await api.post('/assessment/cleanup', request);
     return res.data;
 };
 

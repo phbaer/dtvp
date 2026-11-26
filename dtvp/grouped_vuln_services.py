@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from .assessment_model import RESPONSE_TAG_PATTERN, analysis_response
 from .assessment_restore_services import refresh_group_restore_metadata
 from .assessment_scopes import (
     INCONSISTENCY_REASON_VERSION_OVERRIDE_LABEL_MISMATCH,
@@ -33,6 +34,7 @@ from .logic import (
     STATE_PRIORITY,
     _parse_assessment_blocks,
     populate_group_dependency_chains,
+    blocks_in_team_order,
     without_historical_blocks,
 )
 from .task_group_query_services import build_task_group_query_index
@@ -199,6 +201,8 @@ def _finding_order_key(instance: Dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+_RESPONSE_TAG = re.compile(RESPONSE_TAG_PATTERN, re.IGNORECASE)
+
 _COMPARISON_IGNORED_TAGS = [
     r"\[Date:\s*[^\]]*\]",
     r"\[Assessed By:\s*[^\]]*\]",
@@ -215,6 +219,36 @@ _COMPARISON_IGNORED_TAGS = [
 ]
 
 
+def _without_optional_decisions(details: str) -> str:
+    """``details`` without the SSVC record (tag, summary and details) and
+    the response: both are optional, so a finding without one does not
+    differ from one with it. Two different ones do; see
+    ``ssvc_comparison_key`` and ``analysis_response``."""
+    from .ssvc_services import DETAILS as SSVC_DETAILS
+    from .ssvc_services import SUMMARY as SSVC_SUMMARY
+    from .ssvc_services import TAG as SSVC_TAG
+
+    text = SSVC_SUMMARY.sub("", SSVC_DETAILS.sub("", str(details or "")))
+    text = SSVC_TAG.sub("", text)
+    return _RESPONSE_TAG.sub("", text)
+
+
+def ssvc_comparison_key(details: str) -> Optional[str]:
+    """The SSVC record of a text as compared between findings (its tag and
+    its details, whitespace aside); ``None`` when the text has none."""
+    from .ssvc_services import DETAILS as SSVC_DETAILS
+    from .ssvc_services import GENERAL_HEADER, mask_details
+    from .ssvc_services import TAG as SSVC_TAG
+
+    text = str(details or "")
+    header = GENERAL_HEADER.search(mask_details(text))
+    tags = [tag.strip() for tag in SSVC_TAG.findall(header[0])] if header else []
+    blocks = [" ".join(block.split()) for block in SSVC_DETAILS.findall(text)]
+    if not tags and not blocks:
+        return None
+    return "|".join(tags) + "||" + "||".join(blocks)
+
+
 @functools.lru_cache(maxsize=8192)
 def comparable_assessment_text(details: str) -> str:
     """The part of an assessment text that the findings of a vulnerability
@@ -223,23 +257,50 @@ def comparable_assessment_text(details: str) -> str:
     Historical blocks are records that belong to one finding (a former
     team's assessment, a team assessment restored from an export): they are
     left out, as are the tags that say who assessed when, the rescoring, the
-    pending status and the version coverage. The web client compares the
-    same way (``comparableAssessmentText`` in assessment-helpers.ts); both
-    are tested against ``assessment_scope_cases.json``.
+    pending status and the version coverage. The order of the team blocks
+    does not count either, nor the optional SSVC record and response, which
+    are compared on their own: missing is no difference, two different ones
+    are. The web client compares the same way (``comparableAssessmentText``
+    in assessment-helpers.ts); both are tested against
+    ``assessment_scope_cases.json``.
     """
-    cleaned = without_historical_blocks(details)
+    cleaned = blocks_in_team_order(
+        without_historical_blocks(_without_optional_decisions(details))
+    )
     for pattern in _COMPARISON_IGNORED_TAGS:
         cleaned = re.sub(pattern, "", cleaned)
     return " ".join(cleaned.split()).strip()
 
 
+@functools.lru_cache(maxsize=8192)
+def assessment_comparison_parts(details: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """What findings are compared on, part by part: the text ahead of the
+    blocks (as ``comparable_assessment_text`` compares it), and per current
+    block its team and signature (state, justification, text).
+
+    Findings agree when the parts they have are the same: a block that one
+    finding lacks is a gap for Synchronize, not a difference, and so is a
+    missing SSVC record or response. The web client compares the same way
+    (``assessmentComparisonParts``)."""
+    cleaned = without_historical_blocks(_without_optional_decisions(details))
+    shared, blocks = _parse_assessment_blocks(cleaned)
+    lead = comparable_assessment_text(shared) if str(shared or "").strip() else ""
+    signatures = tuple(
+        (str(block.get("team") or "").strip().casefold(), _normalize_block_signature(block))
+        for block in blocks
+        if not block.get("historical")
+    )
+    return lead, signatures
+
+
 def _normalize_block_signature(block: Dict[str, Any]) -> str:
     details = " ".join(str(block.get("details") or "").split())
+    justification = str(block.get("justification") or "")
     return "|".join(
         [
-            str(block.get("team") or ""),
+            str(block.get("team") or "").strip().casefold(),
             str(block.get("state") or ""),
-            str(block.get("justification") or ""),
+            "" if justification == "NOT_SET" else justification,
             details,
         ]
     )
@@ -365,41 +426,45 @@ def _derive_group_inconsistency_reasons(
     )
 
     if not has_global:
-        instance_block_signatures = []
-        has_inconsistent_instance_blocks = False
+        # A team contradicts itself: its current blocks differ, in one
+        # finding or across the findings of the scope (each version override
+        # scope is judged on its own). Teams may disagree with each other: a
+        # vulnerability affects components differently. A team's block that
+        # some findings lack is a gap for Synchronize (Incomplete), not a
+        # contradiction.
+        by_team: Dict[str, set[str]] = {}
         for instance_blocks in summary["instance_blocks"]:
-            significant = [
-                block
-                for block in instance_blocks
-                if block.get("state") != "NOT_SET" and block.get("team") != "General"
-            ]
-            if not significant:
-                continue
-            distinct_signatures = sorted(
-                {_normalize_block_signature(block) for block in significant}
-            )
-            instance_block_signatures.append("||".join(distinct_signatures))
-            if len(significant) > 1 and len(distinct_signatures) > 1:
-                has_inconsistent_instance_blocks = True
-
-        if (
-            len(set(instance_block_signatures)) > 1
-            or (
-                has_inconsistent_instance_blocks
-                and len(instance_block_signatures) <= 1
-            )
-        ):
+            for block in instance_blocks:
+                if block.get("state") == "NOT_SET" or block.get("team") == "General":
+                    continue
+                team = str(block.get("team") or "").strip().casefold()
+                by_team.setdefault(team, set()).add(_normalize_block_signature(block))
+        if any(len(signatures) > 1 for signatures in by_team.values()):
             reasons.append(INCONSISTENCY_REASON_TEAM_ASSESSMENT_MISMATCH)
 
-    assessed_details = [
-        comparable_assessment_text(_instance_details(instance))
+    # The assessed findings agree when the parts they have are the same: the
+    # text ahead of the blocks, each block (the Global one included) where
+    # present, and the optional SSVC record and response where set. A part
+    # that some findings lack is a gap, not a difference.
+    assessed_texts = [
+        _instance_details(instance)
         for instance in instances
         if _instance_state(instance) != "NOT_SET"
     ]
-    assessed_details = [details for details in assessed_details if details]
-    details_mismatch = len(assessed_details) > 1 and any(
-        details != assessed_details[0] for details in assessed_details
+    leads: set[str] = set()
+    block_signatures: Dict[str, set[str]] = {}
+    for text in assessed_texts:
+        lead, signatures = assessment_comparison_parts(text)
+        if lead:
+            leads.add(lead)
+        for team, signature in signatures:
+            block_signatures.setdefault(team, set()).add(signature)
+    details_mismatch = len(leads) > 1 or any(
+        len(signatures) > 1 for signatures in block_signatures.values()
     )
+    ssvc_keys = {key for text in assessed_texts if (key := ssvc_comparison_key(text))}
+    responses = {value for text in assessed_texts if (value := analysis_response(text))}
+    details_mismatch = details_mismatch or len(ssvc_keys) > 1 or len(responses) > 1
     # Preserve the existing legacy-assessment classification: differing legacy
     # plaintext alone did not make a group inconsistent. Once another supported
     # inconsistency is present, retaining this diagnostic is still useful.
@@ -419,6 +484,24 @@ def _assessed_team_keys(
         team.casefold()
         for team in _normalize_group_tags(list(assessed_teams), team_mapping or {})
     }
+
+
+def _has_team_block_gap(summary: Dict[str, Any]) -> bool:
+    """Whether a team's current block (with a decision) is on some assessed
+    findings and missing on others."""
+    teams_per_finding = [
+        {
+            str(block.get("team") or "").strip().casefold()
+            for block in blocks
+            if block.get("team") != "General" and block.get("state") != "NOT_SET"
+        }
+        for state, blocks in zip(summary["component_states"], summary["instance_blocks"])
+        if state != "NOT_SET"
+    ]
+    if len(teams_per_finding) < 2:
+        return False
+    every = set.union(*teams_per_finding)
+    return any(teams != every for teams in teams_per_finding)
 
 
 def _derive_group_lifecycle(
@@ -486,6 +569,11 @@ def _derive_group_lifecycle(
     # assessment before the vulnerability can be considered complete.
     if missing_teams:
         return "INCOMPLETE" if has_any else "OPEN"
+
+    # A team's block that some assessed findings have and others lack is a
+    # gap for Synchronize, not a contradiction.
+    if _has_team_block_gap(summary):
+        return "INCOMPLETE"
 
     # Findings that disagree on the state were returned as INCONSISTENT
     # above (ANALYSIS_STATE_MISMATCH), whichever version they belong to.

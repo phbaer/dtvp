@@ -18,12 +18,12 @@ export const INCONSISTENCY_REASON_OPTIONS: ReadonlyArray<{
     {
         value: 'TEAM_ASSESSMENT_MISMATCH',
         label: 'Team assessments differ',
-        description: 'Structured team assessment blocks differ within or across findings.',
+        description: 'A team contradicts itself: its assessment blocks differ within a finding or across findings.',
     },
     {
         value: 'ASSESSMENT_DETAILS_MISMATCH',
         label: 'Assessment details differ',
-        description: 'Assessed findings have different substantive assessment text.',
+        description: 'Parts the findings both have say different things (two different responses or SSVC records included).',
     },
     {
         value: 'VERSION_OVERRIDE_PARTIAL',

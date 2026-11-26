@@ -5,10 +5,13 @@ the result of the previous one, so a finding receives a single write:
 
 1. restore a rescored CVSS vector that was lost and is recoverable from audit
    history;
-2. synchronize a consistent assessment to findings that lack it, keep
+2. carry the SSVC record and the response the findings agree on to those
+   without one, so that a vulnerability that differed only in these is
+   synchronized in the same run;
+3. synchronize a consistent assessment to findings that lack it, keep
    assessments of teams that no longer own the vulnerability as historical
    blocks, and combine conflicts that involve no current team;
-3. repair missing, incomplete, or incorrect rule-based CVSS rescores.
+4. repair missing, incomplete, or incorrect rule-based CVSS rescores.
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ from typing import Any, Callable
 from ..assessment_model import (
     SEE_GLOBAL_ASSESSMENT,
     agreed_response,
+    analysis_response,
+    preserve_or_share_response,
     preserve_response,
     preserve_version_override,
 )
@@ -30,7 +35,10 @@ from ..rescore_rule_services import (
     build_rescore_rule_sync_payloads,
     build_rescore_rule_sync_preview,
 )
+from ..ssvc_services import agreed_record as agreed_ssvc_record
+from ..ssvc_services import preserve_or_share_record as preserve_or_share_ssvc_record
 from ..ssvc_services import preserve_record as preserve_ssvc_record
+from ..ssvc_services import read_record as read_ssvc_record
 from ..ssvc_services import strip_details as strip_ssvc_details
 from ..team_mapping import normalize_team_values
 from .assessment_restore import (
@@ -63,12 +71,16 @@ REPAIR_UNOWNED_REFERENCES = "unowned_references"
 REPAIR_COMBINE_CONFLICT = "combine_conflict"
 REPAIR_RESCORING = "rescoring"
 REPAIR_UNKNOWN_COMPONENT = "unknown_component"
+REPAIR_SSVC_RECORD = "ssvc_record"
+REPAIR_RESPONSE = "response"
 
 # Short names for the per-topic selection buttons, in pipeline order.
 REPAIR_TOPICS = {
     REPAIR_RESTORE_CVSS: "Restore CVSS",
     REPAIR_RESTORE_TICKETS: "Restore tickets",
     REPAIR_UNKNOWN_COMPONENT: "Unknown component",
+    REPAIR_SSVC_RECORD: "SSVC record",
+    REPAIR_RESPONSE: "Response",
     REPAIR_SYNC_FINDINGS: "Synchronize",
     REPAIR_FORMER_TEAMS: "Former teams",
     REPAIR_REFER_TEAMS: "Refer to global",
@@ -918,6 +930,13 @@ def _team_stage(
         # The new findings this repair would change; one it would leave as
         # it is does not count.
         new_changing: list[dict[str, Any]] = []
+        # Each finding keeps its own SSVC record; one without takes the record
+        # the others agree on, as a save does (the response likewise, in
+        # ``_with_rescoring``).
+        shared_ssvc = agreed_ssvc_record([_details(instance) for instance in instances])
+
+        def preserve_ssvc_record(details: str, old: str) -> str:
+            return preserve_or_share_ssvc_record(details, old, shared_ssvc)
 
         if lifecycle == "INCONSISTENT":
             # A conflict between current teams needs a human decision. One
@@ -1029,12 +1048,122 @@ def _team_stage(
                 # The new findings the repair would change, where they are,
                 # and how many this run left.
                 "new_findings": len(new_changing),
+                "new_finding_keys": {_finding_key(instance) for instance in new_changing},
                 "new_finding_places": new_finding_places(group, new_changing),
                 "new_findings_left": left_new,
             }
     return payloads, info, missing_identity, sum(
         entry["new_findings_left"] for entry in info.values()
     )
+
+
+def _finding_key(instance: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(str(instance.get(key) or "") for key in _IDENTITY_KEYS)
+
+
+def _has_own_ssvc_record(details: str) -> bool:
+    try:
+        return read_ssvc_record(details) is not None
+    except (ValueError, KeyError, TypeError):
+        # An unreadable record is a record: it is not replaced.
+        return True
+
+
+def _carry_stage(
+    groups: list[dict[str, Any]],
+    context: BulkWorkflowContext,
+) -> tuple[list[Payload], dict[str, dict[str, Any]], int]:
+    """Carry the SSVC record and the response the findings agree on to
+    those without one.
+
+    Both are decided for the vulnerability with its Global assessment.
+    Findings that came later (a new project version, a replaced component)
+    start without them, and a save keeps each finding's own. They are carried
+    as a save carries them (``agreed_record``/``preserve_or_share_record``,
+    ``agreed_response``/``preserve_or_share_response``): only when every
+    finding that holds one holds the same, none is unreadable, and only onto
+    a finding with a General block. Nothing else of the text changes. New
+    findings of a new version take them only when the reviewer includes
+    them, as Synchronize does.
+    """
+    payloads: list[Payload] = []
+    info: dict[str, dict[str, Any]] = {}
+    left_total = 0
+    for group in groups:
+        group_id = str(group.get("id") or "")
+        instances = _instances(group)
+        texts = [_details(instance) for instance in instances]
+        shared_ssvc = agreed_ssvc_record(texts)
+        shared_response = agreed_response(texts)
+        if shared_ssvc is None and shared_response is None:
+            continue
+        new = new_finding_ids(group)
+        include_new = group_id in context.include_new_findings
+        carried = {"ssvc": 0, "response": 0}
+        new_changing: list[dict[str, Any]] = []
+        left = 0
+        for instance in instances:
+            old = _details(instance)
+            details = old
+            what = []
+            if shared_ssvc is not None and not _has_own_ssvc_record(old):
+                details = preserve_or_share_ssvc_record(details, old, shared_ssvc)
+                if _differs(details, old):
+                    what.append("ssvc")
+            if shared_response is not None and analysis_response(old) is None:
+                before = details
+                details = preserve_or_share_response(details, old, shared_response)
+                if _differs(details, before):
+                    what.append("response")
+            if not what:
+                continue  # holds its own, or no General block to hold them
+            if id(instance) in new:
+                new_changing.append(instance)
+                if not include_new:
+                    left += 1
+                    continue
+            if not all(instance.get(key) for key in _IDENTITY_KEYS):
+                continue
+            payloads.append((instance, _payload(instance, _state(instance), details)))
+            for key in what:
+                carried[key] += 1
+        if carried["ssvc"] or carried["response"] or new_changing:
+            info[group_id] = {
+                "carried": carried["ssvc"],
+                "response": shared_response if carried["response"] else None,
+                "carried_response": carried["response"],
+                "new_finding_keys": {_finding_key(instance) for instance in new_changing},
+                "new_finding_places": new_finding_places(group, new_changing),
+            }
+        left_total += left
+    return payloads, info, left_total
+
+
+def _with_current_lifecycle(
+    groups: list[dict[str, Any]],
+    changed: set[str],
+    team_mapping: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """The groups, with the lifecycle of the changed ones derived again from
+    their findings as an earlier stage left them: a vulnerability that
+    differed only in what that stage carried is no longer inconsistent, and
+    the next stage treats it as it now is."""
+    from ..grouped_vuln_services import summarize_grouped_vulnerabilities
+
+    result = []
+    for group in groups:
+        if str(group.get("id") or "") not in changed:
+            result.append(group)
+            continue
+        copy = {**group}
+        metadata = summarize_grouped_vulnerabilities([copy], team_mapping)[0]["list_metadata"]
+        copy["list_metadata"] = {
+            **(group.get("list_metadata") or {}),
+            "lifecycle": metadata.get("lifecycle"),
+            "inconsistency_reasons": metadata.get("inconsistency_reasons") or [],
+        }
+        result.append(copy)
+    return result
 
 
 def _apply_payloads(
@@ -1102,10 +1231,22 @@ def _run(
     unknown_payloads, unknown_info = _unknown_component_stage(keep_alive[-1], context)
     record(unknown_payloads, {})
 
+    # Before Synchronize: a vulnerability that differed only in the SSVC
+    # record or the response is then incomplete, not inconsistent, and is
+    # synchronized in the same run. Each finding is still written once.
+    carry_payloads, carry_info, carry_new_left = _carry_stage(keep_alive[-1], context)
+    record(carry_payloads, {})
+    if carry_payloads:
+        keep_alive[-1] = _with_current_lifecycle(
+            keep_alive[-1], set(carry_info), context.team_mapping or {}
+        )
+
     team_payloads, team_info, missing_identity, new_left = _team_stage(
         keep_alive[-1], context, int(time.time() * 1000)
     )
     record(team_payloads, {"missing_identity": missing_identity, "new_finding": new_left})
+    if carry_new_left and not new_left:
+        skipped["new_finding"] = skipped.get("new_finding", 0) + carry_new_left
 
     rescore_preview: dict[str, Any] = {"items": []}
     try:
@@ -1125,6 +1266,7 @@ def _run(
         "ticket_info": ticket_info,
         "unknown_info": unknown_info,
         "team_info": team_info,
+        "ssvc_info": carry_info,
         "rescore_items": {item["group_id"]: item for item in rescore_preview["items"]},
     }
 
@@ -1231,6 +1373,24 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
             f"({', '.join(conflicting['states'])}): conflicting, not carried"
         )
 
+    ssvc = run["ssvc_info"].get(group_id) or {}
+    if ssvc.get("carried"):
+        repairs.append({
+            "id": REPAIR_SSVC_RECORD,
+            "label": (
+                f"Carry the SSVC record the other findings agree on to "
+                f"{_plural(ssvc['carried'], 'finding')} without one"
+            ),
+        })
+    if ssvc.get("carried_response"):
+        repairs.append({
+            "id": REPAIR_RESPONSE,
+            "label": (
+                f"Carry the response the other findings agree on ({ssvc['response']}) to "
+                f"{_plural(ssvc['carried_response'], 'finding')} without one"
+            ),
+        })
+
     team = run["team_info"].get(group_id) or {}
     if team.get("synchronized"):
         repairs.append({
@@ -1303,7 +1463,11 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
 
     # Findings a new project version added: listed, and synchronized only
     # when the reviewer includes them for this vulnerability.
-    new_findings = int(team.get("new_findings") or 0)
+    new_keys = set(team.get("new_finding_keys") or ()) | set(ssvc.get("new_finding_keys") or ())
+    new_findings = len(new_keys) if new_keys else int(team.get("new_findings") or 0)
+    new_places = list(dict.fromkeys([
+        *(team.get("new_finding_places") or []), *(ssvc.get("new_finding_places") or []),
+    ]))
     if not repairs and not review and not new_findings:
         return None
     return {
@@ -1314,7 +1478,7 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
         "review": review,
         "finding_count": finding_count,
         "new_finding_count": new_findings,
-        "new_finding_places": list(team.get("new_finding_places") or []),
+        "new_finding_places": new_places,
         "repairable": finding_count > 0 or new_findings > 0,
         # Not selected by default: the repair makes a decision, part of the
         # vulnerability cannot be repaired automatically, or all it could

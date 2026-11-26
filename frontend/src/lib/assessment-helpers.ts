@@ -1,7 +1,7 @@
 import { combineLifecycles, getAssessmentScopes, scopedGroup, type AssessmentScopeView } from './assessmentScopes';
 import type { GroupedVuln, InconsistencyReason, Tags, TagValue } from '../types';
 import { normalizeInconsistencyReasons } from './inconsistency';
-import { maskSsvcDetails, ssvcDetailsPattern, stripSsvcDetails } from './ssvc';
+import { maskSsvcDetails, ssvcDetailsPattern, stripSsvcDetails, stripSsvcDocumentation } from './ssvc';
 
 export interface AssessmentBlock {
     ssvc?: string;
@@ -273,15 +273,84 @@ export const withoutHistoricalBlocks = (fullText: string): string => {
 };
 
 /**
+ * The text with its team blocks sorted by team, General first. Their order
+ * carries no meaning and writers differ in it. For comparing only, as the
+ * server's ``blocks_in_team_order``.
+ */
+export const blocksInTeamOrder = (fullText: string): string => {
+    const text = String(fullText || '');
+    const masked = maskSsvcDetails(text);
+    const starts = [...masked.matchAll(/---(?=\s*\[Team:)/g)].map(match => match.index ?? 0);
+    if (starts.length < 2) return text;
+    const blocks = starts.map((start, index) => {
+        const block = text.slice(start, index + 1 < starts.length ? starts[index + 1] : text.length);
+        const headerEnd = block.indexOf('---', 3);
+        const header = headerEnd === -1 ? block.slice(3) : block.slice(3, headerEnd);
+        const team = (header.match(/\[Team:\s*([^\]]+)\]/)?.[1] || '').trim().toLocaleLowerCase();
+        return { team, index, block: block.trim() };
+    });
+    blocks.sort((left, right) => (
+        Number(left.team !== 'general') - Number(right.team !== 'general')
+        || (left.team < right.team ? -1 : left.team > right.team ? 1 : 0)
+        || left.index - right.index
+    ));
+    return [text.slice(0, starts[0]).trim(), ...blocks.map(entry => entry.block)].join('\n\n').trim();
+};
+
+/**
  * The part of an assessment text that the findings of a vulnerability must
  * agree on. Historical blocks are records that belong to one finding; they
  * are left out, as are the tags that say who assessed when, the rescoring,
- * the pending status and the version coverage. As the server's
- * ``comparable_assessment_text``; both are tested against
+ * the pending status and the version coverage, and the order of the team
+ * blocks. As the server's ``comparable_assessment_text``; both are tested against
  * fixtures/assessment_scope_cases.json.
  */
+/**
+ * The text without the SSVC record (tag, summary and details) and the
+ * response: both are optional, so a finding without one does not differ from
+ * one with it; two different ones do (`ssvcComparisonKey`,
+ * `parseAssessmentResponse`). As the server's ``_without_optional_decisions``.
+ */
+const withoutOptionalDecisions = (details: string): string =>
+    stripSsvcDocumentation(String(details || ''))
+        .replace(/\[SSVC:\s*([^\]]+)\]/g, '')
+        .replace(responseTagPattern(), '');
+
+/** The SSVC record as compared between findings; null when there is none. */
+export const ssvcComparisonKey = (details: string | undefined | null): string | null => {
+    const text = String(details || '');
+    const header = maskSsvcDetails(text).match(/---\s*\[Team:\s*General\][^\n]*?---/i);
+    const tags = header ? [...header[0].matchAll(/\[SSVC:\s*([^\]]+)\]/g)].map(match => match[1]!.trim()) : [];
+    const blocks = [...text.matchAll(ssvcDetailsPattern())].map(match => String(match[1] || '').replace(/\s+/g, ' ').trim());
+    if (!tags.length && !blocks.length) return null;
+    return `${tags.join('|')}||${blocks.join('||')}`;
+};
+
+/** A block as findings compare it: team (case aside), state, justification, text. */
+export const normalizeBlockSignature = (block: AssessmentBlock): string => JSON.stringify({
+    team: block.team.trim().toLocaleLowerCase(),
+    state: block.state,
+    justification: !block.justification || block.justification === 'NOT_SET' ? '' : block.justification,
+    details: String(block.details || '').replace(/\s+/g, ' ').trim(),
+});
+
+/**
+ * What findings are compared on, part by part: the text ahead of the blocks
+ * and per current block its team and signature. A part one finding lacks is
+ * a gap, not a difference. As the server's ``assessment_comparison_parts``.
+ */
+export const assessmentComparisonParts = (details: string | undefined | null): { lead: string; blocks: Array<[string, string]> } => {
+    const current = withoutHistoricalBlocks(withoutOptionalDecisions(String(details || '')));
+    const [shared] = splitAtFirstTeamBlock(current);
+    const lead = shared.trim() ? comparableAssessmentText(shared) : '';
+    const blocks = parseAssessmentBlocks(current)
+        .filter(block => !block.historical)
+        .map(block => [block.team.trim().toLocaleLowerCase(), normalizeBlockSignature(block)] as [string, string]);
+    return { lead, blocks };
+};
+
 export const comparableAssessmentText = (details: string | undefined | null): string =>
-    withoutHistoricalBlocks(String(details || ''))
+    blocksInTeamOrder(withoutHistoricalBlocks(withoutOptionalDecisions(String(details || ''))))
         .replace(/\[Date:\s*[^\]]*\]/g, '')
         .replace(/\[Assessed By:\s*[^\]]*\]/g, '')
         .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
@@ -293,6 +362,26 @@ export const comparableAssessmentText = (details: string | undefined | null): st
         .replace(/\[Override Reason:\s*[^\]]*\]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+
+/**
+ * What makes two findings' texts different versions of the assessment for
+ * the views that list them: what the server compares
+ * (``comparableAssessmentText``), and the rescoring, version override,
+ * response and SSVC record, which it checks on their own but a reviewer
+ * must see. Who assessed when,
+ * the review marker, records of one finding, whitespace and the order of
+ * the team blocks do not count.
+ */
+export const assessmentVariantKey = (details: string | undefined | null): string => {
+    const current = withoutHistoricalBlocks(String(details || ''));
+    const tags = [...current.matchAll(/\[(?:Rescored(?: Vector)?|Version Override|Override Reason):\s*[^\]]*\]/g)]
+        .map(match => match[0].replace(/\s+/g, ' '))
+        .sort();
+    // The optional response and SSVC record: a finding without one is no
+    // conflict, but it is a version of its own here, so that the views show
+    // what a tidy-up (Repair, a save) would carry.
+    return `${comparableAssessmentText(details)}|${tags.join(' ')}|${parseAssessmentResponse(details) || ''}|${ssvcComparisonKey(details) || ''}`;
+};
 
 /**
  * One active block per team; a historical block is a record of its own and
@@ -1168,43 +1257,47 @@ const getGroupInconsistencyReasonsFromSummary = (
     );
 
     if (!hasGlobalAssessment) {
-        const normalizeBlockSignature = (block: AssessmentBlock) => JSON.stringify({
-            team: block.team,
-            state: block.state,
-            justification: block.justification,
-            details: block.details.replace(/\s+/g, ' ').trim(),
-        });
-        const instanceBlockSignatures = allInstances
-            .map(instance => {
-                const significantBlocks = parseAssessmentBlocks(getInstanceAssessmentDetails(instance))
-                    .filter(block => !block.historical && block.state !== 'NOT_SET' && block.team !== 'General');
-                if (significantBlocks.length === 0) return '';
-                return Array.from(new Set(significantBlocks.map(normalizeBlockSignature)))
-                    .sort((left, right) => left.localeCompare(right))
-                    .join('||');
-            })
-            .filter(Boolean);
-        const hasInconsistentInstanceBlocks = allInstances.some(instance => {
-            const significantBlocks = parseAssessmentBlocks(getInstanceAssessmentDetails(instance))
-                .filter(block => !block.historical && block.state !== 'NOT_SET' && block.team !== 'General');
-            return significantBlocks.length > 1
-                && new Set(significantBlocks.map(normalizeBlockSignature)).size > 1;
-        });
+        // A team contradicts itself: its current blocks differ, in one finding
+        // or across the findings. Teams may disagree with each other, and a
+        // block some findings lack is a gap for Synchronize. As the server.
+        const byTeam = new Map<string, Set<string>>();
+        for (const instance of allInstances) {
+            for (const block of parseAssessmentBlocks(getInstanceAssessmentDetails(instance))) {
+                if (block.historical || block.state === 'NOT_SET' || block.team === 'General') continue;
+                const team = block.team.trim().toLocaleLowerCase();
+                if (!byTeam.has(team)) byTeam.set(team, new Set());
+                byTeam.get(team)!.add(normalizeBlockSignature(block));
+            }
+        }
 
-        if (
-            new Set(instanceBlockSignatures).size > 1
-            || (hasInconsistentInstanceBlocks && instanceBlockSignatures.length <= 1)
-        ) {
+        if ([...byTeam.values()].some(signatures => signatures.size > 1)) {
             reasons.push('TEAM_ASSESSMENT_MISMATCH');
         }
     }
 
-    const assessedDetails = allInstances
+    // The assessed findings agree when the parts they have are the same: the
+    // text ahead of the blocks, each block (the Global one included) where
+    // present, and the optional SSVC record and response where set. A part
+    // that some findings lack is a gap, not a difference. As the server.
+    const assessedTexts = allInstances
         .filter(instance => getInstanceAssessmentState(instance) !== 'NOT_SET')
-        .map(instance => comparableAssessmentText(getInstanceAssessmentDetails(instance)))
-        .filter(Boolean);
-    const detailsMismatch = assessedDetails.length > 1
-        && assessedDetails.some(details => details !== assessedDetails[0]);
+        .map(instance => getInstanceAssessmentDetails(instance));
+    const leads = new Set<string>();
+    const blockSignatures = new Map<string, Set<string>>();
+    for (const text of assessedTexts) {
+        const { lead, blocks: parts } = assessmentComparisonParts(text);
+        if (lead) leads.add(lead);
+        for (const [team, signature] of parts) {
+            if (!blockSignatures.has(team)) blockSignatures.set(team, new Set());
+            blockSignatures.get(team)!.add(signature);
+        }
+    }
+    const ssvcKeys = new Set(assessedTexts.map(ssvcComparisonKey).filter(Boolean));
+    const responses = new Set(assessedTexts.map(parseAssessmentResponse).filter(Boolean));
+    const detailsMismatch = leads.size > 1
+        || [...blockSignatures.values()].some(signatures => signatures.size > 1)
+        || ssvcKeys.size > 1
+        || responses.size > 1;
     if (detailsMismatch && (!isLegacy || reasons.length > 0)) {
         reasons.push('ASSESSMENT_DETAILS_MISMATCH');
     }
@@ -1285,6 +1378,18 @@ export function getScopedAssessment(
     };
 }
 
+/** Whether a team's current block (with a decision) is on some assessed findings and missing on others. */
+const hasTeamBlockGap = (instances: readonly any[]): boolean => {
+    const teamsPerFinding = instances
+        .filter(instance => getInstanceAssessmentState(instance) !== 'NOT_SET')
+        .map(instance => new Set(parseAssessmentBlocks(getInstanceAssessmentDetails(instance))
+            .filter(block => !block.historical && block.team !== 'General' && block.state !== 'NOT_SET')
+            .map(block => block.team.trim().toLocaleLowerCase())));
+    if (teamsPerFinding.length < 2) return false;
+    const every = new Set(teamsPerFinding.flatMap(teams => [...teams]));
+    return teamsPerFinding.some(teams => teams.size !== every.size);
+};
+
 const getGroupLifecycleFromSummary = (
     group: GroupedVuln,
     summary: GroupAssessmentSummary,
@@ -1352,6 +1457,10 @@ const getGroupLifecycleFromSummary = (
     if (missingTeams.length > 0) {
         return hasAnyAssessment ? 'INCOMPLETE' : 'OPEN';
     }
+
+    // A team's block that some assessed findings have and others lack is a
+    // gap for Synchronize, not a contradiction. As the server.
+    if (hasTeamBlockGap(allInstances)) return 'INCOMPLETE';
 
     // Findings that disagree on the state were returned as INCONSISTENT
     // above (ANALYSIS_STATE_MISMATCH), whichever version they belong to.

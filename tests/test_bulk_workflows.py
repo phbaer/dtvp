@@ -2056,31 +2056,28 @@ def _conflict_repair(findings, tags=("TeamB", "TeamC")):
     return preview["items"][0], payloads, details, applied
 
 
-def test_repair_combines_agreeing_conflict_into_approved_global_and_refers_teams():
+def test_former_team_blocks_on_different_findings_are_a_gap_that_repair_synchronizes():
+    """Each finding holds another former team's block: no team contradicts
+    itself, so the vulnerability is incomplete, not conflicting, and Repair
+    synchronizes the blocks and keeps the former teams as historical."""
     other = _FORMER.replace("TeamA", "TeamX").replace("Not reachable.", "Feature disabled.")
     general = "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rev] [Justification: NOT_SET] ---\nApproved earlier."
-    item, payloads, details, applied = _conflict_repair(
-        [("NOT_AFFECTED", _FORMER), ("NOT_AFFECTED", other), ("NOT_AFFECTED", general), ("NOT_SET", "")]
+    group = _repair_group(
+        [("NOT_AFFECTED", _FORMER), ("NOT_AFFECTED", other), ("NOT_AFFECTED", general), ("NOT_SET", "")],
+        tags=["TeamB", "TeamC"],
     )
+    assert (group["list_metadata"]["lifecycle"], group["list_metadata"]["inconsistency_reasons"]) == ("INCOMPLETE", [])
 
-    assert item["repairs"][0]["label"] == (
-        "Combine conflicting assessments into one global decision (NOT_AFFECTED): "
-        "former teams TeamA, TeamX and existing global assessment; TeamB, TeamC refer to global"
-    )
-    assert item["finding_count"] == 4 and len(payloads) == 4
-    # One current General; the one by rev it replaces stays as a record.
-    assert details.count("[Team: General]") == 2
-    assert [team["assessed_by"] for team in _historical(details, "General")] == ["rev"]
-    assert "[Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
-    assert "Approved earlier." in details
-    assert "Former team assessment" not in details
+    preview, payloads, _ = _repair(group)
+
+    assert _labels(preview) == ["sync_findings", "former_teams"]
+    assert len(payloads) == 4 and len({payload["details"] for _, payload in payloads}) == 1
+    details = payloads[0][1]["details"]
     assert _team(details, "TeamA")["historical"] is True
-    assert _team(details, "TeamX")["details"] == "Feature disabled."
     assert _team(details, "TeamX")["historical"] is True
-    assert details.count("See global assessment.") == 2
-    assert "[Status: Pending Review]" not in details
+    assert "Approved earlier." in details
+    applied = _repair_group([(payloads[0][1]["state"], details)] * 4, tags=["TeamB", "TeamC"])
     assert applied["list_metadata"]["lifecycle"] == "ASSESSED"
-    assert applied["list_metadata"]["assessed_teams"] == ["TeamB", "TeamC"]
     assert _repair(applied)[0]["items"] == []
 
 
@@ -2148,27 +2145,20 @@ def test_repair_combines_keeping_every_former_record_as_a_historical_block():
     assert _team(details, "General")["ticket"] is None
 
 
-def test_repair_combines_keeping_each_assessor_and_date_of_blocks_that_say_the_same():
+def test_blocks_that_say_the_same_with_other_assessors_dates_and_tickets_agree():
+    """A team's blocks that differ only in who wrote them when, and under
+    which ticket, say the same: the team does not contradict itself."""
     later = _FORMER_RECORD.replace("1794000000000", "1794000000001").replace(
         "EXP-1, EXP-2", "EXP-3"
     ).replace("alice", "bob")
     same = _FORMER_RECORD.replace("EXP-1, EXP-2", "EXP-4")
-    _, _, details, _ = _conflict_repair(
-        [("NOT_AFFECTED", _FORMER_RECORD), ("NOT_AFFECTED", later), ("NOT_AFFECTED", same)]
+    group = _repair_group(
+        [("NOT_AFFECTED", _FORMER_RECORD), ("NOT_AFFECTED", later), ("NOT_AFFECTED", same)],
+        tags=["TeamB", "TeamC"],
     )
 
-    # alice's two identical records are one block with both tickets; bob's
-    # is his own, with his date and ticket.
-    assert sorted(
-        (team["assessed_by"], team["assessed_at_ms"], team["ticket"])
-        for team in _historical(details, "TeamA")
-    ) == [
-        ("alice", 1794000000000, "EXP-1, EXP-2, EXP-4"),
-        ("bob", 1794000000001, "EXP-3"),
-    ]
-    assert "Former team assessment" not in details
-    # Without a General text the decision takes the former rationale.
-    assert _team(details, "General")["details"] == "Not reachable."
+    assert group["list_metadata"]["inconsistency_reasons"] == []
+    assert group["list_metadata"]["lifecycle"] != "INCONSISTENT"
 
 
 def test_repair_combines_keeping_blocks_that_were_historical_as_they_are():

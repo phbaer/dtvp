@@ -67,6 +67,7 @@ describe('BulkWorkflowModal', () => {
                 show: false,
                 taskId: 'task-1',
                 query: { q: 'openssl', component: 'runtime', sort: 'id', limit: 250 },
+                listFiltersCustom: true,
             },
         })
 
@@ -123,7 +124,7 @@ describe('BulkWorkflowModal', () => {
         })
 
         const wrapper = mount(BulkWorkflowModal, {
-            props: { show: false, taskId: 'task-1', query: { q: 'does-not-match' } },
+            props: { show: false, taskId: 'task-1', query: { q: 'does-not-match' }, listFiltersCustom: true },
         })
         await wrapper.setProps({ show: true })
         await flushPromises()
@@ -195,7 +196,7 @@ describe('BulkWorkflowModal', () => {
         const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
         const wrapper = mount(BulkWorkflowModal, {
-            props: { show: false, taskId: 'task-1', query: { q: 'auto' } },
+            props: { show: false, taskId: 'task-1', query: { q: 'auto' }, listFiltersCustom: true },
         })
         await wrapper.setProps({ show: true })
         await flushPromises()
@@ -580,6 +581,38 @@ describe('BulkWorkflowModal', () => {
             expect(row).not.toContain('0 findings will be updated')
         })
 
+        it('includes the new findings of every vulnerability at once', async () => {
+            const second = { ...item, group_id: 'CVE-2026-2', new_finding_count: 1 }
+            const none = { ...item, group_id: 'CVE-2026-3', new_finding_count: 0 }
+            const wrapper = await openRepair([item, second, none], ['CVE-2026-1', 'CVE-2026-2', 'CVE-2026-3'])
+
+            const toggle = wrapper.get('[data-testid="bulk-workflow-select-new-findings"]')
+            expect(toggle.text()).toContain('New findings · 0/2')
+            await toggle.trigger('click')
+            expect(toggle.text()).toContain('New findings · 2/2')
+            expect((wrapper.get('[data-testid="include-new-findings-CVE-2026-1"]').element as HTMLInputElement).checked).toBe(true)
+            expect((wrapper.get('[data-testid="include-new-findings-CVE-2026-2"]').element as HTMLInputElement).checked).toBe(true)
+
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+            const call = mocks.applyBulkWorkflow.mock.calls[0]
+            expect([...call[7]].sort()).toEqual(['CVE-2026-1', 'CVE-2026-2'])
+            expect(call[3]).toEqual(expect.arrayContaining(['CVE-2026-1', 'CVE-2026-2']))
+        })
+
+        it('leaves every new finding out again with the same toggle', async () => {
+            const second = { ...item, group_id: 'CVE-2026-2', new_finding_count: 1 }
+            const wrapper = await openRepair([item, second], ['CVE-2026-1', 'CVE-2026-2'])
+
+            const toggle = wrapper.get('[data-testid="bulk-workflow-select-new-findings"]')
+            await toggle.trigger('click')
+            await toggle.trigger('click')
+            expect(toggle.text()).toContain('New findings · 0/2')
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+            expect(mocks.applyBulkWorkflow.mock.calls[0]).toHaveLength(10)
+        })
+
         it('drops the opt-in of a vulnerability that is no longer selected', async () => {
             const other = { ...item, group_id: 'CVE-2026-2', new_finding_count: 0 }
             const wrapper = await openRepair([item, other], ['CVE-2026-1', 'CVE-2026-2'])
@@ -905,5 +938,108 @@ describe('BulkWorkflowModal', () => {
             expect(wrapper.get('[data-testid="bulk-workflow-error"]').text()).toContain('This is a DTVP export')
             expect(mocks.previewBulkWorkflow).not.toHaveBeenCalled()
         })
+    })
+
+    describe('for one vulnerability (the card\'s Repair…)', () => {
+        it('runs Repair Assessments scoped to the group, without the workflow list or the list filters', async () => {
+            mocks.getBulkWorkflowSummary.mockResolvedValue({
+                task_id: 'task-1',
+                workflows: [
+                    { ...workflow, candidate_count: null, summary: {} },
+                    { ...workflow, id: 'automatic-assessments', label: 'Automatic' },
+                ],
+            })
+            const wrapper = mount(BulkWorkflowModal, {
+                props: { show: false, taskId: 'task-1', groupId: 'CVE-2026-1', query: { q: 'openssl' } },
+            })
+
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+
+            expect(mocks.getBulkWorkflowSummary).toHaveBeenCalledWith('task-1', { group_id: 'CVE-2026-1' })
+            expect(mocks.previewBulkWorkflow).toHaveBeenCalledWith(
+                'assessment-repair', 'task-1', { group_id: 'CVE-2026-1' }, expect.any(Function),
+            )
+            expect(wrapper.get('[data-testid="bulk-workflow-group-title"]').text()).toBe('Repair CVE-2026-1')
+            expect(wrapper.find('[data-testid="bulk-workflow-automatic-assessments"]').exists()).toBe(false)
+            expect(wrapper.find('aside').exists()).toBe(false)
+
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+
+            expect(mocks.applyBulkWorkflow.mock.calls[0]![2]).toEqual({ group_id: 'CVE-2026-1' })
+            expect(mocks.applyBulkWorkflow.mock.calls[0]![3]).toEqual(['CVE-2026-1'])
+            expect(wrapper.emitted('applied')).toHaveLength(1)
+        })
+    })
+
+    describe('scope', () => {
+        const reviewerDefault = { awaiting_review: true, lifecycle: ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL', 'ASSESSED'] }
+
+        it('looks at the whole project when the list shows only the role default', async () => {
+            const wrapper = mount(BulkWorkflowModal, {
+                props: { show: false, taskId: 'task-1', query: reviewerDefault, scopeLabels: ['Awaiting review'] },
+            })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+
+            expect(mocks.getBulkWorkflowSummary).toHaveBeenCalledWith('task-1', {})
+            expect(wrapper.get('[data-testid="bulk-workflow-scope-project"]').attributes('aria-checked')).toBe('true')
+            expect(wrapper.get('[data-testid="bulk-workflow-scope-description"]').text()).toBe('All versions, no list filters.')
+
+            await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+            await flushPromises()
+            expect(mocks.previewBulkWorkflow).toHaveBeenLastCalledWith('assessment-repair', 'task-1', {}, expect.any(Function))
+
+            // The current list instead: its filters, named as the list names them.
+            await wrapper.get('[data-testid="bulk-workflow-scope-list"]').trigger('click')
+            await flushPromises()
+            expect(wrapper.get('[data-testid="bulk-workflow-scope-description"]').text()).toBe('Awaiting review')
+            expect(mocks.previewBulkWorkflow).toHaveBeenLastCalledWith(
+                'assessment-repair', 'task-1', reviewerDefault, expect.any(Function),
+            )
+            await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+            await flushPromises()
+            expect(mocks.applyBulkWorkflow.mock.calls[0]![2]).toEqual(reviewerDefault)
+        })
+
+        it('keeps the current list when the user set filters', async () => {
+            const wrapper = mount(BulkWorkflowModal, {
+                props: {
+                    show: false, taskId: 'task-1', listFiltersCustom: true,
+                    query: { ...reviewerDefault, versions: ['7.1.2'] },
+                    scopeLabels: ['Awaiting review', 'Version: 7.1.2'],
+                },
+            })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+
+            expect(wrapper.get('[data-testid="bulk-workflow-scope-list"]').attributes('aria-checked')).toBe('true')
+            expect(wrapper.get('[data-testid="bulk-workflow-scope-description"]').text()).toBe('Awaiting review · Version: 7.1.2')
+            expect(mocks.getBulkWorkflowSummary).toHaveBeenCalledWith('task-1', { ...reviewerDefault, versions: ['7.1.2'] })
+        })
+
+        it('has no scope choice for one vulnerability', async () => {
+            const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1', groupId: 'CVE-2026-1' } })
+            await wrapper.setProps({ show: true })
+            await flushPromises()
+            expect(wrapper.find('[data-testid="bulk-workflow-scope"]').exists()).toBe(false)
+        })
+    })
+
+    it('prepares the preview again after an apply instead of showing the one from before', async () => {
+        const wrapper = mount(BulkWorkflowModal, { props: { show: false, taskId: 'task-1' } })
+        await wrapper.setProps({ show: true })
+        await flushPromises()
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+        await flushPromises()
+        await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+        await flushPromises()
+        expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(1)
+
+        await wrapper.get('[data-testid="bulk-workflow-assessment-repair"]').trigger('click')
+        await flushPromises()
+
+        expect(mocks.previewBulkWorkflow).toHaveBeenCalledTimes(2)
     })
 })

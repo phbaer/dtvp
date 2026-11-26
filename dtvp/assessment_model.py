@@ -220,6 +220,26 @@ def agreed_response(texts: Any) -> str | None:
     return next(iter(named)) if len(named) == 1 else None
 
 
+def preserve_or_share_response(details: Any, existing: Any, shared: Any) -> str:
+    """``details`` with the response of ``existing``; a finding without one
+    takes ``shared``, the response the vulnerability's other findings agree
+    on (``agreed_response``), where ``details`` has a General block, which
+    the response belongs to. The save path and Repair Assessments carry it
+    this way, as they carry the SSVC record (``preserve_or_share_record``).
+
+    The response is the vulnerability's. Findings that come later start
+    without it; keeping each finding's own would leave them without it for
+    good, and the findings would disagree."""
+    from .ssvc_services import GENERAL_HEADER, mask_details
+
+    kept = analysis_response(existing)
+    if kept is None and normalize_response(shared) and GENERAL_HEADER.search(
+        mask_details(str(details or ""))
+    ):
+        kept = normalize_response(shared)
+    return with_response(details, kept)
+
+
 def preserve_response(details: Any, existing: Any, shared: Any = None) -> str:
     """``details`` with the response of ``existing`` when it names none.
 

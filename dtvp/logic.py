@@ -1709,6 +1709,16 @@ def _team_block_spans(text: str) -> List[Tuple[int, int, str, bool]]:
     return spans
 
 
+def active_assessment_block(details: str, team: str) -> Optional[str]:
+    """``team``'s current block of ``details`` exactly as stored, without
+    the pending-review marker; ``None`` when the team has none."""
+    wanted = _assessment_team_key(team)
+    for start, end, key, historical in _team_block_spans(details or ""):
+        if key == wanted and not historical:
+            return _PENDING_MARKER.sub("", details[start:end]).strip()
+    return None
+
+
 def replace_assessment_block(details: str, team: str, rendered: str) -> str:
     """``details`` with ``team``'s active block replaced by ``rendered``;
     all other text, the team's historical blocks included, stays exactly as
@@ -1972,6 +1982,28 @@ def _without_historical_blocks(details: str) -> str:
     kept = [text[: spans[0][0]]]
     kept.extend(text[start:end] for start, end, _key, historical in spans if not historical)
     return "".join(kept)
+
+
+def blocks_in_team_order(details: str) -> str:
+    """``details`` with its team blocks sorted by team, General first.
+
+    The order of the blocks carries no meaning; writers differ in it (a save
+    appends a new team's block, a carry-over keeps the predecessor's order).
+    For comparing two texts only: the result is not meant to be stored.
+    """
+    text = str(details or "")
+    spans = _team_block_spans(text)
+    if len(spans) < 2:
+        return text
+    blocks = sorted(
+        (
+            (key != "general", key, index, text[start:end].strip())
+            for index, (start, end, key, _historical) in enumerate(spans)
+        )
+    )
+    return "\n\n".join(
+        [text[: spans[0][0]].strip(), *(block for *_order, block in blocks)]
+    ).strip()
 
 
 def historical_blocks_of(details: str) -> List[str]:

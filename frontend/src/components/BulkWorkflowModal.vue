@@ -33,9 +33,33 @@ const props = withDefaults(defineProps<{
     show: boolean
     taskId: string | null
     query?: TaskVulnGroupListQuery
+    /**
+     * One vulnerability: Repair Assessments for this group only (the card's
+     * Repair…), without the workflow list and the list's filters.
+     */
+    groupId?: string
+    /** The list filters are the user's own, not the untouched role default. */
+    listFiltersCustom?: boolean
+    /** The list filters in words (the list's filter chips). */
+    scopeLabels?: string[]
 }>(), {
     query: () => ({}),
+    groupId: '',
+    listFiltersCustom: false,
+    scopeLabels: () => [],
 })
+/**
+ * Which findings a workflow looks at: the current list (its filters), or the
+ * whole project (all versions, no list filters). The role default of the
+ * list (a reviewer's Awaiting review) would hide what most workflows are for,
+ * such as findings to synchronize across versions; so the whole project is
+ * the default unless the user set filters.
+ */
+type BulkScope = 'list' | 'project'
+const scope = ref<BulkScope>('project')
+const scopeFilters = (value: BulkScope): BulkWorkflowFilters =>
+    value === 'list' ? bulkWorkflowFilters(props.query) : {}
+const REPAIR_WORKFLOW_ID = 'assessment-repair'
 
 const emit = defineEmits<{
     close: []
@@ -112,9 +136,6 @@ const selectedFindingCount = computed(() =>
             || 0
         ) + (includeNewIds.value.has(item.group_id) ? Number(item.new_finding_count || 0) : 0), 0)
 )
-const activeFilterCount = computed(() => Object.entries(activeFilters.value).filter(([, value]) =>
-    Array.isArray(value) ? value.length > 0 : value !== '' && value != null && value !== false
-).length)
 
 const itemSelectable = (item: BulkWorkflowPreviewItem) =>
     selectableIds.value.includes(item.group_id)
@@ -186,7 +207,7 @@ interface SelectionGroup {
 // One toggle per repair topic, plus one for everything that needs review first.
 const selectionGroups = computed<SelectionGroup[]>(() => {
     const topics = preview.value?.topics || []
-    if (!topics.length) return []
+    if (!topics.length) return [newFindingsGroup()].filter(entry => entry.ids.length > 0)
     const selectable = visiblePreviewItems.value.filter(itemSelectable)
     const group = (id: string, label: string, items: BulkWorkflowPreviewItem[]): SelectionGroup => {
         const ids = items.map(item => item.group_id)
@@ -199,11 +220,38 @@ const selectionGroups = computed<SelectionGroup[]>(() => {
             selectable.filter(item => itemRepairs(item).some(repair => repair.id === topic.id)),
         )),
         group('review-first', 'Needs review', selectable.filter(item => item.requires_review)),
+        newFindingsGroup(),
     ].filter(entry => entry.ids.length > 0)
 })
 
+// Including the new findings of every vulnerability that offers it; counts
+// the vulnerabilities whose new findings are included, not the selection.
+function newFindingsGroup(): SelectionGroup {
+    const ids = visiblePreviewItems.value.filter(offersNewFindings).map(item => item.group_id)
+    return { id: NEW_FINDINGS_GROUP, label: 'New findings', ids, selected: ids.filter(groupId => includeNewIds.value.has(groupId)).length }
+}
+
+const NEW_FINDINGS_GROUP = 'new-findings'
+
 const toggleSelectionGroup = (group: SelectionGroup) => {
     if (processing.value) return
+    if (group.id === NEW_FINDINGS_GROUP) {
+        const include = group.selected < group.ids.length
+        const nextIncluded = new Set(includeNewIds.value)
+        const nextSelected = new Set(selectedIds.value)
+        for (const groupId of group.ids) {
+            if (include) {
+                nextIncluded.add(groupId)
+                // Including the new findings is a decision about this vulnerability.
+                nextSelected.add(groupId)
+            } else {
+                nextIncluded.delete(groupId)
+            }
+        }
+        includeNewIds.value = nextIncluded
+        selectedIds.value = nextSelected
+        return
+    }
     const next = new Set(selectedIds.value)
     const selectAll = group.selected < group.ids.length
     for (const groupId of group.ids) {
@@ -400,7 +448,8 @@ const loadWorkflows = async () => {
     if (!props.taskId) return
     loading.value = true
     error.value = ''
-    activeFilters.value = bulkWorkflowFilters(props.query)
+    if (!props.groupId) scope.value = props.listFiltersCustom ? 'list' : 'project'
+    activeFilters.value = props.groupId ? { group_id: props.groupId } : scopeFilters(scope.value)
     workflows.value = []
     selectedWorkflowId.value = ''
     preview.value = null
@@ -414,12 +463,16 @@ const loadWorkflows = async () => {
     previewRequestId += 1
     try {
         const response = await getBulkWorkflowSummary(props.taskId, activeFilters.value)
-        workflows.value = response.workflows
+        workflows.value = props.groupId
+            ? response.workflows.filter(workflow => workflow.id === REPAIR_WORKFLOW_ID)
+            : response.workflows
     } catch (err: any) {
         error.value = err?.response?.data?.detail || err?.message || 'Unable to load bulk workflows.'
-    } finally {
         loading.value = false
+        return
     }
+    loading.value = false
+    if (props.groupId) await loadPreview(REPAIR_WORKFLOW_ID)
 }
 
 // The other input of the restore: the history the source kept of each
@@ -653,6 +706,11 @@ const applySelected = async () => {
             selectedItems(),
         )
         appliedResult.value = result
+        // What was written changes the candidates of every workflow: a cached
+        // preview from before is stale, and applying it again would be
+        // refused (changed since the preview). Choosing a workflow prepares
+        // the preview again.
+        previewCache.clear()
         emit('applied', result)
     } catch (err: any) {
         if (err?.detail?.code === 'preview_changed') {
@@ -663,6 +721,15 @@ const applySelected = async () => {
     } finally {
         processing.value = false
     }
+}
+
+const changeScope = async (value: BulkScope) => {
+    if (processing.value || scope.value === value) return
+    scope.value = value
+    activeFilters.value = scopeFilters(value)
+    previewCache.clear()
+    workflows.value = workflows.value.map(workflow => ({ ...workflow, candidate_count: null, summary: {} }))
+    if (selectedWorkflowId.value) await loadPreview(selectedWorkflowId.value)
 }
 
 const close = () => {
@@ -683,8 +750,10 @@ watch(() => props.show, show => {
                         <Layers :size="25" class="text-blue-200" />
                     </div>
                     <div>
-                        <h2 class="text-2xl font-extrabold text-white">Bulk Changes</h2>
-                        <p class="text-xs text-slate-400">Choose one workflow. Every candidate also matches the active vulnerability filters.</p>
+                        <h2 v-if="groupId" class="text-2xl font-extrabold text-white" data-testid="bulk-workflow-group-title">Repair {{ groupId }}</h2>
+                        <h2 v-else class="text-2xl font-extrabold text-white">Bulk Changes</h2>
+                        <p v-if="groupId" class="text-xs text-slate-400">The Repair Assessments workflow, for this vulnerability only.</p>
+                        <p v-else class="text-xs text-slate-400">Choose one workflow and where it looks for candidates.</p>
                     </div>
                 </div>
                 <button type="button" class="rounded-full p-2 text-slate-500 hover:bg-white/5 hover:text-white" :disabled="processing" @click="close">
@@ -692,10 +761,48 @@ watch(() => props.show, show => {
                 </button>
             </header>
 
-            <div class="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
-                <aside class="overflow-y-auto border-r border-white/5 bg-black/20 p-4">
+            <div
+                v-if="!groupId"
+                class="flex flex-wrap items-center gap-3 border-b border-white/5 bg-black/20 px-8 py-3 text-xs"
+                data-testid="bulk-workflow-scope"
+            >
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Scope</span>
+                <div class="inline-flex overflow-hidden rounded-lg border border-white/10" role="radiogroup" aria-label="Scope">
+                    <button
+                        type="button"
+                        role="radio"
+                        :aria-checked="scope === 'project' ? 'true' : 'false'"
+                        class="px-3 py-1.5 font-bold transition-colors"
+                        :class="scope === 'project' ? 'bg-blue-500/25 text-white' : 'text-slate-400 hover:bg-white/5'"
+                        :disabled="processing"
+                        data-testid="bulk-workflow-scope-project"
+                        @click="changeScope('project')"
+                    >
+                        Whole project
+                    </button>
+                    <button
+                        type="button"
+                        role="radio"
+                        :aria-checked="scope === 'list' ? 'true' : 'false'"
+                        class="border-l border-white/10 px-3 py-1.5 font-bold transition-colors"
+                        :class="scope === 'list' ? 'bg-blue-500/25 text-white' : 'text-slate-400 hover:bg-white/5'"
+                        :disabled="processing"
+                        data-testid="bulk-workflow-scope-list"
+                        @click="changeScope('list')"
+                    >
+                        Current list
+                    </button>
+                </div>
+                <span class="min-w-0 flex-1 text-slate-400" data-testid="bulk-workflow-scope-description">
+                    <template v-if="scope === 'project'">All versions, no list filters.</template>
+                    <template v-else>{{ scopeLabels.length ? scopeLabels.join(' · ') : 'No list filters' }}</template>
+                </span>
+            </div>
+
+            <div class="grid min-h-0 flex-1 overflow-hidden" :class="groupId ? 'grid-cols-1' : 'grid-cols-[280px_minmax(0,1fr)]'">
+                <aside v-if="!groupId" class="overflow-y-auto border-r border-white/5 bg-black/20 p-4">
                     <div class="mb-3 px-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
-                        Workflows · {{ activeFilterCount }} active filter{{ activeFilterCount === 1 ? '' : 's' }}
+                        Workflows
                     </div>
                     <button
                         v-for="workflow in workflows"
@@ -849,7 +956,9 @@ watch(() => props.show, show => {
                                         ? 'border-amber-400/25 bg-amber-500/5 text-amber-100 hover:bg-amber-500/10'
                                         : 'border-white/10 text-slate-300 hover:bg-white/5'"
                                 :aria-pressed="group.selected === group.ids.length"
-                                :title="group.selected === group.ids.length ? `Deselect all: ${group.label}` : `Select all: ${group.label}`"
+                                :title="group.id === NEW_FINDINGS_GROUP
+                                    ? (group.selected === group.ids.length ? 'Leave the new findings of every vulnerability unassessed' : 'Synchronize the new findings of every vulnerability as well')
+                                    : group.selected === group.ids.length ? `Deselect all: ${group.label}` : `Select all: ${group.label}`"
                                 :data-testid="`bulk-workflow-select-${group.id}`"
                                 @click="toggleSelectionGroup(group)"
                             >

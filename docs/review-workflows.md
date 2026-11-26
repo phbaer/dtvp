@@ -12,8 +12,8 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 The project view searches and filters grouped vulnerabilities. Every filter
 is a server-side task-window filter (`GET /api/tasks/{id}/groups`), so URL
-state, counts, pagination, and Bulk Changes all operate on the same candidate
-set. Filters combine with AND across categories and OR within one; option
+state, counts and pagination operate on the same candidate set, and so does
+Bulk Changes when its scope is the current list ([scope](#bulk-changes)). Filters combine with AND across categories and OR within one; option
 counts leave out their own category. The sidebar is described in the
 [screen guide](screens.md#filters).
 
@@ -80,14 +80,16 @@ takes it off the list and selects the next (see
 [Stable list](screens.md#stable-list)). The **Awaiting review** quick view
 sets the toggle with every status. The toggle is the `awaiting_review=true`
 URL and API parameter and the `has:awaiting_review` (or `has:pending_review`)
-search token, and it narrows Bulk Changes candidates.
+search token, and it narrows Bulk Changes candidates when the dialog's scope
+is the current list.
 
 The **Not rescored** toggle under **More filters** lists vulnerabilities that
 have neither a rescored CVSS score nor a rescored vector on any finding. It
 ignores lifecycle, so combine it with an overall status such as Assessed to
 find decisions that still lack a rescoring. The same filter is available as the
 `has:no_rescore` or `cvss:not-rescored` search token and the `not_rescored=true`
-URL and API parameter, and it also narrows Bulk Changes candidates.
+URL and API parameter, and it also narrows Bulk Changes candidates (current
+list scope).
 
 ### New findings
 
@@ -109,7 +111,7 @@ others were assessed is not new, only incomplete.
 - The **New findings** toggle under **More filters** lists only these
   vulnerabilities. The same filter is the `has:new_findings` search token and
   the `new_findings=true` URL and API parameter, and it narrows Bulk Changes
-  candidates.
+  candidates (current list scope).
 
 Nothing is copied automatically: the same component may be used differently in
 the new version. Assess the finding by hand. The mark disappears once the
@@ -431,6 +433,21 @@ finding once saved. In tab mode this switches to the Assessment tab; in the
 assessment workspace the comparison stays open on the left and the form stays
 visible on the right.
 
+The SSVC record is one of the fields shown ("Global · SSVC"): findings of a
+version added after the SSVC decision lack it. That alone is not a conflict
+(the record and the response are optional; only two different ones
+conflict), and neither are teams that decide differently or a team's block
+that some findings lack; only a team that contradicts itself is ([Assessment
+model](assessment-model.md#vulnerabilities-and-assessments)). A save keeps each finding's own
+record; a finding without one takes the record the others hold, when the
+saved findings that hold one hold the same. To make the findings agree
+otherwise, **Repair…** runs the rule-based [Repair Assessments](#bulk-changes)
+for this vulnerability when one of its repairs applies, and **Clean up…** on
+the banner keeps one version for the findings chosen, or clears a stray one,
+after a preview (it points to Repair… when a repair would make the findings
+agree); see
+[Cleaning up an inconsistent assessment](import-export.md#cleaning-up-an-inconsistent-assessment).
+
 ### Approving
 
 A reviewer who opens a pending assessment lands on the Global assessment. If no
@@ -484,7 +501,9 @@ Component ownership is edited in Settings → Team Mapping, not in the card. A
 vulnerability whose components belong to no team offers the team `Unassigned`,
 so it can be assessed without a mapping.
 
-The "More" menu next to Save holds the rarely used actions: **Clear
+The "More" menu next to Save holds the rarely used actions: **Repair…**
+(reviewers, when a repair applies; see [Bulk Changes](#bulk-changes)), **Clean up
+assessment…** (see [Inconsistencies and differences](#inconsistencies-and-differences)), **Clear
 assessment…** and, for reviewers on the Global assessment, suppressing the
 finding in Dependency-Track. Clearing removes the open team's assessment (or,
 on the Global tab, the Global one; reviewers can also clear the whole
@@ -569,7 +588,23 @@ the header so it does not overlap the assessed corner marker.
 
 ## Bulk Changes
 
-The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time:
+The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time.
+Its **scope** line says where the workflow looks for candidates:
+
+- **Whole project**: all versions, no list filters.
+- **Current list**: the list's filters, named as the list's chips name them
+  (for example "Awaiting review · Version: 7.1.2").
+
+It opens on Whole project while the list shows only its role default (a
+reviewer's Awaiting review, which would hide the incomplete vulnerabilities
+that Synchronize repairs across versions), and on Current list when you set
+filters yourself; the sort does not count. Changing the scope prepares the
+preview again. The card's **Repair…** for one vulnerability (below) has no
+scope choice.
+
+After an apply, choosing a workflow prepares its preview again: a preview
+from before the apply is stale, and an apply of it would be refused for every
+vulnerability the earlier apply changed.
 
 | Workflow | Candidates and action |
 | :--- | :--- |
@@ -577,7 +612,17 @@ The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time:
 | Repair Assessments | Every safe, rule-based repair in one operation; each vulnerability lists the repairs that apply |
 | Restore Team Assessments From Export | Team assessments that a Dependency-Track export, or Dependency-Track's audit trail of the findings in view, has and DTVP has in no form; adds them as historical blocks and changes no state ([details](#restore-team-assessments-from-an-export)) |
 
-**Repair Assessments** chains the following repairs. Each stage works on the
+**Repair Assessments** also runs for one vulnerability: **Repair…** on the
+card (on the inconsistency banner, beside **Sync all**, and in **More**) is
+offered to reviewers when a repair applies, and its tooltip names the stages
+(for example "Synchronize, Rescoring"). It is the same workflow with the
+filter `group_id` (the exact vulnerability id) on the workflow endpoints:
+the same candidates as the bulk run, restricted to that group, the same
+per-finding preview, preview token and write path. Unknown component stays
+opt-in, the new-findings checkbox stays, and findings saved since the preview
+are skipped. After the apply the card is refreshed in place.
+
+**Repair Assessments** chains the following repairs, in this order. Each stage works on the
 result of the previous one, so a finding is written once. Preview rows carry a
 label per applicable repair and count only the findings that change.
 
@@ -585,7 +630,8 @@ label per applicable repair and count only the findings that change.
 | :--- | :--- | :--- |
 | Restore CVSS vector | Findings whose rescored vector is recoverable unambiguously from audit comments | The vector and score are written back |
 | Restore tickets | Findings whose history shows that a workflow removed a ticket | See below |
-| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks, except the [new findings](#new-findings) of a new version, which stay unassessed unless the reviewer includes them; a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one. The [response](assessment-model.md#response) is kept as well; a finding without one takes the response the other findings agree on |
+| Carry the SSVC record and the response | Findings without an SSVC record, or without a response, when every finding of the vulnerability that has one holds the same (none unreadable) | That record or response is copied to them, as a save carries it; nothing else of the text changes. Never onto a finding without a General block; new findings of a new version take it only when included. Runs before Synchronize: a vulnerability that differed only in these is then incomplete, not conflicting, and is synchronized in the same run, each finding written once |
+| Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks, except the [new findings](#new-findings) of a new version, which stay unassessed unless the reviewer includes them (per vulnerability, or for all at once with **New findings** in the Select row); a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one. The [response](assessment-model.md#response) is kept as well; a finding without one takes the response the other findings agree on |
 | Keep former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
 | Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset. A team block without a decision that holds a text, ticket, assignees, evidence or coverage stays as it is, and that team is left to assess |
 | Remove references no team stands behind | A block under the name for components no team owns (the team mapping's `*`, or `Unassigned`) whose text is only `See global assessment.` | The block is removed. An assessment someone wrote under that name stays: it is the assessment of a component without a team, not a former team's |

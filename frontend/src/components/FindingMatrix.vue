@@ -308,7 +308,7 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                         </tr>
                         <tr v-if="differingRows.length === 0 && !showAllFields">
                             <td :colspan="matrix.variants.length + 1" class="px-3 py-3 text-gray-400" data-testid="finding-differences-none">
-                                The assessments differ only in parts that are not shown as fields here, such as the SSVC record or the order of the team assessments.
+                                The assessments differ only in parts that are not shown as fields here. To make the findings agree, use Clean up… in the More menu.
                             </td>
                         </tr>
                     </tbody>

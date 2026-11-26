@@ -22,6 +22,7 @@ else.
 - [Export](#export)
 - [When Dependency-Track Holds Something Else](#when-dependency-track-holds-something-else)
 - [Clearing An Assessment](#clearing-an-assessment)
+- [Cleaning Up An Inconsistent Assessment](#cleaning-up-an-inconsistent-assessment)
 - [Findings That Disappear](#findings-that-disappear)
 - [History](#history)
 - [Sync Status Values](#sync-status-values)
@@ -257,6 +258,47 @@ agents cannot clear.
 `POST /api/assessment/delete` takes `instances` and `team` (a team name,
 `"General"`, or `null` for everything). It answers 422 when there is nothing
 to clear and 409 when a finding changed in the meantime.
+
+## Cleaning Up An Inconsistent Assessment
+
+When the findings of a vulnerability carry different assessments, **Clean
+up…** (on the inconsistency banner, and in **More** of the action bar) lists
+the versions of the assessment, compared as the lifecycle compares them, each
+with its findings (project version, component), state, teams and the fields
+in which it differs from the others, the SSVC record included. Who assessed
+when is not listed; it does not make two versions different.
+
+The user keeps one version and chooses the findings to change (by default
+those that do not carry it) and what to clean up: the whole assessment, the
+Global assessment, or one team's. For the selected findings it then either
+**uses the kept version** for that scope, or **clears** it. Clearing one
+team's assessment from all findings removes the block of a team that no
+longer exists; the scope list marks teams the team mapping does not name, or
+names only as an alias.
+
+**Preview** shows per finding what would change (state, and the fields or
+team assessments added or removed); nothing is saved before. **Save** writes
+what was previewed: each finding a new revision (origin
+`assessment-cleanup`), exported to Dependency-Track like any change. A
+finding that changed after the preview, or the kept one, makes the save fail
+with a conflict; preview again. Using the kept version keeps each finding's
+own historical blocks and version override. With the whole assessment it
+takes the kept finding's state, rescoring, response, SSVC record, review
+status and suppression; with the Global assessment its General block (with
+the SSVC record) and response; with a team, that team's block, and the
+result of an analyst goes to review.
+
+Reviewers can clean up every scope. Analysts clean up team assessments only.
+
+`POST /api/assessment/cleanup` takes `instances` (the findings to change),
+`action` (`apply` or `clear`), `team` (a team name, `"General"`, or `null`
+for the whole assessment), `source` (the finding whose stored assessment is
+kept, for `apply`), `revisions` (`"project|component|vulnerability"` to the
+revision previewed) and `dry_run`. A dry run returns, per finding, `before`,
+`after` (`null` when unchanged), `changed`, `revision` and the kept finding's
+`source_revision`. The texts are built from the stored ones only. It answers
+403 for an analyst's Global or whole cleanup, 422 for an invalid request or
+when nothing would change, and 409 on a conflict.
 
 ## Reading A Dependency-Track Export Back
 

@@ -222,7 +222,7 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
         });
 
-        it('should return INCONSISTENT when multiple structured assessment blocks exist within the same component details', () => {
+        it('should judge one finding with two teams as several findings with the same blocks: ASSESSED', () => {
             const group: any = {
                 id: 'CVE-MULTI-BLOCK',
                 tags: ['team-a', 'team-b'],
@@ -238,11 +238,26 @@ describe('Assessment Helpers', () => {
                 ]
             };
 
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('ASSESSED');
+        });
+
+        it('should return INCONSISTENT when one team has two differing blocks within one finding', () => {
+            const group: any = {
+                id: 'CVE-SAME-TEAM-TWICE',
+                tags: ['team-a'],
+                affected_versions: [{ components: [{
+                    analysis_state: 'NOT_AFFECTED',
+                    analysis_details: `--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] ---\nFirst analysis\n--- [Team: Team-A] [State: EXPLOITABLE] [Assessed By: bob] ---\nSecond analysis`,
+                }] }],
+            };
+
+            expect(getGroupInconsistencyReasons(group)).toContain('TEAM_ASSESSMENT_MISMATCH');
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
         });
 
         it('should return ASSESSED when every version repeats complete multi-team assessments without General', () => {
-            const sharedDetails = `--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] ---\nApproved by team A\n--- [Team: team-b] [State: IN_TRIAGE] [Assessed By: bob] ---\nAwaiting team B follow-up`;
+            // The teams agree on the state, each with its own rationale.
+            const sharedDetails = `--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] ---\nApproved by team A\n--- [Team: team-b] [State: NOT_AFFECTED] [Assessed By: bob] ---\nNot used by team B`;
             const group: any = {
                 id: 'CVE-MULTI-BLOCK-REPEATED',
                 tags: ['team-a', 'team-b'],

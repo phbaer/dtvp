@@ -1136,6 +1136,8 @@ async function mockCommonShell(page: Page) {
                         ],
                     },
     ]
+    // Served at request time: a test may adjust a group before it opens the page.
+    currentDocsGroups = docsGroupedVulns
 
     const automaticAssessmentIds = new Set(
         mockCodeAnalysisResults
@@ -1399,6 +1401,38 @@ async function mockCommonShell(page: Page) {
 
     await mockAnalysisQueue(page, { items: [] })
     await mockCodeAnalysisDashboardStatus(page)
+}
+
+
+// The fixture groups of the current test (set up in mockApis).
+let currentDocsGroups: any[] = []
+
+// CVE-2024-5003 with a real conflict: PlatformTeam contradicts itself. Teams
+// that decide differently are not a conflict, so the shared fixture (two
+// teams that disagree, used by the team overview) does not show one.
+const routeSelfContradictingConflict = async (page: Page) => {
+    const details = '--- [Team: PlatformTeam] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1713200000000] ---\nStill evaluating impact.\n\n'
+        + '--- [Team: PlatformTeam] [State: NOT_AFFECTED] [Assessed By: analyst] [Date: 1713100000000] [Justification: REQUIRES_ENVIRONMENT] ---\nNot reachable via our edge configuration.'
+    for (const group of currentDocsGroups.filter(entry => entry.id === 'CVE-2024-5003')) {
+        for (const version of group.affected_versions) {
+            for (const component of version.components) component.analysis_details = details
+        }
+    }
+    await page.route('**/api/assessments/details', async (route) => {
+        const body = route.request().postDataJSON()
+        if (!(body.instances || []).some((instance: any) => instance.component_uuid === 'c8')) {
+            await route.fallback()
+            return
+        }
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify((body.instances || []).map((instance: any) => ({
+                ...instance,
+                analysis: { state: 'IN_TRIAGE', analysisState: 'IN_TRIAGE', isSuppressed: false, analysisDetails: details, analysisComments: [] },
+            }))),
+        })
+    })
 }
 
 test.describe('Capture README screenshots', () => {
@@ -1815,6 +1849,7 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture expanded card with assessment details screenshot', async ({ page }) => {
+        await routeSelfContradictingConflict(page)
         await page.setViewportSize({ width: 2200, height: 1800 })
         await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
@@ -1826,7 +1861,7 @@ test.describe('Capture README screenshots', () => {
         // Wait for assessment details to load
         await page.waitForTimeout(2000)
 
-        // Should show the conflicting team blocks (PlatformTeam: IN_TRIAGE vs EdgeTeam: NOT_AFFECTED)
+        // Should show the conflicting team blocks (PlatformTeam contradicts itself: IN_TRIAGE vs NOT_AFFECTED)
         await expect(card.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
 
         await expect(card.getByTestId('card-differences-banner')).toBeVisible({ timeout: 10000 })
@@ -1936,6 +1971,52 @@ test.describe('Capture README screenshots', () => {
         await expect(modal.getByRole('heading', { name: 'Repair Assessments' })).toBeVisible({ timeout: 10000 })
 
         await captureWithPadding(modal, '../docs/screenshots/bulk-sync-modal.png')
+    })
+
+    test('capture vulnerability repair dialog screenshot', async ({ page }) => {
+        await routeSelfContradictingConflict(page)
+        const workflow = { id: 'assessment-repair', label: 'Repair Assessments', description: 'Every safe, rule-based repair in one operation.', supports_apply: true, supports_document: false, version: 1 }
+        const item = {
+            group_id: 'CVE-2024-5003',
+            title: 'Inconsistent analysis — teams disagree on assessment state',
+            finding_count: 1,
+            new_finding_count: 1,
+            new_finding_places: ['2.1.0 (validation-core@1.3.0)'],
+            repairable: true,
+            requires_review: false,
+            repairs: [
+                { id: 'combine_conflict', label: 'Combine conflicting assessments into one global decision (IN_TRIAGE): former teams EdgeTeam, PlatformTeam; sources disagree, pending review' },
+                { id: 'rescoring', label: 'Repair rescoring on 1 finding' },
+            ],
+            review: [],
+            rescore_findings: [],
+        }
+        const preview = {
+            task_id: 'task-docs', workflow, preview_token: 'docs-repair-token',
+            group_fingerprints: { 'CVE-2024-5003': 'fp' },
+            selectable_group_ids: ['CVE-2024-5003'],
+            items: [item],
+            topics: [{ id: 'combine_conflict', label: 'Combine conflicts', groups: 1 }, { id: 'rescoring', label: 'Rescoring', groups: 1 }],
+            summary: { groups: 1, findings: 1 },
+        }
+        const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+        await page.route('**/api/bulk-workflows/assessment-repair/preview', route => route.fulfill(json(preview)))
+        await page.route('**/api/bulk-workflows/summary', route => route.fulfill(json({ task_id: 'task-docs', workflows: [{ ...workflow, candidate_count: null, summary: {} }] })))
+        await page.route('**/api/bulk-workflows/assessment-repair/preview-task', route => route.fulfill(json({ task_id: 'docs-repair-preview' })))
+        await page.route('**/api/bulk-workflows/tasks/docs-repair-preview', route => route.fulfill(json({
+            task_id: 'docs-repair-preview', status: 'completed', progress: 100, result: preview,
+        })))
+        await page.setViewportSize({ width: 1600, height: 1000 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-5003')
+        await selectDetailTab(card, 'Context')
+        await card.getByTestId('card-differences-repair').click()
+        const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Repair CVE-2024-5003' }).first()
+        await expect(modal.getByTestId('bulk-workflow-apply')).toBeVisible({ timeout: 10000 })
+
+        await captureWithPadding(modal.locator(':scope > div').first(), '../docs/screenshots/vulnerability-repair.png')
     })
 
     test('capture conflict resolution modal screenshot', async ({ page }) => {
@@ -2061,6 +2142,44 @@ test.describe('Capture README screenshots', () => {
         await expect(dialog).toContainText('Only the PlatformTeam assessment')
 
         await captureWithPadding(dialog, '../docs/screenshots/clear-assessment.png')
+    })
+
+    test('capture assessment cleanup dialog screenshot', async ({ page }) => {
+        // Two findings of CVE-2024-9999 carry different assessments: one has
+        // a block under the mapping's old alias of PlatformTeam.
+        const texts: Record<string, string> = {
+            c1: '--- [Team: LegacyPlatformAlias] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1710000000000] [Justification: CODE_NOT_PRESENT] ---\nLegacy alias assessment block retained for compatibility.',
+            c2: '--- [Team: PlatformTeam] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1711000000000] [Justification: CODE_NOT_PRESENT] ---\nPrimary assessment block.',
+        }
+        await page.route('**/api/assessment/cleanup', async (route) => {
+            const body = route.request().postDataJSON()
+            const kept = texts[body.source?.component_uuid] ?? ''
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify((body.instances || []).map((instance: any) => ({
+                    ...instance,
+                    revision: 3,
+                    source_revision: 4,
+                    changed: texts[instance.component_uuid] !== kept,
+                    before: { state: texts[instance.component_uuid] ? 'IN_TRIAGE' : 'NOT_SET', details: texts[instance.component_uuid] ?? '', suppressed: false },
+                    after: texts[instance.component_uuid] !== kept ? { state: 'IN_TRIAGE', details: kept, suppressed: false } : null,
+                }))),
+            })
+        })
+        await page.setViewportSize({ width: 1600, height: 1100 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await selectDetailTab(card, 'Context')
+        await card.getByTestId('card-differences-cleanup').click()
+        const modal = page.getByTestId('cleanup-assessment-modal')
+        await expect(modal.getByTestId('cleanup-version')).toHaveCount(3)
+        await modal.getByTestId('cleanup-preview-button').click()
+        await expect(modal.getByTestId('cleanup-preview-row')).toHaveCount(2)
+
+        await captureWithPadding(modal.locator(':scope > div').first(), '../docs/screenshots/assessment-cleanup.png')
     })
 
     test('capture code analysis dashboard screenshot', async ({ page }) => {

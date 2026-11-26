@@ -18,12 +18,14 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from .assessment_model import (
     ANALYSIS_RESPONSES,
     RESPONSE_NOT_SET,
+    agreed_response,
     analysis_response,
     finding_key,
     normalize_override_label,
     normalize_response,
     normalize_version_override,
     parse_assessment,
+    preserve_or_share_response,
     render_assessment,
     version_override,
     with_response,
@@ -34,11 +36,20 @@ from .assessment_outbox_services import (
     assessment_key,
 )
 from .code_analysis_assessment_services import record_application_eligible
-from .logic import calculate_aggregated_state, remove_assessment_blocks
+from .logic import (
+    active_assessment_block,
+    calculate_aggregated_state,
+    historical_blocks_of,
+    insert_assessment_blocks,
+    remove_assessment_blocks,
+    replace_assessment_block,
+    without_historical_blocks,
+)
 from .ssvc_services import (
     SsvcInput,
+    agreed_record as agreed_ssvc_record,
     evaluate as evaluate_ssvc,
-    preserve_record as preserve_ssvc_record,
+    preserve_or_share_record as preserve_or_share_ssvc_record,
     validate_evidence as validate_ssvc_evidence,
 )
 
@@ -670,13 +681,18 @@ async def save_assessment(
     if keep_ssvc or keep_response:
         # Never trust client-supplied original_analysis/headers as authority
         # for what reviewers decide with the Global assessment: the SSVC
-        # record and the response. Preserve each finding's stored value.
+        # record and the response. Preserve each finding's stored value; a
+        # finding without a record takes the one the others stored agree on.
+        shared_ssvc = agreed_ssvc_record(stored_details) if keep_ssvc else None
+        shared_response = agreed_response(stored_details) if keep_response else None
         for (_instance, payload), existing in zip(payloads, stored_details):
             if keep_ssvc:
-                payload["details"] = preserve_ssvc_record(payload["details"], existing)
+                payload["details"] = preserve_or_share_ssvc_record(
+                    payload["details"], existing, shared_ssvc
+                )
             if keep_response:
-                payload["details"] = with_response(
-                    payload["details"], analysis_response(existing)
+                payload["details"] = preserve_or_share_response(
+                    payload["details"], existing, shared_response
                 )
     # Until override scopes exist (ADR 0010 step 7), every save keeps each
     # finding's stored version override exactly.
@@ -776,56 +792,88 @@ async def delete_assessment(
     payloads: AssessmentPayloads = []
     expected: dict[tuple[str, str, str], int] = {}
     for instance, current in zip(keyed, stored):
-        details = remove_assessment_blocks(current["details"], team)
-        suppressed = False if team is None else bool(current["suppressed"])
-        was_pending = bool(
-            re.search(r"\[Status: Pending Review\]", current["details"], re.IGNORECASE)
-        )
-        if (
-            details
-            and calculate_aggregated_state(details) != "NOT_SET"
-            # What remains was not reviewed in this form; a reviewer's
-            # deletion is not an approval of what was pending.
-            and (not reviewer or was_pending)
-        ):
-            details += "\n\n[Status: Pending Review]"
-        state = calculate_aggregated_state(details) if details else "NOT_SET"
-        # Compare without the review marker, which is re-derived above.
-        before = re.sub(
-            r"\[Status: Pending Review\]", "", current["details"], flags=re.IGNORECASE
-        )
-        unchanged = (
-            remove_assessment_blocks(details, "").strip()
-            == remove_assessment_blocks(before, "").strip()
-            and suppressed == bool(current["suppressed"])
-        )
-        if unchanged:
+        payload = _cleared_payload(instance, current, team, reviewer)
+        if payload is None:
             continue
-        key = assessment_key(instance)
-        expected[key] = int(current["revision"])
-        payloads.append(
-            (
-                instance,
-                {
-                    "project_uuid": key[0],
-                    "component_uuid": key[1],
-                    "vulnerability_uuid": key[2],
-                    "state": state,
-                    "details": details,
-                    "suppressed": suppressed,
-                },
-            )
-        )
+        expected[assessment_key(instance)] = int(current["revision"])
+        payloads.append((instance, payload))
     if not payloads:
         raise AssessmentValidationError("There is no such assessment to clear")
 
+    return await _persist_explicit_change(
+        deps, payloads, expected, user=user, origin=ORIGIN_DELETION,
+        after_persist=after_persist,
+    )
+
+
+_PENDING_REVIEW = re.compile(r"\[Status: Pending Review\]", re.IGNORECASE)
+
+
+def _payload(
+    instance: dict[str, Any], state: str, details: str, suppressed: bool
+) -> dict[str, Any]:
+    key = assessment_key(instance)
+    return {
+        "project_uuid": key[0],
+        "component_uuid": key[1],
+        "vulnerability_uuid": key[2],
+        "state": state,
+        "details": details,
+        "suppressed": suppressed,
+    }
+
+
+def _cleared_payload(
+    instance: dict[str, Any],
+    current: dict[str, Any],
+    team: str | None,
+    reviewer: bool,
+) -> dict[str, Any] | None:
+    """The finding with ``team``'s assessment (``None``: all of it) removed;
+    ``None`` when there is nothing to remove."""
+    details = remove_assessment_blocks(current["details"], team)
+    suppressed = False if team is None else bool(current["suppressed"])
+    was_pending = bool(_PENDING_REVIEW.search(current["details"]))
+    if (
+        details
+        and calculate_aggregated_state(details) != "NOT_SET"
+        # What remains was not reviewed in this form; a reviewer's
+        # deletion is not an approval of what was pending.
+        and (not reviewer or was_pending)
+    ):
+        details += "\n\n[Status: Pending Review]"
+    state = calculate_aggregated_state(details) if details else "NOT_SET"
+    # Compare without the review marker, which is re-derived above.
+    before = _PENDING_REVIEW.sub("", current["details"])
+    unchanged = (
+        remove_assessment_blocks(details, "").strip()
+        == remove_assessment_blocks(before, "").strip()
+        and suppressed == bool(current["suppressed"])
+    )
+    if unchanged:
+        return None
+    return _payload(instance, state, details, suppressed)
+
+
+async def _persist_explicit_change(
+    deps: AssessmentUseCaseDeps,
+    payloads: AssessmentPayloads,
+    expected: dict[tuple[str, str, str], int],
+    *,
+    user: str,
+    origin: str,
+    after_persist: Callable[[AssessmentPayloads], Awaitable[None]] | None,
+) -> list[dict[str, Any]]:
+    """Persist texts built from the stored ones (a deletion, a cleanup):
+    each a new revision, guarded by the revision it was built from, and
+    exported like any change."""
     try:
         persisted = await deps.cache_manager.persist_assessment_updates(
             [payload for _instance, payload in payloads],
             replace=True,
             expected_revisions=expected,
             author=user,
-            origin=ORIGIN_DELETION,
+            origin=origin,
         )
     except AssessmentRevisionConflictError as exc:
         raise AssessmentConflictError(
@@ -846,3 +894,177 @@ async def delete_assessment(
     if after_persist is not None:
         await after_persist(payloads)
     return accepted_assessment_results(payloads, persisted)
+
+
+ORIGIN_CLEANUP = "assessment-cleanup"
+CLEANUP_ACTIONS = ("apply", "clear")
+
+
+def _is_general(team: str | None) -> bool:
+    return team is not None and team.strip().casefold() == "general"
+
+
+def _applied_text(
+    target: str, source: str, team: str | None, reviewer: bool
+) -> str:
+    """``target`` with ``source``'s assessment for ``team`` (``None``: the
+    whole assessment). The target keeps its own historical blocks and its
+    version override; those belong to the finding, not to the decision."""
+    if team is None:
+        text = without_historical_blocks(source)
+        pending = bool(_PENDING_REVIEW.search(text))
+        text = insert_assessment_blocks(
+            _PENDING_REVIEW.sub("", text).strip(), historical_blocks_of(target)
+        )
+        if pending:
+            text = f"{text}\n\n[Status: Pending Review]"
+        return with_version_override(text, version_override(target))
+    block = active_assessment_block(source, team)
+    if block is None:
+        raise AssessmentValidationError(
+            f"The assessment to keep has no {'Global' if _is_general(team) else team} assessment"
+        )
+    pending = bool(_PENDING_REVIEW.search(target)) or bool(
+        _PENDING_REVIEW.search(source)
+    ) or not reviewer
+    text = _PENDING_REVIEW.sub("", target).strip()
+    if active_assessment_block(text, team) is not None:
+        text = replace_assessment_block(text, team, block)
+    else:
+        text = insert_assessment_blocks(text, [block], first=_is_general(team))
+    if _is_general(team):
+        # The response stands beside the blocks and belongs to the General
+        # assessment, as its SSVC record, which is part of the block.
+        text = with_response(text, analysis_response(source))
+    return f"{text}\n\n[Status: Pending Review]" if pending else text
+
+
+async def clean_up_assessment(
+    deps: AssessmentUseCaseDeps,
+    instances: list[dict[str, Any]],
+    *,
+    action: str,
+    team: str | None,
+    source: dict[str, Any] | None,
+    user: str,
+    role: str | None = None,
+    revisions: dict[str, int] | None = None,
+    dry_run: bool = False,
+    after_persist: Callable[[AssessmentPayloads], Awaitable[None]] | None = None,
+) -> list[dict[str, Any]]:
+    """Make the findings of a vulnerability agree: give the selected ones
+    the assessment of ``source`` (``apply``), or remove theirs (``clear``),
+    for ``team`` or, with ``None``, the whole assessment.
+
+    The texts are built from the stored ones, never from a client's view,
+    and written like any change: a revision each, exported. ``dry_run``
+    returns the same per finding without writing anything, so that what a
+    reviewer previewed is what is saved; ``revisions`` (``"project|
+    component|vulnerability"`` to the revision previewed, the kept finding's
+    included) turns any change in between into a conflict. Findings that would not change are left
+    alone and reported as unchanged in a dry run only.
+    """
+    if action not in CLEANUP_ACTIONS:
+        raise AssessmentValidationError(f"Unknown cleanup action: {action}")
+    if role is None:
+        role = deps.get_user_role(user)
+    reviewer = role.upper() == "REVIEWER"
+    if (team is None or _is_general(team)) and not reviewer:
+        raise AssessmentPermissionError(
+            "Only reviewers can clean up the Global assessment or a whole assessment"
+        )
+    if team is not None and not team.strip():
+        raise AssessmentValidationError("Name the team whose assessment to clean up")
+    keyed = [instance for instance in instances if assessment_key(instance) is not None]
+    if not keyed or len(keyed) != len(instances):
+        raise AssessmentValidationError(
+            "Each instance needs project_uuid, component_uuid, and vulnerability_uuid"
+        )
+    revisions = revisions or {}
+
+    def guard(key: tuple[str, str, str], stored_revision: int) -> int:
+        previewed = revisions.get("|".join(key))
+        if previewed is not None and int(previewed) != stored_revision:
+            raise AssessmentConflictError(
+                [{"finding_uuid": None, "current": deps.cache_manager.get_assessment_overlay(*key) or {}}]
+            )
+        return stored_revision
+
+    source_text = ""
+    source_state = "NOT_SET"
+    source_suppressed = False
+    source_key = None
+    source_revision = None
+    if action == "apply":
+        source_key = assessment_key(source or {})
+        if source_key is None:
+            raise AssessmentValidationError("Name the finding whose assessment to keep")
+        (kept,) = await asyncio.to_thread(
+            deps.cache_manager.get_cached_assessments, [source]
+        )
+        source_revision = guard(source_key, int(kept["revision"]))
+        source_text = kept["details"]
+        source_state = kept["state"]
+        source_suppressed = bool(kept["suppressed"])
+        if not source_text.strip() and source_state == "NOT_SET":
+            raise AssessmentValidationError(
+                "The finding to keep has no assessment; clear the others instead"
+            )
+
+    targets = [instance for instance in keyed if assessment_key(instance) != source_key]
+    stored = await asyncio.to_thread(deps.cache_manager.get_cached_assessments, targets)
+    payloads: AssessmentPayloads = []
+    expected: dict[tuple[str, str, str], int] = {}
+    preview: list[dict[str, Any]] = []
+    for instance, current in zip(targets, stored):
+        key = assessment_key(instance)
+        expected_revision = guard(key, int(current["revision"]))
+        if action == "clear":
+            payload = _cleared_payload(instance, current, team, reviewer)
+        else:
+            details = _applied_text(current["details"], source_text, team, reviewer)
+            if team is None:
+                state, suppressed = source_state, source_suppressed
+            else:
+                state = calculate_aggregated_state(details) if details else "NOT_SET"
+                suppressed = bool(current["suppressed"])
+            unchanged = (
+                " ".join(details.split()) == " ".join(current["details"].split())
+                and state == current["state"]
+                and suppressed == bool(current["suppressed"])
+            )
+            payload = None if unchanged else _payload(instance, state, details, suppressed)
+        preview.append(
+            {
+                "finding_uuid": instance.get("finding_uuid"),
+                "project_uuid": key[0],
+                "component_uuid": key[1],
+                "vulnerability_uuid": key[2],
+                "revision": expected_revision,
+                # The kept finding's revision: a confirm sends it back with
+                # the others, so a change to it in between is a conflict too.
+                "source_revision": source_revision,
+                "changed": payload is not None,
+                "before": {
+                    "state": current["state"],
+                    "details": current["details"],
+                    "suppressed": bool(current["suppressed"]),
+                },
+                "after": None if payload is None else {
+                    "state": payload["state"],
+                    "details": payload["details"],
+                    "suppressed": payload["suppressed"],
+                },
+            }
+        )
+        if payload is not None:
+            expected[key] = expected_revision
+            payloads.append((instance, payload))
+    if dry_run:
+        return preview
+    if not payloads:
+        raise AssessmentValidationError("The selected findings already agree; nothing to change")
+    return await _persist_explicit_change(
+        deps, payloads, expected, user=user, origin=ORIGIN_CLEANUP,
+        after_persist=after_persist,
+    )

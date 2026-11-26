@@ -919,5 +919,317 @@
         "lifecycle": "ASSESSED"
       }
     ]
+  },
+  {
+    "name": "the same team assessments in another order",
+    "tags": [
+      "Third Party",
+      "Platform",
+      "Web"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer-1] [Reviewed By: reviewer-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] ---\nThe vulnerable function is not reachable.\n\n--- [Team: Third Party] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1795530000886] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files.\n\n--- [Team: Platform] [State: NOT_AFFECTED] [Assessed By: analyst-3] [Date: 1795530009887] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer-1] [Reviewed By: reviewer-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] ---\nThe vulnerable function is not reachable.\n\n--- [Team: Third Party] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1795530000886] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files.\n\n--- [Team: Platform] [State: NOT_AFFECTED] [Assessed By: analyst-3] [Date: 1795530009887] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files."
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer-1] [Reviewed By: reviewer-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] ---\nThe vulnerable function is not reachable.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files.\n\n--- [Team: Platform] [State: NOT_AFFECTED] [Assessed By: analyst-3] [Date: 1795530009887] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files.\n\n--- [Team: Third Party] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1795530000886] [Justification: CODE_NOT_REACHABLE] ---\nOnly used for local files."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "a later finding without the SSVC record the others hold",
+    "tags": [
+      "Identity"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] [SSVC: INCOMPLETE] ---\n\n[SSVC Summary]\nSSVC priority: Incomplete\nModel: Deployer Patch Application Priority v1.0.0\nExploitation: Active\nSystem Exposure: Not assessed\nAutomatable: Not assessed\nHuman Impact: Not assessed\nSSVC assessed by: reviewer-1 · 2026-11-11T11:00:29+00:00\n[/SSVC Summary]\n\n[SSVC Details]\n{\n  \"model\": \"ssvc:DT_DP\",\n  \"version\": \"1.0.0\",\n  \"answers\": {\n    \"ssvc:E:1.1.0\": \"A\"\n  },\n  \"rationale\": \"\",\n  \"exploitation_evidence\": null,\n  \"outcome\": null,\n  \"evidence\": null,\n  \"assessor\": \"reviewer-1\",\n  \"assessed_at\": \"2026-11-11T11:00:29+00:00\",\n  \"priority\": \"Incomplete\"\n}\n[/SSVC Details]\n\n--- [Team: Identity] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nRequest decompression is disabled.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] [SSVC: INCOMPLETE] ---\n\n[SSVC Summary]\nSSVC priority: Incomplete\nModel: Deployer Patch Application Priority v1.0.0\nExploitation: Active\nSystem Exposure: Not assessed\nAutomatable: Not assessed\nHuman Impact: Not assessed\nSSVC assessed by: reviewer-1 · 2026-11-11T11:00:29+00:00\n[/SSVC Summary]\n\n[SSVC Details]\n{\n  \"model\": \"ssvc:DT_DP\",\n  \"version\": \"1.0.0\",\n  \"answers\": {\n    \"ssvc:E:1.1.0\": \"A\"\n  },\n  \"rationale\": \"\",\n  \"exploitation_evidence\": null,\n  \"outcome\": null,\n  \"evidence\": null,\n  \"assessor\": \"reviewer-1\",\n  \"assessed_at\": \"2026-11-11T11:00:29+00:00\",\n  \"priority\": \"Incomplete\"\n}\n[/SSVC Details]\n\n--- [Team: Identity] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nRequest decompression is disabled.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] ---\n\n--- [Team: Identity] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nRequest decompression is disabled.\n\n[Status: Pending Review]"
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "NEEDS_APPROVAL",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "one finding with two teams that agree, each with its own rationale",
+    "tags": [
+      "Third Party",
+      "Platform"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "6.15.6",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: Third Party] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected module is not part of the build.\n\n--- [Team: Platform] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe library is only used for its CLI, which is not shipped."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "one assessed finding with two teams among unassessed findings",
+    "tags": [
+      "Third Party",
+      "Platform"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "6.15.6",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: Third Party] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected module is not part of the build.\n\n--- [Team: Platform] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe library is only used for its CLI, which is not shipped."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "7.1.1",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "INCOMPLETE",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "two teams that decide different states in one finding",
+    "tags": [
+      "Third Party",
+      "Web"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "7.1.1",
+        "analysis_state": "FALSE_POSITIVE",
+        "analysis_details": "--- [Team: Third Party] [State: FALSE_POSITIVE] [Assessed By: analyst-1] [Date: 1794000000000] ---\nThe matched package is a different one.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "FALSE_POSITIVE"
+  },
+  {
+    "name": "two teams that decide different states, repeated in every version",
+    "tags": [
+      "Third Party",
+      "Web"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "7.1.1",
+        "analysis_state": "FALSE_POSITIVE",
+        "analysis_details": "--- [Team: Third Party] [State: FALSE_POSITIVE] [Assessed By: analyst-1] [Date: 1794000000000] ---\nThe matched package is a different one.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "7.1.2",
+        "analysis_state": "FALSE_POSITIVE",
+        "analysis_details": "--- [Team: Third Party] [State: FALSE_POSITIVE] [Assessed By: analyst-1] [Date: 1794000000000] ---\nThe matched package is a different one.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "FALSE_POSITIVE"
+  },
+  {
+    "name": "two findings with different SSVC records",
+    "tags": [
+      "Identity"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] [SSVC: INCOMPLETE] ---\n\n[SSVC Summary]\nSSVC priority: Incomplete\nModel: Deployer Patch Application Priority v1.0.0\nExploitation: Active\nSystem Exposure: Not assessed\nAutomatable: Not assessed\nHuman Impact: Not assessed\nSSVC assessed by: reviewer-1 · 2026-11-11T11:00:29+00:00\n[/SSVC Summary]\n\n[SSVC Details]\n{\n  \"model\": \"ssvc:DT_DP\",\n  \"version\": \"1.0.0\",\n  \"answers\": {\n    \"ssvc:E:1.1.0\": \"A\"\n  },\n  \"rationale\": \"\",\n  \"exploitation_evidence\": null,\n  \"outcome\": null,\n  \"evidence\": null,\n  \"assessor\": \"reviewer-1\",\n  \"assessed_at\": \"2026-11-11T11:00:29+00:00\",\n  \"priority\": \"Incomplete\"\n}\n[/SSVC Details]\n\n--- [Team: Identity] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nRequest decompression is disabled.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1795535973530] [Justification: CODE_NOT_REACHABLE] [SSVC: INCOMPLETE] ---\n\n[SSVC Summary]\nSSVC priority: Incomplete\nModel: Deployer Patch Application Priority v1.0.0\nExploitation: Not assessed\nSystem Exposure: Not assessed\nAutomatable: Not assessed\nHuman Impact: Not assessed\nSSVC rationale: Other context\nSSVC assessed by: reviewer-2 · 2026-11-12T09:00:00+00:00\n[/SSVC Summary]\n\n[SSVC Details]\n{\n  \"model\": \"ssvc:DT_DP\",\n  \"version\": \"1.0.0\",\n  \"answers\": {},\n  \"rationale\": \"Other context\",\n  \"exploitation_evidence\": null,\n  \"outcome\": null,\n  \"evidence\": null,\n  \"assessor\": \"reviewer-2\",\n  \"assessed_at\": \"2026-11-12T09:00:00+00:00\",\n  \"priority\": \"Incomplete\"\n}\n[/SSVC Details]\n\n--- [Team: Identity] [State: NOT_AFFECTED] [Assessed By: analyst-4] [Date: 1795530016568] [Justification: CODE_NOT_REACHABLE] ---\nRequest decompression is disabled.\n\n[Status: Pending Review]"
+      }
+    ],
+    "inconsistency_reasons": [
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "a later finding without the response the others carry",
+    "tags": [
+      "Web"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "[Response: UPDATE]\n\n--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer-1] [Reviewed By: reviewer-1] [Date: 1794300000000] [Justification: CODE_NOT_PRESENT] ---\nNot used.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer-1] [Reviewed By: reviewer-1] [Date: 1794300000000] [Justification: CODE_NOT_PRESENT] ---\nNot used.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "ASSESSED",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "two findings with different responses",
+    "tags": [
+      "Web"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "[Response: UPDATE]\n\n--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer-1] [Reviewed By: reviewer-1] [Date: 1794300000000] [Justification: CODE_NOT_PRESENT] ---\nNot used.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "[Response: WILL_NOT_FIX]\n\n--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer-1] [Reviewed By: reviewer-1] [Date: 1794300000000] [Justification: CODE_NOT_PRESENT] ---\nNot used.\n\n--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      }
+    ],
+    "inconsistency_reasons": [
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "NOT_AFFECTED"
+  },
+  {
+    "name": "one team contradicts itself across findings",
+    "tags": [
+      "Web"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: Web] [State: EXPLOITABLE] [Assessed By: analyst-3] [Date: 1794200000000] ---\nReachable through the upload endpoint."
+      }
+    ],
+    "inconsistency_reasons": [
+      "ANALYSIS_STATE_MISMATCH",
+      "TEAM_ASSESSMENT_MISMATCH",
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ],
+    "lifecycle": "INCONSISTENT",
+    "technical_state": "EXPLOITABLE"
+  },
+  {
+    "name": "a team's block that one finding lacks",
+    "tags": [
+      "Web",
+      "Third Party"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used.\n\n--- [Team: Third Party] [State: NOT_AFFECTED] [Assessed By: analyst-1] [Date: 1794000000000] [Justification: CODE_NOT_PRESENT] ---\nNot built."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.1",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: Web] [State: NOT_AFFECTED] [Assessed By: analyst-2] [Date: 1794100000000] [Justification: CODE_NOT_PRESENT] ---\nThe affected function is not used."
+      }
+    ],
+    "inconsistency_reasons": [],
+    "lifecycle": "INCOMPLETE",
+    "technical_state": "NOT_AFFECTED"
   }
 ]

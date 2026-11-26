@@ -1,10 +1,11 @@
 import {
     analysisResponseLabel,
-    assessmentTextKey,
     assessmentTextToFields,
+    assessmentVariantKey,
     STATE_PRIORITY,
     type AssessmentTeamFields,
 } from './assessment-helpers'
+import { stripSsvcDocumentation } from './ssvc'
 
 /** What the matrix needs of one finding (a component in a project version). */
 export interface MatrixInstance {
@@ -65,8 +66,10 @@ const byNumericText = (left: string, right: string) =>
 
 const stateOf = (instance: MatrixInstance) => String(instance.analysis_state || 'NOT_SET')
 
+// Who assessed when, the review marker, records of one finding and the
+// order of the team blocks do not make two assessments different.
 const variantKey = (instance: MatrixInstance) =>
-    `${stateOf(instance)}|${assessmentTextKey(instance.analysis_details)}|${Boolean(instance.is_suppressed)}`
+    `${stateOf(instance)}|${assessmentVariantKey(instance.analysis_details)}|${Boolean(instance.is_suppressed)}`
 
 const variantLabel = (index: number) => {
     let label = ''
@@ -188,6 +191,20 @@ const humanState = (state: string) => state.replaceAll('_', ' ')
 const teamValue = (team: AssessmentTeamFields | undefined, pick: (team: AssessmentTeamFields) => string) =>
     team ? pick(team) : ''
 
+/** The SSVC decision a block carries: its priority, and who recorded it when. */
+export const ssvcValue = (team: AssessmentTeamFields): string => {
+    if (!team.ssvc) return ''
+    const priority = team.ssvc.replaceAll('_', ' ').toLowerCase().replace(/^./, c => c.toUpperCase())
+    let recorded = ''
+    try {
+        const record = JSON.parse(String(team.ssvc_details || '').match(/\{[\s\S]*\}/)?.[0] || 'null')
+        if (record?.assessor) recorded = ` · recorded by ${record.assessor}${record.assessed_at ? ` on ${String(record.assessed_at).slice(0, 10)}` : ''}`
+    } catch {
+        recorded = ' · unreadable record'
+    }
+    return `${priority}${recorded}`
+}
+
 /**
  * The variants field by field. Only rows with a value in at least one
  * variant are returned; `differs` marks the rows that explain the mismatch.
@@ -238,7 +255,9 @@ export const compareVariants = (variants: readonly MatrixVariant[]): ComparisonR
         add(`team:${name}:justification`, `${title} · justification`, teams.map(team => teamValue(team, value => (
             value.justification && value.justification !== 'NOT_SET' ? humanState(value.justification) : ''
         ))))
-        add(`team:${name}:details`, `${title} · rationale`, teams.map(team => teamValue(team, value => value.details.trim())))
+        // The SSVC summary is written into the text; it is shown as the SSVC field.
+        add(`team:${name}:details`, `${title} · rationale`, teams.map(team => teamValue(team, value => stripSsvcDocumentation(value.details).trim())))
+        add(`team:${name}:ssvc`, `${title} · SSVC`, teams.map(team => teamValue(team, ssvcValue)))
         add(`team:${name}:ticket`, `${title} · ticket`, teams.map(team => teamValue(team, value => value.ticket || '')))
         add(`team:${name}:assessed_by`, `${title} · assessed by`, teams.map(team => teamValue(team, value => value.assessed_by || '')))
         add(`team:${name}:reviewed_by`, `${title} · reviewed by`, teams.map(team => teamValue(team, value => value.reviewed_by || '')))

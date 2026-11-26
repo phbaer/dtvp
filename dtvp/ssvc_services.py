@@ -229,6 +229,40 @@ def preserve_record(details: str, existing: str) -> str:
     return write_record(details, record)
 
 
+def agreed_record(texts) -> dict | None:
+    """The SSVC record of several findings' texts when every one that holds
+    a record holds the same; ``None`` when none does, they differ, or one is
+    invalid."""
+    records: dict[str, dict] = {}
+    for text in texts:
+        try:
+            record = read_record(text or "")
+        except (ValueError, KeyError, TypeError):
+            return None
+        if record is not None:
+            records[json.dumps(record, sort_keys=True)] = record
+    return next(iter(records.values())) if len(records) == 1 else None
+
+
+def preserve_or_share_record(details: str, existing: str, shared: dict | None) -> str:
+    """``preserve_record``, except that a finding without a record of its
+    own takes ``shared``, the one the vulnerability's other findings agree
+    on (``agreed_record``). Only where ``details`` has a General block: a
+    record is never the reason to add one.
+
+    The SSVC decision is the vulnerability's. Findings that come later (a
+    new project version, a replaced component) start without it, and a save
+    that kept each finding's own would never give it to them: the findings
+    would disagree for good."""
+    try:
+        has_own = read_record(existing or "") is not None
+    except (ValueError, KeyError, TypeError):
+        has_own = True
+    if has_own or shared is None or not GENERAL_HEADER.search(mask_details(details)):
+        return preserve_record(details, existing)
+    return write_record(details, shared)
+
+
 def new_record(selection: SsvcInput, user: str) -> dict:
     record = {
         **selection.model_dump(),

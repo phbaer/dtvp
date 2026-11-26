@@ -51,13 +51,30 @@ aggregate state follows these rules:
   The legacy API Needs Approval filter still selects all pending work.
 - Inconsistency reasons are indexed separately: missing rescoring metadata,
   differing analysis states, differing structured team blocks, and differing
-  substantive details. Selected reasons use OR semantics; filter categories
+  substantive details. Narrowed meanings:
+  - **Team assessments differ** (`TEAM_ASSESSMENT_MISMATCH`): a team
+    contradicts itself. Its current blocks differ (state, justification or
+    text) across the findings of one scope (findings with a different
+    version override are another scope) or within one finding. Teams may
+    disagree with each other, since a vulnerability affects components
+    differently; that is not a conflict, and a reviewer's Global decision
+    settles it.
+  - **Assessment details differ** (`ASSESSMENT_DETAILS_MISMATCH`): parts the
+    findings both have say different things: the text ahead of the blocks,
+    the same block (the Global one included), two different SSVC records,
+    or two different responses.
+  - A part that some findings have and others lack is a gap, not a
+    difference: a team's block (the vulnerability is Incomplete until
+    Synchronize copies it), the SSVC record or the response (optional; a
+    save and Repair carry the agreed one as a tidy-up). Selected reasons use OR semantics; filter categories
   combine with AND semantics.
 - Findings are compared on what they must agree on: the current team blocks
   and the text ahead of them. Left out are historical blocks, which are
   records of single findings, and the tags for assessor, date, rescoring,
-  pending review and `[Version Coverage: ...]`. A vulnerability whose
-  findings differ only in these is not Conflicting. The server
+  pending review and `[Version Coverage: ...]`, and the order of the team
+  blocks. A vulnerability whose findings differ only in these is not
+  Conflicting. The SSVC record and the response are compared on their own:
+  missing is no difference, two different ones are. The server
   (`comparable_assessment_text` in `dtvp/grouped_vuln_services.py`) and the
   web client (`comparableAssessmentText`) compare the same way; both are
   tested against
@@ -169,9 +186,9 @@ Who changes it:
 | Save | Response |
 | :--- | :--- |
 | Reviewer, `fields` with `response` | Set to that value; `null` or `NOT_SET` removes it |
-| Reviewer, `fields` without `response` | Each finding keeps its own |
+| Reviewer, `fields` without `response` | Each finding keeps its own; a finding without one takes the response the saved findings agree on (only where it has a General block) |
 | Reviewer, text with `response` beside it (General assessment) | Set; `NOT_SET` removes it |
-| Any other save: analysts, team saves as text, MCP agents | Each finding keeps its own, whatever the request's text or fields say |
+| Any other save: analysts, team saves as text, MCP agents | Each finding keeps its own, whatever the request's text or fields say; a finding without one takes the response the saved findings agree on (only where it has a General block) |
 | Clearing the General assessment, or the whole assessment | Removed |
 | Bulk workflows (apply automatic assessments, repair) | Each finding keeps its own; a finding without one takes the response the vulnerability's other findings agree on |
 
@@ -179,9 +196,10 @@ The stored record decides what "its own" is, not the text a client says it
 loaded. An unknown value is answered with 422; a `response` beside a text
 from someone who is not a reviewer, or with a team save, with 403.
 
-Findings of one vulnerability that differ only in the response count as
-differing assessments (`ASSESSMENT_DETAILS_MISMATCH`), like any other
-difference in the General assessment.
+Findings of one vulnerability with two different responses count as
+differing assessments (`ASSESSMENT_DETAILS_MISMATCH`). A finding without a
+response next to findings with one is no difference: the response is
+optional, and a save or Repair gives it the agreed one as a tidy-up.
 
 Dependency-Track receives the response with every export; see
 [Export](import-export.md#export). The VDR carries it as `analysis.response`;
@@ -288,7 +306,11 @@ stages copy this resource directory for the build and type-checking.
 exploitation_evidence?}`
 for reviewer global assessments. The server validates answers and calculates
 the outcome; omitted answers mean incomplete, never a default decision.
-Omitting `ssvc` preserves each finding's stored record; `null` clears it.
+Omitting `ssvc` preserves each finding's stored record; a finding without one
+takes the record the other saved findings hold, when they all hold the same
+(only where the finding has a General block). Repair Assessments carries it
+the same way ([Carry the SSVC record and the response](review-workflows.md#bulk-changes)).
+`null` clears it.
 The General header stores an atomic `[SSVC: IMMEDIATE]` tag (or `DEFER`,
 `SCHEDULED`, `OUT_OF_CYCLE`, `INCOMPLETE`). A separate body block delimited by
 `[SSVC Details]` and `[/SSVC Details]` contains pretty-printed JSON: model/version,

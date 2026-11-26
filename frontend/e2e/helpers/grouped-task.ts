@@ -64,6 +64,27 @@ export async function mockGroupedVulnTask(
     page: Page,
     { taskId, groups }: MockGroupedVulnTaskOptions,
 ) {
+    // A reviewer's card asks whether Repair Assessments applies to its
+    // vulnerability (Repair…). By default nothing does; a spec that needs a
+    // repair routes this again after calling this helper, which then wins.
+    await page.route('**/api/bulk-workflows/assessment-repair/preview', async (route) => {
+        const body = route.request().postDataJSON() || {};
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                task_id: body.task_id || taskId,
+                workflow: { id: 'assessment-repair', label: 'Repair Assessments', description: '', supports_apply: true, supports_document: false, version: 1 },
+                preview_token: 'no-repair',
+                group_fingerprints: {},
+                selectable_group_ids: [],
+                items: [],
+                topics: [],
+                summary: { groups: 0, findings: 0 },
+            }),
+        });
+    });
+
     await page.route(`**/api/tasks/${taskId}**`, async (route) => {
         await route.fulfill({
             status: 200,
