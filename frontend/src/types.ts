@@ -156,6 +156,16 @@ export interface GroupedVulnListMetadata {
     override_gaps?: string[];
     is_pending?: boolean;
     is_approval_ready?: boolean;
+    /** A recorded General decision, or a closed vulnerability, stands for every team (docs/assessment-model.md#per-team-status). */
+    covers_all_teams?: boolean;
+    /** The effective Global decision (docs/assessment-model.md#the-global-decision). */
+    global_decision_source?: 'manual' | 'derived' | 'none';
+    global_decision_state?: string;
+    global_decision_justification?: string;
+    global_decision_teams?: string[];
+    /** The worst team decision, to compare a manual one with. */
+    derived_global_state?: string;
+    derived_global_teams?: string[];
     is_open?: boolean;
     is_assessed?: boolean;
     technical_state?: string;

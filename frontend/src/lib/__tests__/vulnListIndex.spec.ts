@@ -693,12 +693,13 @@ describe('vulnListIndex', () => {
         })
         const item = buildVulnListItem(pending, {}, {})
 
-        expect(item.lifecycle).toBe('INCOMPLETE')
+        // Pending with nothing decided is Open (ADR 0014), still awaiting review.
+        expect(item.lifecycle).toBe('OPEN')
         expect(item.isApprovalReady).toBe(false)
-        expect(matchesLifecycleFilter(item, ['INCOMPLETE'])).toBe(true)
+        expect(matchesLifecycleFilter(item, ['INCOMPLETE'])).toBe(false)
         expect(matchesLifecycleFilter(item, ['NEEDS_APPROVAL'])).toBe(true)
         expect(matchesLifecycleFilter(item, ['READY_FOR_APPROVAL'])).toBe(false)
-        expect(matchesLifecycleFilter(item, ['OPEN'])).toBe(false)
+        expect(matchesLifecycleFilter(item, ['OPEN'])).toBe(true)
         expect(item.isOpen).toBe(true)
         expect(item.isAssessed).toBe(false)
         expect(matchesStateFilters(item, {

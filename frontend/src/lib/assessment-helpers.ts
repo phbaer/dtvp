@@ -1,4 +1,4 @@
-import { combineLifecycles, getAssessmentScopes, scopedGroup, type AssessmentScopeView } from './assessmentScopes';
+import { combineLifecycles, getAssessmentScopes, hasPendingReviewMarker, scopedGroup, type AssessmentScopeView } from './assessmentScopes';
 import type { GroupedVuln, InconsistencyReason, Tags, TagValue } from '../types';
 import { normalizeInconsistencyReasons } from './inconsistency';
 import { maskSsvcDetails, ssvcDetailsPattern, stripSsvcDetails, stripSsvcDocumentation } from './ssvc';
@@ -492,6 +492,19 @@ const buildGroupAssessmentSignature = (group: GroupedVuln): string => {
     return parts.join('||');
 };
 
+/**
+ * The blocks under team headers only, as the server's _parse_assessment_blocks
+ * reads them: text ahead of the first header (a legacy assessment) is no
+ * block. parseAssessmentBlocks shows such text as a General block for
+ * editing; the lifecycle must not count it.
+ */
+const parseHeaderBlocks = (details: string): AssessmentBlock[] => {
+    if (!details) return [];
+    const first = maskSsvcDetails(details).indexOf('--- [Team:');
+    if (first === -1) return [];
+    return parseAssessmentBlocks(first === 0 ? details : details.slice(first));
+};
+
 const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary => {
     const allInstances = (group.affected_versions || []).flatMap(v => v.components || []) as Array<Record<string, any>>;
     const componentStates = allInstances.map(getInstanceAssessmentState);
@@ -500,9 +513,7 @@ const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary
 
     for (const instance of allInstances) {
         const details = getInstanceAssessmentDetails(instance);
-        const active = details
-            ? parseAssessmentBlocks(details).filter(block => !block.historical)
-            : [];
+        const active = parseHeaderBlocks(details).filter(block => !block.historical);
         instanceBlocks.push(active);
         blocks.push(...active);
     }
@@ -553,7 +564,7 @@ const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary
         hasAnyAssessment: componentStates.some(state => state !== 'NOT_SET'),
         hasMissingComponent: componentStates.includes('NOT_SET'),
         hasGlobalAssessment: blocks.some(block => block.team === 'General' && block.state !== 'NOT_SET'),
-        isPendingReview: allInstances.some(instance => stripSsvcDetails(getInstanceAssessmentDetails(instance)).includes('[Status: Pending Review]')),
+        isPendingReview: allInstances.some(instance => hasPendingReviewMarker(getInstanceAssessmentDetails(instance))),
         technicalState,
     };
 };
@@ -1204,32 +1215,79 @@ export function hasGlobalAssessmentForGroup(group: GroupedVuln): boolean {
     return getGroupAssessmentSummary(group).hasGlobalAssessment;
 }
 
-const hasOpenTeamAssessmentFromSummary = (
-    summary: GroupAssessmentSummary,
-    requiredTeamsOrTags?: Tags | undefined,
-    teamMapping?: Record<string, string | string[]>,
-): boolean => {
-    const requiredTeams = teamMapping
-        ? normalizeTags(requiredTeamsOrTags, teamMapping)
-        : (requiredTeamsOrTags || []).map(tagToString).filter(Boolean);
-    const assessableTeams = requiredTeams.filter(team => assessmentTeamKey(team) !== 'unassigned');
-
-    if (assessableTeams.length > 0) {
-        const assessedKeys = assessedTeamKeys(summary.assessedTeams, teamMapping);
-        const missingAssessment = assessableTeams.some(team => !assessedKeys.has(assessmentTeamKey(team)));
-        const singleTeamGlobalAssessment = assessableTeams.length === 1
-            && summary.hasGlobalAssessment
-            && summary.assessedTeams.size === 0;
-        if (missingAssessment && !singleTeamGlobalAssessment) return true;
-    }
-
-    if (summary.hasMissingComponent) return true;
-
-    return summary.blocks.some(block => block.team !== 'General' && block.state === 'NOT_SET');
+export interface DerivedGlobalDecision {
+    state: string;
+    justification: string;
+    teams: string[];
 }
 
-export function hasOpenTeamAssessment(group: GroupedVuln, requiredTeamsOrTags?: Tags | undefined, teamMapping?: Record<string, string | string[]>): boolean {
-    return hasOpenTeamAssessmentFromSummary(getGroupAssessmentSummary(group), requiredTeamsOrTags, teamMapping);
+export interface GlobalDecision extends DerivedGlobalDecision {
+    /** Set by a reviewer (manual), the worst team decision (derived), or none. */
+    source: 'manual' | 'derived' | 'none';
+    /** The worst team decision in every case; null without deciding team blocks. */
+    derived: DerivedGlobalDecision | null;
+}
+
+const decides = (state: string | undefined | null) => !!state && state !== 'NOT_SET';
+
+/**
+ * The effective Global decision of assessment blocks: the reviewer's General
+ * block when one decides, else the worst state among the current team blocks
+ * that decide (STATE_PRIORITY), every team with that state named, with the
+ * justification of the first of them that has one. As the server's
+ * logic.global_decision; both are tested against fixtures/lifecycle_cases.json.
+ */
+export function getGlobalDecision(blocks: readonly AssessmentBlock[]): GlobalDecision {
+    const current = blocks.filter(block => !block.historical);
+    const deciding = current.filter(block => assessmentTeamKey(block.team) !== 'general' && decides(block.state));
+    let derived: DerivedGlobalDecision | null = null;
+    if (deciding.length) {
+        const rank = (state: string) => STATE_PRIORITY[state] ?? 10;
+        const worst = deciding
+            .map(block => block.state)
+            .sort((left, right) => rank(left) - rank(right) || (left < right ? -1 : left > right ? 1 : 0))[0]!;
+        const tied = deciding
+            .filter(block => block.state === worst)
+            .sort((left, right) => {
+                const a = assessmentTeamKey(left.team), b = assessmentTeamKey(right.team);
+                return a < b ? -1 : a > b ? 1 : 0;
+            });
+        const teams: string[] = [];
+        for (const block of tied) {
+            const name = String(block.team || '').trim();
+            if (name && !teams.some(team => assessmentTeamKey(team) === assessmentTeamKey(name))) teams.push(name);
+        }
+        const justification = tied.find(block => decides(block.justification))?.justification || 'NOT_SET';
+        derived = { state: worst, justification, teams };
+    }
+    const general = current.find(block => assessmentTeamKey(block.team) === 'general' && decides(block.state));
+    if (general) {
+        return { source: 'manual', state: general.state, justification: general.justification || 'NOT_SET', teams: [], derived };
+    }
+    if (derived) return { source: 'derived', ...derived, derived };
+    return { source: 'none', state: 'NOT_SET', justification: 'NOT_SET', teams: [], derived: null };
+}
+
+/**
+ * The group's effective Global decision: computed from the loaded findings,
+ * else the server's list metadata (rows without their findings).
+ */
+export function getGroupGlobalDecision(group: GroupedVuln): GlobalDecision {
+    const metadata = group.list_metadata;
+    const loaded = (group.affected_versions || []).some(version => (version.components || []).length > 0);
+    if (!loaded && metadata?.global_decision_source) {
+        const derived = decides(metadata.derived_global_state)
+            ? { state: metadata.derived_global_state!, justification: 'NOT_SET', teams: metadata.derived_global_teams || [] }
+            : null;
+        return {
+            source: metadata.global_decision_source,
+            state: metadata.global_decision_state || 'NOT_SET',
+            justification: metadata.global_decision_justification || 'NOT_SET',
+            teams: metadata.global_decision_teams || [],
+            derived,
+        };
+    }
+    return getGlobalDecision(getGroupAssessmentSummary(group).blocks);
 }
 
 const getGroupInconsistencyReasonsFromSummary = (
@@ -1413,11 +1471,15 @@ const getGroupLifecycleFromSummary = (
     );
     const missingTeams = (assessableTeams || []).filter((t: string) => !assessedKeys.has(assessmentTeamKey(t)));
 
-    // Pending review always wins over legacy detection. If coverage is also
-    // incomplete, keep the lifecycle in INCOMPLETE; the pending flag still
-    // exposes the item through the separate NEEDS_APPROVAL filter.
+    // Pending review always wins over legacy detection, as on the server
+    // (_derive_group_lifecycle; docs/assessment-model.md#lifecycle-decision-table).
+    // A finding without a state keeps it INCOMPLETE. Teams without a block of
+    // their own do too, unless a General block decides: approving it
+    // completes the vulnerability, so it awaits approval.
     if (isPendingReview) {
-        if (missingTeams.length > 0 || hasMissingComponent) return 'INCOMPLETE';
+        // Nothing decided yet: nothing to approve either.
+        if (!hasAnyAssessment) return 'OPEN';
+        if (hasMissingComponent || (missingTeams.length > 0 && !hasGlobal)) return 'INCOMPLETE';
         return 'NEEDS_APPROVAL';
     }
 
@@ -1544,10 +1606,9 @@ export function matchesFilters(
 ): boolean {
     if (lifecycleFilters.length === 0 || analysisFilters.length === 0) return false;
 
-    const summary = getGroupAssessmentSummary(group);
-    const tags = normalizeTags(group.tags, teamMapping);
-    const state = getGroupLifecycleFromSummary(group, summary, tags, teamMapping);
-    const isPending = summary.isPendingReview;
+    // The same lifecycle as everywhere else, version overrides included.
+    const state = getGroupLifecycle(group, group.tags, teamMapping);
+    const isPending = isPendingReview(group);
 
     // 1. Lifecycle Match
     const lifecycleMatch = (lifecycleFilters.includes('OPEN') && state === 'OPEN') ||
@@ -1564,7 +1625,7 @@ export function matchesFilters(
     // A group matches if:
     // - It is OPEN (no technical state yet, so it matches any analysis filter that includes NOT_SET)
     // - OR its overall technical state matches one of the filters
-    const techState = summary.technicalState;
+    const techState = getGroupTechnicalState(group);
     if (techState === 'NOT_SET') {
         return analysisFilters.includes('NOT_SET');
     }

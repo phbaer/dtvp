@@ -1107,3 +1107,37 @@ async def test_a_forced_save_without_a_race_overwrites_a_stale_view(deps):
     )
 
     assert _teams()["TeamA"]["details"] == "Overwrites."
+
+
+# --- Approval only when Ready for approval (ADR 0014) ------------------------
+
+_TEAMS_INSTANCE = {**INSTANCE, "tags": ["TeamA", "TeamB"]}
+_GENERAL_PENDING = {"team": "General", "state": "NOT_AFFECTED", "assessed_by": "alice",
+                    "justification": "CODE_NOT_PRESENT", "details": "Not shipped."}
+
+
+async def test_approval_of_an_incomplete_vulnerability_is_refused(deps):
+    # TeamB has no assessment and no General decision covers it: Incomplete.
+    await _store(deps, _TEAM_A_STORED, instance=_TEAMS_INSTANCE)
+    revision = _stored()["dtvpRevision"]
+
+    with pytest.raises(AssessmentValidationError, match="ready for approval"):
+        await _reviewer_save(
+            deps, instances=[dict(_TEAMS_INSTANCE)], team=None, state="NOT_AFFECTED", approve=True,
+            fields={"pending_review": False, "teams": [_GENERAL_PENDING, _TEAM_A_STORED]},
+        )
+
+    assert _stored()["dtvpRevision"] == revision
+    assert _PENDING in _stored()["analysisDetails"]
+
+
+async def test_a_pending_general_decision_that_covers_a_team_can_be_approved(deps):
+    # Saved first (pending), the General decision covers TeamB: Ready for approval.
+    await _store(deps, _GENERAL_PENDING, _TEAM_A_STORED, instance=_TEAMS_INSTANCE)
+
+    await _reviewer_save(
+        deps, instances=[dict(_TEAMS_INSTANCE)], team=None, state="NOT_AFFECTED", approve=True,
+        fields={"pending_review": False, "teams": [_GENERAL_PENDING, _TEAM_A_STORED]},
+    )
+
+    assert _PENDING not in _stored()["analysisDetails"]

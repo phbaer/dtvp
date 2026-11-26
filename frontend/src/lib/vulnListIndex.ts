@@ -12,7 +12,7 @@ import {
     normalizeTags,
     tagToString,
 } from './assessment-helpers'
-import { addTeamCounts, classifyGroup } from './group-classifier'
+import { addTeamCounts, classifyGroup, coversAllTeamsOf } from './group-classifier'
 import type { FilterCounts, TeamCounts } from './group-classifier'
 import {
     AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
@@ -77,6 +77,8 @@ export interface VulnListItem {
     lifecycle: string
     isPending: boolean
     isApprovalReady: boolean
+    /** Every team counts as assessed: a recorded General decision or a closed vulnerability. */
+    coversAllTeams: boolean
     isOpen: boolean
     isAssessed: boolean
     technicalState: string
@@ -810,6 +812,9 @@ export function buildVulnListItem(
         isOpen: metadata?.is_open ?? fallbackClassification?.isOpen ?? false,
         technicalState: metadata?.technical_state || fallbackClassification?.technicalState || 'NOT_SET',
     }
+    const coversAllTeams = metadata
+        ? coversAllTeamsOf(group, teamMapping)
+        : fallbackClassification!.coversAllTeams
     const isAssessed = metadata?.is_assessed ?? (
         classification.lifecycle === 'ASSESSED' ||
         classification.lifecycle === 'ASSESSED_LEGACY'
@@ -853,7 +858,8 @@ export function buildVulnListItem(
         tagsLower,
         normalizedTags,
         assessedTeams,
-        missingTeamTagsLower: allTagText.filter(tag => {
+        // The same rule as the team counters (coversAllTeams).
+        missingTeamTagsLower: coversAllTeams ? [] : allTagText.filter(tag => {
             const canonical = normalizeTags([tag], teamMapping)[0] || tag
             return lower(canonical) !== 'unassigned'
                 && !assessedTeamsLower.has(lower(canonical))
@@ -889,6 +895,7 @@ export function buildVulnListItem(
         lifecycle: classification.lifecycle,
         isPending: classification.isPending,
         isApprovalReady: classification.isApprovalReady,
+        coversAllTeams,
         isOpen: classification.isOpen,
         isAssessed,
         technicalState: classification.technicalState,

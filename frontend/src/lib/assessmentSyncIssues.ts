@@ -5,13 +5,15 @@ import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
     getGroupLifecycle,
+    hasGlobalAssessmentForGroup,
+    isPendingReview,
     normalizeTags,
 } from './assessment-helpers'
 import { INCONSISTENCY_REASON_OPTIONS } from './inconsistency'
 
 export interface AssessmentSyncIssue {
     code: string
-    kind: 'incomplete' | 'inconsistent'
+    kind: 'incomplete' | 'inconsistent' | 'approval'
     label: string
     detail: string
 }
@@ -30,6 +32,29 @@ const humanizeState = (state: string) => state
 const inconsistencyOption = (reason: InconsistencyReason) =>
     INCONSISTENCY_REASON_OPTIONS.find(option => option.value === reason)
 
+const missingTeamsOf = (
+    group: GroupedVuln,
+    requiredTeamsOrTags: Tags,
+    teamMapping: Record<string, string | string[]>,
+): string[] => {
+    const requiredTeams = normalizeTags(requiredTeamsOrTags, teamMapping)
+    const assessedTeams = group.list_metadata?.assessed_teams
+        ? new Set(group.list_metadata.assessed_teams)
+        : getAssessedTeams(group)
+    const assessedKeys = assessedTeamKeys(assessedTeams, teamMapping)
+    return requiredTeams.filter(team =>
+        assessmentTeamKey(team) !== 'unassigned' && !assessedKeys.has(assessmentTeamKey(team))
+    )
+}
+
+/** A General block decides and is pending review: approving it completes
+ * the teams without a block of their own
+ * (docs/assessment-model.md#lifecycle-decision-table). */
+const globalAwaitsApproval = (group: GroupedVuln): boolean =>
+    isPendingReview(group) && hasGlobalAssessmentForGroup(group)
+
+const APPROVE_GLOBAL = 'Approve the Global assessment to complete it.'
+
 const incompleteIssues = (
     group: GroupedVuln,
     requiredTeamsOrTags: Tags,
@@ -40,21 +65,19 @@ const incompleteIssues = (
     const missingInstances = allInstances.filter(instance =>
         (instance.analysis_state || instance.analysisState || 'NOT_SET') === 'NOT_SET'
     )
-    const requiredTeams = normalizeTags(requiredTeamsOrTags, teamMapping)
-    const assessedTeams = group.list_metadata?.assessed_teams
-        ? new Set(group.list_metadata.assessed_teams)
-        : getAssessedTeams(group)
-    const assessedKeys = assessedTeamKeys(assessedTeams, teamMapping)
-    const missingTeams = requiredTeams.filter(team =>
-        assessmentTeamKey(team) !== 'unassigned' && !assessedKeys.has(assessmentTeamKey(team))
-    )
+    // An approved General decision covers every team (ADR 0014).
+    const missingTeams = hasGlobalAssessmentForGroup(group) && !isPendingReview(group)
+        ? []
+        : missingTeamsOf(group, requiredTeamsOrTags, teamMapping)
 
     if (missingTeams.length > 0) {
         issues.push({
             code: 'MISSING_TEAM_ASSESSMENTS',
             kind: 'incomplete',
             label: 'Missing team assessments',
-            detail: `No completed assessment for ${missingTeams.join(', ')}.`,
+            detail: globalAwaitsApproval(group)
+                ? `No assessment of their own for ${missingTeams.join(', ')}; the pending Global assessment covers them once approved.`
+                : `No completed assessment for ${missingTeams.join(', ')}.`,
         })
     }
 
@@ -146,5 +169,48 @@ export const getGroupAssessmentSyncIssues = (
     if (lifecycle === 'INCOMPLETE') {
         return incompleteIssues(group, requiredTeamsOrTags, teamMapping)
     }
+    if (lifecycle === 'NEEDS_APPROVAL' && globalAwaitsApproval(group)) {
+        // Ready for approval although teams have no block of their own.
+        const missingTeams = missingTeamsOf(group, requiredTeamsOrTags, teamMapping)
+        if (missingTeams.length > 0) {
+            return [{
+                code: 'GLOBAL_AWAITS_APPROVAL',
+                kind: 'approval',
+                label: 'Covered by the pending Global assessment',
+                detail: `No assessment of their own for ${missingTeams.join(', ')}. ${APPROVE_GLOBAL}`,
+            }]
+        }
+    }
     return []
+}
+
+/**
+ * Why a pending vulnerability cannot be approved now, or '' when it can or
+ * nothing waits. Approval is for Ready for approval only
+ * (docs/assessment-model.md#lifecycle-decision-table); the server refuses
+ * it otherwise (assessment_use_cases.approval_blocker).
+ */
+export const getApprovalUnavailableReason = (
+    group: GroupedVuln,
+    options: AssessmentSyncIssueOptions = {},
+): string => {
+    if (!isPendingReview(group)) return ''
+    const teamMapping = options.teamMapping || {}
+    const requiredTeamsOrTags = options.requiredTeamsOrTags || group.tags || []
+    const lifecycle = options.lifecycle
+        || group.list_metadata?.lifecycle
+        || getGroupLifecycle(group, requiredTeamsOrTags, teamMapping)
+    if (lifecycle === 'NEEDS_APPROVAL') return ''
+    if (lifecycle === 'OPEN') return 'Approval is possible once it is ready for approval: nothing is decided yet.'
+    if (lifecycle === 'INCONSISTENT') {
+        return 'Approval is possible once it is ready for approval: the findings disagree; resolve the conflict first.'
+    }
+    if (lifecycle === 'INCOMPLETE') {
+        const details = incompleteIssues(group, requiredTeamsOrTags, teamMapping).map(issue => issue.detail).join(' ')
+        const missingTeams = !hasGlobalAssessmentForGroup(group)
+            && missingTeamsOf(group, requiredTeamsOrTags, teamMapping).length > 0
+        return `Approval is possible once it is ready for approval. ${details}`
+            + (missingTeams ? ' Record the Global decision, or the missing team assessments, first.' : '')
+    }
+    return ''
 }

@@ -149,8 +149,14 @@ constraints, and CI conventions.
 | **Open** | No assessment started |
 | **Incomplete** | Required team or finding coverage is missing |
 | **Conflicting** | Assessment data disagrees or needs repair |
-| **Ready for approval** | Complete, consistent assessments await reviewer sign-off |
+| **Ready for approval** | Only the reviewer's approval is left, including a pending Global decision that covers teams without their own assessment |
 | **Assessed** | Complete with no pending approval; includes legacy assessments |
+
+Without a reviewer's Global decision, the decision is derived: the worst team
+assessment ([the Global decision](docs/assessment-model.md#the-global-decision)).
+The exact rules, their order, the API values and who resolves each state are
+in the [lifecycle decision table](docs/assessment-model.md#lifecycle-decision-table)
+([ADR 0014](docs/adr/0014-lifecycle-decision-table.md)).
 
 **Quick views** cover the common jobs: **Needs my assessment** (Open and
 Incomplete, including Conflicting; with teams selected, their assessment is
@@ -168,7 +174,7 @@ vulnerability leaves it, the next one is selected
 Select one or more **Teams** to enable **Assessment for selected teams**:
 **Not recorded** finds a missing assessment among responsible selected teams;
 **Recorded** requires all responsible selected teams to have an assessment
-(including pending approval); **Any** adds no restriction. Analysts start with
+(including pending approval, or a recorded Global decision that covers them); **Any** adds no restriction. Analysts start with
 Not recorded when selecting their first team; reviewers start with Any.
 Clearing teams removes this restriction. Status choices remain unchanged.
 
@@ -200,10 +206,12 @@ project opened without filters shows the default view
 Combined Team and Version selections require team ownership in one of the
 selected project versions; ownership in another release does not match.
 
-Team Open/Assessed statistics use the current filtered findings and each team's
-recorded assessment, including pending approval. A closed, reviewer-approved
-vulnerability counts as Assessed for every assigned team, even when team
-documentation is incomplete. Group totals count each finding once and remain
+Team Open/Assessed statistics and the **Assessment for selected teams** filter
+follow one rule ([per-team status](docs/assessment-model.md#per-team-status)):
+each team's recorded assessment, including pending approval, and a recorded
+Global decision or a closed vulnerability counts for every assigned team,
+even when team documentation is incomplete. Approve is offered only for
+Ready for approval; the card says what is missing otherwise. Group totals count each finding once and remain
 Open while an unclosed finding has a responsible member without an assessment.
 With a version filter, team and group breakdowns include only owners in those
 releases. Team selections restrict these breakdowns to selected teams and their

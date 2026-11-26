@@ -51,9 +51,13 @@ address bar.
 least one of its findings holds an assessment that was submitted for review
 and not approved yet (`[Status: Pending Review]` in its text). That is:
 
-- Ready for approval: all required teams assessed, only the approval is left;
-- a team's submission while other teams are still open: the status stays
-  Incomplete, but the submission waits for review all the same;
+- Ready for approval: only the approval is left, because every required team
+  assessed or a pending Global decision covers the teams without an
+  assessment of their own;
+- a team's submission while other teams are still open and no Global
+  decision covers them: the status stays Incomplete, but the submission
+  waits for review all the same;
+- a pending placeholder without any decision: the status is Open;
 - a conflicting submission, which needs repair before it can be approved;
 - proposals saved pending review: assessments carried over to a replacing
   finding (`carried-over`, `carried-over-by-alias`,
@@ -294,7 +298,9 @@ need repair before approval; cards and the API retain their distinct labels.
 - **Any** adds no coverage restriction.
 - **Not recorded** requires a missing assessment among responsible selected teams.
 - **Recorded** requires assessments from all responsible selected teams, including
-  pending approval or globally incomplete/conflicting work.
+  pending approval or globally incomplete/conflicting work. A recorded Global
+  decision, or a closed vulnerability, counts for every team
+  ([per-team status](assessment-model.md#per-team-status)).
 
 Only selected teams responsible for each vulnerability participate; unrelated
 selected teams and unassigned findings cannot create missing assessments.
@@ -322,14 +328,12 @@ configured aliases; legacy component-scoped runs without that metadata remain
 visible for compatibility. Team mappings are compiled and component ownership
 is resolved once per card scope so switching filters does not repeatedly scan
 the full mapping. Advisory metadata remains vulnerability-wide context. An
-approved General assessment remains the authoritative aggregate state and makes
-the vulnerability done once approved, even when team coverage is incomplete.
-Finding coverage is still required: an approved or legacy assessment that is
-missing from some finding instances, such as another project version, is
-classified as `INCOMPLETE`. Before approval, a pending item with missing team or finding coverage is
-classified as `INCOMPLETE`, while complete-but-pending work remains
-`NEEDS_APPROVAL`, displayed as Ready for approval. The `READY_FOR_APPROVAL`
-filter selects only that complete pending subset. The tab badges
+lifecycle follows the
+[lifecycle decision table](assessment-model.md#lifecycle-decision-table): a
+General decision covers teams without a block of their own (Assessed once
+approved, Ready for approval while pending), and every finding needs a state.
+The `READY_FOR_APPROVAL` filter selects the Ready for approval subset of the
+pending work. The tab badges
 use assessment coverage from the selected team's visible findings.
 The card reports how many findings are inside the
 active team scope, and stale asynchronous history loads are discarded when the
@@ -342,13 +346,14 @@ Combined team dropdown and version selections require
 the selected team to own a finding in a selected release; matching the team
 only in a different release does not include the vulnerability. The version
 selection can come from a shared URL or a `version:` search token.
-The Team open/assessed breakdown uses the final filtered result and each team's
-recorded assessment. A team with an active assessment state other than `NOT_SET`
-counts as assessed, including pending approval. Closed findings (including
-approved General and legacy assessments) count as assessed for all assigned
-teams, even where team documentation is missing. For findings that remain open,
-missing team assessments count as open. The Not recorded/Recorded filter still
-checks actual team documentation independently of closure.
+The Team open/assessed breakdown uses the final filtered result and the same
+rule as the Not recorded/Recorded filter
+([per-team status](assessment-model.md#per-team-status)): a team with an
+active assessment state other than `NOT_SET` counts as assessed, including
+pending approval, and a recorded General decision (pending or approved) or a
+closed vulnerability (including legacy assessments) counts for all assigned
+teams, even where team documentation is missing. Otherwise missing team
+assessments count as open.
 With a version filter, the team and group breakdowns count only owners in those
 releases. A wildcard (`*`) fallback such as Unknown uses its configured team
 name and recorded team assessments, just like other owners.
@@ -581,6 +586,13 @@ agree); see
 
 ### Approving
 
+Approve is offered only for a vulnerability that is
+[Ready for approval](assessment-model.md#approval); on any other pending
+vulnerability the card says what is missing, and the server refuses the
+approval (422). A reviewer can still complete a vulnerability without every
+team's own assessment: save the final Global decision first (it stays
+pending and makes the vulnerability Ready for approval), then approve it.
+
 A reviewer who opens a pending assessment lands on the Global assessment. If no
 Global assessment exists yet, the form is filled from the team assessments: the
 worst state, its justification and the combined rationale, with the rescoring
@@ -765,7 +777,7 @@ label per applicable repair and count only the findings that change.
 | Synchronize assessment | Incomplete groups whose otherwise consistent assessment is missing from some findings | Every finding carries the same assessment blocks, except the [new findings](#new-findings) of a new version, which stay unassessed unless the reviewer includes them (per vulnerability, or for all at once with **New findings** in the Select row); a rescored CVSS stored ahead of the blocks is kept, and copied to findings without one. The [response](assessment-model.md#response) is kept as well; a finding without one takes the response the other findings agree on |
 | Keep former team assessment | Assessment blocks of teams that no longer own the vulnerability | See below |
 | Refer teams to the global assessment | An approved global assessment while a current team has no assessment of its own | Each such team receives a block with the global state and justification and the text `See global assessment.`; never while the global assessment is pending review or unset. A team block without a decision that holds a text, ticket, assignees, evidence or coverage stays as it is, and that team is left to assess |
-| Remove references no team stands behind | A block under the name for components no team owns (the team mapping's `*`, or `Unassigned`) whose text is only `See global assessment.` | The block is removed. An assessment someone wrote under that name stays: it is the assessment of a component without a team, not a former team's |
+| Remove references no team stands behind | A block under the name for components no team owns (the team mapping's `*`, or `Unassigned`) whose text is only `See global assessment.`, while a General decision covers the team | The block is removed: not needed, the General decision covers it. Without a General decision it stays, since it is what the team has. An assessment someone wrote under that name stays: it is the assessment of a component without a team, not a former team's |
 | Combine conflicting assessments | Conflicting groups in which no current team has an assessment | See below |
 | Repair rescoring | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect | The rule's vector and score are written |
 
@@ -798,8 +810,12 @@ An incomplete vulnerability whose missing team has no assessment anywhere
 cannot be completed by a repair: there is nothing to copy, and no approved
 global assessment to refer to. The preview lists it, not selectable, with
 the reason, for example "Core has not assessed this vulnerability yet;
-nothing to copy and the global assessment is pending review, so no team can
-refer to it: open the vulnerability to assess it". A team counts as having
+nothing to copy: open the vulnerability to assess it". When a Global
+decision pending review covers the team, the vulnerability is Ready for
+approval (or becomes it once Repair synchronizes its findings), and the
+preview says "Core has no assessment of their own; the global assessment
+covers them and is pending review: approve the Global assessment to complete
+it"; the card shows the same under **What completes it**. A team counts as having
 assessed when a current block carries its name or one of its aliases from
 the team mapping (a team's `aliases`), compared
 without case and surrounding space; the vulnerability list, the card's
@@ -811,7 +827,7 @@ of one finding, for example a former team's assessment or a team assessment
 version. Each finding keeps its own historical blocks exactly as stored, none
 is copied to another finding, and none is taken for a team's current
 assessment. A team that has a historical block on any finding receives no
-`See global assessment.` reference and is left to assess. Historical blocks
+`See global assessment.` reference; a General decision still covers it. Historical blocks
 do not make the findings of a vulnerability differ
 ([Assessment model](assessment-model.md)), so a restore into one version
 leaves the vulnerability's status as it was.
@@ -832,10 +848,13 @@ it:
   it, not the day of the repair), and a copy of its rationale, so that the
   decision does not stand without a text. If that result is approved, each
   team without an assessment receives a block with the global state and the
-  text `See global assessment.`; while it is pending review those teams stay
-  open and the vulnerability remains Incomplete. A current team that already
-  has a historical block gets no reference block and stays open; its own
-  later assessment is written beside the historical block, which stays.
+  text `See global assessment.`; while it is pending review the vulnerability
+  is Ready for approval and the label says "approve the Global assessment to
+  complete it". A current team that already has a historical block gets no
+  reference block; the General decision covers it, and its own later
+  assessment is written beside the historical block, which stays. The
+  catch-all `*` team never gets a reference block: the General decision
+  covers it ([Repair and the catch-all team](assessment-model.md#repair-and-the-catch-all-team)).
 
 Notes in the global assessment written by earlier repairs ("Former team
 assessment (…)") stay as they are and are still exported.
@@ -856,8 +875,8 @@ the global assessment. No "Former team assessment" note is written. If
 the sources agree on the state and none
 was pending review, each other current team receives a `See global assessment.`
 block and the vulnerability becomes Assessed. If the sources disagree, the
-combined decision is new: it is marked pending review and the current teams
-stay open. Conflicts that involve a current team's assessment still need a
+combined decision is new: it is marked pending review, and approving it
+completes the vulnerability. Conflicts that involve a current team's assessment still need a
 manual decision.
 
 Tickets are restored from DTVP's own [history](import-export.md#history). A

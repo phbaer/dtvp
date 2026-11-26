@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
@@ -14,7 +15,7 @@ from .assessment_model import (
     with_analysis_response,
 )
 from .dt_client import DTClient
-from .logic import keep_team_records
+from .logic import keep_team_records, with_derived_global_block
 from .assessment_use_cases import AssessmentRequest
 from .ssvc_services import new_record, preserve_record, write_record
 
@@ -306,7 +307,13 @@ def build_assessment_payloads(
         if is_reviewer and req.approve:
             if marked:
                 final_details_str = _PENDING_MARKER_RE.sub("", final_details_str).rstrip()
-                aggregated_state = deps.calculate_aggregated_state(final_details_str)
+            # Without a General decision the approval records the derived
+            # one, the worst team decision, as the General block: what is
+            # approved is written down (ADR 0014).
+            final_details_str = with_derived_global_block(
+                final_details_str, user, int(time.time() * 1000)
+            )
+            aggregated_state = deps.calculate_aggregated_state(final_details_str)
         elif (
             final_details_str.strip()
             and not marked

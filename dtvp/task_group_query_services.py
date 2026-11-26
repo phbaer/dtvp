@@ -26,7 +26,7 @@ from .first_seen import (
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 19
+TASK_GROUP_QUERY_INDEX_VERSION = 20
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -336,6 +336,12 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "is_open": bool(metadata.get("is_open")),
         "is_pending": bool(metadata.get("is_pending")),
         "is_approval_ready": bool(metadata.get("is_approval_ready")),
+        "covers_all_teams": bool(metadata.get(
+            "covers_all_teams",
+            # Metadata from before the flag: a closed vulnerability.
+            str(metadata.get("lifecycle") or "") in {"ASSESSED", "ASSESSED_LEGACY"}
+            and not metadata.get("is_pending"),
+        )),
         "technical_state": str(metadata.get("technical_state") or "NOT_SET"),
         "dependency_relationship": _dependency_relationship_for_group(group),
         "cvss_version_mismatch": bool(metadata.get("cvss_version_mismatch")),
@@ -378,7 +384,8 @@ def _team_assessment_status(
     relevant = _selected_group_teams(fields, selected, aliases) - {"unassigned"}
     if not relevant:
         return None
-    assessed = {_lower(aliases.get(name, name)) for name in fields["assessed_teams_lower"]}
+    # The same rule as the team counters (_canonical_assessed_teams).
+    assessed = _canonical_assessed_teams(fields, aliases)
     return "MISSING" if relevant - assessed else "DOCUMENTED"
 
 
@@ -948,10 +955,11 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _canonical_assessed_teams(
     fields: dict[str, Any], team_aliases: dict[str, str],
 ) -> set[str]:
-    # Closure applies to every owner without inventing team documentation.
-    closed = fields["lifecycle"] in {"ASSESSED", "ASSESSED_LEGACY"} and not fields["is_pending"]
+    # A recorded General decision, or a closed vulnerability, stands for
+    # every owner without a block of its own
+    # (docs/assessment-model.md#per-team-status).
     teams = set(fields["assessed_teams_lower"])
-    if closed:
+    if fields["covers_all_teams"]:
         teams.update(_lower(team) for team in fields["tags"])
     return {
         _lower(team_aliases.get(team, team))

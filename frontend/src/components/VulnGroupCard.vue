@@ -8,10 +8,10 @@ import { marked } from 'marked'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Eraser, Brush, Wrench, MoreHorizontal, EyeOff, Maximize2, Minimize2, Info } from '@lucide/vue'
 
-import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentVariantKey, type AssessmentBlock } from '../lib/assessment-helpers'
+import { ANALYSIS_RESPONSE_OPTIONS, parseAssessmentResponse, parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupGlobalDecision, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, assessmentVariantKey, type AssessmentBlock } from '../lib/assessment-helpers'
 import { AMBIGUOUS_SCOPE, BASE_SCOPE, getAssessmentScopes } from '../lib/assessmentScopes'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
-import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
+import { getApprovalUnavailableReason, getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
@@ -39,7 +39,7 @@ import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
 import DetailSection from './DetailSection.vue'
 import VulnAboutSummary from './VulnAboutSummary.vue'
 import TeamAssessmentOverview from './TeamAssessmentOverview.vue'
-import { buildTeamOverview } from '../lib/teamOverview'
+import { buildTeamOverview, stateLabel as stateLabelOf } from '../lib/teamOverview'
 import { sortVersions } from '../lib/version'
 import type { CodeAnalysisAssessResponse, CodeAnalysisCvssAdjustment } from '../lib/api'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
@@ -297,6 +297,7 @@ const differingFindingCount = computed(() => visibleInstances.value.length - Mat
 ))
 const inconsistencyIssues = computed(() => assessmentSyncIssues.value.filter(issue => issue.kind === 'inconsistent'))
 const incompleteIssues = computed(() => assessmentSyncIssues.value.filter(issue => issue.kind === 'incomplete'))
+const approvalIssues = computed(() => assessmentSyncIssues.value.filter(issue => issue.kind === 'approval'))
 /**
  * The team assessments that count: historical records are listed in
  * mergedAssessmentData too, but they are not any team's current decision.
@@ -850,9 +851,18 @@ const assessedIconClass = computed(() => {
     return 'text-white'
 })
 
+// Approval is for a vulnerability that is Ready for approval only; the
+// server refuses it otherwise (docs/assessment-model.md#lifecycle-decision-table).
 const canApprove = computed(() => {
-    return user?.value?.role === 'REVIEWER' && isPendingReview.value
+    return user?.value?.role === 'REVIEWER' && isPendingReview.value && displayState.value === 'NEEDS_APPROVAL'
 })
+const approvalUnavailableReason = computed(() => user?.value?.role === 'REVIEWER'
+    ? getApprovalUnavailableReason(props.group, {
+        lifecycle: displayState.value,
+        requiredTeamsOrTags: effectiveTags.value,
+        teamMapping: teamMapping?.value || {},
+    })
+    : '')
 
 const lastRescoredScore = ref<number | null>(null)
 
@@ -2794,6 +2804,8 @@ const showFormerTeamAssessments = async () => {
     detailsEl.value?.querySelector?.('[data-testid="vulnerability-assessments"]')
         ?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
 }
+/** The saved effective Global decision: the reviewer's, or the worst team decision. */
+const groupGlobalDecision = computed(() => getGroupGlobalDecision(props.group))
 const effectiveAssessmentWorst = computed(() => effectiveTeamAssessments.value
     .filter(assessment => assessment.state !== 'NOT_SET')
     .sort((left, right) => (STATE_PRIORITY[left.state] ?? 10) - (STATE_PRIORITY[right.state] ?? 10))[0] || null)
@@ -3177,6 +3189,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
             @copy-id="copyId"
             :expanded="expanded"
             :canApprove="canApprove"
+            :approvalUnavailableReason="approvalUnavailableReason"
             :isPendingReview="isPendingReview"
             :dependencyRelationship="dependencyRelationship"
             :assignees="group.assignees || []"
@@ -3276,7 +3289,9 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         type="button"
                         :disabled="approvalAtForm && !canApproveNow"
                         :title="approvalAtForm
-                            ? (approvalBlockedReason || 'Save this Global assessment and remove the pending review status')
+                            ? (approvalBlockedReason || (groupGlobalDecision.source === 'manual'
+                                ? 'Save this Global assessment and remove the pending review status'
+                                : 'Record this Global decision (the worst team assessment unless you changed it) as the Global assessment and remove the pending review status'))
                             : 'Open the Global assessment to check and approve it'"
                         data-testid="assessment-approve-button"
                         :class="[actionButton, actionButtonApprove]"
@@ -3384,6 +3399,13 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         </div>
                     </div>
                 </div>
+            </div>
+            <div
+                v-if="approvalUnavailableReason"
+                data-testid="approval-unavailable-reason"
+                class="mb-1.5 rounded border border-yellow-700/40 bg-yellow-950/20 px-2 py-1 text-[11px] leading-relaxed text-yellow-100/80"
+            >
+                {{ approvalUnavailableReason }}
             </div>
         </div>
 
@@ -3828,8 +3850,9 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             class="mt-3 rounded border border-green-700/40 bg-green-950/20 px-3 py-2 text-[11px] leading-relaxed text-green-100/90"
                             role="status"
                         >
-                            The Global decision below is taken over from the team assessments, with the rescoring rule for that state applied.
-                            Nothing is saved until you press Approve.
+                            No reviewer has set the Global decision, so it is derived: the worst of the team assessments<template v-if="groupGlobalDecision.source === 'derived'">,
+                            {{ stateLabelOf(groupGlobalDecision.state) }} ({{ groupGlobalDecision.teams.join(', ') }})</template>, with the rescoring rule for that state applied.
+                            Approve records it as the Global assessment unless you change it here. Nothing is saved until you press Approve.
                         </div>
                         <!-- What each team decided; the worst state is what the
                              Global decision takes over. -->
@@ -3837,6 +3860,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             v-if="isReviewer && !selectedTeam && teamOverview.rows.length"
                             :overview="teamOverview"
                             :worstState="effectiveAssessmentWorst?.state || ''"
+                            :globalDecision="groupGlobalDecision"
                             @open="openTeamFromOverview"
                             @use-as-global="row => handleAdoptTeamBlock(row, false)"
                             @use-worst="applyEffectiveAssessmentSummary"
@@ -4258,6 +4282,28 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         </div>
                     </div>
 
+
+                    <!-- Ready for approval although teams have no block of their
+                         own: approving the Global assessment completes it. -->
+                    <div
+                        v-if="isReviewer && !selectedTeam && displayState === 'NEEDS_APPROVAL' && approvalIssues.length > 0"
+                        data-testid="assessment-approval-reasons"
+                        class="pt-2 border-t border-gray-700 mt-2"
+                    >
+                        <div class="rounded border border-purple-600/30 bg-purple-950/20 p-2.5">
+                            <div class="mb-1.5 text-[10px] font-black uppercase tracking-widest text-purple-300">
+                                What completes it
+                            </div>
+                            <div
+                                v-for="issue in approvalIssues"
+                                :key="issue.code"
+                                class="text-[11px] leading-relaxed text-purple-100/80"
+                            >
+                                <span class="font-bold text-purple-300">{{ issue.label }}:</span>
+                                {{ issue.detail }}
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Why the coverage is incomplete, with the repair. Why it is
                          inconsistent is said once, in the banner above the tabs. -->

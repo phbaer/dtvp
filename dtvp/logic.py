@@ -202,6 +202,100 @@ STATE_PRIORITY = {
 }
 
 
+# Worst first. The one order for every "worst state": the derived Global
+# decision, the exported analysis state, Repair and the analyzer verdicts
+# (AFFECTED -> EXPLOITABLE, INCONCLUSIVE/PROBABLY_AFFECTED -> IN_TRIAGE).
+# The web client has the same (STATE_PRIORITY in assessment-helpers.ts);
+# both are tested against frontend/src/lib/__tests__/fixtures/state_order.json.
+STATE_ORDER = tuple(sorted(STATE_PRIORITY, key=STATE_PRIORITY.__getitem__))
+
+
+def _decides(state: Any) -> bool:
+    return bool(state) and state != "NOT_SET"
+
+
+def global_decision(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The effective Global decision of parsed assessment blocks
+    (docs/assessment-model.md#the-global-decision, ADR 0014).
+
+    ``manual``: the first current General block that decides, as a reviewer
+    set it. ``derived``: otherwise the worst state among the current team
+    blocks that decide (``STATE_ORDER``); every team with that state is a
+    source, named in order, and the justification is that of the first of
+    them that has one. ``none``: nothing decides. ``derived`` is the derived
+    decision in every case (``None`` without deciding team blocks), so a
+    manual one can be compared with it.
+    """
+    current = [block for block in blocks if not block.get("historical")]
+    deciding = [
+        block for block in current
+        if _assessment_team_key(block.get("team")) != "general" and _decides(block.get("state"))
+    ]
+    derived = None
+    if deciding:
+        worst = min(
+            (block["state"] for block in deciding),
+            key=lambda state: (STATE_PRIORITY.get(state, 10), str(state)),
+        )
+        tied = sorted(
+            (block for block in deciding if block["state"] == worst),
+            key=lambda block: _assessment_team_key(block.get("team")),
+        )
+        teams: List[str] = []
+        for block in tied:
+            name = str(block.get("team") or "").strip()
+            if name and _assessment_team_key(name) not in {_assessment_team_key(t) for t in teams}:
+                teams.append(name)
+        justification = next(
+            (
+                str(block["justification"]) for block in tied
+                if _decides(block.get("justification"))
+            ),
+            "NOT_SET",
+        )
+        derived = {"state": worst, "justification": justification, "teams": teams}
+    general = next(
+        (
+            block for block in current
+            if _assessment_team_key(block.get("team")) == "general" and _decides(block.get("state"))
+        ),
+        None,
+    )
+    if general is not None:
+        return {
+            "source": "manual",
+            "state": general["state"],
+            "justification": str(general.get("justification") or "NOT_SET"),
+            "teams": [],
+            "derived": derived,
+        }
+    if derived is not None:
+        return {"source": "derived", **derived, "derived": derived}
+    return {"source": "none", "state": "NOT_SET", "justification": "NOT_SET", "teams": [], "derived": None}
+
+
+def with_derived_global_block(details: str, user: str, now_ms: int) -> str:
+    """``details`` with the derived Global decision recorded as its General
+    block, when no General block decides; else unchanged. An approval
+    records what it approves (ADR 0014)."""
+    _shared, parsed = _parse_assessment_blocks(details)
+    decision = global_decision(parsed)
+    if decision["source"] != "derived":
+        return details
+    teams = ", ".join(decision["teams"])
+    header = (
+        f"--- [Team: General] [State: {decision['state']}] [Assessed By: {user}] "
+        f"[Date: {now_ms}] [Justification: {decision['justification']}] ---\n"
+        f"Worst of the team assessments: {teams}."
+    )
+    found = re.search(r"---\s*\[Team:", details)
+    if found is None:
+        return f"{details.rstrip()}\n\n{header}" if details.strip() else header
+    lead = details[: found.start()].rstrip()
+    rest = details[found.start():]
+    return f"{lead}\n\n{header}\n\n{rest}" if lead else f"{header}\n\n{rest}"
+
+
 def load_team_mapping_document(path: str = None) -> Dict[str, Any]:
     """The team mapping file as stored: organised by team, or the older
     selector format (``dtvp.team_config``)."""
@@ -2232,20 +2326,6 @@ def calculate_aggregated_state(details: str) -> str:
     # 1. Any block named 'General' (if set)
     # 2. Worst state of all teams
 
-    general_block = next(
-        (
-            block
-            for block in blocks_list
-            if _assessment_team_key(block["team"]) == "general"
-            and not block.get("historical")
-        ),
-        None,
-    )
-    if general_block and general_block.get("state") != "NOT_SET":
-        return general_block["state"]
-
-    states = [b["state"] for b in blocks_list if not b.get("historical") and b["state"] != "NOT_SET"]
-    if not states:
-        return "NOT_SET"
-
-    return sorted(states, key=lambda s: STATE_PRIORITY.get(s, 10))[0]
+    # The effective Global decision: the reviewer's General block, else the
+    # worst team decision (global_decision); what Dependency-Track receives.
+    return global_decision(blocks_list)["state"]

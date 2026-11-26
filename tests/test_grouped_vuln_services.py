@@ -307,8 +307,9 @@ def test_summary_approved_global_assessment_is_terminal_before_team_coverage():
         "\n[Status: Pending Review]"
     )
     pending = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
-    assert pending["lifecycle"] == "INCOMPLETE"
-    assert pending["is_approval_ready"] is False
+    # Pending, the General decision covers TeamB once approved (ADR 0014).
+    assert pending["lifecycle"] == "NEEDS_APPROVAL"
+    assert pending["is_approval_ready"] is True
     assert pending["is_open"] is True
     assert pending["is_assessed"] is False
 

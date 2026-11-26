@@ -16,6 +16,7 @@ from .assessment_scopes import (
     assessment_scopes,
     combine_lifecycles,
     finding_key as scope_finding_key,
+    has_pending_review_marker,
     is_untouched,
     scoped_group,
 )
@@ -33,6 +34,7 @@ from .grouped_vuln_summary_index_services import (
 from .logic import (
     STATE_PRIORITY,
     _parse_assessment_blocks,
+    global_decision,
     populate_group_dependency_chains,
     blocks_in_team_order,
     without_historical_blocks,
@@ -280,21 +282,6 @@ def _normalize_block_signature(block: Dict[str, Any]) -> str:
     )
 
 
-def _has_open_team_assessment(
-    summary: Dict[str, Any],
-    required_teams: List[str],
-) -> bool:
-    assessed_teams = summary["assessed_teams"]
-    if required_teams and any(team not in assessed_teams for team in required_teams):
-        return True
-    if summary["has_missing_component"]:
-        return True
-    return any(
-        block.get("team") != "General" and block.get("state") == "NOT_SET"
-        for block in summary["blocks"]
-    )
-
-
 def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
     instances = [
         component
@@ -361,8 +348,13 @@ def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
         "has_any_assessment": any(state != "NOT_SET" for state in component_states),
         "has_missing_component": "NOT_SET" in component_states,
         "has_global_assessment": bool(global_state),
+        # The reviewer's General decision (first by finding key), else the
+        # worst team decision (logic.global_decision).
+        "global_decision": global_decision(
+            [block for active_blocks in ordered_instance_blocks for block in active_blocks]
+        ),
         "is_pending_review": any(
-            "[Status: Pending Review]" in _instance_details(instance)
+            has_pending_review_marker(_instance_details(instance))
             for instance in instances
         ),
         "technical_state": global_state or (team_states[0] if team_states else None)
@@ -508,11 +500,16 @@ def _derive_group_lifecycle(
         if team.strip().casefold() not in assessed_keys
     ]
 
-    # Pending review always wins over legacy detection. If coverage is also
-    # incomplete, keep the lifecycle in INCOMPLETE; the pending flag still
-    # exposes the item through the separate NEEDS_APPROVAL filter.
+    # Pending review always wins over legacy detection
+    # (docs/assessment-model.md#lifecycle-decision-table, ADR 0014). A finding
+    # without a state keeps it INCOMPLETE. Teams without a block of their own
+    # do too, unless a General block decides: approving it completes the
+    # vulnerability, as an approved one does below, so it awaits approval.
     if summary["is_pending_review"]:
-        if missing_teams or summary["has_missing_component"]:
+        if not has_any:
+            # Nothing decided yet: nothing to approve either.
+            return "OPEN"
+        if has_missing or (missing_teams and not has_global):
             return "INCOMPLETE"
         return "NEEDS_APPROVAL"
 
@@ -674,8 +671,29 @@ def _build_group_list_metadata(
         summary["is_pending_review"] and lifecycle == "NEEDS_APPROVAL"
     )
 
+    # A General decision, recorded (pending or approved), is the decision of
+    # every team without a block of its own; so is a closed vulnerability.
+    # Team counters and the team assessment filter read this one flag
+    # (docs/assessment-model.md#per-team-status).
+    covers_all_teams = bool(summary["has_global_assessment"]) or (
+        lifecycle in {"ASSESSED", "ASSESSED_LEGACY"} and not summary["is_pending_review"]
+    )
+
+    decision = summary["global_decision"]
+    derived = decision["derived"] or {}
     metadata: Dict[str, Any] = {
         "lifecycle": lifecycle,
+        "covers_all_teams": covers_all_teams,
+        # The effective Global decision: set by a reviewer (manual), the
+        # worst team decision (derived), or none
+        # (docs/assessment-model.md#the-global-decision).
+        "global_decision_source": decision["source"],
+        "global_decision_state": decision["state"],
+        "global_decision_justification": decision["justification"],
+        "global_decision_teams": list(decision["teams"]),
+        # The worst team decision, to compare a manual one with.
+        "derived_global_state": derived.get("state", "NOT_SET"),
+        "derived_global_teams": list(derived.get("teams") or []),
         "inconsistency_reasons": inconsistency_reasons,
         "is_pending": summary["is_pending_review"],
         "is_approval_ready": is_approval_ready,

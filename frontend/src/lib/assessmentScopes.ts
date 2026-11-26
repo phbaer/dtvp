@@ -1,5 +1,6 @@
 import type { GroupedVuln } from '../types'
 import { parseVersionOverride } from './assessment-helpers'
+import { stripSsvcDetails } from './ssvc'
 
 // Assessment scopes of a vulnerability (ADR 0010). A port of the server's
 // dtvp/assessment_scopes.py; both are tested against
@@ -35,6 +36,15 @@ export interface AssessmentScopeView {
 
 const stateOf = (instance: Finding): string => instance.analysis_state || instance.analysisState || 'NOT_SET'
 const detailsOf = (instance: Finding): string => instance.analysis_details || instance.analysisDetails || ''
+
+const PENDING_REVIEW_MARKER = '[Status: Pending Review]'
+
+/** Whether an assessment text waits for review: the marker outside the SSVC
+ * details. As the server's has_pending_review_marker (assessment_scopes.py). */
+export const hasPendingReviewMarker = (details: string | undefined | null): boolean => {
+    const text = String(details || '')
+    return text.includes(PENDING_REVIEW_MARKER) && stripSsvcDetails(text).includes(PENDING_REVIEW_MARKER)
+}
 
 const IGNORED_FOR_UNTOUCHED = /\[(?:Version Override|Override Reason|Status: Pending Review)[^\]]*\]/g
 
@@ -112,7 +122,7 @@ export function getAssessmentScopes(group: GroupedVuln): AssessmentScopeView {
         const agreed = new Set(reasons.get(scope) || [])
         scope.reasonMismatch = agreed.size > 1
         scope.reason = agreed.size === 1 ? ([...agreed][0] || null) : null
-        scope.pending = scope.instances.some(instance => detailsOf(instance).includes('[Status: Pending Review]'))
+        scope.pending = scope.instances.some(instance => hasPendingReviewMarker(detailsOf(instance)))
     }
     const withFindings = scopes.filter(scope => scope.instances.length > 0)
     const primary = base.instances.length > 0

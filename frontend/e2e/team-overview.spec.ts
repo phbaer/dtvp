@@ -47,7 +47,7 @@ const group = {
     }],
 };
 
-async function mockShell(page: Page, saves: unknown[]) {
+async function mockShell(page: Page, saves: unknown[], shown: typeof group = group) {
     const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
     await page.route('**/auth/me', route => route.fulfill(json({ username: 'rita', role: 'REVIEWER' })));
@@ -88,8 +88,8 @@ async function mockShell(page: Page, saves: unknown[]) {
     await page.route('**/api/events/interest', route => route.fulfill({ status: 204, body: '' }));
 
     await page.route('**/api/tasks/group-vulns*', route => route.fulfill(json({ task_id: 'task-overview' })));
-    await mockGroupedVulnTask(page, { taskId: 'task-overview', groups: [group] });
-    await page.route('**/api/tasks/task-overview/groups/*', route => route.fulfill(json(group)));
+    await mockGroupedVulnTask(page, { taskId: 'task-overview', groups: [shown] });
+    await page.route('**/api/tasks/task-overview/groups/*', route => route.fulfill(json(shown)));
 
     await page.route('**/api/assessments/details', async (route) => {
         const body = route.request().postDataJSON();
@@ -99,10 +99,10 @@ async function mockShell(page: Page, saves: unknown[]) {
             component_uuid: instance.component_uuid,
             vulnerability_uuid: instance.vulnerability_uuid,
             analysis: {
-                state: 'EXPLOITABLE',
-                analysisState: 'EXPLOITABLE',
+                state: shown.affected_versions[0]!.components[0]!.analysis_state,
+                analysisState: shown.affected_versions[0]!.components[0]!.analysis_state,
                 isSuppressed: false,
-                analysisDetails: TEXT,
+                analysisDetails: shown.affected_versions[0]!.components[0]!.analysis_details,
                 analysisComments: [],
             },
         }))));
@@ -165,6 +165,10 @@ test.describe('Team overview on the Global assessment', () => {
         await expect(overview.locator('[data-team="H-Core"] [data-testid="team-overview-status"]')).toHaveText('pending review');
         await expect(overview.locator('[data-team="A-Core"] [data-testid="team-overview-components"]')).toHaveAttribute('title', 'lib-a');
         await expect(overview.getByTestId('team-overview-former')).toHaveText('1 former team assessment');
+        // No reviewer set the Global decision: it is derived, the worst team assessment.
+        const global = overview.getByTestId('team-overview-global');
+        await expect(global).toHaveAttribute('data-source', 'derived');
+        await expect(global).toContainText('Global: derived, worst of team assessments: Exploitable (H-Core)');
         // The old one-line summary is gone.
         await expect(inspector.getByTestId('effective-team-assessment-summary')).toHaveCount(0);
 
@@ -192,6 +196,78 @@ test.describe('Team overview on the Global assessment', () => {
         await expect(overview.locator('[data-team="H-Core"]')).toHaveAttribute('data-disagrees', 'true');
         await expect(overview.getByTestId('team-overview-summary')).toContainText('1 differs from Global Not affected');
 
+        expect(saves).toEqual([]);
+        expect(errors).toEqual([]);
+    });
+
+    test('approving without a Global decision records the derived worst', async ({ page }) => {
+        // Every required team assessed, pending review: Ready for approval.
+        const ready = {
+            ...group,
+            tags: ['A-Core', 'B-Core', 'H-Core'],
+            list_metadata: { lifecycle: 'NEEDS_APPROVAL', is_pending: true, is_approval_ready: true },
+            affected_versions: [{
+                ...group.affected_versions[0]!,
+                components: [finding('lib-a', 'A-Core'), finding('lib-b', 'B-Core'), finding('lib-h', 'H-Core')],
+            }],
+        };
+        const errors = collectErrors(page);
+        const saves: any[] = [];
+        await mockShell(page, saves, ready);
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page.goto('/project/TestProject?awaiting_review=false');
+        await page.locator(`.vuln-card[data-group-id="${group.id}"]`).click();
+        const inspector = page.getByTestId('vuln-detail-inspector');
+        // The state chip marks the decision as derived.
+        const chip = inspector.getByTestId('analysis-state-badge').first();
+        await expect(chip.getByTestId('analysis-state-derived')).toBeVisible();
+        await expect(chip).toHaveAttribute('title', /Derived: no reviewer has set the Global decision; it is the worst of the team assessments \(H-Core\)/);
+        // The Global form holds the derived worst; Approve says it records it.
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        await expect(inspector.locator('#analysis-state-select')).toContainText('Exploitable');
+        const approve = inspector.getByTestId('assessment-approve-button');
+        await expect(approve).toHaveAttribute('title', /the worst team assessment unless you changed it/);
+        // A reviewer opening a pending vulnerability lands on the filled
+        // Global form, which says what Approve records.
+        const note = inspector.getByTestId('approval-prefilled-note');
+        await expect(note).toContainText('it is derived: the worst of the team assessments, Exploitable (H-Core)');
+        await expect(note).toContainText('Approve records it as the Global assessment unless you change it here');
+        await approve.click();
+
+        await expect.poll(() => saves.length).toBe(1);
+        expect(saves[0].approve).toBe(true);
+        const general = saves[0].fields.teams.find((team: any) => team.team === 'General');
+        expect(general.state).toBe('EXPLOITABLE');
+        expect(errors).toEqual([]);
+    });
+
+    test('says when a reviewer set the Global decision and offers the worst when it differs', async ({ page }) => {
+        const manual = TEXT.replace(
+            '--- [Team: A-Core]',
+            '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: rita] [Date: 1713300000000] [Justification: CODE_NOT_REACHABLE] ---\nOnly the build tool parses documents.\n\n--- [Team: A-Core]',
+        );
+        const withGlobal = {
+            ...group,
+            affected_versions: [{
+                ...group.affected_versions[0]!,
+                components: group.affected_versions[0]!.components.map(component => ({
+                    ...component, analysis_state: 'NOT_AFFECTED', analysis_details: manual,
+                })),
+            }],
+        };
+        const errors = collectErrors(page);
+        const saves: unknown[] = [];
+        await mockShell(page, saves, withGlobal);
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        const inspector = await openGlobalAssessment(page);
+
+        const global = inspector.getByTestId('team-overview-global');
+        await expect(global).toHaveAttribute('data-source', 'manual');
+        await expect(global).toContainText('Global: set by reviewer: Not affected');
+        await expect(global.getByTestId('team-overview-global-differs'))
+            .toHaveText('· differs from the worst team assessment (Exploitable, H-Core)');
+        await global.getByTestId('team-overview-use-worst').click();
+        await expect(inspector.locator('#analysis-state-select')).toContainText('Exploitable');
         expect(saves).toEqual([]);
         expect(errors).toEqual([]);
     });

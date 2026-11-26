@@ -153,7 +153,11 @@ def _header_value(value: Any) -> str:
 
 
 def _unowned_keys(team_mapping: dict[str, Any]) -> set[str]:
-    """The names under which components that no team owns are assessed."""
+    """The names under which components that no team owns are assessed: the
+    tag Unassigned and the catch-all ``*`` team. The ``*`` team is a required
+    team like any other, which a General decision covers; it is never given
+    a reference to the global assessment, and an assessment under its name
+    is a person's, never a former team's."""
     return {"unassigned", *(_team_key(name) for name in normalize_team_values(team_mapping.get("*")))}
 
 
@@ -162,13 +166,12 @@ def _is_reference(block: dict[str, Any]) -> bool:
 
 
 def _current_teams(group: dict[str, Any], team_mapping: dict[str, Any]) -> dict[str, str]:
-    # The name the mapping gives to components no team owns is not a team:
-    # nobody is there to refer to the global assessment.
-    unowned = _unowned_keys(team_mapping)
+    # The required teams of the lifecycle: every owner, the catch-all ``*``
+    # team included; only the tag Unassigned is none.
     return {
         _team_key(team): team
         for team in _normalize_group_tags(group.get("tags") or [], team_mapping)
-        if _team_key(team) not in unowned
+        if _team_key(team) != "unassigned"
     }
 
 
@@ -186,6 +189,15 @@ def _still_open(
     }
     return sorted(
         (team for key, team in current.items() if key not in covered), key=str.casefold
+    )
+
+
+def _decides_globally(blocks: list[dict[str, Any]]) -> bool:
+    """Whether a current General block decides (a state other than NOT_SET).
+    Pending review, it is what completes the vulnerability once approved
+    (docs/assessment-model.md#lifecycle-decision-table)."""
+    return any(
+        _team_key(block["team"]) == "general" and _is_assessed(block) for block in blocks
     )
 
 
@@ -282,10 +294,12 @@ def _repair_former_teams(
     # reference to the global assessment under that name says nothing, and
     # nobody stands behind it.
     unowned = _unowned_keys(team_mapping)
+    # Not needed where a General decision covers the team; without one the
+    # reference is what the team has, and it stays.
     stale = [
         block for block in blocks
         if _team_key(block["team"]) in unowned and _is_assessed(block) and _is_reference(block)
-    ]
+    ] if _decides_globally(blocks) else []
     if stale:
         stale_ids = {id(block) for block in stale}
         blocks = [block for block in blocks if id(block) not in stale_ids]
@@ -295,8 +309,9 @@ def _repair_former_teams(
         "referred_teams": [], "open_teams": [], "removed_references": removed,
     }) if stale else (blocks, None)
 
-    if not current:
-        # Unknown ownership is not the same as no ownership.
+    if not any(key not in unowned for key in current):
+        # Unknown ownership is not the same as no ownership: with only the
+        # catch-all team, no block can be called a former team's.
         return nothing
 
     def canonical_key(team: str) -> str:
@@ -329,7 +344,7 @@ def _repair_former_teams(
     )
     if not former and (
         pending
-        or not uncovered
+        or not any(_team_key(team) not in unowned for team in uncovered)
         or general is None
         or general["tags"].get("State", "NOT_SET") == "NOT_SET"
     ):
@@ -380,9 +395,13 @@ def _repair_former_teams(
     }
     if uncovered and general_state != "NOT_SET" and not pending:
         for team in uncovered:
+            if _team_key(team) in unowned:
+                # The General decision covers the catch-all team; no
+                # reference is written for it.
+                continue
             if _team_key(team) in historical_teams:
                 # Never two blocks for one team: the historical one stays,
-                # the team is left to assess.
+                # and the General decision covers the team.
                 continue
             reference = {
                 "team": team,
@@ -413,11 +432,19 @@ def _repair_former_teams(
                 remaining.append(reference)
             referred.append(team)
 
+    if not former and not referred and not removed:
+        return nothing
+    # A General decision covers the teams it does not refer: approved, they
+    # are done; pending, approving it completes them.
+    covered = general_state != "NOT_SET"
     return remaining, {
         "former_teams": sorted({block["team"] for block in former}, key=str.casefold),
         "promoted_to_global_decision": promoted,
         "referred_teams": referred,
-        "open_teams": [team for team in uncovered if team not in referred],
+        "open_teams": [
+            team for team in uncovered if team not in referred and (pending or not covered)
+        ],
+        "open_pending": pending and covered,
         "removed_references": removed,
     }
 
@@ -443,13 +470,14 @@ def _combine_conflict(
     team's block without a decision that holds a text, ticket or assignees
     stays as it is, and that team is not referred to the global assessment.
     """
-    if not current:
+    unowned = _unowned_keys(team_mapping)
+    if not any(key not in unowned for key in current):
+        # Only the catch-all team (or nobody): ownership is unknown.
         return None
 
     def canonical_key(team: str) -> str:
         return _team_key((_normalize_group_tags([team], team_mapping) or [team])[0])
 
-    unowned = _unowned_keys(team_mapping)
     generals: list[dict[str, Any]] = []
     former: list[dict[str, Any]] = []
     historical: dict[str, dict[str, Any]] = {}
@@ -465,13 +493,13 @@ def _combine_conflict(
                 continue
             elif _team_key(block["team"]) == "general":
                 generals.append(block)
-            elif canonical_key(block["team"]) in current:
-                return None
             elif _team_key(block["team"]) in unowned:
                 if not _is_reference(block):
                     # A person's assessment of a component no team owns
                     # is not a former team's: a human decides.
                     return None
+            elif canonical_key(block["team"]) in current:
+                return None
             else:
                 former.append(block)
     sources = generals + former
@@ -568,7 +596,8 @@ def _combine_conflict(
         if _team_key(block["team"]) != "general"
     } | set(open_blocks)
     referred = [] if pending else [
-        team for key, team in current.items() if key not in historical_teams
+        team for key, team in current.items()
+        if key not in historical_teams and key not in unowned
     ]
     references = [
         {
@@ -591,7 +620,10 @@ def _combine_conflict(
         "had_global": bool(generals),
         "disagreement": disagreement,
         "referred_teams": referred,
-        "open_teams": [team for team in current.values() if team not in referred],
+        # The combined decision covers the others: pending, approving it
+        # completes them.
+        "open_teams": [team for team in current.values() if team not in referred] if pending else [],
+        "pending": pending,
     }
 
 
@@ -915,7 +947,8 @@ def _team_stage(
         former: dict[str, Any] | None = None
         conflict: dict[str, Any] | None = None
         synchronized = 0
-        # Current teams the repair cannot complete (INCOMPLETE groups only).
+        # Current teams the repair cannot complete, and whether approving
+        # the pending global assessment completes them.
         open_teams: list[str] = []
         open_pending = False
         # Findings a new project version added stay unassessed: nothing is
@@ -988,7 +1021,10 @@ def _team_stage(
             )
             blocks = [block for block in blocks if id(block) not in record_ids]
             open_teams = _still_open(blocks, current, context.team_mapping)
-            open_pending = pending
+            open_pending = pending and _decides_globally(blocks)
+            if _decides_globally(blocks) and not pending:
+                # Covered by the approved General decision.
+                open_teams = []
             rescored = _with_rescoring(_render(blocks, pending=pending), instances)
             rescored_sync = _with_rescoring(sync_only, instances)
             for instance in instances:
@@ -1033,6 +1069,17 @@ def _team_stage(
                     for key in ("former_teams", "referred_teams", "open_teams", "removed_references"):
                         former[key] = sorted({*former[key], *result[key]}, key=str.casefold)
                     former["promoted_to_global_decision"] |= result["promoted_to_global_decision"]
+                    former["open_pending"] = former.get("open_pending") or result.get("open_pending")
+            if lifecycle == "NEEDS_APPROVAL":
+                # Ready for approval although teams have no block of their
+                # own: the pending global assessment covers them once approved.
+                current_blocks = [
+                    block for instance in instances for block in _parse_blocks(_details(instance))
+                ]
+                open_teams = _still_open(current_blocks, current, context.team_mapping)
+                open_pending = bool(open_teams) and _decides_globally(current_blocks)
+                if not open_pending:
+                    open_teams = []
 
         for instance, details in targets:
             if not all(instance.get(key) for key in _IDENTITY_KEYS):
@@ -1043,7 +1090,7 @@ def _team_stage(
             info[group_id] = {
                 "synchronized": synchronized, "former": former, "conflict": conflict,
                 # Teams with no assessment of their own after the repair, and
-                # whether the global assessment they could refer to is pending.
+                # whether a pending global decision covers them once approved.
                 "open_teams": open_teams, "open_pending": open_pending,
                 # The new findings the repair would change, where they are,
                 # and how many this run left.
@@ -1287,7 +1334,12 @@ def _former_team_label(former: dict[str, Any]) -> str:
     if former["referred_teams"]:
         label += f"; {', '.join(former['referred_teams'])} refer to global"
     if former["open_teams"]:
-        label += f"; {', '.join(former['open_teams'])} still to assess"
+        label += (
+            f"; {', '.join(former['open_teams'])} covered by the pending global assessment: "
+            "approve the Global assessment to complete it"
+            if former.get("open_pending")
+            else f"; {', '.join(former['open_teams'])} still to assess"
+        )
     return label
 
 
@@ -1303,9 +1355,9 @@ def _conflict_label(conflict: dict[str, Any]) -> str:
     )
     if conflict["referred_teams"]:
         label += f"; {', '.join(conflict['referred_teams'])} refer to global"
-    else:
+    if conflict.get("pending"):
         reason = "sources disagree, " if conflict["disagreement"] else ""
-        label += f"; {reason}pending review, {', '.join(conflict['open_teams'])} still to assess"
+        label += f"; {reason}pending review: approve the Global assessment to complete it"
     return label
 
 
@@ -1403,7 +1455,7 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
             "id": REPAIR_UNOWNED_REFERENCES,
             "label": (
                 f"Remove the reference to the global assessment under {', '.join(stale_references)}: "
-                "no team owns the component"
+                "not needed, the global assessment covers it"
             ),
         })
     if team.get("former") and (
@@ -1431,14 +1483,17 @@ def _group_item(group: dict[str, Any], run: dict[str, Any], finding_count: int) 
     if left:
         teams = ", ".join(left)
         verb = "has" if len(left) == 1 else "have"
-        review.append(
-            f"{teams} {verb} not assessed this vulnerability yet; nothing to copy"
-            + (
-                " and the global assessment is pending review, so no team can refer to it"
-                if team.get("open_pending") else ""
+        if team.get("open_pending"):
+            review.append(
+                f"{teams} {verb} no assessment of their own; the global assessment "
+                "covers them and is pending review: approve the Global assessment "
+                "to complete it"
             )
-            + ": open the vulnerability to assess it"
-        )
+        else:
+            review.append(
+                f"{teams} {verb} not assessed this vulnerability yet; nothing to copy"
+                ": open the vulnerability to assess it"
+            )
 
     rescore = run["rescore_items"].get(group_id)
     if rescore:

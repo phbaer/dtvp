@@ -222,9 +222,8 @@ export const deriveVulnListResultCounts = (
         incrementUniqueResultCounts(counts.assignees, item.group.assignees || [])
         incrementUniqueResultCounts(counts.components, item.componentNames)
 
-        const closed = ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle) && !item.isPending
-        addTeamCounts(counts.team_tags!, teams, item.assessedTeams, closed)
-        addTeamCounts(counts.canonical_team_tags!, teams, item.assessedTeams, closed)
+        addTeamCounts(counts.team_tags!, teams, item.assessedTeams, item.coversAllTeams)
+        addTeamCounts(counts.canonical_team_tags!, teams, item.assessedTeams, item.coversAllTeams)
         for (const reason of item.inconsistencyReasons) {
             incrementResultCount(counts.inconsistency_reason!, reason)
         }
@@ -370,8 +369,7 @@ const updateTeamCounts = (
     counts: Record<string, TeamCounts>,
     item: VulnListItem,
 ) => {
-    addTeamCounts(counts, item.normalizedTags, item.assessedTeams,
-        ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle) && !item.isPending)
+    addTeamCounts(counts, item.normalizedTags, item.assessedTeams, item.coversAllTeams)
 }
 
 export const sortVulnListItems = (

@@ -3,7 +3,7 @@ import { computed, toRefs } from 'vue'
 import { CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from '@lucide/vue'
 import type { GroupedVuln } from '../types'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
-import { getGroupInconsistencyReasons } from '../lib/assessment-helpers'
+import { getGroupGlobalDecision, getGroupInconsistencyReasons } from '../lib/assessment-helpers'
 import { inconsistencyReasonLabel } from '../lib/inconsistency'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { ssvcLabel } from '../lib/ssvc'
@@ -38,6 +38,8 @@ const props = defineProps<{
   hasAutomaticAssessment?: boolean
   automaticAssessmentStatus?: AutomaticAssessmentStatus | null
   hasTmrescoreAnalysis?: boolean
+  /** Why a pending vulnerability cannot be approved yet, for reviewers. */
+  approvalUnavailableReason?: string
 }>()
 
 const codeAssessmentStatus = computed<AutomaticAssessmentStatus | null>(() =>
@@ -167,12 +169,29 @@ const lifecycleTooltip = computed(() => {
     }
     case 'ASSESSED': return 'Lifecycle: Assessed — approved globally or all required teams have completed their assessment'
     case 'ASSESSED_LEGACY': return 'Lifecycle: Assessed (Legacy) — assessed before the multi-team workflow was introduced'
-    case 'NEEDS_APPROVAL': return 'Lifecycle: Ready for approval — all required assessments complete; reviewer sign-off pending'
+    case 'NEEDS_APPROVAL': {
+      const approval = getGroupAssessmentSyncIssues(group.value, {
+        lifecycle: 'NEEDS_APPROVAL', requiredTeamsOrTags: normalizedTags.value,
+      })
+      return approval.length > 0
+        ? `Lifecycle: Ready for approval — ${approval.map(issue => issue.detail).join(' ')}`
+        : 'Lifecycle: Ready for approval — all required assessments complete; reviewer sign-off pending'
+    }
     default: return `Lifecycle: ${displayState.value}`
   }
 })
 
+/** The effective Global decision; a derived one is marked on the state chip. */
+const globalDecision = computed(() => getGroupGlobalDecision(group.value))
+const derivedDecision = computed(() => globalDecision.value.source === 'derived'
+  && globalDecision.value.state === technicalState.value)
 const analysisStateTooltip = computed(() => {
+  const base = analysisStateBaseTooltip.value
+  return base && derivedDecision.value
+    ? `${base}. Derived: no reviewer has set the Global decision; it is the worst of the team assessments (${globalDecision.value.teams.join(', ')}).`
+    : base
+})
+const analysisStateBaseTooltip = computed(() => {
   switch (technicalState.value) {
     case 'EXPLOITABLE': return 'Analysis: Exploitable — the vulnerability is exploitable in this context'
     case 'IN_TRIAGE': return 'Analysis: In Triage — currently being investigated'
@@ -326,6 +345,7 @@ const componentSummary = computed(() => {
           <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
           <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
           {{ analysisStateLabel }}
+          <span v-if="derivedDecision" data-testid="analysis-state-derived" class="font-normal normal-case opacity-70">· derived</span>
         </span>
         <!-- Close lifecycle pill if no analysis state -->
         <span v-else class="-ml-1.5"></span>
@@ -450,7 +470,7 @@ const componentSummary = computed(() => {
           <span class="sr-only">Code assessment {{ codeAssessmentAvailable ? 'available' : 'unavailable' }}</span>
         </span>
 
-        <span v-if="isPendingReview && !canApprove" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
+        <span v-if="isPendingReview && !canApprove" data-testid="header-review-chip" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" :title="props.approvalUnavailableReason || 'Assessment submitted by an analyst, awaiting reviewer approval'">
           <Eye :size="9" />
           Review
         </span>

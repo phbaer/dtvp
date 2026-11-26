@@ -58,6 +58,11 @@ const cutoffStatus = (group: GroupedTaskItem, cutoff: string, mode: string, vers
     return unknown.some(label => !scope || scope.has(label.toLowerCase())) ? 'unknown' : null;
 };
 
+// A recorded General decision, or a closed vulnerability, stands for every
+// team (the server's list_metadata.covers_all_teams).
+const coversAllTeams = (group: GroupedTaskItem) => group.list_metadata?.covers_all_teams
+    ?? (['ASSESSED', 'ASSESSED_LEGACY'].includes(lifecycleForGroup(group)) && !group.list_metadata?.is_pending);
+
 // Small API-shaped counters; keep browser fixtures independent of Vite-only modules.
 const countsForGroups = (groups: GroupedTaskItem[]) => {
     const lifecycle = Object.fromEntries(['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL', 'READY_FOR_APPROVAL', 'ASSESSED', 'ASSESSED_LEGACY'].map(key => [key, 0]));
@@ -76,7 +81,9 @@ const countsForGroups = (groups: GroupedTaskItem[]) => {
         for (const tag of group.tags || []) {
             tags[tag] = (tags[tag] || 0) + 1;
             const count = team_tags[tag] ||= { open: 0, assessed: 0 };
-            if (['ASSESSED', 'ASSESSED_LEGACY'].includes(lifecycleForGroup(group))) count.assessed++;
+            const assessed = coversAllTeams(group)
+                || (group.list_metadata?.assessed_teams || []).some((name: string) => name.toLowerCase() === tag.toLowerCase());
+            if (assessed) count.assessed++;
             else count.open++;
         }
     }
@@ -156,7 +163,8 @@ export async function mockGroupedVulnTask(
             if (!explicitTerms.every(term => tags.some((tag: string) => tag.includes(term)))) return false;
             const assessed = new Set((group.list_metadata?.assessed_teams || []).map((name: string) => name.toLowerCase()));
             const selected = tags.filter((tag: string) => tag !== 'unassigned' && selectedTeams.includes(tag));
-            const status = !selected.length ? null : selected.some((tag: string) => !assessed.has(tag)) ? 'MISSING' : 'DOCUMENTED';
+            const status = !selected.length ? null
+                : !coversAllTeams(group) && selected.some((tag: string) => !assessed.has(tag)) ? 'MISSING' : 'DOCUMENTED';
             if (selectedTeams.length && teamAssessment !== 'ANY' && status !== teamAssessment) return false;
             if (awaitingReview && !group.list_metadata?.is_pending) return false;
             return matchesLifecycle(group, lifecycleFilters);

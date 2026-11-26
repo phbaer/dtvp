@@ -12,11 +12,14 @@ import {
     type TeamOverview,
     type TeamOverviewRow,
 } from '../lib/teamOverview'
+import type { GlobalDecision } from '../lib/assessment-helpers'
 
 const props = defineProps<{
     overview: TeamOverview
     /** The worst team state, for "Use worst for Global"; '' for none. */
     worstState?: string
+    /** The saved effective Global decision: set by a reviewer, or derived. */
+    globalDecision?: GlobalDecision | null
 }>()
 
 const emit = defineEmits<{
@@ -56,6 +59,16 @@ const statusClass = (row: TeamOverviewRow) => ({
     missing: 'border-gray-700 text-gray-500',
 })[row.status]
 
+const decision = computed(() => (props.globalDecision && props.globalDecision.source !== 'none' ? props.globalDecision : null))
+/** A reviewer's Global decision other than the worst team decision. */
+const differsFromDerived = computed(() => !!decision.value
+    && decision.value.source === 'manual'
+    && !!decision.value.derived
+    && decision.value.derived.state !== decision.value.state)
+const DERIVED_HELP = 'No reviewer has set the Global decision, so it is the worst team assessment '
+    + '(Exploitable, then In triage, False positive, Not affected, Resolved). '
+    + 'It is what the findings export; approving records it as the Global assessment.'
+
 const day = (timestamp?: number) => (timestamp ? new Date(timestamp).toLocaleDateString() : '')
 const rowTitle = (row: TeamOverviewRow) => [
     row.disagreesWithGlobal ? 'Differs from the Global decision.' : row.disagrees ? 'Differs from the other teams.' : '',
@@ -91,6 +104,39 @@ const rowTitle = (row: TeamOverviewRow) => [
                     Use worst for Global
                 </button>
             </span>
+        </div>
+
+        <div
+            v-if="decision"
+            data-testid="team-overview-global"
+            :data-source="decision.source"
+            class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-gray-700/60 px-2 py-1.5"
+            :title="decision.source === 'derived' ? DERIVED_HELP : 'A reviewer set the Global decision; it takes precedence over the team assessments.'"
+        >
+            <span v-if="decision.source === 'derived'" class="text-gray-400">
+                <span class="font-semibold text-gray-300">Global:</span> derived, worst of team assessments:
+                <span :class="['font-semibold', stateClass(decision.state)]">{{ stateLabel(decision.state) }}</span>
+                ({{ decision.teams.join(', ') }})
+                <span class="text-gray-500">· no reviewer set it; approving records it</span>
+            </span>
+            <template v-else>
+                <span class="text-gray-400">
+                    <span class="font-semibold text-gray-300">Global:</span> set by reviewer:
+                    <span :class="['font-semibold', stateClass(decision.state)]">{{ stateLabel(decision.state) }}</span>
+                </span>
+                <template v-if="differsFromDerived && decision.derived">
+                    <span data-testid="team-overview-global-differs" class="text-amber-200">· differs from the worst team assessment ({{ stateLabel(decision.derived.state) }}, {{ decision.derived.teams.join(', ') }})</span>
+                    <button
+                        type="button"
+                        data-testid="team-overview-use-worst"
+                        class="rounded border border-purple-600/60 px-2 py-0.5 text-[10px] font-bold text-purple-200 hover:bg-purple-900/40"
+                        title="Fill the Global form with the worst team decision; nothing is saved."
+                        @click="emit('use-worst')"
+                    >
+                        Use worst
+                    </button>
+                </template>
+            </template>
         </div>
 
         <ul class="divide-y divide-gray-800">

@@ -1,0 +1,1390 @@
+[
+  {
+    "name": "nothing assessed",
+    "rule": "R9",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      }
+    ],
+    "lifecycle": "OPEN",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "none",
+      "state": "NOT_SET",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_SET",
+      "derived_teams": []
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a team block without a decision is still open",
+    "rule": "R9",
+    "tags": [
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] [Assigned: bob] ---"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] [Assigned: bob] ---"
+      }
+    ],
+    "lifecycle": "OPEN",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "none",
+      "state": "NOT_SET",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_SET",
+      "derived_teams": []
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "findings disagree on the state",
+    "rule": "R1",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable."
+      }
+    ],
+    "lifecycle": "INCONSISTENT",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "EXPLOITABLE",
+      "justification": "NOT_SET",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "EXPLOITABLE",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": [
+      "ANALYSIS_STATE_MISMATCH",
+      "TEAM_ASSESSMENT_MISMATCH",
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ]
+  },
+  {
+    "name": "conflicting while pending review",
+    "rule": "R1",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable."
+      }
+    ],
+    "lifecycle": "INCONSISTENT",
+    "is_pending": true,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "EXPLOITABLE",
+      "justification": "NOT_SET",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "EXPLOITABLE",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": [
+      "ANALYSIS_STATE_MISMATCH",
+      "TEAM_ASSESSMENT_MISMATCH",
+      "ASSESSMENT_DETAILS_MISMATCH"
+    ]
+  },
+  {
+    "name": "pending, a finding without a state",
+    "rule": "R3",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": true,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "pending global decision, a team without a block and a finding without a state",
+    "rule": "R3",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "IN_TRIAGE",
+        "analysis_details": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nUnder investigation.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": true,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "IN_TRIAGE",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "pending, a team without a block and no General block",
+    "rule": "R4",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": true,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "pending, a team without a block and a General block without a decision",
+    "rule": "R4",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nNotes only.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nNotes only.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": true,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "pending, nothing decided yet",
+    "rule": "R2",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nLooking.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nLooking.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "OPEN",
+    "is_pending": true,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "none",
+      "state": "NOT_SET",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_SET",
+      "derived_teams": []
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "pending global decision covers a team without its own assessment",
+    "rule": "R5",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "IN_TRIAGE",
+        "analysis_details": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nUnder investigation.\n\n--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "IN_TRIAGE",
+        "analysis_details": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nUnder investigation.\n\n--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "3.0",
+        "analysis_state": "IN_TRIAGE",
+        "analysis_details": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nUnder investigation.\n\n--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "NEEDS_APPROVAL",
+    "is_pending": true,
+    "is_approval_ready": true,
+    "approvable": true,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "IN_TRIAGE",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "pending global decision, no team block at all",
+    "rule": "R5",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "NEEDS_APPROVAL",
+    "is_pending": true,
+    "is_approval_ready": true,
+    "approvable": true,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [],
+      "derived_state": "NOT_SET",
+      "derived_teams": []
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "pending, every team assessed",
+    "rule": "R5",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "NEEDS_APPROVAL",
+    "is_pending": true,
+    "is_approval_ready": true,
+    "approvable": true,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA",
+        "TeamB"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA",
+        "TeamB"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "approved global decision, a finding without a state",
+    "rule": "R6",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_SET",
+        "analysis_details": ""
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [],
+      "derived_state": "NOT_SET",
+      "derived_teams": []
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a legacy assessment without blocks",
+    "rule": "R7",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "Assessed in Dependency-Track."
+      }
+    ],
+    "lifecycle": "ASSESSED_LEGACY",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "none",
+      "state": "NOT_SET",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_SET",
+      "derived_teams": []
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a legacy assessment on two findings",
+    "rule": "R7",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "Assessed in Dependency-Track."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "Assessed in Dependency-Track."
+      }
+    ],
+    "lifecycle": "ASSESSED_LEGACY",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "none",
+      "state": "NOT_SET",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_SET",
+      "derived_teams": []
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "approved global decision covers a team without its own assessment",
+    "rule": "R8",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "IN_TRIAGE",
+        "analysis_details": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nUnder investigation.\n\n--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "IN_TRIAGE",
+        "analysis_details": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nUnder investigation.\n\n--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-3",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "3.0",
+        "analysis_state": "IN_TRIAGE",
+        "analysis_details": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nUnder investigation.\n\n--- [Team: TeamB] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "IN_TRIAGE",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "approved, a team without a block and no General block",
+    "rule": "R9",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "approved, a team without a block and a General block without a decision",
+    "rule": "R9",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nNotes only.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_SET] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nNotes only.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "approved, every team assessed",
+    "rule": "R11",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA",
+        "TeamB"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA",
+        "TeamB"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "Unassigned is not a required team",
+    "rule": "R11",
+    "tags": [
+      "TeamA",
+      "Unassigned"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a block under a team's alias counts for the team",
+    "rule": "R11",
+    "tags": [
+      "Core"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: Old-Core] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: Old-Core] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "Old-Core"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "Old-Core"
+      ]
+    },
+    "inconsistency_reasons": [],
+    "team_mapping": {
+      "library": [
+        "Core",
+        "Old-Core"
+      ]
+    }
+  },
+  {
+    "name": "a historical block does not count for its team",
+    "rule": "R9",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] [Historical: yes] ---\nBefore."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] [Historical: yes] ---\nBefore."
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "the catch-all team without a block is missing",
+    "rule": "R9",
+    "tags": [
+      "TeamA",
+      "Unknown"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": [],
+    "team_mapping": {
+      "*": "Unknown",
+      "library": "TeamA"
+    }
+  },
+  {
+    "name": "an approved global decision covers the catch-all team",
+    "rule": "R8",
+    "tags": [
+      "TeamA",
+      "Unknown"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": [],
+    "team_mapping": {
+      "*": "Unknown",
+      "library": "TeamA"
+    }
+  },
+  {
+    "name": "a pending global decision covers the catch-all team",
+    "rule": "R5",
+    "tags": [
+      "TeamA",
+      "Unknown"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "NEEDS_APPROVAL",
+    "is_pending": true,
+    "is_approval_ready": true,
+    "approvable": true,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": [],
+    "team_mapping": {
+      "*": "Unknown",
+      "library": "TeamA"
+    }
+  },
+  {
+    "name": "a pending marker quoted in the SSVC details is not pending review",
+    "rule": "R11",
+    "tags": [
+      "TeamA"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[SSVC Details]\nquoted: [Status: Pending Review]\n[/SSVC Details]"
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "teams disagree: the derived Global decision is the worst",
+    "rule": "R11",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "derived",
+      "state": "EXPLOITABLE",
+      "justification": "NOT_SET",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "EXPLOITABLE",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "teams disagree pending review: ready for approval of the derived worst",
+    "rule": "R5",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n[Status: Pending Review]"
+      }
+    ],
+    "lifecycle": "NEEDS_APPROVAL",
+    "is_pending": true,
+    "is_approval_ready": true,
+    "approvable": true,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "EXPLOITABLE",
+      "justification": "NOT_SET",
+      "teams": [
+        "TeamA"
+      ],
+      "derived_state": "EXPLOITABLE",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a tie for the worst state names every tied team",
+    "rule": "R11",
+    "tags": [
+      "TeamA",
+      "TeamB",
+      "TeamC"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamC] [State: RESOLVED] [Assessed By: carl] [Justification: NOT_SET] ---\nFixed."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamC] [State: RESOLVED] [Assessed By: carl] [Justification: NOT_SET] ---\nFixed."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA",
+        "TeamB"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA",
+        "TeamB"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a reviewer's Global decision equal to the worst",
+    "rule": "R8",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "EXPLOITABLE",
+        "analysis_details": "--- [Team: General] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "EXPLOITABLE",
+      "justification": "NOT_SET",
+      "teams": [],
+      "derived_state": "EXPLOITABLE",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a reviewer's Global decision other than the worst",
+    "rule": "R8",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Date: 1794000000000] [Justification: NOT_SET] ---\nReachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "ASSESSED",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": true,
+    "global_decision": {
+      "source": "manual",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [],
+      "derived_state": "EXPLOITABLE",
+      "derived_teams": [
+        "TeamA"
+      ]
+    },
+    "inconsistency_reasons": []
+  },
+  {
+    "name": "a team block on some assessed findings only is a gap",
+    "rule": "R10",
+    "tags": [
+      "TeamA",
+      "TeamB"
+    ],
+    "instances": [
+      {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "1.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      },
+      {
+        "project_uuid": "project-2",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vulnerability-1",
+        "project_version": "2.0",
+        "analysis_state": "NOT_AFFECTED",
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1794000000000] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable."
+      }
+    ],
+    "lifecycle": "INCOMPLETE",
+    "is_pending": false,
+    "is_approval_ready": false,
+    "approvable": false,
+    "covers_all_teams": false,
+    "global_decision": {
+      "source": "derived",
+      "state": "NOT_AFFECTED",
+      "justification": "CODE_NOT_REACHABLE",
+      "teams": [
+        "TeamA",
+        "TeamB"
+      ],
+      "derived_state": "NOT_AFFECTED",
+      "derived_teams": [
+        "TeamA",
+        "TeamB"
+      ]
+    },
+    "inconsistency_reasons": []
+  }
+]

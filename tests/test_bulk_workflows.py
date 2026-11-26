@@ -1931,13 +1931,16 @@ def test_repair_keeps_pending_former_team_decision_open_for_current_teams():
 
     preview, payloads, _ = _repair(group)
 
-    assert _former_label(preview).endswith("TeamB still to assess")
+    assert _former_label(preview).endswith(
+        "TeamB covered by the pending global assessment: approve the Global assessment to complete it"
+    )
     details = payloads[0][1]["details"]
     assert "[Team: General] [State: NOT_AFFECTED]" in details
     assert "See global assessment." not in details
     assert details.endswith("[Status: Pending Review]")
     applied = _repair_group([("NOT_AFFECTED", details)], tags=["TeamB"])
-    assert applied["list_metadata"]["lifecycle"] == "INCOMPLETE"
+    # The pending General decision covers TeamB once approved (ADR 0014).
+    assert applied["list_metadata"]["lifecycle"] == "NEEDS_APPROVAL"
 
 
 def test_repair_keeps_former_teams_as_historical_and_never_overrides_an_existing_global():
@@ -1969,7 +1972,8 @@ def test_repair_writes_no_reference_for_a_team_that_has_a_historical_block():
     assert details.count("[Team: TeamB]") == 1
     assert _team(details, "TeamB")["historical"] is True
     assert "--- [Team: TeamC] [State: NOT_AFFECTED] [Assessed By: reviewer]" in details
-    assert _former_label(preview).endswith("TeamC refer to global; TeamB still to assess")
+    # The approved General decision covers TeamB (ADR 0014): nothing left.
+    assert _former_label(preview).endswith("TeamC refer to global")
 
 
 def test_repair_leaves_current_historical_and_unowned_groups_alone():
@@ -2092,7 +2096,7 @@ def test_repair_combines_disagreeing_conflict_as_pending_worst_state():
     )
 
     assert item["repairs"][0]["label"].endswith(
-        "sources disagree, pending review, TeamB, TeamC still to assess"
+        "sources disagree, pending review: approve the Global assessment to complete it"
     )
     assert {payload["state"] for _, payload in payloads} == {"EXPLOITABLE"}
     assert "[Team: General] [State: EXPLOITABLE]" in details and "[Rescored: 8.1]" in details
@@ -2100,7 +2104,8 @@ def test_repair_combines_disagreeing_conflict_as_pending_worst_state():
     assert "Not reachable." in details and "Reachable in v2." in details
     assert "See global assessment." not in details
     assert details.endswith("[Status: Pending Review]")
-    assert applied["list_metadata"]["lifecycle"] == "INCOMPLETE"
+    # The pending General decision covers the teams once approved (ADR 0014).
+    assert applied["list_metadata"]["lifecycle"] == "NEEDS_APPROVAL"
     assert applied["list_metadata"]["is_pending"] is True
 
 
@@ -2340,10 +2345,10 @@ def test_repair_does_not_refer_teams_to_a_pending_or_missing_global_assessment()
     assert payloads == []
     [item] = preview["items"]
     assert item["repairs"] == [] and item["repairable"] is False
+    assert pending["list_metadata"]["lifecycle"] == "NEEDS_APPROVAL"
     assert item["review"] == [
-        "TeamB has not assessed this vulnerability yet; nothing to copy and the global "
-        "assessment is pending review, so no team can refer to it: open the vulnerability "
-        "to assess it"
+        "TeamB has no assessment of their own; the global assessment covers them and "
+        "is pending review: approve the Global assessment to complete it"
     ]
     unset = _GLOBAL.replace("[State: NOT_AFFECTED]", "[State: NOT_SET]")
     assert _repair(_repair_group([("NOT_SET", unset)] * 2, tags=["TeamB"]))[0]["items"] == []
@@ -2809,7 +2814,7 @@ def test_repair_removes_a_reference_to_the_global_assessment_that_no_team_stands
         assert preview["items"][0]["repairs"] == [{
             "id": "unowned_references",
             "label": "Remove the reference to the global assessment under Unknown: "
-                     "no team owns the component",
+                     "not needed, the global assessment covers it",
         }]
         assert preview["items"][0]["requires_review"] is False
         details = payloads[0][1]["details"]

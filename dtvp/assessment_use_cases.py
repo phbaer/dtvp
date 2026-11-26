@@ -179,6 +179,61 @@ class AssessmentValidationError(AssessmentUseCaseError):
     """The request is well-formed but violates an assessment rule."""
 
 
+def approval_blocker(
+    instances: list[dict[str, Any]],
+    stored: list[dict[str, Any]],
+    team_mapping: dict[str, Any] | None = None,
+) -> str | None:
+    """Why the findings cannot be approved now, or None.
+
+    Approval is for a vulnerability that is Ready for approval
+    (docs/assessment-model.md#lifecycle-decision-table, ADR 0014): every
+    finding has a state, they agree, and every required team has its own
+    assessment or a General decision covers it. Read from the stored texts,
+    as the card reads them; nothing pending means there is nothing to
+    approve and nothing to refuse.
+    """
+    # Imported here: the grouped services import much of the application.
+    from .assessment_scopes import has_pending_review_marker
+    from .grouped_vuln_services import summarize_grouped_vulnerabilities
+
+    if not any(has_pending_review_marker(str(item.get("details") or "")) for item in stored):
+        return None
+    tags = list(dict.fromkeys(
+        str(tag) for instance in instances for tag in instance.get("tags") or [] if tag
+    ))
+    versions: dict[str, dict[str, Any]] = {}
+    for instance, current in zip(instances, stored):
+        project = str(instance.get("project_uuid") or "")
+        version = versions.setdefault(project, {
+            "project_uuid": project,
+            "project_version": instance.get("project_version"),
+            "components": [],
+        })
+        version["components"].append({
+            **instance,
+            "analysis_state": current.get("state") or "NOT_SET",
+            "analysis_details": current.get("details") or "",
+        })
+    group = {"id": "approval", "tags": tags, "affected_versions": list(versions.values())}
+    metadata = summarize_grouped_vulnerabilities([group], team_mapping or {})[0]["list_metadata"]
+    lifecycle = metadata["lifecycle"]
+    if lifecycle == "NEEDS_APPROVAL":
+        return None
+    reasons = {
+        "INCONSISTENT": "the findings disagree; resolve the conflict first",
+        "INCOMPLETE": (
+            "a finding has no state, or a team has no assessment and no Global "
+            "decision covers it; record the Global decision or synchronize first"
+        ),
+        "OPEN": "nothing is decided yet",
+    }
+    return (
+        "Only a vulnerability that is ready for approval can be approved: "
+        + reasons.get(lifecycle, f"it is {lifecycle}")
+    )
+
+
 class AssessmentConflictError(AssessmentUseCaseError):
     """The stored assessment changed since the caller read it."""
 
@@ -643,6 +698,13 @@ async def save_assessment(
         deps.cache_manager.get_cached_assessments, req.instances
     )
     stored_details = [current["details"] for current in stored]
+    if req.approve:
+        load_team_mapping = getattr(deps, "load_team_mapping", None)
+        blocker = approval_blocker(
+            req.instances, stored, load_team_mapping() if load_team_mapping else {}
+        )
+        if blocker:
+            raise AssessmentValidationError(blocker)
     req._stored_revisions = {
         key: int(current["revision"])
         for instance, current in zip(req.instances, stored)

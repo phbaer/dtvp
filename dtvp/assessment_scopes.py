@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Optional
 
 from .assessment_model import version_override
+from .ssvc_services import strip_details as strip_ssvc_details
 from .inconsistency import (  # noqa: F401 (re-exported)
     INCONSISTENCY_REASON_VERSION_OVERRIDE_LABEL_MISMATCH,
     INCONSISTENCY_REASON_VERSION_OVERRIDE_PARTIAL,
@@ -28,6 +29,16 @@ AMBIGUOUS = "ambiguous"
 _IGNORED_FOR_UNTOUCHED = re.compile(
     r"\[(?:Version Override|Override Reason|Status: Pending Review)[^\]]*\]"
 )
+
+
+PENDING_REVIEW_MARKER = "[Status: Pending Review]"
+
+
+def has_pending_review_marker(details: str) -> bool:
+    """Whether an assessment text waits for review: the marker outside the
+    SSVC details. The web client reads it the same way
+    (``hasPendingReviewMarker`` in assessmentScopes.ts)."""
+    return PENDING_REVIEW_MARKER in details and PENDING_REVIEW_MARKER in strip_ssvc_details(details)
 
 
 def _state(instance: Mapping[str, Any]) -> str:
@@ -83,7 +94,7 @@ class Scope:
 
     @property
     def pending(self) -> bool:
-        return any("[Status: Pending Review]" in _details(i) for i in self.instances)
+        return any(has_pending_review_marker(_details(i)) for i in self.instances)
 
     @property
     def reason_mismatch(self) -> bool:

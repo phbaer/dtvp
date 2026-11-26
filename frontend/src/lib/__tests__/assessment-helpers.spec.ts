@@ -1,7 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
 import parserCasesJson from './fixtures/assessment_parser_cases.json'
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags, assessmentTextToFields, assessmentTextKey, sanitizeAssessmentDetails, withoutHistoricalBlocks, markAssessmentBlocksHistorical, parseVersionOverride } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, normalizeTags, assessmentTextToFields, assessmentTextKey, sanitizeAssessmentDetails, withoutHistoricalBlocks, markAssessmentBlocksHistorical, parseVersionOverride } from '../assessment-helpers';
 import { renderAssessmentFields } from './assessmentFieldsText';
 
 // Kept inside the frontend tree: the Docker image builds the frontend
@@ -132,7 +132,9 @@ describe('Assessment Helpers', () => {
 
             group.affected_versions[0].components[0].analysis_details +=
                 '\n[Status: Pending Review]';
-            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
+            // Pending, the General decision still covers team-b once approved
+            // (ADR 0014): ready for approval, not incomplete.
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('NEEDS_APPROVAL');
 
             group.affected_versions[0].components[0].analysis_details +=
                 '\n--- [Team: team-b] [State: FALSE_POSITIVE] ---';
@@ -292,7 +294,7 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
         });
 
-        it('should use the same team assessment check for open team assessment and chip state', () => {
+        it('reads the assessed teams for the team chips', () => {
             const group: any = {
                 id: 'CVE-OPEN-TEAM',
                 tags: ['team-a', 'team-b'],
@@ -315,9 +317,6 @@ describe('Assessment Helpers', () => {
             const assessed = getAssessedTeams(group);
             expect(assessed.has('team-a')).toBe(true);
             expect(assessed.has('team-b')).toBe(false);
-
-            const open = hasOpenTeamAssessment(group, group.tags, {});
-            expect(open).toBe(true);
         });
     });
 

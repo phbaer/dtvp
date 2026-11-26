@@ -9,6 +9,7 @@ import {
     getGroupTechnicalState,
     normalizeTags,
     getAssessedTeams,
+    hasGlobalAssessmentForGroup,
     matchesFilters,
 } from './assessment-helpers'
 
@@ -21,6 +22,9 @@ export interface GroupClassification {
     isApprovalReady: boolean
     /** Whether this group is open/not done for the open/assessed counters. */
     isOpen: boolean
+    /** Every team counts as assessed: a recorded General decision, or a
+     * closed vulnerability (the server's list_metadata.covers_all_teams). */
+    coversAllTeams: boolean
     /** The technical analysis state (EXPLOITABLE, IN_TRIAGE, NOT_SET, etc.) */
     technicalState: string
 }
@@ -41,12 +45,15 @@ export function classifyGroup(
     // an open block. Keep the existing separate semantics for incomplete and
     // inconsistent lifecycle counters.
     const isOpen = lifecycle === 'OPEN' || isPending
+    const coversAllTeams = hasGlobalAssessmentForGroup(group)
+        || (['ASSESSED', 'ASSESSED_LEGACY'].includes(lifecycle) && !isPending)
 
     return {
         lifecycle,
         isPending,
         isApprovalReady,
         isOpen,
+        coversAllTeams,
         technicalState: getGroupTechnicalState(group),
     }
 }
@@ -120,6 +127,18 @@ export function computeFilterCounts(
     return counts
 }
 
+/**
+ * Whether every team of the group counts as assessed: the server's
+ * list_metadata.covers_all_teams, for metadata from before the flag a closed
+ * vulnerability, and without metadata the client's own classification.
+ */
+export function coversAllTeamsOf(group: GroupedVuln, teamMapping: Record<string, any>): boolean {
+    const metadata = group.list_metadata
+    if (!metadata) return classifyGroup(group, teamMapping).coversAllTeams
+    return metadata.covers_all_teams
+        ?? (['ASSESSED', 'ASSESSED_LEGACY'].includes(String(metadata.lifecycle)) && !metadata.is_pending)
+}
+
 export interface TeamCounts {
     open: number
     assessed: number
@@ -153,10 +172,8 @@ export function computeTeamCounts(
         if (!teams.length) continue
 
         const assessed = g.list_metadata?.assessed_teams ?? Array.from(getAssessedTeams(g))
-        const lifecycle = g.list_metadata?.lifecycle ?? classifyGroup(g, teamMapping).lifecycle
-        const closed = ['ASSESSED', 'ASSESSED_LEGACY'].includes(lifecycle)
-            && !(g.list_metadata?.is_pending ?? isPendingReview(g))
-        addTeamCounts(counts, teams, normalizeTags(assessed, teamMapping), closed)
+        const covered = coversAllTeamsOf(g, teamMapping)
+        addTeamCounts(counts, teams, normalizeTags(assessed, teamMapping), covered)
     }
 
     return counts

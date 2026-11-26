@@ -940,9 +940,10 @@ def test_a_restored_block_survives_repair_and_the_next_save():
     text = _restored_text()
     group = _repair_group([("NOT_AFFECTED", text)], tags=["TeamT", "TeamU"])
     _preview, payloads, _ = _repair(group)
-    [(_instance, payload)] = payloads
-    repaired = payload["details"]
-    # TeamT has a historical block, so the repair adds no reference block.
+    # TeamT has a historical block, so the repair adds no reference block;
+    # the approved General decision covers it (ADR 0014): nothing to write.
+    assert payloads == []
+    repaired = text
     assert ("TeamT", False, "See global assessment.") not in _teams(repaired)
     assert ("TeamT", True, "Restored old text.") in _teams(repaired)
 

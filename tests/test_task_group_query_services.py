@@ -566,10 +566,10 @@ def test_filtered_team_statistics_use_coverage_and_reviewer_closure_across_all_p
     pending = _query(index, **options, lifecycle=["READY_FOR_APPROVAL"])
     assert pending["counts"]["filtered"]["team_groups"]["Engineering"] == {"open": 0, "assessed": 1}
     missing = _query(index, **options, team="Platform", team_assessment="MISSING")
-    # Missing documentation still selects the approved finding, but closure
-    # makes it assessed in the statistics.
-    assert missing["filtered"] == 2
-    assert missing["counts"]["filtered"]["canonical_team_tags"]["Platform"] == {"open": 1, "assessed": 1}
+    # One rule for the filter and the statistics (ADR 0014): the closed
+    # finding counts as assessed for Platform, so it is not missing.
+    assert missing["filtered"] == 1
+    assert missing["counts"]["filtered"]["canonical_team_tags"]["Platform"] == {"open": 1, "assessed": 0}
 
 
 def test_team_and_version_filters_require_ownership_in_the_same_release():

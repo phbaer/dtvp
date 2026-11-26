@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import TeamAssessmentOverview from '../TeamAssessmentOverview.vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 import { buildTeamOverview, type TeamOverviewInput } from '../../lib/teamOverview'
-import type { AssessmentBlock } from '../../lib/assessment-helpers'
+import { getGlobalDecision, type AssessmentBlock } from '../../lib/assessment-helpers'
 import ssvcModel from '../../../../dtvp/resources/ssvc/deployer-1.0.0.json'
 
 vi.mock('../../lib/api', () => ({
@@ -35,6 +35,48 @@ const overviewOf = (teams: [string, string][], extraBlocks: AssessmentBlock[] = 
 })
 
 describe('TeamAssessmentOverview', () => {
+    it('points to a derived Global decision: the worst team assessment', () => {
+        const blocks = [block('H-Core', 'EXPLOITABLE'), block('Web', 'NOT_AFFECTED')]
+        const wrapper = mount(TeamAssessmentOverview, {
+            props: {
+                overview: overviewOf([['H-Core', 'EXPLOITABLE'], ['Web', 'NOT_AFFECTED']]),
+                globalDecision: getGlobalDecision(blocks),
+            },
+        })
+        const line = wrapper.get('[data-testid="team-overview-global"]')
+        expect(line.attributes('data-source')).toBe('derived')
+        expect(line.text()).toContain('Global: derived, worst of team assessments: Exploitable (H-Core)')
+        expect(wrapper.find('[data-testid="team-overview-use-worst"]').exists()).toBe(false)
+    })
+
+    it('says a reviewer set the Global decision, and offers the worst when it differs', async () => {
+        const blocks = [block('General', 'NOT_AFFECTED'), block('H-Core', 'EXPLOITABLE'), block('Web', 'NOT_AFFECTED')]
+        const wrapper = mount(TeamAssessmentOverview, {
+            props: {
+                overview: overviewOf([['H-Core', 'EXPLOITABLE'], ['Web', 'NOT_AFFECTED']]),
+                globalDecision: getGlobalDecision(blocks),
+            },
+        })
+        const line = wrapper.get('[data-testid="team-overview-global"]')
+        expect(line.attributes('data-source')).toBe('manual')
+        expect(line.text()).toContain('Global: set by reviewer: Not affected')
+        expect(line.get('[data-testid="team-overview-global-differs"]').text())
+            .toBe('· differs from the worst team assessment (Exploitable, H-Core)')
+        await wrapper.get('[data-testid="team-overview-use-worst"]').trigger('click')
+        expect(wrapper.emitted('use-worst')).toHaveLength(1)
+
+        const equal = mount(TeamAssessmentOverview, {
+            props: {
+                overview: overviewOf([['H-Core', 'EXPLOITABLE']]),
+                globalDecision: getGlobalDecision([block('General', 'EXPLOITABLE'), block('H-Core', 'EXPLOITABLE')]),
+            },
+        })
+        expect(equal.find('[data-testid="team-overview-global-differs"]').exists()).toBe(false)
+        expect(mount(TeamAssessmentOverview, {
+            props: { overview: overviewOf([['H-Core', 'NOT_SET']]), globalDecision: getGlobalDecision([]) },
+        }).find('[data-testid="team-overview-global"]').exists()).toBe(false)
+    })
+
     it('lists the teams with state, status, components and the rationale', async () => {
         const wrapper = mount(TeamAssessmentOverview, {
             props: { overview: overviewOf([['A', 'NOT_AFFECTED'], ['B', 'EXPLOITABLE'], ['C', 'NOT_AFFECTED'], ['D', 'NOT_SET']]) },

@@ -52,7 +52,7 @@ from .code_evidence_services import (
     normalize_evidence_input,
     resolve_targets,
 )
-from .logic import STATE_PRIORITY, parse_assessment_blocks
+from .logic import STATE_PRIORITY, global_decision, parse_assessment_blocks
 
 AGENT_ROLE = "ANALYST"
 ANALYSIS_STATES = tuple(STATE_PRIORITY)
@@ -448,6 +448,7 @@ class McpToolService:
         )
         findings = []
         variants: dict[str, dict[str, Any]] = {}
+        decided_blocks: list[dict[str, Any]] = []
         components = _components(hydrated)
         for component, current in zip(
             components, await self._current_analyses(components)
@@ -481,6 +482,9 @@ class McpToolService:
                 {**self._assessment_view(current["details"]), "finding_uuids": []},
             )
             variant["finding_uuids"].append(component.get("finding_uuid"))
+            decided_blocks.extend(parse_assessment_blocks(str(current["details"] or ""))[1])
+        decision = global_decision(decided_blocks)
+        metadata = group.get("list_metadata") or {}
         return {
             "project": task.get("_project_name"),
             "id": hydrated.get("id"),
@@ -504,6 +508,17 @@ class McpToolService:
             # One entry when every finding carries the same assessment text.
             "assessments": list(variants.values()),
             "assessments_consistent": len(variants) <= 1,
+            "lifecycle": metadata.get("lifecycle"),
+            # The effective Global decision (docs/assessment-model.md#the-global-decision):
+            # set by a reviewer (manual), else the worst team decision (derived).
+            "global_decision": {
+                "source": decision["source"],
+                "state": decision["state"],
+                "justification": decision["justification"],
+                "teams": decision["teams"],
+                "derived_state": (decision["derived"] or {}).get("state", "NOT_SET"),
+                "derived_teams": (decision["derived"] or {}).get("teams", []),
+            },
             "valid_states": list(ANALYSIS_STATES),
         }
 
@@ -1135,7 +1150,12 @@ def build_mcp_server(service: McpToolService) -> Any:
     ) -> dict[str, Any]:
         """Search the vulnerabilities of a project across all its versions.
 
-        lifecycle: OPEN, INCOMPLETE, INCONSISTENT, NEEDS_APPROVAL, ASSESSED.
+        lifecycle: OPEN, INCOMPLETE, INCONSISTENT (Conflicting),
+        READY_FOR_APPROVAL, ASSESSED. Rows report the lifecycle; Ready for
+        approval is reported as NEEDS_APPROVAL. As a filter value
+        NEEDS_APPROVAL is deprecated: it selects every vulnerability pending
+        review, as awaiting_review does. Definitions:
+        docs/assessment-model.md#lifecycle-decision-table.
         severity (before rescoring): CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN.
         analysis_state: NOT_SET, IN_TRIAGE, EXPLOITABLE, NOT_AFFECTED,
         FALSE_POSITIVE, RESOLVED. awaiting_review: only vulnerabilities with

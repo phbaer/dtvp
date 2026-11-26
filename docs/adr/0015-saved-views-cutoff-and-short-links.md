@@ -5,7 +5,7 @@
 | | |
 | :--- | :--- |
 | Decision status | Accepted (2026-11-26, repository owner) |
-| Implementation status | Implemented on branch `feat/saved-views-cutoff` (PR #360), not merged |
+| Implementation status | Implemented ([PR #360](https://git.baer.one/phbaer/dtvp/pulls/360)) |
 | Related | [Cutoff](../review-workflows.md#cutoff), [Cutoff and the FDA guidance](../review-workflows.md#cutoff-and-the-fda-guidance), [Saved views](../review-workflows.md#saved-views-and-short-links), [AI access](../ai-access.md#mcp-tools), [Backup](../backup-and-restore.md); builds on the filters of PR #351 |
 
 ## Context

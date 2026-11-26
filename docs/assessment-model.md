@@ -5,6 +5,7 @@
 Paths and commands refer to the repository root unless stated otherwise.
 
 - [Vulnerabilities And Assessments](#vulnerabilities-and-assessments)
+  ([lifecycle decision table](#lifecycle-decision-table))
 - [SSVC And Original Severity](#ssvc-and-original-severity)
 - [Team Mapping And Analyzer Guidance](#team-mapping-and-analyzer-guidance)
 
@@ -17,38 +18,9 @@ aggregate state follows these rules:
   `FALSE_POSITIVE`, and `NOT_AFFECTED`.
 - A non-`NOT_SET` General assessment takes precedence; otherwise DTVP chooses
   the worst team state using the priority in `dtvp/logic.py`.
-- A reviewer-approved, non-pending General assessment is terminal and makes
-  the vulnerability `ASSESSED`, even if team-specific blocks were not all
-  recorded before approval. It must still cover every finding instance: while
-  any instance (for example another project version) has no analysis state,
-  the vulnerability stays `INCOMPLETE`, as do partially applied legacy
-  assessments. Without an approved General result, the
-  `ASSESSED` lifecycle requires a non-`NOT_SET` assessment block for every
-  normalized team tag and consistent coverage across all finding instances;
-  a General block is not required. Cached summaries from the previous
-  classification are invalidated automatically. Legacy unstructured assessments
-  retain their separate `ASSESSED_LEGACY` classification.
-- Lifecycle filters show five mutually exclusive categories: Open (no work
-  started), Incomplete (missing required team or finding coverage), Conflicting
-  (assessment data disagrees or needs repair), Ready for approval (complete,
-  consistent, pending sign-off), and Assessed (complete, no pending approval).
-  Assessed includes legacy assessments, which retain a separate Legacy badge.
-- Analysts default to Open plus Incomplete, including Conflicting findings;
-  reviewers default to all statuses. The project filter groups Conflicting under
-  Incomplete because conflicts require repair before approval. Cards and API
-  lifecycle values still distinguish the two. Reset restores role defaults;
-  explicit URL selections override them. Assessment coverage is independent
-  and requires selected teams. Old Needs Approval URL selections migrate to
-  Ready for approval; old Assessed Legacy selections migrate to Assessed.
-  Smart-search aliases retain the API categories.
-- Pending review remains internal metadata; it does not add an overlapping UI
-  category. The server sets it on every save that is not a reviewer's, and
-  removes it only for a reviewer's explicit approval
-  ([Review workflows](review-workflows.md)). Incomplete tooltips identify missing teams and finding instances.
-  A missing General block alone is not an incomplete-coverage issue.
-- API lifecycle codes remain compatible: `INCONSISTENT` is displayed as
-  Conflicting, and complete `NEEDS_APPROVAL` groups as Ready for approval.
-  The legacy API Needs Approval filter still selects all pending work.
+- The lifecycle (Open, Incomplete, Conflicting, Ready for approval,
+  Assessed), the Awaiting review flag, and exactly what decides them are
+  defined in the [lifecycle decision table](#lifecycle-decision-table).
 - Inconsistency reasons are indexed separately: missing rescoring metadata,
   differing analysis states, differing structured team blocks, and differing
   substantive details. Narrowed meanings:
@@ -138,6 +110,181 @@ aggregate state follows these rules:
   sync operations are removed on the next sync.
 - Dependency paths come from CycloneDX BOM dependency graphs. Dependency-Track
   attribution timestamps are retained as `attributed_on`.
+
+### Lifecycle decision table
+
+| | |
+| :--- | :--- |
+| Status | Implemented; the canonical definition. Decided in [ADR 0014](adr/0014-lifecycle-decision-table.md) |
+| Code | Server: `_derive_group_lifecycle` and `_build_group_list_metadata` in `dtvp/grouped_vuln_services.py`, `combine_lifecycles` and `has_pending_review_marker` in `dtvp/assessment_scopes.py`, `approval_blocker` in `dtvp/assessment_use_cases.py`. Web client (the card, and lists without server metadata): `getGroupLifecycleFromSummary` in `frontend/src/lib/assessment-helpers.ts`, `classifyGroup` and `coversAllTeamsOf` in `frontend/src/lib/group-classifier.ts`, `getApprovalUnavailableReason` in `frontend/src/lib/assessmentSyncIssues.ts` |
+| Verified | 2026-11-26 (rebased onto PR #355) against the code above, `tests/test_lifecycle_decision_table.py` and `frontend/src/lib/__tests__/lifecycleCases.spec.ts`, which both read `frontend/src/lib/__tests__/fixtures/lifecycle_cases.json`: every rule, the team coverage and whether Approve is possible, for each case |
+
+Every view takes the lifecycle from this one rule: the list, its status
+filters, counts and quick views (`dtvp/task_group_query_services.py`), the
+card, the Bulk Changes candidates, the Repair stages and MCP
+(`search_vulnerabilities`) read `list_metadata.lifecycle`, `is_pending`,
+`is_approval_ready` and `covers_all_teams` computed by the server; the card
+computes the same with the web client's mirror.
+
+#### Inputs
+
+| Input | What counts |
+| :--- | :--- |
+| Findings | The vulnerability's findings Dependency-Track reports now, in every project version, including new findings of a new version and suppressed ones (suppression does not change the lifecycle). Gone findings are not part of the vulnerability ([Gone findings](review-workflows.md#gone-findings)) |
+| Finding state | The finding's analysis state; `NOT_SET` or absent means the finding has no state |
+| Required teams | The vulnerability's team tags from the [team mapping](#team-mapping-and-analyzer-guidance), an alias read as its team. The catch-all `*` team (for example Unknown) is a required team like any other; only the tag `Unassigned` is not. With version overrides, the teams owning the scope's findings |
+| Team assessed | A **current** block (not `[Historical: yes]`) of that team, or of one of its aliases, compared without case and surrounding space, with a state other than `NOT_SET`, on any finding |
+| General decides | A current `[Team: General]` block with a state other than `NOT_SET`, on any finding: the reviewer's (manual) [Global decision](#the-global-decision). A General block that is `NOT_SET` does not decide. A General decision stands for every required team without a block of its own, pending or approved |
+| Pending review | Any finding's text holds `[Status: Pending Review]` outside its SSVC details. The marker belongs to the finding's whole text, not to one block (accepted, ADR 0014) |
+| Legacy | Assessed findings without any block under a `--- [Team: …] ---` header (text ahead of the first header is no block), or whose only block is a General block that is `NOT_SET` |
+| Inconsistency reasons | The reasons as defined [above](#vulnerabilities-and-assessments) (the bullets on inconsistency reasons and on what findings are compared on) and in [Version override](#version-override): `MISSING_RESCORING_VECTOR`, `ANALYSIS_STATE_MISMATCH`, `TEAM_ASSESSMENT_MISMATCH`, `ASSESSMENT_DETAILS_MISMATCH`, `VERSION_OVERRIDE_PARTIAL`, `VERSION_OVERRIDE_LABEL_MISMATCH`. What each compares is defined there, not here |
+| Version overrides | With an override marker on any finding the rules run per scope and are combined ([Scopes and lifecycle](#scopes-and-lifecycle)) |
+
+#### Rules
+
+The first rule that matches decides. Inside each scope when the vulnerability
+has version overrides.
+
+| Rule | Condition | Lifecycle (API) |
+| :--- | :--- | :--- |
+| R1 | Any inconsistency reason | `INCONSISTENT` |
+| R2 | Pending review, and no finding has a state | `OPEN` |
+| R3 | Pending review, and a finding has no state | `INCOMPLETE` |
+| R4 | Pending review, a required team has not assessed, and no General block decides | `INCOMPLETE` |
+| R5 | Pending review otherwise: every required team assessed or covered by a General decision | `NEEDS_APPROVAL` |
+| R6 | A finding has no state and another has one | `INCOMPLETE` |
+| R7 | Legacy | `ASSESSED_LEGACY` |
+| R8 | A General block decides (approved, since R2-R5 did not match) | `ASSESSED` |
+| R9 | A required team has not assessed: `INCOMPLETE` if any finding has a state, else `OPEN` | `INCOMPLETE` / `OPEN` |
+| R10 | A team's deciding block is on some assessed findings and missing on others (a gap for Synchronize, not a contradiction; PR #355) | `INCOMPLETE` |
+| R11 | Otherwise: `ASSESSED` if any finding has a state, else `OPEN`. Teams that disagree do not prevent it: the [derived Global decision](#the-global-decision), the worst of them, is the decision | `ASSESSED` / `OPEN` |
+
+A vulnerability without findings is `OPEN`. R5 and R8 are the same rule with
+and without the pending marker: a General decision covers the teams without
+a block of their own, so approving it is all that is left. R10 applies only
+without a General decision and without pending review: a pending
+vulnerability with such a gap is Ready for approval, and the approval
+records a General decision (see [Approval](#approval)). Without a General
+block, teams that disagree yield the derived worst as the decision: the
+vulnerability is Assessed (R11), or Ready for approval while pending (R5). With version
+overrides, the scope lifecycles combine worst first: any `INCONSISTENT` (or
+two overrides in one version) gives `INCONSISTENT`; any `INCOMPLETE`, or
+`OPEN` beside a scope that is not, gives `INCOMPLETE`; then `NEEDS_APPROVAL`;
+all `OPEN` gives `OPEN`; then `ASSESSED_LEGACY`, then `ASSESSED`.
+
+#### Flags beside the lifecycle
+
+| Flag (`list_metadata`) | Definition |
+| :--- | :--- |
+| `is_pending` | Pending review (the input above), whatever the lifecycle. This is **Awaiting review** |
+| `is_approval_ready` | `is_pending` and lifecycle `NEEDS_APPROVAL`. This is **Ready for approval**, and the only state in which Approve is possible |
+| `covers_all_teams` | A General block decides (pending or approved), or the lifecycle is `ASSESSED` or `ASSESSED_LEGACY` without pending review: every required team counts as assessed ([Per-team status](#per-team-status)) |
+| `is_assessed` | Lifecycle `ASSESSED` or `ASSESSED_LEGACY` |
+| `is_open` | Lifecycle `OPEN`, or `is_pending` (pending review is not done) |
+
+Awaiting review is a filter flag, not a lifecycle: it cuts across R1-R5, so
+an Awaiting review vulnerability can be Conflicting, Open, Incomplete or
+Ready for approval. A Ready for approval vulnerability is always Awaiting
+review.
+
+#### The Global decision
+
+| | |
+| :--- | :--- |
+| Code | `global_decision` and `STATE_ORDER` in `dtvp/logic.py`; `getGlobalDecision` and `STATE_PRIORITY` in `frontend/src/lib/assessment-helpers.ts`. Both are tested against `lifecycle_cases.json` (`global_decision` of every case) and `state_order.json` |
+
+The **effective Global decision** of a vulnerability is:
+
+- **manual**: the reviewer's current General block when it decides; it takes
+  precedence over the team assessments, whatever they say;
+- otherwise **derived**: the worst state among the current team blocks that
+  decide. Every team with that state is a source, named in alphabetical
+  order; the justification is that of the first of them that has one;
+- otherwise **none**.
+
+The worst-state order, worst first, is the one order DTVP uses for every
+"worst": **Exploitable > In triage > False positive > Not affected >
+Resolved** (then Not set). Repair, the analyzer verdicts of Apply Automatic
+Assessments (Affected → Exploitable; Probably affected and Inconclusive →
+In triage; Not affected) and the finding matrix use the same order.
+
+- **Export.** The state DTVP writes to Dependency-Track for a finding is its
+  effective decision (`calculate_aggregated_state`): the same derived worst
+  when there is no General block. The justification is not derived: DTVP
+  exports none of its own, and Dependency-Track keeps its value.
+- **API.** `list_metadata.global_decision_source` (`manual`, `derived`,
+  `none`), `global_decision_state`, `global_decision_justification`,
+  `global_decision_teams` (the sources of a derived decision), and
+  `derived_global_state` and `derived_global_teams` (the worst team decision
+  in every case, to compare a manual one with). MCP `get_vulnerability`
+  returns the same as `global_decision`.
+- **UI.** The team overview on the Global assessment says "Global: derived,
+  worst of team assessments: Exploitable (H-Core)", or "Global: set by
+  reviewer: Not affected" with "differs from the worst team assessment
+  (Exploitable, H-Core)" and **Use worst** when they differ. The card's state
+  chip carries "· derived" and says so in its tooltip.
+- **Approval** records the effective decision: without a General block the
+  Global form is filled with the derived worst, and the approval stores it
+  as the General block unless the reviewer changed it. The server does the
+  same for API clients (`with_derived_global_block`), without applying a
+  rescoring rule.
+
+#### Approval
+
+Approve is possible only for a vulnerability that is **Ready for approval**
+(R5). The card offers it only then, and otherwise tells a reviewer why (for
+example a finding without a state, or a team without an assessment and no
+General decision). The server checks the same rule on the stored texts of
+the findings the request names and refuses an approval of anything else with
+422 (`approval_blocker`); a request whose findings hold nothing pending is a
+reviewer's ordinary save and is not refused. A reviewer can complete a
+vulnerability without every team's own assessment: record the final Global
+decision (it stays pending review), which makes it Ready for approval, then
+approve it.
+
+#### Names
+
+| Lifecycle (API, MCP rows) | UI label | Status filter value | What resolves it | Who |
+| :--- | :--- | :--- | :--- | :--- |
+| `OPEN` | Open | `OPEN` | A team's or the Global assessment | Analyst (saved pending) or reviewer |
+| `INCOMPLETE` | Incomplete | `INCOMPLETE` (the Incomplete chip also selects `INCONSISTENT`) | R3, R6, R10: Synchronize (the card's **Sync all**, Repair's Synchronize stage); R4, R9: the missing team assesses, or a reviewer records a Global decision (Repair also refers named teams to an approved one) | Analyst for team assessments; reviewer for Sync all, Repair and the Global decision |
+| `INCONSISTENT` | Conflicting | `INCONSISTENT` (old links: `CONFLICTING`) | Align the findings: save one assessment for all, "Use for all findings", Repair (Combine conflicts, Restore CVSS) | Reviewer for Repair and "Use for all findings"; any user's save that rewrites every finding |
+| `NEEDS_APPROVAL` | Ready for approval | `READY_FOR_APPROVAL` | **Approve** ([Approving](review-workflows.md#approving)); when teams have no block of their own the card says "Approve the Global assessment to complete it" | Reviewer |
+| `ASSESSED` | Assessed | `ASSESSED` | Nothing to do | |
+| `ASSESSED_LEGACY` | Assessed, with a **Legacy** badge | `ASSESSED` (old links: `ASSESSED_LEGACY`) | Nothing to do; a structured save replaces it | |
+| (flag `is_pending`) | Awaiting review (row badge, quick view, toggle) | `awaiting_review=true`; the status value `NEEDS_APPROVAL` (deprecated) | Approve when Ready for approval; nothing else removes the marker ([Approving](review-workflows.md#approving)) | Reviewer |
+
+"Pending review" is the marker `[Status: Pending Review]` in the text, not a
+state. As a **lifecycle value** `NEEDS_APPROVAL` means Ready for approval.
+As a **status filter value** it is deprecated: it still selects every
+pending vulnerability (`awaiting_review=true` does the same), as it did
+before Awaiting review existed; use `READY_FOR_APPROVAL` for Ready for
+approval. The counts follow the filter meaning: `lifecycle.NEEDS_APPROVAL`
+counts every pending vulnerability, `lifecycle.READY_FOR_APPROVAL` the Ready
+for approval ones.
+
+#### Per-team status
+
+One rule decides whether a team has assessed a vulnerability, for the team
+counters (Open/Assessed per team and team group) and the **Assessment for
+selected teams** filter (`team_assessment`: Not recorded, Recorded) alike:
+the team has assessed (the input above), pending review included, or
+`covers_all_teams` holds. A recorded General decision therefore counts as
+the decision of every team without a block of its own, the catch-all team
+included.
+
+#### Repair and the catch-all team
+
+Repair names the teams a General decision covers only while that decision is
+pending ("approve the Global assessment to complete it"), and teams without
+any assessment and no General decision ("nothing to copy"). It refers named
+teams to an approved General decision ("See global assessment."), but never
+the catch-all `*` team: the General decision covers it. A reference under
+the catch-all name is removed ("not needed, the global assessment covers
+it") only while a General decision covers the team; without one it is what
+the team has, and it stays. An assessment under the catch-all name that is
+not a reference is a person's and stays; when the catch-all team is the
+only owner, no block counts as a former team's.
 
 CVSS rescoring is data-driven through `RESCORE_RULES_PATH` (default
 `data/rescore_rules.json`). The shipped `NOT_AFFECTED` and `FALSE_POSITIVE`
@@ -244,11 +391,9 @@ The markers divide a vulnerability's findings into **scopes**
   label makes it part of that label's scope, with every finding of the
   version, including untouched (new) findings without the marker. Two labels
   in one version make it **ambiguous**.
-- The lifecycle rules above run **inside each scope**, with the teams that
-  own the scope's findings as required teams. The results combine in this
-  order: any Conflicting (or an ambiguous version) is Conflicting; any
-  Incomplete, or open next to assessed scopes, is Incomplete; any pending
-  scope is Needs approval; all open is Open; then Assessed (legacy). An
+- The [lifecycle rules](#lifecycle-decision-table) run **inside each
+  scope**, with the teams that own the scope's findings as required teams,
+  and combine worst first as the table says. An
   override that differs from base is therefore not a conflict, and a pending
   override is never Assessed.
 - Two new reasons make a scope Conflicting:
