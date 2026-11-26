@@ -127,7 +127,9 @@ constraints, and CI conventions.
    for context and assessment details.
 3. Record team assessments, optionally using earlier team assessments,
    threat-model or code-analysis proposals. Reviewers approve global decisions
-   and adjust CVSS scores. A save never drops another team's assessment; a
+   and adjust CVSS scores; a [team overview](docs/screens.md#team-overview)
+   on the Global assessment shows what every team decided, disagreeing and
+   missing teams first. A save never drops another team's assessment; a
    block it leaves out is kept as historical, and a team's historical block
    stays beside its new assessment.
 4. Use **Bulk Changes** to apply automatic assessments, run the combined

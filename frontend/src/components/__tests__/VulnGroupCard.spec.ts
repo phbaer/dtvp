@@ -973,17 +973,18 @@ describe('VulnGroupCard', () => {
         await assessmentTab?.trigger('click')
         await wrapper.vm.$nextTick()
 
-        // One compact line: each team's state, the analyzer fallback marked.
-        const summary = wrapper.get('[data-testid="effective-team-assessment-summary"]')
-        const teams = summary.findAll('[data-testid="effective-team-assessment"]')
-        expect(teams.map(team => team.findAll('span').map(part => part.text()).join(' '))).toEqual([
-            'Security not affected',
-            'Runtime not affected (analyzer)',
-        ])
-        expect(teams[0].attributes('title')).toBe('Team assessment')
-        expect(teams[1].attributes('title')).toContain('Analyzer fallback')
-        expect(summary.text()).toContain('Worst: not affected')
-        expect(summary.text()).not.toContain('exploitable')
+        // The team overview: the saved decision, the analyzer fallback only for a missing team.
+        const summary = wrapper.get('[data-testid="team-assessment-overview"]')
+        const rows = summary.findAll('[data-testid="team-overview-row"]')
+        expect(rows.map(row => row.attributes('data-team'))).toEqual(['Runtime', 'Security'])
+        expect(rows[0]!.attributes('data-status')).toBe('missing')
+        expect(rows[0]!.get('[data-testid="team-overview-state"]').text()).toBe('Not affected · Code not reachable (analyzer)')
+        expect(rows[1]!.attributes('data-status')).toBe('submitted')
+        expect(rows[1]!.get('[data-testid="team-overview-state"]').text()).toBe('Not affected · Code not present')
+        expect(summary.get('[data-testid="team-overview-summary"]').text()).toBe('2 teams: 1 Not affected · 1 missing (Runtime)')
+        expect(summary.text()).toContain('Worst: Not affected')
+        expect(summary.text()).not.toContain('Exploitable')
+        expect(wrapper.find('[data-testid="effective-team-assessment-summary"]').exists()).toBe(false)
 
         await summary.get('[data-testid="use-effective-assessment-summary"]').trigger('click')
         await wrapper.vm.$nextTick()

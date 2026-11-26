@@ -2010,6 +2010,22 @@ test.describe('Capture README screenshots', () => {
         await captureWithPadding(card, '../docs/screenshots/vuln-card-review-context.png')
     })
 
+    test('capture team overview screenshot', async ({ page }) => {
+        // CVE-2024-5003: PlatformTeam is in triage, EdgeTeam says not affected.
+        await page.setViewportSize({ width: 1600, height: 1400 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-5003')
+        await selectDetailTab(card, 'Assessment')
+        await card.getByRole('button', { name: /^Global/ }).click()
+        const overview = card.getByTestId('team-assessment-overview')
+        await expect(overview.getByTestId('team-overview-row')).toHaveCount(2)
+        await expect(overview.locator('[data-disagrees="true"]')).toHaveCount(2)
+
+        await captureWithPadding(card.getByTestId('assessment-scope'), '../docs/screenshots/team-overview.png')
+    })
+
     test('capture team assessment tab screenshot', async ({ page }) => {
         await page.route('**/auth/me', route => route.fulfill({
             status: 200,

@@ -37,6 +37,8 @@ import AssessmentReviewModal from './AssessmentReviewModal.vue'
 import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
 import DetailSection from './DetailSection.vue'
 import VulnAboutSummary from './VulnAboutSummary.vue'
+import TeamAssessmentOverview from './TeamAssessmentOverview.vue'
+import { buildTeamOverview } from '../lib/teamOverview'
 import { sortVersions } from '../lib/version'
 import type { CodeAnalysisAssessResponse, CodeAnalysisCvssAdjustment } from '../lib/api'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
@@ -1899,7 +1901,10 @@ const copyGeneratedText = async () => {
     }
 }
 
-const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
+const handleAdoptTeamBlock = async (
+    block: Pick<AssessmentBlock, 'state' | 'justification'> & { details?: string },
+    withText = true,
+) => {
     // Always apply to global assessment regardless of current team selection.
     // Must await nextTick so the selectedTeam watcher (updateFormFromGroup) runs
     // before we set the form values — otherwise it overwrites them.
@@ -1909,7 +1914,7 @@ const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
     // Only copy the team's details text (not a full structured document).
     state.value = block.state || 'NOT_SET'
     justification.value = block.justification || 'NOT_SET'
-    details.value = stripPendingReviewStatus(stripSsvcDocumentation(block.details || '')).trim()
+    if (withText) details.value = stripPendingReviewStatus(stripSsvcDocumentation(block.details || '')).trim()
     formTouched.value = true
 
     // Same as syncAllAssessments: the adopted state owns the rescore even
@@ -2699,23 +2704,27 @@ const effectiveTeamAssessments = computed<EffectiveTeamAssessment[]>(() => allAs
     }
     return { team, state: 'NOT_SET', justification: 'NOT_SET', details: '', source: 'missing' }
 }))
-// The compact summary names a few teams and folds the rest.
-const EFFECTIVE_TEAMS_SHOWN = 6
-const showAllEffectiveTeams = ref(false)
-const shownEffectiveTeamAssessments = computed(() => (
-    showAllEffectiveTeams.value
-        ? effectiveTeamAssessments.value
-        : effectiveTeamAssessments.value.slice(0, EFFECTIVE_TEAMS_SHOWN)
-))
-const hiddenEffectiveTeamCount = computed(() => (
-    effectiveTeamAssessments.value.length - shownEffectiveTeamAssessments.value.length
-))
-const effectiveSourceLabel = (source: string) => (
-    source === 'team' ? 'Team assessment'
-        : source === 'automatic' ? 'Analyzer fallback: the team has no assessment yet'
-            : 'No team assessment and no analyzer proposal'
-)
-const stateWords = (value: string) => value.replaceAll('_', ' ').toLowerCase()
+// What every team decided, above the Global form (TeamAssessmentOverview).
+const teamOverview = computed(() => buildTeamOverview({
+    teams: effectiveTeamAssessments.value,
+    blocks: mergedAssessmentData.value.blocks,
+    aliasGroups: teamAliasGroups.value,
+    componentsByTeam: assessmentComponentsByTeam.value,
+    pendingReview: mergedAssessmentData.value.isPending,
+    globalState: selectedTeam.value ? '' : state.value,
+}))
+/** "Open" in the overview: the team's tab, shown even when the team filter hides it. */
+const openTeamFromOverview = (team: string) => {
+    if (!teamTabs.value.includes(team)) showAllAssessmentTeams.value = true
+    chooseTeamTab(team)
+}
+/** Former teams' assessments are listed with the stored evidence on the Context tab. */
+const showFormerTeamAssessments = async () => {
+    setDetailTab('overview')
+    await nextTick()
+    detailsEl.value?.querySelector?.('[data-testid="vulnerability-assessments"]')
+        ?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+}
 const effectiveAssessmentWorst = computed(() => effectiveTeamAssessments.value
     .filter(assessment => assessment.state !== 'NOT_SET')
     .sort((left, right) => (STATE_PRIORITY[left.state] ?? 10) - (STATE_PRIORITY[right.state] ?? 10))[0] || null)
@@ -3697,54 +3706,17 @@ const teamBlockStateColor = (state?: string): string => {
                             The Global decision below is taken over from the team assessments, with the rescoring rule for that state applied.
                             Nothing is saved until you press Approve.
                         </div>
-                        <!-- What each team decided, on one line: the worst state
-                             is what the Global decision takes over. -->
-                        <div
-                            v-if="isReviewer && !selectedTeam && effectiveTeamAssessments.length"
-                            data-testid="effective-team-assessment-summary"
-                            class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]"
-                        >
-                            <span
-                                class="inline-flex cursor-help items-center gap-1 text-gray-500"
-                                title="Team assessments take precedence; the latest analyzer proposal fills only missing teams."
-                            >
-                                Teams
-                                <Info :size="11" aria-hidden="true" />
-                                <span class="sr-only">Team assessments take precedence; the latest analyzer proposal fills only missing teams.</span>
-                            </span>
-                            <span
-                                v-for="assessment in shownEffectiveTeamAssessments"
-                                :key="assessment.team"
-                                data-testid="effective-team-assessment"
-                                class="inline-flex items-center gap-1"
-                                :title="effectiveSourceLabel(assessment.source)"
-                            >
-                                <span class="font-semibold text-gray-300">{{ assessment.team }}</span>
-                                <span v-if="assessment.source !== 'missing'" class="text-gray-400">{{ stateWords(assessment.state) }}</span>
-                                <span v-if="assessment.source === 'automatic'" class="text-cyan-300">(analyzer)</span>
-                                <span v-else-if="assessment.source === 'missing'" class="italic text-gray-600">missing</span>
-                            </span>
-                            <button
-                                v-if="hiddenEffectiveTeamCount"
-                                type="button"
-                                data-testid="effective-team-assessment-more"
-                                class="text-cyan-300 hover:text-cyan-200"
-                                @click="showAllEffectiveTeams = true"
-                            >
-                                +{{ hiddenEffectiveTeamCount }} more
-                            </button>
-                            <span v-if="effectiveAssessmentWorst" class="ml-auto flex items-center gap-2">
-                                <span class="text-gray-500">Worst: <strong class="text-gray-200">{{ stateWords(effectiveAssessmentWorst.state) }}</strong></span>
-                                <button
-                                    type="button"
-                                    data-testid="use-effective-assessment-summary"
-                                    class="rounded bg-purple-700/70 px-2 py-1 text-[10px] font-bold text-white hover:bg-purple-600"
-                                    @click="applyEffectiveAssessmentSummary"
-                                >
-                                    Use for Global
-                                </button>
-                            </span>
-                        </div>
+                        <!-- What each team decided; the worst state is what the
+                             Global decision takes over. -->
+                        <TeamAssessmentOverview
+                            v-if="isReviewer && !selectedTeam && teamOverview.rows.length"
+                            :overview="teamOverview"
+                            :worstState="effectiveAssessmentWorst?.state || ''"
+                            @open="openTeamFromOverview"
+                            @use-as-global="row => handleAdoptTeamBlock(row, false)"
+                            @use-worst="applyEffectiveAssessmentSummary"
+                            @show-former="showFormerTeamAssessments"
+                        />
                     </section>
 
                     <DetailSection

@@ -437,8 +437,14 @@ A reviewer who opens a pending assessment lands on the Global assessment. If no
 Global assessment exists yet, the form is filled from the team assessments: the
 worst state, its justification and the combined rationale, with the rescoring
 rule for that state applied. An existing Global assessment is never replaced.
-Nothing is saved at this point. The reviewer adjusts the decision or the CVSS
-vector where needed and presses Approve, which saves the Global assessment and
+Nothing is saved at this point. Above the form, the
+[team overview](screens.md#team-overview) lists every required team with its
+state, justification, status, assessor and date, components and the first line
+of its rationale; teams that disagree with each other or with the Global
+decision come first and are highlighted, missing teams next. **Open** switches
+to a team's tab and keeps the Global draft; **Use as Global** takes over a
+team's state and justification without its text. The reviewer adjusts the
+decision or the CVSS vector where needed and presses Approve, which saves the Global assessment and
 removes the pending status in one step. On a collapsed card the Approve button
 in the header opens this view; it does not approve by itself. In the assessment
 workspace the form is always visible, so on the Global form the button reads
