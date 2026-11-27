@@ -76,7 +76,7 @@ ENTITIES: dict[str, EntitySpec] = {
         EntitySpec("code_analysis_result", CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE, "code_analysis_results", GROUP_RECORD, lambda r: r["analysis_run_id"]),
         EntitySpec("code_analysis_application", CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE, "code_analysis_result_applications", GROUP_RECORD, lambda r: (r["analysis_run_id"], r["finding_uuid"])),
         EntitySpec("code_evidence", CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE, "code_evidence", GROUP_RECORD, lambda r: r["evidence_id"]),
-        EntitySpec("code_evidence_application", CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE, "code_evidence_applications", GROUP_RECORD, lambda r: (r["evidence_id"], r["finding_uuid"])),
+        EntitySpec("code_evidence_application", CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE, "code_evidence_applications", GROUP_RECORD, lambda r: (r["evidence_id"], r["finding_uuid"], r.get("team", ""), r.get("assessment_revision", -1))),
         EntitySpec("finding_presence", FINDING_LIFECYCLE_MIGRATION_NAMESPACE, "finding_presence", GROUP_RECORD, _key),
         EntitySpec("finding_read", FINDING_LIFECYCLE_MIGRATION_NAMESPACE, "finding_reads", GROUP_RECORD, lambda r: r["project_uuid"]),
         EntitySpec("session_version", ACCESS_TOKEN_MIGRATION_NAMESPACE, "session_versions", GROUP_RECORD, lambda r: r["username"]),
@@ -311,6 +311,8 @@ COLUMN_MAP: dict[str, dict[str, str]] = {
                 "targets_json",
                 "title",
                 "body_markdown",
+                "assessment_summary",
+                "attachments_json",
                 "references_json",
                 "suggested_state",
                 "suggested_justification",
@@ -341,6 +343,9 @@ COLUMN_MAP: dict[str, dict[str, str]] = {
             "status",
             "applied_by",
             "applied_at",
+            "team",
+            "assessment_revision",
+            "selected",
         )
     },
     "finding_presence": {

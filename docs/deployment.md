@@ -170,6 +170,12 @@ Deployment rules:
 - The DTVP container startup script prints its packaged project version and
   image build number before importing the application, so deployment identity
   remains visible in Docker logs even if initialization fails.
+- After updating an image, check `/api/version` for the intended commit;
+  image tags and merged PRs alone do not establish the running build. For MCP
+  updates, reconnect the client and inspect `tools/list`: justification and
+  `code_evidence_ids` must appear on preview/save, and attachment-capable
+  builds list `add_code_evidence_attachment`. These checks need no assessment
+  writes. A server still reporting `39f637de` predates those capabilities.
 - `/api/performance-status` reports grouped-query/build/post-processing
   saturation, retained task counts, process-local cache pressure, and the
   active Python/GIL state.

@@ -194,4 +194,31 @@ describe('VulnRowCompact', () => {
         expect(web.attributes('aria-label')).toBe('Web: Missing assessment')
         expect(web.find('[data-testid="team-mcp"]').exists()).toBe(false)
     })
+    it.each([
+        { id: 'case-insensitive-team', pending: false, teams: ['Phoenix', 'Web'], assessed: ['phoenix'], missing: 'Web' },
+        { id: 'GHSA-G2V6-RQMX-R4W6', pending: true, teams: ['I-Web', 'DE-Core', 'Core'], assessed: ['I-Web'], missing: 'Core' },
+        { id: 'GHSA-FF3F-86QR-9CV3', pending: false, teams: ['Core', 'DE-Core', 'Phoenix', 'S-Web', 'IN-Core', 'C-Web', 'I-Web'], assessed: ['Core', 'Phoenix', 'S-Web', 'C-Web'], missing: 'I-Web' },
+    ])('shows review work and missing coverage independently for $id', ({ id, pending, teams, assessed, missing }) => {
+        const mapping = { lib: ['Core', 'DE-Core'], router: ['S-Web', 'IN-Core'] }
+        const item = buildVulnListItem({ ...group, id, tags: teams, list_metadata: {
+            lifecycle: 'INCOMPLETE', technical_state: 'NOT_AFFECTED', is_pending: pending,
+            is_approval_ready: false, is_assessed: false, covers_all_teams: false, assessed_teams: assessed,
+        } }, mapping)
+        const wrapper = mount(VulnRowCompact, { props: { item } })
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Review needed')
+        expect(wrapper.get('[data-testid="missing-team-assessments"]').text()).toBe(`Missing team assessments: ${missing}`)
+        expect(wrapper.text()).not.toContain('Needs assessment')
+        expect(wrapper.text()).not.toContain('Awaiting review')
+    })
+
+    it('reserves Ready for approval for complete coverage and hides missing-team work covered by Global', () => {
+        const item = buildVulnListItem({ ...group, tags: ['Core', 'I-Web'], list_metadata: {
+            lifecycle: 'NEEDS_APPROVAL', technical_state: 'NOT_AFFECTED', is_pending: true,
+            is_approval_ready: true, covers_all_teams: true, assessed_teams: ['Core'],
+        } }, {})
+        const wrapper = mount(VulnRowCompact, { props: { item } })
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Ready for approval')
+        expect(wrapper.find('[data-testid="missing-team-assessments"]').exists()).toBe(false)
+    })
+
 })

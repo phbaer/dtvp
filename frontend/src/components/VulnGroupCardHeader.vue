@@ -20,6 +20,7 @@ const props = defineProps<{
   originalSeverity?: string
   normalizedTags: string[]
   assessedTeams: Set<string>
+  missingAssessmentTeams?: string[]
   expanded: boolean
   canApprove: boolean
   isPendingReview: boolean
@@ -284,11 +285,11 @@ const componentSummary = computed(() => {
           </span>
           <span v-if="displayState === 'ASSESSED_LEGACY'" class="text-sky-300" data-testid="legacy-assessment-badge">Legacy</span>
           <span
-            v-if="isPendingReview && displayState !== 'NEEDS_APPROVAL'"
+            v-if="displayState !== 'NEEDS_APPROVAL' && (isPendingReview || (displayState === 'INCOMPLETE' && technicalState !== 'NOT_SET'))"
             data-testid="header-review-chip"
             class="text-violet-300"
-            :title="approvalUnavailableReason || 'Assessment submitted for reviewer approval'"
-          >Awaiting review</span>
+            :title="approvalUnavailableReason || 'A reviewer decision is still needed; team coverage is shown separately.'"
+          >Review needed</span>
           <span v-if="hasUnsavedDraft" data-testid="header-draft-chip" class="font-semibold text-amber-300">Unsaved draft</span>
           <button
             v-if="canApprove && !expanded"
@@ -304,6 +305,10 @@ const componentSummary = computed(() => {
       </div>
     </div>
 
+    <p v-if="missingAssessmentTeams?.length && ['OPEN', 'INCOMPLETE'].includes(displayState)"
+      data-testid="missing-team-assessments" class="break-words text-[11px] text-amber-200">
+      Missing team assessments: {{ missingAssessmentTeams.join(', ') }}
+    </p>
     <span v-if="compact && workflowLabel !== lifecycleLabel" data-testid="lifecycle-badge" class="sr-only" :title="lifecycleTooltip">{{ lifecycleLabel }}</span>
     <span v-if="compact && displayState === 'ASSESSED_LEGACY'" data-testid="legacy-assessment-badge" class="sr-only">Legacy</span>
     <div :class="compact

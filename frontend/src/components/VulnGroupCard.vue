@@ -20,7 +20,7 @@ import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVers
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
 import { isCodeAnalysisApplicable, buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
-import { evidenceIdsReferencedIn, unusableEvidenceId } from '../lib/codeEvidence'
+import { unusableEvidenceId } from '../lib/codeEvidence'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { hasGlobalAssessmentData } from '../lib/assessmentCleanup'
 import { buildTeamAliasGroups, type TeamRosterEntry } from '../lib/team-mapping'
@@ -555,7 +555,44 @@ const formTouched = ref(false)
 const codeAnalysisDraftApplied = ref(false)
 const codeAnalysisDraftSummary = ref('')
 const codeAnalysisRunIds = ref<string[]>([])
-const codeEvidenceIds = ref<string[]>([])
+const codeEvidenceByTeam = ref<Record<string, string[]>>({})
+const codeEvidenceTitles = ref<Record<string, string>>({})
+const requestedEvidenceId = ref('')
+const openSupportingEvidence = async (id: string) => {
+    requestedEvidenceId.value = ''
+    setDetailTab('analysis', true)
+    await nextTick()
+    requestedEvidenceId.value = id
+}
+const dirtyEvidenceTeams = ref(new Set<string>())
+const evidenceTeam = computed(() => selectedTeam.value || 'General')
+const codeEvidenceIds = computed({
+    get: () => codeEvidenceByTeam.value[evidenceTeam.value] || [],
+    set: (ids: string[]) => {
+        codeEvidenceByTeam.value[evidenceTeam.value] = ids
+        dirtyEvidenceTeams.value.add(evidenceTeam.value)
+    },
+})
+const loadEvidenceSelections = (records: import('../lib/api').CodeEvidence[]) => {
+    const visible = new Set(visibleInstances.value.map(instance => instance.finding_uuid))
+    const latest = new Map<string, number>()
+    for (const record of records) {
+        codeEvidenceTitles.value[record.evidence_id] = record.title
+        for (const app of record.applications || []) {
+            if (!app.team || !visible.has(app.finding_uuid)) continue
+            const key = `${app.team}:${app.finding_uuid}`
+            latest.set(key, Math.max(latest.get(key) ?? -1, app.assessment_revision ?? -1))
+        }
+    }
+    const byTeam: Record<string, string[]> = {}
+    for (const record of records) for (const app of record.applications || []) {
+        if (!app.team || !visible.has(app.finding_uuid)) continue
+        byTeam[app.team] ||= []
+        if (app.selected !== false && app.assessment_revision === latest.get(`${app.team}:${app.finding_uuid}`) && !byTeam[app.team].includes(record.evidence_id)) byTeam[app.team].push(record.evidence_id)
+    }
+    for (const [team, ids] of Object.entries(byTeam)) if (!dirtyEvidenceTeams.value.has(team)) codeEvidenceByTeam.value[team] = ids
+}
+const removeSelectedEvidence = (id: string) => { codeEvidenceIds.value = codeEvidenceIds.value.filter(value => value !== id) }
 const codeAnalysisProposalRuns = ref<CodeAnalysisComponentRun[]>([])
 const automaticFallbackTeams = ref<Set<string>>(new Set())
 const assessmentSubmitted = ref(false)
@@ -800,7 +837,8 @@ const discardUnsavedDraft = () => {
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
-    codeEvidenceIds.value = []
+    codeEvidenceByTeam.value = {}
+    dirtyEvidenceTeams.value = new Set()
     automaticFallbackTeams.value = new Set()
     isManualBaseMode.value = false
     assigneeInput.value = ''
@@ -1183,11 +1221,12 @@ const applyRescoreRulesForState = (targetState: string) => {
     applyStateRescore(targetState)
 }
 
-/** Agent code evidence a person chose to use: a reference line, and the
+/** Agent code evidence a person chose to use: standalone rationale, and the
  * suggested decision only when it was ticked. Nothing is saved here. */
-const handleApplyCodeEvidence = (payload: { evidenceId: string; reference: string; state?: string; justification?: string }) => {
+const handleApplyCodeEvidence = (payload: { evidenceId: string; title: string; summary: string; state?: string; justification?: string }) => {
     const current = details.value.trimEnd()
-    details.value = current ? `${current}\n\n${payload.reference}` : payload.reference
+    if (payload.summary) details.value = current ? `${current}\n\n${payload.summary}` : payload.summary
+    codeEvidenceTitles.value[payload.evidenceId] = payload.title
     if (payload.state) {
         state.value = payload.state
         justification.value = payload.justification || 'NOT_SET'
@@ -1195,7 +1234,7 @@ const handleApplyCodeEvidence = (payload: { evidenceId: string; reference: strin
     }
     formTouched.value = true
     codeAnalysisDraftApplied.value = true
-    codeAnalysisDraftSummary.value = `Agent evidence ${payload.evidenceId} referenced in the draft. Review before saving.`
+    codeAnalysisDraftSummary.value = 'Supporting evidence selected. Review the assessment rationale before saving.'
     if (!codeEvidenceIds.value.includes(payload.evidenceId)) {
         codeEvidenceIds.value = [...codeEvidenceIds.value, payload.evidenceId]
     }
@@ -2363,8 +2402,7 @@ const handleUpdate = async (force = false, isApprove = false, resubmit = false) 
             } } : {}),
             state: finalState,
             analysis_run_ids: [...codeAnalysisRunIds.value],
-            // Only evidence the saved text still references counts as used.
-            code_evidence_ids: evidenceIdsReferencedIn(codeEvidenceIds.value, finalText),
+            code_evidence_by_team: Object.fromEntries([...dirtyEvidenceTeams.value].map(team => [team, codeEvidenceByTeam.value[team] || []])),
         }
 
         const results = await updateAssessment(payload)
@@ -3006,7 +3044,8 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
-    codeEvidenceIds.value = []
+    codeEvidenceByTeam.value = {}
+    dirtyEvidenceTeams.value = new Set()
     automaticFallbackTeams.value = new Set()
 }
 
@@ -3183,7 +3222,8 @@ const selectedBlockMetaText = computed(() => {
     if (!block) return ''
     const user = block.user && block.user.toLowerCase() !== 'unknown' ? `Assessed by ${block.user}` : ''
     const date = block.timestamp ? new Date(block.timestamp).toLocaleDateString() : ''
-    return [user, date].filter(Boolean).join(', ')
+    const review = block.reviewer ? `Reviewed by ${block.reviewer}${block.reviewedAt ? `, ${new Date(block.reviewedAt).toLocaleString()}` : ' (approval time not recorded)'}` : ''
+    return [[user, date].filter(Boolean).join(', '), review].filter(Boolean).join(' · ')
 })
 
 /** Project versions of the findings in scope, newest first. */
@@ -3241,6 +3281,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
             :rescoredScore="displayedRescore"
             :normalizedTags="scopedHeaderTags"
             :assessedTeams="assessedTeams"
+            :missingAssessmentTeams="teamOverview.missingTeams"
             @copy-id="copyId"
             :expanded="expanded"
             :canApprove="canApprove"
@@ -3735,12 +3776,14 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                 :isReviewer="isReviewer"
                 :reportedFindingUuids="reportedFindingUuids"
                 :refreshKey="historyRefreshKey"
+                :focusEvidenceId="requestedEvidenceId"
                 @apply-result="handleCodeAnalysisResult"
                 @apply-all-results="handleApplyAllCodeAnalysisResults"
                 @result-change="handleCodeAnalysisResultChange"
                 @scope-results-change="scopedCodeAnalysisAvailable = $event"
                 @proposals-change="handleCodeAnalysisProposalsChange"
                 @apply-evidence="handleApplyCodeEvidence"
+                @evidence-loaded="loadEvidenceSelections"
             />
         </section>
         </div>
@@ -4097,12 +4140,22 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                                 </div>
 
                                 <div>
-                                    <label for="analysis-details-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
+
+                                    <section class="mb-3 space-y-1 print:hidden" data-testid="assessment-supporting-evidence">
+                                        <p class="text-xs font-semibold text-gray-400">Supporting evidence (stored in DTVP)</p>
+                                        <div v-for="id in codeEvidenceIds" :key="id" class="flex items-center gap-2 text-xs text-gray-300">
+                                            <button type="button" class="text-cyan-300 underline" @click="openSupportingEvidence(id)">{{ codeEvidenceTitles[id] || 'Supporting evidence' }}</button>
+                                            <button type="button" class="text-amber-300" :aria-label="`Remove supporting evidence ${codeEvidenceTitles[id] || ''}`" @click="removeSelectedEvidence(id)">Remove</button>
+                                        </div>
+                                        <p v-if="!codeEvidenceIds.length" class="text-xs text-gray-500">No supporting evidence selected. The assessment rationale must explain the decision.</p>
+                                    </section>
+                                    <label for="analysis-details-textarea" class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Analysis Details' : 'Global rationale' }}</label>
+                                    <p v-if="isReviewer && !selectedTeam" data-testid="global-rationale-guidance" class="mb-2 text-xs text-gray-400">Review the team rationales above and write a synthesis here, preserving consumer and release differences. Saving records it in the Global assessment; a derived state alone is not a reviewer rationale.</p>
                                     <textarea
                                         id="analysis-details-textarea"
                                         v-model="details"
                                         @input="formTouched = true; markSelectedTeamAssessmentManual()"
-                                        placeholder="Technical details..."
+                                        :placeholder="selectedTeam ? 'Explain the consumer and release scope, exposure, observations, limitations, decision rationale and required action.' : 'Synthesize the team conclusions. Preserve material differences between consumers and justify any severity change.'"
                                         class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
                                     ></textarea>
                                 </div>

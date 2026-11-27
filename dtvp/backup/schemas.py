@@ -16,9 +16,10 @@ from referencing import Registry, Resource
 FORMAT = "dtvp.dump"
 FORMAT_VERSION = 1
 # The highest minor version this reader knows.
-FORMAT_MINOR = 1
+FORMAT_MINOR = 2
 FEATURE_CREDENTIALS = "credentials"
-KNOWN_FEATURES = frozenset({FEATURE_CREDENTIALS})
+FEATURE_EVIDENCE_MATERIAL = "evidence-supporting-material"
+KNOWN_FEATURES = frozenset({FEATURE_CREDENTIALS, FEATURE_EVIDENCE_MATERIAL})
 SCOPE_INSTANCE = "instance"
 
 # The fixed order of the entities in a dump.

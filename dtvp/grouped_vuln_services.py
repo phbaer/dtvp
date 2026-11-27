@@ -180,7 +180,7 @@ def _finding_order_key(instance: Dict[str, Any]) -> tuple[str, str, str]:
 _RESPONSE_TAG = re.compile(RESPONSE_TAG_PATTERN, re.IGNORECASE)
 
 _COMPARISON_IGNORED_TAGS = [
-    r"\[Date:\s*[^\]]*\]",
+    r"\[(?:Date|Reviewed At):\s*[^\]]*\]",
     r"\[Assessed By:\s*[^\]]*\]",
     r"\[Rescored:\s*[\d\.]+\]",
     r"\[Rescored Vector:\s*[^\]]+\]",

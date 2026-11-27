@@ -34,6 +34,13 @@ const isAssessed = computed(() => listItem.value.isAssessed)
 const rescore = computed(() => savedRescoredScore(group.value))
 const rescoredSeverity = computed(() => rescore.value == null ? null : scoreSeverity(rescore.value))
 const tint = computed(() => cardSeverityTint(listItem.value.originalSeverity, rescoredSeverity.value))
+const missingAssessmentTeams = computed(() => {
+    if (listItem.value.coversAllTeams) return []
+    const recorded = new Set([...assessedTeams.value].map(team => team.toLocaleLowerCase()))
+    return normalizedTags.value.filter(team =>
+        team.toLocaleLowerCase() !== 'unassigned' && !recorded.has(team.toLocaleLowerCase()),
+    )
+})
 const suppressedCount = computed(() => (group.value.affected_versions || []).reduce((count, version) =>
     count + (version.components || []).filter(component => component.is_suppressed).length, 0))
 const syncFailed = computed(() => (group.value.affected_versions || []).some(version =>
@@ -72,13 +79,13 @@ const workflowState = computed<{ label: string; tone: WorkflowTone }>(() => {
         label: activeAnalyses.value.some(item => item.status === 'running') ? 'Analysis running' : 'Analysis queued',
         tone: 'cyan',
     }
-    if (isPendingReview.value) return { label: 'Awaiting review', tone: 'purple' }
+    if (isPendingReview.value || technicalState.value !== 'NOT_SET') return { label: 'Review needed', tone: 'purple' }
     if (normalizedTags.value.filter(team => team.toLocaleLowerCase() !== 'automation').length === 0) {
         return { label: 'Needs mapping', tone: 'amber' }
     }
     if (listItem.value.hasAutomaticAssessment) return { label: 'Result ready', tone: 'cyan' }
     if (technicalState.value === 'NOT_SET') return { label: 'Needs analysis', tone: 'amber' }
-    return { label: 'Needs assessment', tone: 'blue' }
+    return { label: 'Review needed', tone: 'purple' }
 })
 
 const workflowStateClass = computed(() => ({
@@ -111,6 +118,7 @@ const showAssessedCorner = computed(() => workflowState.value.label === 'Assesse
                 :rescoredScore="rescore"
                 :normalizedTags="normalizedTags"
                 :assessedTeams="assessedTeams"
+                :missingAssessmentTeams="missingAssessmentTeams"
                 :changesRequestedTeams="listItem.changesRequestedTeams"
                 :expanded="false"
                 :canApprove="false"

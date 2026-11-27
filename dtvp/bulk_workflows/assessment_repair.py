@@ -511,7 +511,7 @@ def _combine_conflict(
     pending = disagreement or any(_PENDING_RE.search(_details(instance)) for instance in instances)
 
     tags = dict(generals[0]["tags"]) if generals else {}
-    for tag in ("Rescored", "Rescored Vector", "Reviewed By"):
+    for tag in ("Rescored", "Rescored Vector", "Reviewed By", "Reviewed At"):
         tags.pop(tag, None)
     tags.update(
         {

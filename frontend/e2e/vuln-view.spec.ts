@@ -237,7 +237,8 @@ test.describe('Vulnerability View and Rescoring', () => {
         const vulnCard = page.locator('.vuln-card').filter({ hasText: /CVE-2023-1234/ }).first();
         await expect(vulnCard).toBeVisible({ timeout: 20000 });
 
-        await expect(vulnCard.getByText('Security')).toBeVisible();
+        await expect(vulnCard.getByTestId('team-tag').getByText('Security', { exact: true })).toBeVisible();
+        await expect(vulnCard.getByTestId('missing-team-assessments')).toHaveText('Missing team assessments: Security');
         await expect(vulnCard.getByTestId('lifecycle-badge')).toHaveText('Open');
         await expect(vulnCard.getByTestId('base-score-value')).toBeVisible();
     });

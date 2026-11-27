@@ -31,6 +31,7 @@ export const renderAssessmentFields = (fields: AssessmentFields | undefined | nu
             `[Assessed By: ${team.assessed_by || 'unknown'}]`,
         ]
         if (team.reviewed_by) tags.push(`[Reviewed By: ${team.reviewed_by}]`)
+        if (team.reviewed_at_ms) tags.push(`[Reviewed At: ${team.reviewed_at_ms}]`)
         if (team.assessed_at_ms) tags.push(`[Date: ${team.assessed_at_ms}]`)
         tags.push(`[Justification: ${team.justification || 'NOT_SET'}]`)
         if (team.assigned.length) tags.push(`[Assigned: ${team.assigned.join(', ')}]`)

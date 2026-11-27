@@ -97,8 +97,32 @@ aggregate state follows these rules:
   and `[Reviewed By]` when it changes only the block's ticket, evidence,
   version coverage or assignees; the server checks this for every client.
   Another team's block that a save sends back unchanged keeps them as well.
-  A change of state, justification, text or rescoring, and every approval,
-  records the saving user and the time as before.
+  A substantive edit invalidates a recorded approval of the changed block.
+  Explicit approval stamps every current deciding block, including General, with `[Reviewed By: user]` and
+  `[Reviewed At: epoch_ms]`. Historical and `NOT_SET` blocks are not stamped.
+  The original `[Assessed By]` and `[Date]` stay on unchanged work, and one
+  approval uses the same review time across all saved findings. The canonical
+  fields expose `reviewed_by`, `reviewed_at_ms` and `assessed_at_ms`; the UI
+  shows reviewer and time separately. A metadata-only save retains existing
+  review provenance, and ordinary saves cannot supply a new approval time.
+  Each explicit approval has revision origin `assessment-approval`, author
+  and commit time. Older revisions already retain author/time, but their
+  generic save origin alone does not establish an approval. Legacy missing
+  reviewer/time remain unknown; no automatic backfill guesses them.
+
+  Full automated application verification (2026-11-27): all 2,641 backend tests
+  passed with no exclusions, including exhaustive backup crash recovery; all
+  1,312 frontend unit tests passed with coverage; the production build and all
+  189 regular browser tests passed (63 each on Chromium, Firefox and WebKit).
+  No skips or flaky browser results; browser retries were disabled. The final
+  backend run used `--no-cov` after the initial coverage run exposed two stale
+  assertions that treated ordinary saves as approvals. The browser regression
+  now distinguishes the team badge from the missing-team message; an HTTP
+  regression checks explicit approval and metadata readback. Local runtimes:
+  CPython 3.15.0 and Node.js 24.22.2 (CI uses Node.js 26). Manual real-stack
+  scenarios and documentation captures are separate from these regular suites.
+  This verifies local/mock behavior, not production rollout or backfill.
+
 - Structured details retain at most one active block per team
   (case-insensitive), plus any number of historical blocks; historical blocks
   are merged only when they are the same record (team, decision, text,
@@ -182,6 +206,15 @@ all `OPEN` gives `OPEN`; then `ASSESSED_LEGACY`, then `ASSESSED`.
 | `covers_all_teams` | A General block decides (pending or approved), or the lifecycle is `ASSESSED` or `ASSESSED_LEGACY` without pending review: every required team counts as assessed ([Per-team status](#per-team-status)) |
 | `is_assessed` | Lifecycle `ASSESSED` or `ASSESSED_LEGACY` |
 | `is_open` | Lifecycle `OPEN`, or `is_pending` (pending review is not done) |
+
+The list's **Review needed** workflow label covers both pending submissions
+and incomplete assessments with an existing technical decision. It is broader
+than the **Awaiting review** filter, which specifically selects the stored
+pending-review marker. **Missing team assessments: ...** names missing coverage
+separately, with aliases collapsed to canonical teams. Neither label implies
+**Ready for approval**: that still requires complete finding/team coverage or
+an applicable General decision. Conflicts and requested changes retain their
+dedicated labels; active analyzer work retains its progress label.
 
 Awaiting review is a filter flag, not a lifecycle: it cuts across R1-R5, so
 an Awaiting review vulnerability can be Conflicting, Open, Incomplete or
@@ -765,3 +798,23 @@ Values may be strings, arrays, or objects with `guidance`/`prompt`. Optional
 target, applies without restart, and is context only: it cannot establish
 dependency presence, version, reachability, or affectedness without evidence.
 A changed guidance fingerprint makes an automatic result eligible for rescanning.
+
+
+## Standalone assessment rationale and supporting evidence
+
+Team and global assessment text must explain the conclusion, consumer and
+release/configuration scope, relevant code or artifact observations, input
+control and access requirements, demonstrated impact, uncertainty, and the
+reason for exploitability or severity changes. Preserve source severity and
+explain the environmental vector when rescoring. State the required action
+or the conditions supporting an exclusion. A global rationale synthesizes
+team conclusions without hiding material consumer differences.
+
+Supporting evidence is associated separately inside DTVP; it does not replace
+that rationale. New evidence use inserts no opaque ID into printable text.
+A person edits the offered summary and explicitly saves the assessment;
+selection alone changes no score, decision or approval. Editing prose keeps
+selected evidence, and explicit removal does not alter prose. Evidence use
+history is attributed to team/global scope, finding and assessment revision.
+Existing assessments and legacy reference lines are preserved unchanged.
+See [Agent code evidence](analysis-integrations.md#agent-code-evidence).

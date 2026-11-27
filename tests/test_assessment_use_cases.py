@@ -1115,6 +1115,31 @@ async def test_a_forced_save_without_a_race_overwrites_a_stale_view(deps):
     assert _teams()["TeamA"]["details"] == "Overwrites."
 
 
+async def test_evidence_selection_survives_rationale_edits_and_deselection_is_revisioned(deps, tmp_path):
+    store = _evidence_store(tmp_path)
+    deps.code_evidence_store = store
+    evidence_id = _add_evidence(store)['evidence_id']
+    first = await save_assessment(deps, _request(instances=[dict(EVIDENCE_INSTANCE)], code_evidence_by_team={'Team A': [evidence_id]}), user='bob', client=None)
+    assert store.current_selection('f1', 'Team A') == [evidence_id]
+    second = await save_assessment(deps, _request(instances=[dict(EVIDENCE_INSTANCE)], details='Revised standalone rationale.'), user='bob', client=None)
+    assert store.current_selection('f1', 'Team A') == [evidence_id]
+    assert len(store.list_applications([evidence_id])) == 2
+    await save_assessment(deps, _request(instances=[dict(EVIDENCE_INSTANCE)], code_evidence_by_team={'Team A': []}), user='bob', client=None)
+    assert store.current_selection('f1', 'Team A') == []
+    applications = store.list_applications([evidence_id])
+    assert {app['assessment_revision'] for app in applications} == {first[0]['revision'], second[0]['revision'], second[0]['revision'] + 1}
+    assert any(not app['selected'] for app in applications)
+
+
+async def test_analyst_cannot_change_other_team_evidence_associations(deps, tmp_path):
+    store = _evidence_store(tmp_path)
+    deps.code_evidence_store = store
+    evidence_id = _add_evidence(store)['evidence_id']
+    with pytest.raises(AssessmentPermissionError):
+        await save_assessment(deps, _request(instances=[dict(EVIDENCE_INSTANCE)], code_evidence_by_team={'General':[evidence_id]}), user='bob', client=None)
+    assert store.list_applications([evidence_id]) == []
+
+
 # --- Approval only when Ready for approval (ADR 0014) ------------------------
 
 _TEAMS_INSTANCE = {**INSTANCE, "tags": ["TeamA", "TeamB"]}
@@ -1264,3 +1289,94 @@ async def test_approval_revision_guard_covers_an_unwritten_sibling(deps):
 
     assert conflict.value.conflicts[0]["finding_uuid"] == "f2"
     assert _PENDING in _stored()["analysisDetails"]
+
+
+async def test_reviewer_global_rationale_is_stored_as_general_without_rewriting_team_rationales(deps):
+    from dtvp.logic import global_decision, parse_assessment_blocks
+
+    await _store(deps, _TEAM_A_FIELDS, _TEAM_B_STORED)
+    before = _stored()['analysisDetails']
+    assert global_decision(parse_assessment_blocks(before)[1])['source'] == 'derived'
+    rationale = ('Core reaches the parser with authenticated input; Web does not. '
+                 'The Global decision follows Core; the tested service recovered. '
+                 'No unauthenticated exploitation was established.')
+    await save_assessment(deps, _request(team='General', state='EXPLOITABLE', details=rationale),
+                          user='rita', role='REVIEWER', client=None)
+    after = _stored()['analysisDetails']
+    decision = global_decision(parse_assessment_blocks(after)[1])
+    assert decision['source'] == 'manual'
+    general = next(b for b in parse_assessment_blocks(after)[1] if b['team'] == 'General')
+    assert general['details'] == rationale
+    for team in (_TEAM_A_FIELDS, _TEAM_B_STORED):
+        assert team['details'] in after
+
+
+@pytest.mark.parametrize('rationale', ['', '  \n '])
+async def test_legacy_evidence_selection_requires_standalone_rationale(deps, tmp_path, rationale):
+    store = _evidence_store(tmp_path)
+    deps.code_evidence_store = store
+    key = _add_evidence(store)['evidence_id']
+    with pytest.raises(AssessmentValidationError, match='standalone assessment rationale'):
+        await save_assessment(deps, _request(instances=[dict(EVIDENCE_INSTANCE)],
+                              details=rationale, code_evidence_ids=[key]), user='bob', client=None)
+    assert _stored() is None
+    assert store.list_applications([key]) == []
+
+
+@pytest.mark.parametrize('how', ['fields', 'replace', 'merge'])
+async def test_approval_stamps_all_active_blocks_separately_from_assessor_and_history(deps, monkeypatch, how):
+    from dtvp.logic import parse_assessment_blocks
+
+    historical = {**_TEAM_A_STORED, 'historical': True, 'details': 'Earlier decision.',
+                  'reviewed_by': 'former-reviewer', 'reviewed_at_ms': 1700000000000}
+    # Historical provenance is a record and survives ordinary writes too.
+    await _store(deps, _TEAM_A_STORED, historical)
+    before = next(team for team in parse_assessment(_stored()['analysisState'], _stored()['analysisDetails'], False)['teams']
+                  if team['team'] == 'TeamA' and not team['historical'])
+    now = 1800000000123
+    monkeypatch.setattr('dtvp.assessment_services.time.time', lambda: now / 1000)
+    current = parse_assessment(_stored()['analysisState'], _stored()['analysisDetails'], False)
+    args = dict(team='TeamA', state='NOT_AFFECTED', approve=True)
+    if how == 'fields':
+        args['fields'] = current
+    elif how == 'replace':
+        args.update(comparison_mode='REPLACE', details=_stored()['analysisDetails'])
+    else:
+        args['details'] = before['details']
+    await _reviewer_save(deps, **args)
+    fields = dt_cache.cache_manager.get_assessment_fields('p1', 'c1', 'v1')
+    active = [b for b in fields['teams'] if not b['historical'] and b['state'] != 'NOT_SET']
+    assert {b['team'] for b in active} == {'TeamA', 'General'}
+    assert all((b['reviewed_by'], b['reviewed_at_ms']) == ('rita', now) for b in active)
+    team = next(b for b in active if b['team'] == 'TeamA')
+    assert (team['assessed_by'], team['assessed_at_ms'], team['details']) == (
+        before['assessed_by'], before['assessed_at_ms'], before['details'])
+    old = next(b for b in fields['teams'] if b['historical'])
+    assert (old['reviewed_by'], old['reviewed_at_ms']) == ('former-reviewer', 1700000000000)
+    latest = dt_cache.cache_manager.assessment_outbox.list_revisions(('p1', 'c1', 'v1'))[0]
+    assert (latest['origin'], latest['author']) == ('assessment-approval', 'rita')
+    assert '[Reviewed At: 1800000000123]' in latest['analysisDetails']
+
+
+@pytest.mark.parametrize('role', ['ANALYST', 'REVIEWER'])
+async def test_nonapproval_metadata_save_preserves_recorded_review_but_content_edit_invalidates_it(deps, role):
+    team = {**_TEAM_A_STORED, 'reviewed_by': 'rita', 'reviewed_at_ms': 1794561389026}
+    text = render_assessment({'teams': [team], 'pending_review': True})
+    await dt_cache.cache_manager.persist_assessment_updates([
+        {**INSTANCE, 'state': 'NOT_AFFECTED', 'details': text, 'suppressed': False}])
+    edited = {**team, 'ticket': 'NEW-1', 'reviewed_by': 'forged', 'reviewed_at_ms': 1}
+    await _save_team_a(deps, edited, role=role, user='carol')
+    saved = _teams()['TeamA']
+    assert (saved['reviewed_by'], saved['reviewed_at_ms']) == ('rita', 1794561389026)
+    await _save_team_a(deps, {**saved, 'details': 'New consumer evidence changes this conclusion.'}, role=role, user='carol')
+    saved = _teams()['TeamA']
+    assert saved['reviewed_by'] is None and saved['reviewed_at_ms'] is None
+
+
+async def test_analyst_cannot_supply_an_approval_time_on_a_new_draft(deps):
+    await save_assessment(deps, _request(fields={'teams': [{**_TEAM_A_STORED,
+        'reviewed_by': 'claimed-reviewer', 'reviewed_at_ms': 1800000000000}]}),
+        user='alice', role='ANALYST', client=None)
+    team = _teams()['TeamA']
+    assert team['reviewed_by'] is None and team['reviewed_at_ms'] is None
+    assert _PENDING in _stored()['analysisDetails']

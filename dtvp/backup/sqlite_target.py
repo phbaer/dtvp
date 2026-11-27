@@ -410,8 +410,8 @@ class SqliteDumpTarget:
                 body_markdown, references_json, suggested_state,
                 suggested_justification, confidence, author_username,
                 token_id, agent_label, authority, idempotency_key, created_at,
-                withdrawn_at, withdrawn_by, withdrawn_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                withdrawn_at, withdrawn_by, withdrawn_reason, assessment_summary, attachments_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["evidence_id"],
@@ -437,6 +437,8 @@ class SqliteDumpTarget:
                 record["withdrawn_at"],
                 record["withdrawn_by"],
                 record["withdrawn_reason"],
+                record.get("assessment_summary"),
+                json.dumps(record.get("attachments", [])),
             ),
         )
         db.executemany(
@@ -447,7 +449,7 @@ class SqliteDumpTarget:
     def _write_code_evidence_application(self, record: dict[str, Any]) -> None:
         self._db(CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE).execute(
             "INSERT INTO code_evidence_applications (evidence_id, finding_uuid, "
-            "workflow_id, status, applied_by, applied_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "workflow_id, status, applied_by, applied_at, team, assessment_revision, selected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 record["evidence_id"],
                 record["finding_uuid"],
@@ -455,6 +457,9 @@ class SqliteDumpTarget:
                 record["status"],
                 record["applied_by"],
                 record["applied_at"],
+                record.get("team", ""),
+                record.get("assessment_revision", -1),
+                record.get("selected", 1),
             ),
         )
 

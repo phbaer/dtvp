@@ -2132,7 +2132,10 @@ def test_assessment_update(client, mock_dt_client):
     assert call_kwargs["state"] == "NOT_AFFECTED"
     # Details now includes the appended user tag
     assert "Verified as false positive" in call_kwargs["details"]
-    assert "[Reviewed By: testuser]" in call_kwargs["details"]
+    assert "[Assessed By: testuser]" in call_kwargs["details"]
+    # Saving a reviewer's own assessment is not an explicit approval event.
+    assert "[Reviewed By:" not in call_kwargs["details"]
+    assert "[Reviewed At:" not in call_kwargs["details"]
     assert call_kwargs["suppressed"] is True
 
 
@@ -2406,3 +2409,35 @@ def test_assessment_changes_review_api_uses_the_complete_task_group(client):
                     revisions={item["uuid"]: item["revision"] for item in response.json()})
         withdrawal = client.post(url, json=body)
         assert withdrawal.status_code == 200, withdrawal.text
+
+
+def test_explicit_approval_records_reviewer_and_time_through_the_http_api(client):
+    instance = {'project_uuid': 'p-review', 'component_uuid': 'c-review',
+                'vulnerability_uuid': 'v-review', 'finding_uuid': 'f-review', 'tags': ['Security']}
+    with patch('dtvp.main.get_user_role', return_value='ANALYST'):
+        saved = client.post('/api/assessment', json={
+            'instances': [instance], 'team': 'Security', 'state': 'NOT_AFFECTED',
+            'details': 'The vulnerable code is not shipped.', 'justification': 'CODE_NOT_PRESENT',
+        })
+    assert saved.status_code == 200, saved.text
+    before = main.cache_manager.get_assessment_fields('p-review', 'c-review', 'v-review')
+    with patch('dtvp.main.get_user_role', return_value='REVIEWER'):
+        approved = client.post('/api/assessment', json={
+            'instances': [instance], 'state': 'NOT_AFFECTED', 'approve': True,
+            'fields': {'teams': before['teams']},
+        })
+        assert approved.status_code == 200, approved.text
+        params = {key: instance[key] for key in ('project_uuid', 'component_uuid', 'vulnerability_uuid')}
+        fields = client.get('/api/assessments/fields', params=params)
+        history = client.get('/api/assessments/history', params=params)
+    assert fields.status_code == 200 and history.status_code == 200
+    current = fields.json()
+    assert current['pending_review'] is False
+    blocks = {block['team']: block for block in current['teams'] if not block['historical']}
+    assert set(blocks) == {'Security', 'General'}
+    times = {block['reviewed_at_ms'] for block in blocks.values()}
+    assert len(times) == 1 and all(isinstance(value, int) for value in times)
+    assert all(block['reviewed_by'] == 'testuser' for block in blocks.values())
+    assert blocks['Security']['assessed_at_ms'] == before['teams'][0]['assessed_at_ms']
+    assert history.json()[0]['origin'] == 'assessment-approval'
+    assert history.json()[0]['author'] == 'testuser'

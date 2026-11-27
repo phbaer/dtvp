@@ -296,7 +296,7 @@ Schema: `dtvp/resources/dump-schemas/1/manifest.schema.json`
 | :--- | :--- |
 | `format` | `"dtvp.dump"` |
 | `format_version` | `1`; a reader accepts only its major version |
-| `format_minor` | `1` (saved views); `0` before |
+| `format_minor` | `2` (evidence supporting material); `1` added saved views |
 | `required_features` | Features a reader must know. Known: `"credentials"` (the dump holds access-token digests) |
 | `dump_id` | A UUIDv4 |
 | `created_at` | RFC 3339, UTC |
@@ -490,3 +490,19 @@ reported.
 
 The W rules are kept by the current code but legacy and imported data may
 break them; a restore reproduces the source as it was.
+
+
+### Evidence supporting material (dump minor 2)
+
+`code_evidence` optionally includes `assessment_summary` and `attachments`.
+Each attachment version includes its base64 bytes, size, SHA-256, media type,
+filename, description, uploader, upload time, version and predecessor.
+`code_evidence_application` optionally includes `team`, `assessment_revision`
+and `selected` (0 or 1); its identity includes team and revision. Legacy
+records omit these fields and restore as unknown team/revision, selected.
+
+The required feature `evidence-supporting-material` prevents older readers
+from silently discarding material or revision attribution. New readers still
+restore legacy dumps. Export and verification check attachment size, content
+hash and version chains. Restore keeps all bytes and historical associations,
+including withdrawn evidence; analyzer retention never removes this material.

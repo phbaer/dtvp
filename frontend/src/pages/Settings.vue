@@ -1255,6 +1255,7 @@ watch(() => activeTab.value, (newTab) => {
                     </div>
                 </div>
                 <div v-if="archiveImportTask?.kind === 'import_preview' && archivePreview()" class="overflow-x-auto rounded border border-gray-700">
+                    <p v-if="archivePreview()?.evidence_records" class="p-3 text-xs text-gray-300">Includes {{ archivePreview()?.evidence_records }} evidence records and {{ archivePreview()?.attachment_versions || 0 }} supporting file versions.</p>
                     <table class="min-w-full divide-y divide-gray-700 text-left text-xs">
                         <thead class="bg-gray-950/60 text-gray-400">
                             <tr>
@@ -1278,6 +1279,8 @@ watch(() => activeTab.value, (newTab) => {
                     Created {{ archiveApplyResult()?.summary.created }},
                     updated {{ archiveApplyResult()?.summary.updated }},
                     restored {{ archiveApplyResult()?.summary.restored_assessments }} assessments.
+                    <p v-if="archiveApplyResult()?.evidence_result" class="mt-1">Supporting evidence: {{ archiveApplyResult()?.evidence_result?.added }} records added; history and files preserved.</p>
+                    <p v-if="archiveApplyResult()?.evidence_result?.unmatched_target_findings?.length" class="mt-1 text-amber-300">{{ archiveApplyResult()?.evidence_result?.unmatched_target_findings?.length }} evidence targets could not be matched. Their source identities were retained for review.</p>
                 </div>
                 <div v-if="archiveImportError || archiveApplyError" class="rounded border border-red-800 bg-red-900/30 p-3 text-sm text-red-300">
                     {{ archiveImportError || archiveApplyError }}

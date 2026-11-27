@@ -547,6 +547,7 @@ def build_project_archive_service_deps(
     version: str,
     build_commit: str,
     archive_path_provider: Callable[[], str],
+    code_evidence_store: Any = None,
 ) -> ProjectArchiveServiceDeps:
     return ProjectArchiveServiceDeps(
         cache_manager=cache_manager,
@@ -555,6 +556,7 @@ def build_project_archive_service_deps(
         version=version,
         build_commit=build_commit,
         archive_path_provider=archive_path_provider,
+        code_evidence_store=code_evidence_store,
     )
 
 

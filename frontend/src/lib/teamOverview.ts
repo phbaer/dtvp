@@ -31,6 +31,8 @@ export interface TeamOverviewRow {
     source: 'saved' | 'draft' | 'automatic' | 'missing'
     user: string
     timestamp?: number
+    reviewer?: string
+    reviewedAt?: number
     components: string[]
     rationale: string
     rationaleFirstLine: string
@@ -165,6 +167,8 @@ export const buildTeamOverview = (options: TeamOverviewOptions): TeamOverview =>
             source: draft ? 'draft' : block ? 'saved' : input.source === 'automatic' && hasState(input.state) ? 'automatic' : 'missing',
             user: block?.user && key(block.user) !== 'unknown' ? block.user : '',
             timestamp: block?.timestamp,
+            reviewer: block?.reviewer,
+            reviewedAt: block?.reviewedAt,
             components: options.componentsByTeam?.get(key(input.team)) || options.componentsByTeam?.get(teamKey) || [],
             rationale,
             rationaleFirstLine: rationale.split('\n').map(line => line.trim()).find(Boolean) || '',

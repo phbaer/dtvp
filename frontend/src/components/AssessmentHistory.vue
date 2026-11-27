@@ -17,6 +17,7 @@ const MAX_FINDINGS = 30
 
 const ORIGIN_LABELS: Record<string, string> = {
     'individual-assessment': 'Saved',
+    'assessment-approval': 'Approved',
     'mcp-assessment': 'Saved by an agent',
     'bulk-workflow': 'Bulk change',
     'assessment-deletion': 'Cleared',

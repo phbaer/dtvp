@@ -92,6 +92,7 @@ claude mcp add --transport http dtvp https://dtvp.example.com/dtvp/mcp \
 | `preview_assessment` | read | The assessment `save_assessment` would store, without saving, plus the revisions to pass on |
 | `save_assessment` | write | Record one team's assessment for every finding of a vulnerability |
 | `add_code_evidence` | write | Record what the agent found in the code (Markdown) for a vulnerability, some of its components, or some of its findings. Changes no assessment; see [Code Evidence](#code-evidence) |
+| `add_code_evidence_attachment` | write | Upload an immutable supporting file version to evidence authored by the token owner; see [Supporting files](#supporting-files) |
 | `list_code_evidence` | read | The code evidence of a vulnerability, newest first: entries agents added (`kind: "agent"`) and code-analyzer runs (`kind: "analyzer"`, report cut to 8,000 characters with `report_truncated`); at most 50 items per call. Like the evidence list in the UI it leaves out benchmark-derived records |
 
 `get_vulnerability` also returns `code_evidence: {"agent": n, "analyzer": m}`,
@@ -119,11 +120,32 @@ Values are trimmed and uppercased; unknown values and nonempty reasons with
 other states are rejected. Omit it or pass `null` to preserve each finding's
 existing team justification; `NOT_SET` or an empty string clears it.
 `get_vulnerability` and preview results include `justification` in each
-assessment block (`NOT_SET` when unset). Pass the same arguments from preview
+assessment block (`NOT_SET` when unset). Blocks also expose `assessed_at_ms`,
+`reviewed_by` and `reviewed_at_ms`. Assessment and approval times are separate
+Unix timestamps in milliseconds; unknown historical values are `null`.
+Only a reviewer can approve through the browser/assessment API; MCP never
+stamps an approval, even when its token owner is a reviewer. Pass the same arguments from preview
 to save, together with `expected_revisions`.
 
-Justification support verified 2026-11-26 against `tests/test_mcp_server.py`,
-including the MCP HTTP preview/save/read flow; no live deployment check.
+Both tools also accept optional `code_evidence_ids` for the target team's
+supporting evidence. Omit it or pass `null` to preserve selections; `[]`
+explicitly deselects them. Preview and save use the same availability,
+withdrawal, project, vulnerability and finding-scope checks. Preview reports
+the resulting IDs per finding and treats a selection change as a change even
+when prose is unchanged. Finding-scoped evidence is linked only to matching
+findings. Selection history is readable through `list_code_evidence`.
+Selection never approves a draft or changes another team's links.
+
+All MCP tools advertise `additionalProperties: false` and reject unknown
+arguments before invoking the tool. For example, `justificaton` produces an
+error instead of silently losing a requested justification. Read the deployed
+`tools/list` schema before using a new feature.
+
+Justification, argument rejection and evidence selection are covered by
+`tests/test_mcp_server.py`, including the HTTP preview/save/read flow.
+On 2026-11-27 the live server still reported build `39f637de`, which predates
+justification and attachments. A merged PR is not a deployment: verify
+`/api/version` and refresh the MCP schema after deploying the updated image.
 
 ## Code Evidence
 
@@ -131,12 +153,14 @@ including the MCP HTTP preview/save/read flow; no live deployment check.
 [Analysis integrations](analysis-integrations.md#agent-code-evidence)). It is
 **never an assessment**: adding it changes no assessment, revision, export
 queue entry, or SSVC record. A person opens it on the **Code Evidence** tab
-and chooses **Use in assessment draft**, which adds a one-line reference to
-the draft; the assessment is saved, and reviewed, as usual. The save records
-which evidence it used.
+and chooses **Use in assessment draft**, which offers an editable standalone rationale and separately selects supporting
+evidence. No evidence ID is inserted into the assessment. The assessment is
+saved and reviewed as usual; the save records its team/finding/revision links.
+With no summary, the person must write the rationale in the reader before
+**Use in assessment draft** becomes available.
 
 Arguments: `project`, `vulnerability_id` (ID or alias), `title`,
-`body_markdown`, and optionally `components`, `finding_uuids`, `references`,
+`body_markdown`, and optionally `assessment_summary`, `components`, `finding_uuids`, `references`,
 `suggested_state`, `suggested_justification`, `confidence`, and
 `idempotency_key`.
 
@@ -160,7 +184,8 @@ version.
 
 | Field | Limit |
 | :--- | :--- |
-| `title` | 1 to 160 characters on one line; control characters become spaces. It must not contain `---` or the start of a reserved tag such as `[Team:`, because it is the part a person copies into an assessment |
+| `title` | 1 to 160 characters on one line; control characters become spaces. It must not contain `---` or the start of a reserved tag such as `[Team:`, for compatibility with historical assessment references |
+| `assessment_summary` | Optional standalone assessment prose, up to 10,000 characters; reserved assessment tags and separators are refused. Keep conclusion, scope, exposure, observations, limitations and severity rationale understandable without the evidence package |
 | `body_markdown` | 1 to 20,000 characters of Markdown; NUL and control characters other than newline and tab are removed. The UI renders it through an allow-list sanitiser: no images, scripts, frames, or raw HTML; only `http(s)` links without a user name or password |
 | `references` | Up to 20, each one line of up to 300 characters. The UI links only `http(s)` URLs |
 | `suggested_state` | One of the analysis states, or omitted |
@@ -173,7 +198,7 @@ version.
 earlier one, and the same project, vulnerability, targets and content, returns
 the earlier entry with `created: false` instead of adding a second one. The
 same key with a different project, vulnerability, targets, title, body,
-references or suggestion is rejected ("idempotency_key already used for
+references, assessment summary or suggestion is rejected ("idempotency_key already used for
 different evidence") and audited as rejected; use a new key for new evidence.
 Another token with the same key adds a new entry.
 
@@ -181,6 +206,37 @@ Another token with the same key adds a new entry.
 withdraw it in the UI with a reason. Withdrawn entries are hidden by default,
 cannot be used in an assessment, and keep their provenance.
 `list_code_evidence` returns them with `include_withdrawn: true`.
+
+## Supporting files
+
+`add_code_evidence_attachment` takes `project`, `vulnerability_id`, `evidence_id`,
+`filename`, `content_base64`, and optionally `description`, `media_type` and
+`replaces_attachment_id`. Send the bytes, not an inaccessible local path.
+The token needs write scope and must belong to the evidence author, even
+when its owner is a reviewer. Every accepted or rejected upload is audited;
+file contents are not written to the audit log.
+
+Files are limited to 10 MiB each, 20 immutable versions and 50 MiB total per
+evidence entry. A new version of a filename must name the latest attachment
+it replaces. Identical retries return the existing version. Withdrawal
+prevents new uploads but keeps earlier files and use history readable.
+
+`list_code_evidence` returns `assessment_summary` and attachment metadata
+(filename, description, media type, size, SHA-256, uploader, upload time,
+version and predecessor), without base64 contents. Read-scoped clients may
+use the normal bearer header on:
+
+- `GET /api/code-evidence/{evidence_id}/attachments/{attachment_id}` for bytes;
+- `GET /api/code-evidence/{evidence_id}/package` for a ZIP with the report,
+  optional rationale, versioned files, provenance and a hash manifest. It also
+  includes `appendix.md` and `appendix.html` with readable scope, rationale,
+  report, authorship, withdrawal, file-version and use history. Extract the
+  package and open the static HTML to print; its untrusted text is escaped.
+
+Individual files download as attachments with `nosniff`; they are never
+rendered as executable content. The browser also lets the author or a
+reviewer upload supporting files. REST uploads remain unavailable to tokens;
+machine writes use the MCP tool.
 
 ## What A Token Can And Cannot Do
 
@@ -237,6 +293,8 @@ refreshes the shared snapshots. Machine clients change
 assessments through the MCP tools, where the rules above apply.
 
 ## Audit
+
+Attachment uploads through MCP are recorded as `add_code_evidence_attachment`, including the evidence and attachment IDs on success.
 
 Every attempted `save_assessment` that reaches the write checks is recorded
 with time, user, token, target, outcome (`success`, `conflict`, `rejected`,

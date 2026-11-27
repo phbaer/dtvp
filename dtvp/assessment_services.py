@@ -15,7 +15,7 @@ from .assessment_model import (
     with_analysis_response,
 )
 from .dt_client import DTClient
-from .logic import keep_team_records, with_derived_global_block
+from .logic import keep_team_records, with_derived_global_block, with_review_provenance
 from .assessment_use_cases import AssessmentRequest
 from .ssvc_services import new_record, preserve_record, write_record
 
@@ -105,7 +105,7 @@ def _normalize_analysis_details(details: Optional[str]) -> str:
     if not details:
         return ""
 
-    normalized = re.sub(r"\[Date:\s*[^\]]*\]", "", details)
+    normalized = re.sub(r"\[(?:Date|Reviewed At):\s*[^\]]*\]", "", details)
     normalized = re.sub(r"\[Assessed By:\s*[^\]]*\]", "", normalized)
     normalized = re.sub(r"\[Rescored:\s*[\d\.]+\]", "", normalized)
     normalized = re.sub(r"\[Rescored Vector:\s*[^\]]+\]", "", normalized)
@@ -244,6 +244,7 @@ def build_assessment_payloads(
     ssvc_record = (
         new_record(req.ssvc, user) if change_ssvc and req.ssvc is not None else None
     )
+    reviewed_at_ms = int(time.time() * 1000) if req.approve else None
     for instance in req.instances:
         finding_uuid = instance.get("finding_uuid")
         original_analysis = (
@@ -260,6 +261,12 @@ def build_assessment_payloads(
                 or original_analysis.get("analysis_details")
                 or ""
             )
+
+        # Approvals preserve the stored assessor/date even for legacy clients
+        # that send no original_analysis snapshot. Ordinary merges retain the
+        # existing rule that unseen blocks come back as historical records.
+        if req.approve:
+            existing_details = req._stored_details.get(finding_key(instance), existing_details)
 
         if req.fields is not None and req.fields.free_text is None:
             # Fields without free text: this finding keeps its own.
@@ -311,7 +318,10 @@ def build_assessment_payloads(
             # one, the worst team decision, as the General block: what is
             # approved is written down (ADR 0014).
             final_details_str = with_derived_global_block(
-                final_details_str, user, int(time.time() * 1000)
+                final_details_str, user, reviewed_at_ms
+            )
+            final_details_str = with_review_provenance(
+                base, final_details_str, reviewer=user, reviewed_at_ms=reviewed_at_ms
             )
             aggregated_state = deps.calculate_aggregated_state(final_details_str)
         elif (
@@ -324,6 +334,9 @@ def build_assessment_payloads(
         ):
             final_details_str = f"{final_details_str.rstrip()}\n\n{PENDING_REVIEW_MARKER}"
             aggregated_state = deps.calculate_aggregated_state(final_details_str)
+
+        if not req.approve:
+            final_details_str = with_review_provenance(base, final_details_str)
 
         final_details_str = (
             write_record(final_details_str, ssvc_record)

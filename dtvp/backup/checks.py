@@ -34,6 +34,7 @@ class RecordChecker:
         self._token_hashes: set[str] = set()
         self._results: set[str] = set()
         self._evidence: set[str] = set()
+        self.has_evidence_material = False
         self._snapshots: dict[tuple[str, str], tuple[str, int]] = {}
         self._items: dict[tuple[str, str], int] = defaultdict(int)
         self._max_ids = {"revision": 0, "token_audit": 0}
@@ -108,7 +109,16 @@ class RecordChecker:
                 )
         elif entity == "code_evidence":
             self._evidence.add(record["evidence_id"])
+            if record.get('assessment_summary') or record.get('attachments'):
+                self.has_evidence_material = True
+            from ..code_evidence_services import validate_attachments, CodeEvidenceError
+            try:
+                validate_attachments(record.get('attachments', []))
+            except CodeEvidenceError as exc:
+                self._error('R4', str(exc))
         elif entity == "code_evidence_application":
+            if record.get("team") or record.get("assessment_revision", -1) != -1 or record.get("selected", 1) != 1:
+                self.has_evidence_material = True
             if record["evidence_id"] not in self._evidence:
                 self._error(
                     "R4",

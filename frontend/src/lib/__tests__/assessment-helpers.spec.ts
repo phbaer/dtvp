@@ -819,6 +819,26 @@ My Policy Comment: track this carefully`
         })
     });
 
+    it('does not treat a different approval time as contradictory assessment prose', () => {
+        const text = (time: number) => `--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: alice] [Reviewed By: rita] [Reviewed At: ${time}] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.`
+        const group: any = { id: 'CVE-REVIEW-TIMES', tags: ['Core'], affected_versions: [{ components: [
+            { analysis_state: 'NOT_AFFECTED', analysis_details: text(1700000000000) },
+            { analysis_state: 'NOT_AFFECTED', analysis_details: text(1800000000000) },
+        ] }] }
+        expect(getGroupInconsistencyReasons(group)).toEqual([])
+        expect(getGroupLifecycle(group, group.tags, {})).toBe('ASSESSED')
+    })
+
+    it('retains separate assessment and review dates through parsing, rendering and metadata edits', () => {
+        const text = '--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1700000000000] [Reviewed By: rita] [Reviewed At: 1800000000000] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.'
+        const blocks = parseAssessmentBlocks(text)
+        expect(blocks[0]).toMatchObject({ user: 'alice', timestamp: 1700000000000, reviewer: 'rita', reviewedAt: 1800000000000 })
+        const fields = assessmentTextToFields(constructAssessmentDetails(blocks, [], false).text)
+        expect(fields.teams[0]).toMatchObject({ assessed_at_ms: 1700000000000, reviewed_by: 'rita', reviewed_at_ms: 1800000000000 })
+        const edited = mergeTeamAssessment(text, 'Core', 'NOT_AFFECTED', 'Not shipped.', 'carol', 'CODE_NOT_PRESENT', undefined, true, [], { ticket: 'SEC-1' })
+        expect(assessmentTextToFields(edited.text).teams[0]).toMatchObject({ reviewed_by: 'rita', reviewed_at_ms: 1800000000000 })
+    })
+
     describe('assessmentTextToFields', () => {
         const VECTOR = 'CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N';
         const text = [
@@ -840,14 +860,14 @@ My Policy Comment: track this carefully`
                 teams: [
                     {
                         team: 'General', state: 'NOT_AFFECTED', justification: 'CODE_NOT_REACHABLE',
-                        assessed_by: 'alice', reviewed_by: null, assessed_at_ms: null,
+                        assessed_by: 'alice', reviewed_by: null, reviewed_at_ms: null, assessed_at_ms: null,
                         rescored_score: null, rescored_vector: null, ssvc: null, ssvc_details: null,
                         assigned: [], ticket: null, evidence_reviewed: null, version_coverage: null,
                         historical: false, copied_from: null, details: 'Not reachable.',
                     },
                     {
                         team: 'Core', state: 'NOT_AFFECTED', justification: 'CODE_NOT_REACHABLE',
-                        assessed_by: 'bob', reviewed_by: null, assessed_at_ms: 1794561289026,
+                        assessed_by: 'bob', reviewed_by: null, reviewed_at_ms: null, assessed_at_ms: 1794561289026,
                         rescored_score: null, rescored_vector: null, ssvc: null, ssvc_details: null,
                         assigned: ['carol', 'dave'], ticket: 'EXP-1001', evidence_reviewed: 'yes',
                         version_coverage: 'yes', historical: true, copied_from: 'Old Team',

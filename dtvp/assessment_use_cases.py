@@ -78,6 +78,7 @@ class TeamAssessmentFields(BaseModel):
     justification: Optional[str] = None
     assessed_by: Optional[str] = None
     reviewed_by: Optional[str] = None
+    reviewed_at_ms: Optional[int] = None
     assessed_at_ms: Optional[int] = None
     rescored_score: Optional[float] = Field(default=None, ge=0, le=10)
     rescored_vector: Optional[str] = None
@@ -174,8 +175,9 @@ class AssessmentRequest(BaseModel):
     comparison_mode: Optional[str] = "MERGE"
     analysis_run_ids: list[str] = Field(default_factory=list)
     # Agent code evidence a person referenced in this assessment; recorded
-    # as applications after the save. Never accepted from MCP tools.
+    # as applications after the save, with the same scope checks for MCP.
     code_evidence_ids: list[str] = Field(default_factory=list)
+    code_evidence_by_team: dict[str, list[str]] = Field(default_factory=dict)
     ssvc: SsvcInput | None = None
 
     @field_validator("response", mode="before")
@@ -488,11 +490,16 @@ def record_code_evidence_applications(
     finalized: list[dict[str, Any]],
     user: str,
     workflow_id: str,
+    selections: dict[str, list[str] | None] | None = None,
 ) -> None:
     """Record which saved findings referenced which evidence. Like the
     analyzer provenance, a failure here is logged and never undoes the save."""
     store = _code_evidence_store(deps)
-    if store is None or not evidence_ids:
+    if store is None or not selections:
+        return
+    if not evidence_ids and not store.has_applications(
+        str(instance.get('finding_uuid') or '') for instance, _payload in payloads
+    ):
         return
     results_by_uuid = {
         str(result.get("uuid") or ""): result
@@ -512,31 +519,68 @@ def record_code_evidence_applications(
                 if result.get("status") == "success"
                 else "failed"
             )
-            for evidence_id in evidence_ids:
-                store.record_application(
-                    evidence_id=evidence_id,
-                    finding_uuid=finding_uuid,
-                    status=status,
-                    applied_by=user,
-                    workflow_id=workflow_id,
-                )
+            if result.get('status') != 'success':
+                continue
+            for team, chosen in selections.items():
+                previous = store.current_selection(finding_uuid, team)
+                selected_ids = chosen if chosen is not None else previous
+                for evidence_id in sorted(set(previous) | set(selected_ids)):
+                    record = store.get(evidence_id)
+                    if record is None:
+                        continue
+                    if record['scope'] != 'vulnerability' and not any(t.get('finding_uuid') == finding_uuid for t in record['targets']):
+                        continue
+                    store.record_application(
+                        evidence_id=evidence_id, finding_uuid=finding_uuid,
+                        status=status, applied_by=user, workflow_id=workflow_id,
+                        team=team, assessment_revision=int(result.get('revision', -1)),
+                        selected=evidence_id in selected_ids,
+                    )
     except Exception:
         deps.logger.exception("Failed to persist code-evidence application provenance")
 
 
-def _validate_code_evidence(
+def validate_code_evidence(
     deps: AssessmentUseCaseDeps,
     req: AssessmentRequest,
+    role: str = "REVIEWER",
 ) -> list[str]:
     """The referenced evidence ids, each existing, not withdrawn, and about
     the project and vulnerability of at least one saved finding."""
+    # Preserve omission: assigning the default would turn it into an explicit
+    # deselection in model_fields_set. Normalize only supplied selections.
+    if "code_evidence_ids" in req.model_fields_set:
+        req.code_evidence_ids = list(dict.fromkeys(value.strip() for value in req.code_evidence_ids if value.strip()))
+    if "code_evidence_by_team" in req.model_fields_set:
+        req.code_evidence_by_team = {
+            team: list(dict.fromkeys(value.strip() for value in ids if value.strip()))
+            for team, ids in req.code_evidence_by_team.items()
+        }
     evidence_ids = list(
         dict.fromkeys(
             str(evidence_id).strip()
-            for evidence_id in req.code_evidence_ids
+            for evidence_id in [*req.code_evidence_ids, *(item for ids in req.code_evidence_by_team.values() for item in ids)]
             if str(evidence_id).strip()
         )
     )
+    if role.upper() != 'REVIEWER' and any(team.casefold() != str(req.team or '').casefold() for team in req.code_evidence_by_team):
+        raise AssessmentPermissionError("An analyst can select evidence only for their current team")
+    if req.fields:
+        canonical = {block.team.casefold(): block.team for block in req.fields.teams}
+        req.code_evidence_by_team = {canonical.get(team.casefold(), team): ids for team, ids in req.code_evidence_by_team.items()}
+    if req.fields:
+        for block in req.fields.teams:
+            chosen = req.code_evidence_by_team.get(block.team, [])
+            if block.team.casefold() == str(req.team or 'General').casefold():
+                chosen = chosen or req.code_evidence_ids
+            if chosen and not block.details.strip():
+                raise AssessmentValidationError("A standalone assessment rationale is required when selecting evidence")
+    elif req.code_evidence_ids and not req.details.strip():
+        raise AssessmentValidationError("A standalone assessment rationale is required when selecting evidence")
+    if req.code_evidence_by_team:
+        teams = {block.team.casefold() for block in req.fields.teams} if req.fields else {str(req.team or 'General').casefold()}
+        if any(team.casefold() not in teams for team in req.code_evidence_by_team):
+            raise AssessmentValidationError("Evidence selections must name a team present in the saved assessment")
     if not evidence_ids:
         return []
     store = _code_evidence_store(deps)
@@ -573,6 +617,8 @@ def _validate_code_evidence(
         target_vulnerabilities = {
             str(t.get("vulnerability_uuid") or "") for t in targets
         }
+        if record.get('scope') != 'vulnerability' and instance_findings.isdisjoint(target_findings):
+            raise AssessmentValidationError(f"Code evidence {evidence_id} belongs to another finding scope")
         if instance_findings.isdisjoint(target_findings) and (
             instance_vulnerabilities.isdisjoint(target_vulnerabilities - {""})
         ):
@@ -794,7 +840,7 @@ async def save_assessment(
     _validate_response_change(req, role)
     _validate_version_override_change(req, stored_details)
     _validate_analysis_runs(deps, req)
-    evidence_ids = _validate_code_evidence(deps, req)
+    evidence_ids = validate_code_evidence(deps, req, role)
 
     payloads = deps.build_assessment_payloads(req, user, role)
     open_requests = [
@@ -829,7 +875,7 @@ async def save_assessment(
             # Read the other teams and free text anew from the stored record.
             base = current.get("details") or ""
             before = _review_team_block(base, resubmitted_team, mapping)
-            rendered = render_team_block({**block, "reviewer": None})
+            rendered = render_team_block({**block, "reviewer": None, "reviewed_at_ms": None})
             if before:
                 base = replace_assessment_block(base, before["team"], rendered)
             else:
@@ -885,6 +931,8 @@ async def save_assessment(
         expected = {**review_revisions, **req._stored_revisions, **expected}
     if req.resubmit_changes:
         expected = {**req._stored_revisions, **expected, **resubmitted_revisions}
+    if req.approve:
+        workflow_id = "assessment-approval"
     try:
         persisted = await deps.cache_manager.persist_assessment_updates(
             [payload for _instance, payload in payloads],
@@ -918,6 +966,11 @@ async def save_assessment(
         finalized=finalized,
         user=user,
         workflow_id=workflow_id,
+        selections={
+            **({block.team: None for block in req.fields.teams} if req.fields else {req.team or 'General': None}),
+            **({req.team or 'General': req.code_evidence_ids} if 'code_evidence_ids' in req.model_fields_set else {}),
+            **req.code_evidence_by_team,
+        },
     )
     return finalized
 

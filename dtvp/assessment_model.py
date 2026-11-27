@@ -64,7 +64,7 @@ ANALYSIS_JUSTIFICATIONS = (
 RESERVED_DETAIL_PATTERN = re.compile(
     # An opening is enough: the block parser recognises "--- [Team:" without
     # a closing bracket, so unclosed tags are as dangerous as closed ones.
-    r"---|\[\s*/?\s*(?:Team|State|Assessed By|Reviewed By|Rescored|"
+    r"---|\[\s*/?\s*(?:Team|State|Assessed By|Reviewed By|Reviewed At|Rescored|"
     r"Rescored Vector|Status|SSVC|Assigned|Historical|Copied From|"
     r"Justification|Date|Version Override|Override Reason)\b",
     re.IGNORECASE,
@@ -341,6 +341,7 @@ def team_from_block(block: dict[str, Any]) -> dict[str, Any]:
             None if block.get("user") in (None, "", "unknown") else str(block["user"])
         ),
         "reviewed_by": block.get("reviewer") or None,
+        "reviewed_at_ms": int(block["reviewed_at_ms"]) if _number(block.get("reviewed_at_ms")) else None,
         "assessed_at_ms": (
             int(block["timestamp"]) if _number(block.get("timestamp")) else None
         ),
@@ -464,6 +465,7 @@ def _clean_fields(fields: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "assessed_by": _header_value(team.get("assessed_by") or "") or None,
                 "reviewed_by": _header_value(team.get("reviewed_by") or "") or None,
+                "reviewed_at_ms": int(_number(team.get("reviewed_at_ms"))) if _number(team.get("reviewed_at_ms")) else None,
                 "assessed_at_ms": int(assessed_at) if assessed_at else None,
                 "rescored_score": _number(team.get("rescored_score")),
                 "rescored_vector": _header_value(team.get("rescored_vector") or "") or None,
@@ -583,6 +585,8 @@ def _render_team(team: dict[str, Any]) -> str:
     ]
     if team["reviewed_by"]:
         tags.append(f"[Reviewed By: {team['reviewed_by']}]")
+    if team["reviewed_at_ms"]:
+        tags.append(f"[Reviewed At: {team['reviewed_at_ms']}]")
     if team["assessed_at_ms"]:
         tags.append(f"[Date: {team['assessed_at_ms']}]")
     tags.append(f"[Justification: {team['justification'] or 'NOT_SET'}]")

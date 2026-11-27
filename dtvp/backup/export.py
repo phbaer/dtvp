@@ -266,6 +266,8 @@ def _write_dump(
     if checker.errors:
         raise DumpError(checker.errors[0].code, checker.errors[0].message)
     features = [schemas.FEATURE_CREDENTIALS] if source.include_access_tokens else []
+    if getattr(checker, "has_evidence_material", False):
+        features.append(schemas.FEATURE_EVIDENCE_MATERIAL)
     excluded = []
     if not source.include_source:
         excluded.append("source")
@@ -287,7 +289,7 @@ def _write_dump(
         "entities": entities,
         "config": config_entries,
         "excluded": excluded,
-        "contains_credentials": bool(features),
+        "contains_credentials": source.include_access_tokens,
         "cut_point": {"sequences": sequences, "event_log_high_water_mark": None},
         "warnings": summarize(checker.warnings),
     }

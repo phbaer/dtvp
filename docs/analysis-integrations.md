@@ -174,6 +174,8 @@ the existing result deletion API remains available for assessment-only clients.
 
 ### Agent Code Evidence
 
+[ADR 0017](adr/0017-standalone-assessments-and-supporting-evidence.md) defines standalone assessment prose, internal evidence associations, and downloadable attachments.
+
 AI agents connected through MCP add code evidence with `add_code_evidence`
 and read it with `list_code_evidence`; see
 [AI and API access](ai-access.md#code-evidence) for the tool rules and limits,
@@ -190,13 +192,13 @@ recorded targets. Agent evidence also loads without a mapped analyzer target.
 
 Storage: the same SQLite file as the analyzer results
 (`DTVP_CODE_ANALYSIS_RESULTS_PATH`), migration
-`code_analysis_results/0004_code_evidence.sql`, in three tables:
+`code_analysis_results/0004_code_evidence.sql` and `0005_evidence_supporting_material.sql`, in three tables:
 
 | Table | Content |
 | :--- | :--- |
-| `code_evidence` | One row per entry: project, vulnerability ID, scope, targets (component, version, purl, project version, finding UUID), title, Markdown body, references, suggestion, author, token ID, agent label, authority, idempotency key, creation time, and the withdrawal (time, user, reason) |
+| `code_evidence` | One row per entry: project, vulnerability ID, scope, targets (component, version, purl, project version, finding UUID), title, Markdown body, optional standalone assessment summary, attachment versions including base64 bytes, references, suggestion, author, token ID, agent label, authority, idempotency key, creation time, and the withdrawal (time, user, reason) |
 | `code_evidence_vuln_ids` | The vulnerability ID and every alias of an entry, lowercased, for lookups by either |
-| `code_evidence_applications` | Which saved finding used which entry, with status (`applied`, `queued`, `failed`), user, and time |
+| `code_evidence_applications` | Which team/global block and saved finding used or deselected which entry at each assessment revision, with status (`applied`, `queued`, `failed`), user, and time |
 
 `dtvp/code_evidence_services.py` owns the store and the validation that MCP
 and REST share. Analyzer retention (`DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS`,
@@ -213,17 +215,14 @@ Browser APIs (session only for the write):
 - `POST /api/code-evidence/{evidence_id}/withdraw` with `{reason}`: a
   reviewer, or the user whose token wrote the entry. Others get 403, an
   unknown ID 404, an entry already withdrawn 409. Access tokens are refused.
-- `POST /api/assessment` accepts `code_evidence_ids`. Each must exist, not be
-  withdrawn, and belong to the project and Dependency-Track vulnerability of
-  at least one saved finding; otherwise the save is rejected before anything
-  is written. After the save one application per finding and entry is
-  recorded; a failure there is logged and does not undo the save. The UI
-  sends only the entries whose reference line ("Code evidence <id> from ...")
-  is still in the text being saved, so evidence whose line was replaced (for
-  example by an analyzer result) or deleted is not recorded as used. When a
-  save is rejected because an entry was withdrawn, is unknown, or belongs
-  elsewhere, the UI drops that entry from the draft, says so, and keeps the
-  rest of the draft for the next save.
+- `POST /api/assessment` accepts explicit `code_evidence_by_team` selections;
+  legacy `code_evidence_ids` applies to the request team or General. New
+  selections must exist, not be withdrawn, and match the saved project and
+  finding scope. Validation runs before the assessment write. After saving,
+  team/finding/revision applications and deselections are recorded separately;
+  tracking failures are logged without undoing a committed assessment. Editing
+  prose keeps selections. A rejected selection is removed from the draft with
+  an explanation; the remaining draft is kept for retry.
 
 ### Project Workspace And Dashboard
 
@@ -433,3 +432,75 @@ queue results show **Full assessment** in place of Decision rationale. Older
 results retain the existing rationale view. Markdown is rendered through an HTML
 allowlist: scripts, embedded content, images, event handlers and unsafe links are
 removed. This display change does not change draft/application approval rules.
+
+
+#### Standalone rationale and internal supporting links
+
+**Use in assessment draft** offers the optional `assessment_summary` in an
+editable field. The body remains the detailed report; neither the title nor
+body is automatically used as assessment prose. Without a summary, the
+author must fill that field before **Use in assessment draft** is enabled;
+whitespace does not count. A save with newly selected evidence requires
+nonempty team/global rationale.
+
+The assessment form lists supporting evidence separately, with explicit
+removal. Editing rationale does not remove selections. Team and global
+selections are independent, and the normal print/export contains rationale
+and existing assessor/review provenance rather than an opaque evidence ID.
+A global rationale should synthesize team conclusions and explain any
+severity change; a derived state remains distinct from a reviewed synthesis.
+Reviewers use the existing **Global rationale** field, stored in the General
+assessment block by the normal assessment endpoint. The team overview shows
+the team rationales and labels the effective state as derived or set by a
+reviewer. There is no separate synthesis database or endpoint; ordinary save
+and approval remain separate actions, with the existing audit and revision
+checks.
+
+Assessment saves may send `code_evidence_by_team: {"Core": ["ev_..."]}`.
+An explicit empty list deselects that team's evidence; omission preserves
+its prior selection. `code_evidence_ids` selects evidence for the request's
+team or General in the browser, and for the target team in MCP preview/save.
+MCP cannot write General or change another team's evidence selections. Validation rejects unavailable, withdrawn,
+foreign or out-of-scope new selections before the assessment write. History
+records team, finding, revision, selection, user and time. Existing history
+has unknown team/revision; migration does not infer either or rewrite prose.
+As with analyzer provenance, these application records are written after the
+assessment commit; a tracking failure is logged separately and does not undo
+a committed assessment.
+
+#### Supporting files and downloads
+
+Use **Supporting files** in the evidence reader to upload a report, log or
+source excerpt. Include the useful facts in the report body and rationale;
+files provide supporting detail. Each immutable version has a filename,
+description, media type, size, SHA-256, uploader and upload time. Uploading a
+filename again adds a version and preserves earlier bytes. The author or a
+reviewer can upload; other authenticated users can download. Withdrawn
+evidence keeps its files but refuses uploads. Limits are 10 MiB per file,
+20 versions and 50 MiB total per evidence. Bytes and metadata commit together
+inside the existing SQLite evidence record; analyzer cleanup cannot prune them.
+
+Browser APIs add `POST /api/code-evidence/{id}/attachments` (raw bytes;
+`filename`, optional `description`, `media_type`, `replaces_attachment_id`
+as query parameters), and GETs for `/attachments/{attachment_id}` and
+`/package`. The package contains `report.md`, `evidence.json`, an optional
+`assessment-summary.txt`, all file versions and a SHA-256/size manifest.
+It also contains `appendix.md` and printable `appendix.html`: the evidence
+title, consumer/release scope, supplied rationale, report, author, withdrawal,
+file versions and assessment use history, with explicit unknown legacy data.
+Extract the ZIP and open `appendix.html` to print it. HTML contains escaped
+text and static styles, without scripts, active links or external assets.
+Both appendix files are covered by the hash manifest. This appendix is per
+evidence record; a combined vulnerability-wide print report is not provided.
+Corrupt or incomplete bytes cause download/export failure.
+
+Instance dumps include material and revision links, requiring the
+`evidence-supporting-material` feature when present (dump minor 2). Legacy
+dumps remain readable. Project archive v2 includes a checksummed evidence
+payload; v1 imports still work. Evidence targeting a selected release is
+included as a complete record with its supporting files and history. When
+restore changes finding IDs, uniquely matched targets retain their source
+identity as `archive_source`; original application revisions remain historical.
+Unmatched targets are reported. Existing differing evidence is never overwritten.
+The project evidence payload is bounded to 128 MiB; larger exports require an
+instance backup. Neither download requires a path on the contributor's machine.

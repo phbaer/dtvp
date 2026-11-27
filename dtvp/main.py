@@ -713,6 +713,8 @@ assessment_service_deps = build_assessment_service_deps(
     process_assessment_details=process_assessment_details,
 )
 
+code_evidence_store = CodeEvidenceStore(logger=logger)
+
 project_archive_service_deps = build_project_archive_service_deps(
     cache_manager=cache_manager,
     logger=logger,
@@ -720,10 +722,10 @@ project_archive_service_deps = build_project_archive_service_deps(
     version=VERSION,
     build_commit=BUILD_COMMIT,
     archive_path_provider=get_project_archive_path,
+    code_evidence_store=code_evidence_store,
 )
 
 code_analysis_result_store = CodeAnalysisResultStore(logger=logger)
-code_evidence_store = CodeEvidenceStore(logger=logger)
 
 
 def get_performance_status() -> dict[str, Any]:

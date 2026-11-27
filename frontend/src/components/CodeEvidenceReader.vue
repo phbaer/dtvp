@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ClipboardCheck, Loader2, MoreHorizontal, Trash2, Undo2, X } from '@lucide/vue'
 import SafeMarkdown from './SafeMarkdown.vue'
+import EvidenceAttachments from './EvidenceAttachments.vue'
 import type { CodeAnalysisAssessResponse } from '../lib/api'
 import type { EvidenceRow } from '../lib/codeEvidence'
 import { formatLocalTime, formatUtcTime } from '../lib/codeEvidence'
@@ -24,10 +25,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-    (e: 'apply', options: { useSuggestion: boolean }): void
+    (e: 'apply', options: { useSuggestion: boolean; summary?: string }): void
     (e: 'withdraw', reason: string): void
     (e: 'remove'): void
     (e: 'close'): void
+    (e: 'attachments-change'): void
 }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -42,6 +44,8 @@ onMounted(() => {
 })
 
 const evidence = computed(() => props.row.evidence)
+const assessmentSummary = ref('')
+watch(() => props.row.id, () => { assessmentSummary.value = props.row.evidence?.assessment_summary || '' }, { immediate: true })
 const record = computed(() => props.row.record)
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -114,7 +118,8 @@ const canWithdraw = computed(() => Boolean(
 
 const applyDisabledReason = computed(() => {
     if (props.row.kind === 'agent') {
-        return evidence.value?.withdrawn ? 'Withdrawn evidence cannot be used.' : ''
+        if (evidence.value?.withdrawn) return 'Withdrawn evidence cannot be used.'
+        return assessmentSummary.value.trim() ? '' : 'Write an assessment rationale before using this evidence.'
     }
     if (props.loading) return 'The run is loading.'
     return props.applicable ? '' : 'This run is not eligible: rerun analysis to obtain a validated assessment.'
@@ -125,7 +130,7 @@ const executiveSummary = computed(() => props.result?.assessment?.executive_summ
 
 const apply = () => {
     if (applyDisabledReason.value) return
-    emit('apply', { useSuggestion: Boolean(suggestion.value && useSuggestion.value) })
+    emit('apply', { useSuggestion: Boolean(suggestion.value && useSuggestion.value), ...(props.row.kind === 'agent' ? { summary: assessmentSummary.value.trim() } : {}) })
 }
 
 const confirmWithdraw = () => {
@@ -295,6 +300,15 @@ const headingId = computed(() => `evidence-reader-title-${props.row.key.replace(
             </div>
         </details>
 
+        <details v-if="evidence?.applications?.length" class="text-xs text-gray-400">
+            <summary>Assessment use history</summary>
+            <ul><li v-for="(application, index) in evidence.applications" :key="index">
+                {{ application.team || 'Legacy scope (not recorded)' }} · revision {{ application.assessment_revision === -1 ? 'not recorded' : application.assessment_revision }} · {{ application.selected === false ? 'deselected' : 'selected' }} · {{ application.applied_by }} · {{ application.applied_at }}
+            </li></ul>
+        </details>
+
+        <EvidenceAttachments v-if="evidence" :evidence="evidence" :canUpload="canWithdraw" @changed="emit('attachments-change')" />
+
         <section
             class="rounded-lg border-2 border-emerald-800/60 bg-emerald-950/10 p-3"
             data-testid="evidence-apply-box"
@@ -302,11 +316,16 @@ const headingId = computed(() => `evidence-reader-title-${props.row.key.replace(
         >
             <h6 :id="`${headingId}-apply`" class="text-xs font-bold text-emerald-200">Apply to the assessment</h6>
             <p v-if="row.kind === 'agent'" class="mt-1 text-[11px] leading-relaxed text-gray-300">
-                Adds a reference to this evidence to the {{ targetLabel }} assessment draft. Nothing is saved until you save the assessment.
+                Adds the rationale below to the {{ targetLabel }} assessment draft and links the supporting evidence within DTVP. Nothing is saved until you save the assessment.
             </p>
             <p v-else class="mt-1 text-[11px] leading-relaxed text-gray-300">
                 Fills the {{ targetLabel }} assessment draft with this run's decision: its state, justification, and CVSS. Nothing is saved until you save the assessment.
             </p>
+            <label v-if="row.kind === 'agent'" class="mt-2 block text-xs text-gray-300">
+                Assessment rationale
+                <textarea v-model="assessmentSummary" required maxlength="10000" rows="5" data-testid="evidence-assessment-summary" class="mt-1 w-full rounded border border-gray-700 bg-gray-950 p-2 text-gray-100" placeholder="Explain the decision, scope, exposure, observations and limitations. This text must stand alone when printed." />
+                <span class="text-[11px] text-gray-400">Required before applying. Explain the decision in your own words; the evidence title and report are not copied automatically.</span>
+            </label>
             <label v-if="row.kind === 'agent' && suggestion" class="mt-2 flex items-center gap-2 text-[11px] text-gray-200">
                 <input v-model="useSuggestion" type="checkbox" data-testid="evidence-use-suggestion" class="accent-emerald-500" :disabled="Boolean(applyDisabledReason)" />
                 Also use the suggested decision: <span class="font-mono">{{ suggestion }}</span>

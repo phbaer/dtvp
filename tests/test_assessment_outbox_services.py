@@ -1185,3 +1185,25 @@ def test_discarding_an_export_cannot_change_review_feedback(tmp_path):
 
     assert store.discard_many([withdrawal["id"]]) == []
     assert store.get_overlay(KEY)["analysisDetails"] == "Agreed"
+
+
+@pytest.mark.parametrize('reviewed_at', [None, 1800000000000])
+def test_upgrade_rebuilds_review_time_without_rewriting_text_history_or_exports(tmp_path, reviewed_at):
+    import sqlite3
+
+    store = _store(tmp_path)
+    timestamp = f' [Reviewed At: {reviewed_at}]' if reviewed_at else ''
+    text = ('--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] '
+            '[Date: 1700000000000] [Reviewed By: rita]' + timestamp +
+            ' [Justification: CODE_NOT_PRESENT] ---\nNot shipped.')
+    store.enqueue_many([_payload('NOT_AFFECTED', text)], author='rita')
+    history, pending = store.list_revisions(KEY), store.list_pending()
+    with sqlite3.connect(store.path) as connection:
+        connection.execute('ALTER TABLE assessment_team_fields DROP COLUMN reviewed_at_ms')
+        connection.execute("DELETE FROM schema_migrations WHERE namespace='assessment_outbox' AND version=10")
+    upgraded = AssessmentOutboxStore(store.path)
+    team = upgraded.get_fields(KEY)['teams'][0]
+    assert (team['reviewed_by'], team['assessed_at_ms'], team['reviewed_at_ms']) == ('rita', 1700000000000, reviewed_at)
+    assert upgraded.list_revisions(KEY) == history
+    assert upgraded.list_pending() == pending
+    assert upgraded.get_overlay(KEY)['analysisDetails'] == text

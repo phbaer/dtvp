@@ -2371,7 +2371,14 @@ export interface CodeEvidenceTarget {
     vulnerability_uuid?: string | null;
 }
 
+export interface CodeEvidenceAttachment {
+    attachment_id: string; filename: string; description: string; media_type: string;
+    size: number; sha256: string; uploaded_by: string; uploaded_at: string;
+    version: number; replaces_attachment_id?: string | null;
+}
+
 export interface CodeEvidenceApplication {
+    team?: string; assessment_revision?: number; selected?: boolean;
     finding_uuid: string;
     status?: string;
     applied_by: string;
@@ -2389,6 +2396,8 @@ export interface CodeEvidence {
     targets: CodeEvidenceTarget[];
     title: string;
     body_markdown: string;
+    assessment_summary?: string | null;
+    attachments?: CodeEvidenceAttachment[];
     references: string[];
     suggested_state?: string | null;
     suggested_justification?: string | null;
@@ -2792,6 +2801,26 @@ export const requestSourceAnalysis = async (
     const res = await api.post('/sync/analysis-requests', target)
     return res.data
 }
+
+export const uploadCodeEvidenceAttachment = async (evidenceId: string, file: File, description: string, replacesAttachmentId?: string): Promise<CodeEvidenceAttachment> => {
+    const res = await api.post(`/code-evidence/${encodeURIComponent(evidenceId)}/attachments`, file, {
+        params: { filename: file.name, description, media_type: file.type || 'application/octet-stream', replaces_attachment_id: replacesAttachmentId },
+        headers: { 'Content-Type': 'application/octet-stream' },
+    });
+    return res.data;
+};
+
+export const downloadCodeEvidenceMaterial = async (evidenceId: string, attachment?: CodeEvidenceAttachment): Promise<void> => {
+    const path = attachment ? `attachments/${encodeURIComponent(attachment.attachment_id)}` : 'package';
+    const res = await api.get(`/code-evidence/${encodeURIComponent(evidenceId)}/${path}`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = attachment?.filename || 'evidence-package.zip';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
 
 
 // Saved views and short links (ADR 0015).

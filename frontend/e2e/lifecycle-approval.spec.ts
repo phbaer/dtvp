@@ -167,6 +167,24 @@ async function openAssessment(page: Page, group: typeof pendingGlobal) {
 }
 
 test.describe('Lifecycle: a pending Global decision and approval', () => {
+    for (const pending of [true, false]) {
+        test(`shows Review needed with missing teams when pending=${pending}`, async ({ page }) => {
+            const text = `--- [Team: K-Core] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.${pending ? '\n\n[Status: Pending Review]' : ''}`;
+            const group = groupOf('INCOMPLETE', [finding(1, { analysis_state: 'NOT_AFFECTED', analysis_details: text })]);
+            Object.assign(group.list_metadata, { is_pending: pending, is_approval_ready: false,
+                covers_all_teams: false, assessed_teams: ['K-Core'], technical_state: 'NOT_AFFECTED' });
+            await mockShell(page, group);
+            await page.goto('/project/TestProject?awaiting_review=false');
+            const row = page.locator(`.vuln-card[data-group-id="${group.id}"]`);
+            await expect(row.getByTestId('workflow-state-badge')).toHaveText('Review needed');
+            await expect(row.getByTestId('missing-team-assessments')).toHaveText('Missing team assessments: Core');
+            await row.click();
+            const inspector = page.getByTestId('vuln-detail-inspector');
+            await expect(inspector.getByTestId('header-review-chip')).toHaveText('Review needed');
+            await expect(inspector.getByTestId('missing-team-assessments')).toHaveText('Missing team assessments: Core');
+        });
+    }
+
     test('resets redundant rescoring without approving a Core-only decision missing K-Core', async ({ page }) => {
         const vector = 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H';
         const team = '--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.';

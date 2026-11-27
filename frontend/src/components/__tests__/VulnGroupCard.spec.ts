@@ -952,6 +952,7 @@ describe('VulnGroupCard', () => {
         expect(summary.text()).not.toContain('Exploitable')
         expect(wrapper.find('[data-testid="effective-team-assessment-summary"]').exists()).toBe(false)
 
+        expect(wrapper.get('[data-testid="global-rationale-guidance"]').text()).toContain('write a synthesis here')
         await summary.get('[data-testid="use-effective-assessment-summary"]').trigger('click')
         await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')

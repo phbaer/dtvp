@@ -627,10 +627,10 @@ class AssessmentOutboxStore:
                         reviewed_by, assessed_at_ms, rescored_score,
                         rescored_vector, ssvc, ssvc_details, assigned_json,
                         historical, copied_from, details, ticket,
-                        evidence_reviewed, version_coverage
+                        evidence_reviewed, version_coverage, reviewed_at_ms
                     )
                     VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     [
@@ -643,7 +643,7 @@ class AssessmentOutboxStore:
                             json.dumps(team["assigned"]),
                             int(team["historical"]), team["copied_from"],
                             team["details"], team["ticket"],
-                            team["evidence_reviewed"], team["version_coverage"],
+                            team["evidence_reviewed"], team["version_coverage"], team["reviewed_at_ms"],
                         )
                         for position, team in enumerate(fields["teams"])
                     ],
@@ -727,6 +727,7 @@ class AssessmentOutboxStore:
                     "justification": team["justification"],
                     "assessed_by": team["assessed_by"],
                     "reviewed_by": team["reviewed_by"],
+                    "reviewed_at_ms": team["reviewed_at_ms"],
                     "assessed_at_ms": team["assessed_at_ms"],
                     "rescored_score": team["rescored_score"],
                     "rescored_vector": team["rescored_vector"],

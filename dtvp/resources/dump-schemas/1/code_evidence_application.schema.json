@@ -25,6 +25,20 @@
     },
     "applied_at": {
       "$ref": "urn:dtvp:dump:1:common#/$defs/timestamp"
+    },
+    "team": {
+      "type": "string"
+    },
+    "assessment_revision": {
+      "type": "integer",
+      "minimum": -1
+    },
+    "selected": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
     }
   },
   "required": [

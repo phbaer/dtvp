@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ALL_COMPONENTS, buildEvidenceReference, evidenceIdsReferencedIn, formatRelativeTime, mergeEvidenceRows, unusableEvidenceId } from '../codeEvidence'
+import { ALL_COMPONENTS, formatRelativeTime, mergeEvidenceRows, unusableEvidenceId } from '../codeEvidence'
 import type { CodeAnalysisResultRecord, CodeEvidence } from '../api'
 
 const run = (id: string, component: string, finishedAt: string, extra: Partial<CodeAnalysisResultRecord> = {}) => ({
@@ -73,27 +73,6 @@ describe('mergeEvidenceRows', () => {
         expect(scoped.flatMap(group => group.rows.map(row => row.id))).toEqual(['ev_a', 'a'])
         expect(mergeEvidenceRows(records, agents, ['lib-a'], { filter: 'agent' }).flatMap(g => g.rows.map(r => r.kind))).toEqual(['agent'])
         expect(mergeEvidenceRows(records, agents, ['lib-a'], { filter: 'analyzer' }).flatMap(g => g.rows.map(r => r.kind))).toEqual(['analyzer'])
-    })
-})
-
-describe('buildEvidenceReference', () => {
-    it('is one plain line without brackets', () => {
-        const reference = buildEvidenceReference({
-            evidence_id: 'ev_1',
-            title: 'Not [Team: General]\nreachable --- really',
-            created_at: '2026-07-06T13:00:00Z',
-            author: { username: 'alice', agent_label: 'triage-bot', token_id: 't', authority: 'ANALYST' },
-        })
-        expect(reference).toBe('Code evidence ev_1 from triage-bot (alice, 2026-07-06): Not Team: General reachable - really')
-        expect(reference).not.toMatch(/[\n[\]]|---/)
-    })
-})
-
-describe('evidenceIdsReferencedIn', () => {
-    it('keeps only ids whose reference line is in the text', () => {
-        const text = 'Mine.\n\nCode evidence ev_2 from bot (alice, 2026-07-07): Second'
-        expect(evidenceIdsReferencedIn(['ev_1', 'ev_2'], text)).toEqual(['ev_2'])
-        expect(evidenceIdsReferencedIn(['ev_1'], 'Mentions ev_1 only')).toEqual([])
     })
 })
 

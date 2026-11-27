@@ -2297,3 +2297,41 @@ def test_code_evidence_withdraw_refuses_access_tokens(client, monkeypatch):
     )
     assert refused.status_code == 403
     assert main.code_evidence_store.get(record["evidence_id"])["withdrawn"] is None
+
+
+def test_evidence_attachment_routes_authorization_and_downloads(client):
+    import hashlib, io, zipfile
+    record = _evidence(author='testuser')
+    base = f"/api/code-evidence/{record['evidence_id']}"
+    uploaded = client.post(base + '/attachments', params={'filename': 'report.md', 'description': 'Staging observation'}, content=b'# Observed result', headers={'Content-Type': 'application/octet-stream'})
+    assert uploaded.status_code == 200
+    attachment = uploaded.json()
+    response = client.get(base + '/attachments/' + attachment['attachment_id'])
+    assert response.status_code == 200
+    assert response.content == b'# Observed result'
+    assert response.headers['x-content-type-options'] == 'nosniff'
+    assert response.headers['content-disposition'].startswith('attachment;')
+    assert response.headers['x-content-sha256'] == hashlib.sha256(response.content).hexdigest()
+    package = client.get(base + '/package')
+    assert package.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        assert 'report.md' in archive.namelist()
+        assert 'manifest.json' in archive.namelist()
+    assert client.get(base + '/attachments/missing').status_code == 404
+    foreign = _evidence(author='alice')
+    response = client.post(f"/api/code-evidence/{foreign['evidence_id']}/attachments", params={'filename':'report.txt'}, content=b'report')
+    assert response.status_code == 403
+    with patch('dtvp.main.get_user_role', return_value='REVIEWER'):
+        response = client.post(f"/api/code-evidence/{foreign['evidence_id']}/attachments", params={'filename':'report.txt'}, content=b'report')
+    assert response.status_code == 200
+    assert client.post(base + '/attachments', params={'filename':'../report'}, content=b'report').status_code == 400
+
+
+def test_evidence_attachment_rest_writes_refuse_access_tokens(client, monkeypatch):
+    from dtvp.access_token_services import access_token_store
+    monkeypatch.setenv('DTVP_ACCESS_TOKENS_ENABLED', 'true')
+    record = _evidence(author='alice')
+    _token, plain = access_token_store.create(username='alice', name='bot', scopes=['read','write'])
+    main.app.dependency_overrides.pop(main.get_current_user, None)
+    response = client.post(f"/api/code-evidence/{record['evidence_id']}/attachments", params={'filename':'report.txt'}, content=b'report', headers={'Authorization':f'Bearer {plain}'})
+    assert response.status_code == 403

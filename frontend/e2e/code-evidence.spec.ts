@@ -20,6 +20,7 @@ const EVIDENCE = {
         vulnerability_uuid: 'v-1',
     }],
     title: 'Parser entry point is not linked',
+    assessment_summary: 'The affected parser is not reachable in the tested application configuration. No remote input path was established.',
     body_markdown: '## Call graph\n\n`parse()` is **never** reached from a request handler.\n\n| File | Line |\n|---|---|\n| server.c | 42 |',
     references: ['https://example.org/commit/abc'],
     suggested_state: 'NOT_AFFECTED',
@@ -144,8 +145,42 @@ test.describe('Code evidence from agents', () => {
         expect(requests.every(url => ![...url.searchParams.keys()].some(key => key.startsWith('component_name')))).toBe(true);
     });
 
+    test('uploads a supporting file and downloads it from the evidence reader', async ({ page }) => {
+        const evidence = { ...EVIDENCE, attachments: [] as any[] };
+        await page.route('**/api/projects/*/vulnerabilities/*/code-evidence*', route => route.fulfill({ status:200, contentType:'application/json', body:JSON.stringify({ items:[evidence], withdrawn_count:0 }) }));
+        await page.route('**/api/code-evidence/ev_e2e/attachments?*', async route => {
+            expect(route.request().method()).toBe('POST');
+            // WebKit does not expose Blob POST bytes through Playwright. The
+            // server integration tests validate bytes; other engines expose them here.
+            const bytes = route.request().postDataBuffer();
+            if (bytes) expect(bytes.toString()).toBe('Staging observation');
+            expect(route.request().headers()['content-type']).toContain('application/octet-stream');
+            const file = { attachment_id:'att_test', filename:'report.md', description:'Staging report', media_type:'text/markdown', size:19, sha256:'a'.repeat(64), version:1, uploaded_by:'testuser', uploaded_at:'2026-11-26T10:00:00Z' };
+            evidence.attachments = [file];
+            await route.fulfill({ status:200, contentType:'application/json', body:JSON.stringify(file) });
+        });
+        await page.route('**/api/code-evidence/ev_e2e/attachments/att_test', route => route.fulfill({ status:200, contentType:'application/octet-stream', body:'Staging observation' }));
+        await page.goto('/project/TestProject?lifecycle=OPEN');
+        const listCard = page.locator('.vuln-card[data-group-id="CVE-2026-EVID"]');
+        await expect(listCard).toBeVisible({ timeout:30000 });
+        await listCard.click();
+        const card = page.getByTestId('vuln-detail-inspector').locator('.vuln-card').first();
+        await card.getByRole('tab', { name:'Code Evidence' }).click();
+        await card.locator('[data-testid="evidence-row"][data-id="ev_e2e"]').click();
+        const files = card.getByTestId('evidence-attachments');
+        await files.getByLabel('File description').fill('Staging report');
+        await files.locator('input[type=file]').setInputFiles({ name:'report.md', mimeType:'text/markdown', buffer:Buffer.from('Staging observation') });
+        const downloadButton = files.getByRole('button', { name:'report.md · version 1' });
+        await expect(downloadButton).toBeVisible();
+        const downloadPromise = page.waitForEvent('download');
+        await downloadButton.click();
+        const downloaded = await downloadPromise;
+        expect(downloaded.suggestedFilename()).toBe('report.md');
+        expect(await downloaded.failure()).toBeNull();
+    });
+
     test('reads agent evidence, uses it in the draft, and marks it used after the save', async ({ page }) => {
-        const evidence = { ...EVIDENCE, applications: [] as any[] };
+        const evidence = { ...EVIDENCE, assessment_summary: '', applications: [] as any[] };
         const evidenceRequests: string[] = [];
         await page.route('**/api/projects/*/vulnerabilities/*/code-evidence*', async route => {
             evidenceRequests.push(route.request().url());
@@ -159,7 +194,7 @@ test.describe('Code evidence from agents', () => {
         await page.route('**/api/assessment', async route => {
             savedPayload = route.request().postDataJSON();
             // The server records the use beside the evidence.
-            evidence.applications = [{ finding_uuid: 'f-a', status: 'queued', applied_by: 'testuser', applied_at: '2026-07-06T14:00:00Z' }];
+            evidence.applications = [{ finding_uuid: 'f-a', team: 'General', assessment_revision: 1, selected: true, status: 'queued', applied_by: 'testuser', applied_at: '2026-07-06T14:00:00Z' }];
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -197,11 +232,18 @@ test.describe('Code evidence from agents', () => {
         await expect(reader.getByTestId('evidence-added-by')).toHaveText('alice via token triage-bot (id tok_e2e), analyst authority');
         const applyBox = reader.getByTestId('evidence-apply-box');
         await expect(applyBox).toContainText('Nothing is saved until you save the assessment.');
+        const apply = applyBox.getByRole('button', { name: 'Use in assessment draft' });
+        await expect(apply).toBeDisabled();
+        await expect(applyBox.getByTestId('evidence-apply-disabled-reason')).toContainText('rationale');
+        await applyBox.getByTestId('evidence-assessment-summary').fill('   ');
+        await expect(apply).toBeDisabled();
+        await applyBox.getByTestId('evidence-assessment-summary').fill(EVIDENCE.assessment_summary);
+        await expect(apply).toBeEnabled();
         await applyBox.getByTestId('evidence-use-suggestion').check();
         await applyBox.getByRole('button', { name: 'Use in assessment draft' }).click();
 
         const details = card.locator('#analysis-details-textarea');
-        await expect(details).toHaveValue(/Code evidence ev_e2e from triage-bot \(alice, 2026-07-06\): Parser entry point is not linked/);
+        await expect(details).toHaveValue(EVIDENCE.assessment_summary);
         expect(savedPayload).toBeNull();
 
         const saveButton = card.getByTestId('assessment-submit-button');
@@ -210,7 +252,7 @@ test.describe('Code evidence from agents', () => {
         const submit = page.getByRole('button', { name: 'Submit' }).first();
         if (await submit.isVisible({ timeout: 5000 }).catch(() => false)) await submit.click();
 
-        await expect.poll(() => savedPayload?.code_evidence_ids, { timeout: 10000 }).toEqual(['ev_e2e']);
+        await expect.poll(() => savedPayload?.code_evidence_by_team?.General, { timeout: 10000 }).toEqual(['ev_e2e']);
         expect(savedPayload.state).toBe('NOT_AFFECTED');
 
         const requestsBefore = evidenceRequests.length;

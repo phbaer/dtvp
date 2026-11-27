@@ -90,6 +90,17 @@ describe('AssessmentHistory', () => {
         expect(entries[1]!.text()).toContain('First text')
     })
 
+    it('identifies approval events and their reviewer in the history', async () => {
+        vi.mocked(api.getAssessmentHistory).mockResolvedValue([revision({ origin: 'assessment-approval', author: 'rita' })])
+        const wrapper = mount(AssessmentHistory, { props: { instances: [instance('1.0')] } })
+        await wrapper.get('[data-testid="assessment-history-toggle"]').trigger('click')
+        await flushPromises()
+        const entry = wrapper.get('[data-testid="assessment-history-entry"]')
+        expect(entry.text()).toContain('Approved')
+        expect(entry.text()).toContain('by rita')
+        expect(entry.text()).not.toContain('assessment-approval')
+    })
+
     it('labels deletions, reloads when told to, and reports an empty history', async () => {
         vi.mocked(api.getAssessmentHistory).mockResolvedValue([])
         const wrapper = mount(AssessmentHistory, { props: { instances: [instance('1.0')], refreshKey: 0 } })

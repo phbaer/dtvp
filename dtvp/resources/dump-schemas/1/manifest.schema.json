@@ -18,7 +18,8 @@
       "type": "array",
       "items": {
         "enum": [
-          "credentials"
+          "credentials",
+          "evidence-supporting-material"
         ]
       },
       "uniqueItems": true

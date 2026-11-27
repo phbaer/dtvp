@@ -24,6 +24,7 @@ export interface AssessmentBlock {
     versionCoverageValue?: string;
     // Read from a header that carries them; the form does not edit them.
     reviewer?: string;
+    reviewedAt?: number;
     rescored?: number;
     vector?: string;
 }
@@ -35,6 +36,7 @@ export interface AssessmentTeamFields {
     justification: string | null;
     assessed_by: string | null;
     reviewed_by: string | null;
+    reviewed_at_ms?: number | null;
     assessed_at_ms: number | null;
     rescored_score: number | null;
     rescored_vector: string | null;
@@ -353,6 +355,7 @@ export const assessmentComparisonParts = (details: string | undefined | null): {
 export const comparableAssessmentText = (details: string | undefined | null): string =>
     blocksInTeamOrder(withoutHistoricalBlocks(withoutOptionalDecisions(String(details || ''))))
         .replace(/\[Date:\s*[^\]]*\]/g, '')
+        .replace(/\[Reviewed At:\s*[^\]]*\]/g, '')
         .replace(/\[Assessed By:\s*[^\]]*\]/g, '')
         .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
@@ -405,6 +408,7 @@ export const assessmentBlockKey = (block: AssessmentBlock): string => {
         user.toLocaleLowerCase() === 'unknown' ? '' : user,
         block.timestamp || '',
         collapse(block.reviewer),
+        block.reviewedAt || '',
         tickets.join(','),
         block.rescored ?? '',
         collapse(block.vector),
@@ -674,7 +678,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         // Only what the server removes: the text of a block stays as
         // written, so both sides read the same record.
         const content = stripTeamChangesRequests(stripAssessmentResponseTags(stripSsvcDetails(originalContent)))
-            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
+            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Reviewed At|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/gi, '')
             .replace(/\bAssessed\s*--\s*\S+/g, '')
             .replace(/--\s*\S+\s*$/gm, '')
@@ -688,6 +692,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const rescoredText = tags['Rescored'];
         const vector = tags['Rescored Vector'];
         const reviewer = tags['Reviewed By'];
+        const reviewedAt = tags['Reviewed At'] ? Number(tags['Reviewed At']) : undefined;
 
         blocks.push({
             team,
@@ -709,6 +714,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
             ...(coverageValue ? { versionCoverageValue: coverageValue } : {}),
             ticket: tags['Ticket'] || '',
             ...(reviewer ? { reviewer } : {}),
+            ...(reviewedAt !== undefined && Number.isFinite(reviewedAt) ? { reviewedAt } : {}),
             ...(rescoredText !== undefined && /^[\d.]+$/.test(rescoredText) && !Number.isNaN(Number(rescoredText))
                 ? { rescored: Number(rescoredText) }
                 : {}),
@@ -750,6 +756,7 @@ const blockToTeamFields = (block: AssessmentBlock): AssessmentTeamFields => {
         justification: justification && justification !== 'NOT_SET' ? justification : null,
         assessed_by: user && user.toLocaleLowerCase() !== 'unknown' ? user : null,
         reviewed_by: textOrNull(block.reviewer),
+        reviewed_at_ms: block.reviewedAt ?? null,
         assessed_at_ms: block.timestamp ? block.timestamp : null,
         rescored_score: block.rescored ?? null,
         rescored_vector: textOrNull(block.vector),
@@ -847,8 +854,9 @@ export function constructAssessmentDetails(
             : '';
         const historicalStr = b.historical ? ' [Historical: yes]' : '';
         const copiedFromStr = b.copiedFrom ? ` [Copied From: ${formatAssessmentHeaderValue(b.copiedFrom)}]` : '';
+        const reviewedAtStr = b.reviewedAt ? ` [Reviewed At: ${b.reviewedAt}]` : '';
         const reviewerStr = b.reviewer?.trim() ? ` [Reviewed By: ${formatAssessmentHeaderValue(b.reviewer)}]` : '';
-        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${reviewerStr}${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr}${historicalRescoreStr}${ssvcStr}${historicalStr}${copiedFromStr} ---`;
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${reviewerStr}${reviewedAtStr}${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr}${historicalRescoreStr}${ssvcStr}${historicalStr}${copiedFromStr} ---`;
         parts.push(header);
         if (b.details) parts.push(b.details);
         if (b.ssvcDetails) parts.push(b.ssvcDetails);
@@ -1088,6 +1096,7 @@ export function mergeTeamAssessment(
             ...(existingBlock?.versionCoverageValue ? { versionCoverageValue: existingBlock.versionCoverageValue } : {}),
             ticket: finalTicket,
             ...(keepAttribution && existingBlock!.reviewer ? { reviewer: existingBlock!.reviewer } : {}),
+            ...(keepAttribution && existingBlock!.reviewedAt ? { reviewedAt: existingBlock!.reviewedAt } : {}),
         };
 
         if (targetIndex >= 0) {

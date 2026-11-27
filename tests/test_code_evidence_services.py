@@ -96,7 +96,7 @@ def test_migration_applies_to_an_existing_results_database(tmp_path):
     earlier = tmp_path / "earlier_migrations"
     earlier.mkdir()
     for migration in sorted(get_code_analysis_result_migrations_path().glob("*.sql")):
-        if not migration.name.startswith("0004"):
+        if int(migration.name.split("_")[0]) < 4:
             (earlier / migration.name).write_text(migration.read_text())
     old = tmp_path / "old.sqlite"
     with closing(sqlite3.connect(old)) as connection:
@@ -227,6 +227,7 @@ def test_input_is_cleaned():
     )
     assert fields == {
         "title": "Line one line two",
+        "assessment_summary": None,
         "body_markdown": "a\nb\tc",
         "references": ["https://x"],
         "suggested_state": "NOT_AFFECTED",
@@ -338,3 +339,146 @@ def test_migrations_are_idempotent(tmp_path):
             migrations_path=get_code_analysis_result_migrations_path(),
         )
     assert len(store.list_for_vulnerability("TestApp", ["CVE-2026-0001"])) == 1
+
+
+def test_standalone_summary_is_optional_and_rejects_assessment_markup():
+    fields = normalize_evidence_input(title='Parser', body_markdown='Details', assessment_summary='Authenticated input reaches the parser; memory exhaustion was observed.')
+    assert fields['assessment_summary'].startswith('Authenticated')
+    for summary in ['[Team: forged]', 'A\n---\nB', 'x' * 10001]:
+        with pytest.raises(CodeEvidenceError, match='assessment_summary'):
+            normalize_evidence_input(title='Parser', body_markdown='Details', assessment_summary=summary)
+
+
+def test_attachment_versions_package_integrity_and_archive_round_trip(store, tmp_path):
+    import hashlib, io, json, zipfile
+    record, _ = _add(store, assessment_summary='Authenticated input reaches the parser.')
+    evidence_id = record['evidence_id']
+    first = store.add_attachment(evidence_id, filename='report.md', content=b'# Original report', description='Staging result', uploaded_by='alice', media_type='text/markdown')
+    assert 'content_base64' not in store.get(evidence_id)['attachments'][0]
+    assert store.add_attachment(evidence_id, filename='report.md', content=b'# Original report', description='Staging result', uploaded_by='alice', media_type='text/markdown') == first
+    with pytest.raises(CodeEvidenceError, match='latest'):
+        store.add_attachment(evidence_id, filename='report.md', content=b'# Updated', uploaded_by='alice')
+    second = store.add_attachment(evidence_id, filename='report.md', content=b'# Updated', uploaded_by='alice', replaces_attachment_id=first['attachment_id'])
+    assert second['version'] == 2
+    assert store.download_attachment(evidence_id, first['attachment_id'])[1] == b'# Original report'
+    store.record_application(evidence_id=evidence_id, finding_uuid='finding-1', status='applied', applied_by='bob', team='Team A', assessment_revision=3)
+    with zipfile.ZipFile(io.BytesIO(store.evidence_package(evidence_id))) as package:
+        manifest = json.loads(package.read('manifest.json'))
+        assert package.read('assessment-summary.txt') == b'Authenticated input reaches the parser.'
+        for name, info in manifest['files'].items():
+            data = package.read(name)
+            assert hashlib.sha256(data).hexdigest() == info['sha256']
+    portable = store.export_project_records('TestApp')
+    restored = CodeEvidenceStore(path_provider=lambda: str(tmp_path / 'restored.sqlite'))
+    assert restored.import_project_records(portable, dry_run=True)['added'] == 1
+    assert restored.get(evidence_id) is None
+    restored.import_project_records(portable)
+    assert restored.get(evidence_id) == store.get(evidence_id)
+    assert restored.list_applications([evidence_id]) == store.list_applications([evidence_id])
+    assert restored.download_attachment(evidence_id, second['attachment_id'])[1] == b'# Updated'
+    # A logical backup restore may change JSON object key order, never content.
+    equivalent = json.loads(json.dumps(portable))
+    equivalent['records'][0]['row']['attachments_json'] = json.dumps(json.loads(equivalent['records'][0]['row']['attachments_json']), sort_keys=True)
+    assert restored.import_project_records(equivalent)['added'] == 0
+    portable['records'][0]['row']['attachments_json'] = json.dumps([{**json.loads(portable['records'][0]['row']['attachments_json'])[0], 'content_base64': '!!!'}])
+    with pytest.raises(CodeEvidenceError, match='attachment'):
+        restored.import_project_records(portable)
+
+
+def test_attachment_limits_paths_withdrawal_and_corruption(store):
+    import json
+    from dtvp.code_evidence_services import MAX_ATTACHMENT_BYTES
+    record, _ = _add(store)
+    key = record['evidence_id']
+    for name, content in [('../report', b'x'), ('CON.txt', b'x'), ('report:stream', b'x'), ('trailing.', b'x'), ('a/b', b'x'), ('a\\b', b'x'), ('bad\nname', b'x'), ('report', b''), ('report', b'x' * (MAX_ATTACHMENT_BYTES + 1))]:
+        with pytest.raises(CodeEvidenceError):
+            store.add_attachment(key, filename=name, content=content, uploaded_by='alice')
+    attached = store.add_attachment(key, filename='report.txt', content=b'evidence', uploaded_by='alice')
+    with closing(sqlite3.connect(store._path())) as db:
+        items = json.loads(db.execute('SELECT attachments_json FROM code_evidence WHERE evidence_id=?', (key,)).fetchone()[0])
+        items[0]['sha256'] = '0' * 64
+        db.execute('UPDATE code_evidence SET attachments_json=? WHERE evidence_id=?', (json.dumps(items), key))
+        db.commit()
+    with pytest.raises(CodeEvidenceError, match='hash'):
+        store.download_attachment(key, attached['attachment_id'])
+    with pytest.raises(CodeEvidenceError):
+        store.evidence_package(key)
+    store.withdraw(key, 'alice', 'superseded')
+    with pytest.raises(CodeEvidenceWithdrawnError):
+        store.add_attachment(key, filename='another.txt', content=b'new', uploaded_by='alice')
+
+
+def test_team_revision_history_keeps_explicit_deselection(store):
+    record, _ = _add(store)
+    kwargs = dict(evidence_id=record['evidence_id'], finding_uuid='finding-1', status='applied', applied_by='alice')
+    store.record_application(**kwargs, team='Team A', assessment_revision=1)
+    store.record_application(**kwargs, team='General', assessment_revision=2)
+    store.record_application(**kwargs, team='Team A', assessment_revision=3, selected=False)
+    assert store.current_selection('finding-1', 'Team A') == []
+    assert store.current_selection('finding-1', 'General') == [record['evidence_id']]
+    assert len(store.list_applications([record['evidence_id']])) == 3
+
+
+def test_archives_preserve_legacy_targets_without_guessing_finding_ids(store, tmp_path):
+    record, _ = _add(store)
+    with closing(sqlite3.connect(store._path())) as db:
+        db.execute("UPDATE code_evidence SET targets_json = ? WHERE evidence_id = ?", ('[{"component":"legacy-library","project_version":"1.0"}]', record['evidence_id']))
+        db.commit()
+    payload = store.export_project_records('TestApp')
+    restored = CodeEvidenceStore(path_provider=lambda: str(tmp_path / 'legacy.sqlite'))
+    restored.import_project_records(payload)
+    target = restored.get(record['evidence_id'])['targets'][0]
+    assert target['component'] == 'legacy-library'
+    assert target['finding_uuid'] is None
+
+
+def test_evidence_appendix_is_readable_printable_escaped_and_checksummed(store):
+    import hashlib
+    import io
+    import json
+    import zipfile
+
+    rationale = ('In release 1.0, authenticated input reaches the parser. '
+                 'A 30 KB request caused temporary memory growth; the service recovered. '
+                 'No unauthenticated exploitation or live crash was established.')
+    record, _ = _add(store, assessment_summary=rationale,
+                     body_markdown='Observed <script>alert(1)</script> in untrusted input.')
+    key = record['evidence_id']
+    attachment = store.add_attachment(key, filename='report.txt', content=b'Observation',
+                                      uploaded_by='alice', description='Bounded staging test')
+    store.record_application(evidence_id=key, finding_uuid='finding-1', team='Core',
+                             assessment_revision=3, status='queued', applied_by='rita')
+    store.withdraw(key, 'rita', 'Superseded by a broader test')
+    with zipfile.ZipFile(io.BytesIO(store.evidence_package(key))) as package:
+        text = package.read('appendix.md').decode()
+        printable = package.read('appendix.html').decode()
+        for value in (rationale, 'TestApp', 'library-a', 'project version 1.0',
+                      'alice', 'triage-bot', 'Core; revision 3', 'report.txt (version 1',
+                      attachment['sha256'], 'WITHDRAWN', 'Superseded by a broader test'):
+            assert value in text
+        assert '<script>' not in printable
+        assert '&lt;script&gt;' in printable
+        assert '@media print' in printable
+        manifest = json.loads(package.read('manifest.json'))
+        for name in ('appendix.md', 'appendix.html'):
+            assert hashlib.sha256(package.read(name)).hexdigest() == manifest['files'][name]['sha256']
+
+
+@pytest.mark.parametrize('missing', ['content_base64', 'content'])
+def test_project_evidence_archive_rejects_missing_attachment_bytes_atomically(store, tmp_path, missing):
+    import json
+
+    record, _ = _add(store)
+    store.add_attachment(record['evidence_id'], filename='report.txt', content=b'Observation', uploaded_by='alice')
+    archive = store.export_project_records('TestApp')
+    row = archive['records'][0]['row']
+    attachments = json.loads(row['attachments_json'])
+    if missing == 'content_base64':
+        del attachments[0]['content_base64']
+    else:
+        attachments[0]['content_base64'] = ''
+    row['attachments_json'] = json.dumps(attachments)
+    destination = CodeEvidenceStore(path_provider=lambda: str(tmp_path / 'empty.sqlite'))
+    with pytest.raises(CodeEvidenceError, match='attachment'):
+        destination.import_project_records(archive)
+    assert destination.get(record['evidence_id']) is None

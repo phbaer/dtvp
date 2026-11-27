@@ -5,9 +5,11 @@
 | | |
 | :--- | :--- |
 | Decision status | Proposed (2026-11-20) |
-| Implementation status | Implemented on branch `feat/code-evidence-mcp` (2026-11-20), not merged; see [AI and API access](../ai-access.md#code-evidence) and [Analysis integrations](../analysis-integrations.md#agent-code-evidence) |
+| Implementation status | Base workflow implemented; draft application amended by ADR 0017 on `feat/evidence-assessment-attachments`; see [AI and API access](../ai-access.md#code-evidence) and [Analysis integrations](../analysis-integrations.md#agent-code-evidence) |
 | Related | [ADR 0001](0001-ai-access-through-mcp-and-access-tokens.md), [ADR 0002](0002-local-first-database-with-import-and-export.md) |
 | Numbering | 0005, because `feat/vdr-recommendation` holds 0004 (ADR 0004: the VDR recommendation comes from the ranges Dependency-Track holds). The sync and backup designs are drafting ADRs at the same time: whichever merges later takes the next free number |
+
+Decision 3 and its export consequences are amended by [ADR 0017](0017-standalone-assessments-and-supporting-evidence.md). That design is implemented on `feat/evidence-assessment-attachments`; the reference-line behavior below is historical.
 
 ## Context
 

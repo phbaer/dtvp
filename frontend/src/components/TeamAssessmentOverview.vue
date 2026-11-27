@@ -172,6 +172,9 @@ const rowTitle = (row: TeamOverviewRow) => [
                     <span v-if="row.user || row.timestamp" class="shrink-0 text-gray-500">
                         {{ [row.user, day(row.timestamp)].filter(Boolean).join(', ') }}
                     </span>
+                    <span v-if="row.reviewer" data-testid="team-overview-reviewer" class="text-gray-500">
+                        Reviewed by {{ row.reviewer }}{{ row.reviewedAt ? `, ${new Date(row.reviewedAt).toLocaleString()}` : ' (approval time not recorded)' }}
+                    </span>
                     <span
                         data-testid="team-overview-components"
                         class="shrink-0 cursor-help text-gray-500 underline decoration-dotted"

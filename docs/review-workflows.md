@@ -587,6 +587,18 @@ agree); see
 
 ### Approving
 
+The list shows **Review needed** for incomplete work with a recorded decision,
+including submissions carrying the pending-review marker. Missing team
+assessments are listed separately; a reviewer can see both the need for a
+decision and remaining coverage. **Ready for approval** still requires complete
+coverage. The **Awaiting review** filter specifically selects pending
+submissions and does not include every **Review needed** item.
+
+Explicit approval records the reviewer and approval time for the current
+deciding blocks, separately from each original assessor/date. These appear in
+the assessment metadata, team overview and MCP reads. Older missing approval
+provenance stays unknown rather than being inferred from a generic save.
+
 Approve is offered only for a vulnerability that is
 [Ready for approval](assessment-model.md#approval); on any other pending
 vulnerability the card says what is missing, and the server refuses the

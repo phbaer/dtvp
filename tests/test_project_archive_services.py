@@ -229,7 +229,7 @@ async def test_export_project_archive_can_write_diffable_expanded_tree(
     manifest = (expanded_path / "manifest.json").read_text()
     assert "created_at" not in manifest
     assert "build_commit" not in manifest
-    assert "dtvp.project-archive/v1" in manifest
+    assert ARCHIVE_SCHEMA_VERSION in manifest
 
     rebuilt_archive = tmp_path / "rebuilt-from-tree.zip"
     with zipfile.ZipFile(rebuilt_archive, "w") as archive:
@@ -380,3 +380,30 @@ async def test_apply_project_archive_update_touches_existing_versions(tmp_path):
     assert applied["summary"]["updated"] == 1
     assert client.uploads[0]["project_uuid"] == "target-project-1"
     assert applied["summary"]["restored_assessments"] == 1
+
+
+@pytest.mark.asyncio
+async def test_project_archive_preserves_files_and_origin_when_finding_ids_change(tmp_path):
+    from dataclasses import replace
+    from dtvp.code_evidence_services import CodeEvidenceStore, normalize_evidence_input
+    source = CodeEvidenceStore(path_provider=lambda: str(tmp_path / 'source.sqlite'))
+    record, _ = source.add(project_name='ArchiveApp', vuln_id='CVE-2026-0001', vuln_ids=['CVE-2026-0001'], scope='findings', targets=[{
+        'finding_uuid':'source-finding-1', 'project_version':'1.0.0', 'project_uuid':'source-project-1',
+        'component':'library-a', 'component_uuid':'source-component-1', 'vulnerability_uuid':'source-vuln-1',
+    }], author_username='alice', token_id='token', agent_label='triage', **normalize_evidence_input(title='Staging check', body_markdown='Observed memory growth.', assessment_summary='Authenticated input reaches the parser.'))
+    attachment = source.add_attachment(record['evidence_id'], filename='report.md', content=b'Observed result', uploaded_by='alice')
+    source.record_application(evidence_id=record['evidence_id'], finding_uuid='source-finding-1', team='Core', assessment_revision=7, status='applied', applied_by='alice')
+    deps = replace(make_deps(tmp_path), code_evidence_store=source)
+    archive = await export_project_archive(deps, FakeExportClient(), project_name='ArchiveApp')
+    loaded = load_project_archive(archive['archive_path'])
+    assert loaded['evidence']['records'][0]['row']['evidence_id'] == record['evidence_id']
+    destination = CodeEvidenceStore(path_provider=lambda: str(tmp_path / 'target.sqlite'))
+    restored = await apply_project_archive(replace(deps, code_evidence_store=destination), FakeRestoreClient(), archive_path=archive['archive_path'], mode='create_missing')
+    assert restored['evidence_result']['added'] == 1
+    assert destination.download_attachment(record['evidence_id'], attachment['attachment_id'])[1] == b'Observed result'
+    target = destination.get(record['evidence_id'])['targets'][0]
+    assert target['finding_uuid'] == 'target-finding-1'
+    assert target['archive_source']['finding_uuid'] == 'source-finding-1'
+    assert destination.list_applications([record['evidence_id']])[0]['finding_uuid'] == 'source-finding-1'
+    again = await apply_project_archive(replace(deps, code_evidence_store=destination), FakeRestoreClient(), archive_path=archive['archive_path'], mode='update')
+    assert again['evidence_result']['added'] == 0

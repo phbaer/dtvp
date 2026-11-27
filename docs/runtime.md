@@ -828,3 +828,14 @@ instance is not consistent on disk, takes milliseconds whatever the size.
 The restore writes its staged databases without fsync per statement
 (`synchronous=OFF`) and syncs each file once when it is complete; a crash
 before that discards the staged files, never the live ones.
+
+### Approval provenance fields
+
+The assessment text remains canonical. Assessment-outbox migration 0010 adds
+`assessment_team_fields.reviewed_at_ms` and rebuilds only the derived field
+index from the texts, without changing assessments, revisions or queued
+exports. Approval writes `[Reviewed By]` and `[Reviewed At]` through the shared
+assessment renderer, with revision origin `assessment-approval`. Old records
+without these tags stay unknown; no backfill infers approval from a save.
+Instance dumps retain the canonical text and revision records and rebuild
+these fields on restore; the dump record format is unchanged.

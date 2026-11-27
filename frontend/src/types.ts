@@ -259,6 +259,7 @@ export interface AssessmentPayload {
     analysis_run_ids?: string[];
     /** Agent code evidence referenced in this draft; recorded on save. */
     code_evidence_ids?: string[];
+    code_evidence_by_team?: Record<string, string[]>;
 }
 
 export interface Statistics {
@@ -309,12 +310,15 @@ export interface ProjectArchivePreview {
     total_versions: number;
     total_assessments: number;
     total_restorable_assessments: number;
+    evidence_records?: number;
+    attachment_versions?: number;
     warnings: string[];
 }
 
 export interface ProjectArchiveApplyResult {
     project_name: string;
     mode: 'create_missing' | 'update';
+    evidence_result?: { evidence_records: number; added: number; associations: number; unmatched_target_findings?: string[] } | null;
     versions: Array<{
         version: string;
         status: 'created' | 'updated' | 'skipped_existing';

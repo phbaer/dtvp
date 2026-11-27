@@ -165,7 +165,7 @@ def test_known_limit_a_line_ending_in_a_signature_like_suffix_loses_it():
 def test_every_field_is_stored_as_it_was_sent():
     team = {
         "team": "Core", "state": "NOT_AFFECTED", "justification": "CODE_NOT_REACHABLE",
-        "assessed_by": "bob", "reviewed_by": "rita", "assessed_at_ms": 1794561289026,
+        "assessed_by": "bob", "reviewed_by": "rita", "reviewed_at_ms": 1794561389026, "assessed_at_ms": 1794561289026,
         "rescored_score": 1.5, "rescored_vector": VECTOR, "ssvc": "ATTEND",
         "ssvc_details": None, "assigned": ["carol", "dave"], "ticket": "EXP-1001",
         "evidence_reviewed": "yes", "version_coverage": "yes", "historical": False,
@@ -362,3 +362,14 @@ def test_the_response_goes_into_the_write_to_dependency_track():
     payload = {"state": "EXPLOITABLE", "details": "[Response: ROLLBACK]\n\nNote."}
     assert with_analysis_response(payload) == {**payload, "response": "ROLLBACK"}
     assert with_analysis_response({"details": "Note."})["response"] is None
+
+
+def test_approval_timestamp_round_trips_separately_and_legacy_time_stays_unknown():
+    text, fields = _roundtrip({'teams': [_team('Core', assessed_by='alice', assessed_at_ms=1700000000000,
+                                reviewed_by='rita', reviewed_at_ms=1800000000000)]})
+    assert '[Date: 1700000000000]' in text
+    assert '[Reviewed At: 1800000000000]' in text
+    team = fields['teams'][0]
+    assert (team['reviewed_by'], team['reviewed_at_ms'], team['assessed_at_ms']) == ('rita', 1800000000000, 1700000000000)
+    legacy = parse_assessment('NOT_AFFECTED', text.replace(' [Reviewed At: 1800000000000]', ''), False)
+    assert legacy['teams'][0]['reviewed_at_ms'] is None

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Awaitable, Callable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from .analysis_queue_runtime import AnalysisQueueFullError
@@ -1211,6 +1211,68 @@ def _register_code_analysis_routes(
             "items": await asyncio.to_thread(store.with_applications, records),
             "withdrawn_count": withdrawn_count,
         }
+
+    async def evidence_record(evidence_id: str):
+        store = deps.code_evidence_store
+        record = await asyncio.to_thread(store.get, evidence_id) if store is not None else None
+        if record is None:
+            raise HTTPException(status_code=404, detail="Code evidence not found.")
+        return store, record
+
+    @router.post("/code-evidence/{evidence_id}/attachments")
+    async def evidence_attachment_upload(
+        evidence_id: str, request: Request, filename: str,
+        user: Annotated[str, Depends(current_user_dependency)],
+        description: str = "", media_type: str = "application/octet-stream",
+        replaces_attachment_id: str | None = None,
+    ):
+        from .code_evidence_services import MAX_ATTACHMENT_BYTES
+        store, record = await evidence_record(evidence_id)
+        if str(deps.get_user_role(user) or '').upper() != 'REVIEWER' and record['author']['username'] != user:
+            raise HTTPException(status_code=403, detail="Only the author or a reviewer may upload evidence attachments")
+        content = bytearray()
+        async for chunk in request.stream():
+            if len(content) + len(chunk) > MAX_ATTACHMENT_BYTES:
+                raise HTTPException(status_code=413, detail="Attachments are limited to 10 MiB")
+            content.extend(chunk)
+        try:
+            return await asyncio.to_thread(store.add_attachment, evidence_id, filename=filename,
+                content=bytes(content), uploaded_by=user, description=description,
+                media_type=media_type, replaces_attachment_id=replaces_attachment_id)
+        except CodeEvidenceWithdrawnError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CodeEvidenceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/code-evidence/{evidence_id}/attachments/{attachment_id}")
+    async def evidence_attachment_download(evidence_id: str, attachment_id: str,
+        user: Annotated[str, Depends(current_user_dependency)]):
+        from urllib.parse import quote
+        store, _record = await evidence_record(evidence_id)
+        try:
+            metadata, content = await asyncio.to_thread(store.download_attachment, evidence_id, attachment_id)
+        except CodeEvidenceNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Attachment not found") from exc
+        except CodeEvidenceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(content, media_type="application/octet-stream", headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(metadata['filename'], safe=''),
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+            "X-Content-SHA256": metadata['sha256'],
+        })
+
+    @router.get("/code-evidence/{evidence_id}/package")
+    async def evidence_package_download(evidence_id: str,
+        user: Annotated[str, Depends(current_user_dependency)]):
+        store, _record = await evidence_record(evidence_id)
+        try:
+            content = await asyncio.to_thread(store.evidence_package, evidence_id)
+        except CodeEvidenceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(content, media_type="application/zip", headers={
+            "Content-Disposition": 'attachment; filename="evidence-package.zip"',
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+        })
 
     @router.post(
         "/code-evidence/{evidence_id}/withdraw",

@@ -77,6 +77,19 @@ describe('TeamAssessmentOverview', () => {
         }).find('[data-testid="team-overview-global"]').exists()).toBe(false)
     })
 
+    it('shows the reviewer and approval time separately from the assessor date', () => {
+        const overview = buildTeamOverview({
+            teams: [input('Core', 'NOT_AFFECTED')],
+            blocks: [{ ...block('Core', 'NOT_AFFECTED'), reviewer: 'rita', reviewedAt: 1800000000000 }],
+        })
+        const wrapper = mount(TeamAssessmentOverview, { props: { overview } })
+        expect(wrapper.get('[data-testid="team-overview-reviewer"]').text()).toBe(`Reviewed by rita, ${new Date(1800000000000).toLocaleString()}`)
+        expect(wrapper.text()).toContain('alice')
+        const legacy = buildTeamOverview({ teams: [input('Core', 'NOT_AFFECTED')], blocks: [{ ...block('Core', 'NOT_AFFECTED'), reviewer: 'rita' }] })
+        const old = mount(TeamAssessmentOverview, { props: { overview: legacy } })
+        expect(old.get('[data-testid="team-overview-reviewer"]').text()).toContain('approval time not recorded')
+    })
+
     it('lists the teams with state, status, components and the rationale', async () => {
         const wrapper = mount(TeamAssessmentOverview, {
             props: { overview: overviewOf([['A', 'NOT_AFFECTED'], ['B', 'EXPLOITABLE'], ['C', 'NOT_AFFECTED'], ['D', 'NOT_SET']]) },

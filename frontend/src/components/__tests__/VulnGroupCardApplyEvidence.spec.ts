@@ -27,7 +27,7 @@ vi.mock('../../lib/api', async () => {
 import { updateAssessment } from '../../lib/api'
 import { renderAssessmentFields } from '../../lib/__tests__/assessmentFieldsText'
 
-const REFERENCE = 'Code evidence ev_1 from triage-bot (alice, 2026-07-06): Parser entry point is not linked'
+const RATIONALE = 'The affected parser is absent from the tested application path. No remote exposure was established.'
 
 describe('VulnGroupCard applies agent code evidence', () => {
     const group = {
@@ -76,7 +76,7 @@ describe('VulnGroupCard applies agent code evidence', () => {
             await wrapper.find('.cursor-pointer').trigger('click')
             await flushPromises()
         }
-        wrapper.getComponent(CodeAnalysisPanel).vm.$emit('apply-evidence', payload)
+        wrapper.getComponent(CodeAnalysisPanel).vm.$emit('apply-evidence', { title: 'Parser evidence', ...payload })
         await flushPromises()
     }
 
@@ -98,34 +98,34 @@ describe('VulnGroupCard applies agent code evidence', () => {
         expect(wrapper.getComponent(CodeAnalysisPanel).props('reportedFindingUuids')).toEqual(['f1'])
     })
 
-    it('appends the reference and keeps the state unless a suggestion was chosen', async () => {
+    it('appends standalone rationale and keeps the state unless a suggestion was chosen', async () => {
         const wrapper = mountCard()
-        await applyEvidence(wrapper, { evidenceId: 'ev_1', reference: REFERENCE })
+        await applyEvidence(wrapper, { evidenceId: 'ev_1', summary: RATIONALE })
 
         const vm = wrapper.vm as any
-        expect(vm.details).toBe(REFERENCE)
+        expect(vm.details).toBe(RATIONALE)
         expect(vm.state).toBe('NOT_SET')
         expect(vm.codeEvidenceIds).toEqual(['ev_1'])
         expect(vm.activeDetailTab).toBe('review')
         expect(wrapper.get('[data-testid="code-analysis-draft-banner"]').text())
-            .toContain('Agent evidence ev_1 referenced in the draft. Review before saving.')
+            .toContain('Supporting evidence selected. Review the assessment rationale before saving.')
 
         vm.details = 'Our own reasoning.'
         await applyEvidence(wrapper, {
             evidenceId: 'ev_2',
-            reference: 'Code evidence ev_2 from bot (alice, 2026-07-07): Second',
+            summary: 'A second consumer uses only the local trust store.',
             state: 'NOT_AFFECTED',
             justification: 'CODE_NOT_REACHABLE',
         })
-        expect(vm.details).toBe('Our own reasoning.\n\nCode evidence ev_2 from bot (alice, 2026-07-07): Second')
+        expect(vm.details).toBe('Our own reasoning.\n\nA second consumer uses only the local trust store.')
         expect(vm.state).toBe('NOT_AFFECTED')
         expect(vm.justification).toBe('CODE_NOT_REACHABLE')
         expect(vm.codeEvidenceIds).toEqual(['ev_1', 'ev_2'])
     })
 
-    it('sends code_evidence_ids with the save and resets them after it', async () => {
+    it('sends explicit team evidence selections with the save and resets them after it', async () => {
         const wrapper = mountCard()
-        await applyEvidence(wrapper, { evidenceId: 'ev_1', reference: REFERENCE })
+        await applyEvidence(wrapper, { evidenceId: 'ev_1', summary: RATIONALE })
         const vm = wrapper.vm as any
         vm.state = 'IN_TRIAGE'
         await flushPromises()
@@ -134,17 +134,17 @@ describe('VulnGroupCard applies agent code evidence', () => {
 
         expect(updateAssessment).toHaveBeenCalledTimes(1)
         const payload = vi.mocked(updateAssessment).mock.calls[0]?.[0] as any
-        expect(payload.code_evidence_ids).toEqual(['ev_1'])
-        expect(renderAssessmentFields(payload.fields)).toContain(REFERENCE)
+        expect(payload.code_evidence_by_team.General).toEqual(['ev_1'])
+        expect(renderAssessmentFields(payload.fields)).toContain(RATIONALE)
         expect(vm.codeEvidenceIds).toEqual([])
     })
 
-    it('does not send evidence whose reference line was replaced or deleted', async () => {
+    it('keeps selected evidence when the rationale is edited', async () => {
         const wrapper = mountCard()
-        await applyEvidence(wrapper, { evidenceId: 'ev_1', reference: REFERENCE })
+        await applyEvidence(wrapper, { evidenceId: 'ev_1', summary: RATIONALE })
         await applyEvidence(wrapper, {
             evidenceId: 'ev_2',
-            reference: 'Code evidence ev_2 from bot (alice, 2026-07-07): Second',
+            summary: 'A second consumer uses only the local trust store.',
         })
         const vm = wrapper.vm as any
         // An analyzer result (or the analyst) replaced the text; only ev_2 stays cited.
@@ -155,14 +155,51 @@ describe('VulnGroupCard applies agent code evidence', () => {
         await save(wrapper)
 
         const payload = vi.mocked(updateAssessment).mock.calls[0]?.[0] as any
-        expect(payload.code_evidence_ids).toEqual(['ev_2'])
+        expect(payload.code_evidence_by_team.General).toEqual(['ev_1', 'ev_2'])
+    })
+
+    it('removes the explicit selection without changing rationale text', async () => {
+        const wrapper = mountCard()
+        await applyEvidence(wrapper, { evidenceId:'ev_1', summary:RATIONALE })
+        const vm = wrapper.vm as any
+        vm.state = 'IN_TRIAGE'
+        await flushPromises()
+        await wrapper.get('button[aria-label="Remove supporting evidence Parser evidence"]').trigger('click')
+        expect(vm.details).toBe(RATIONALE)
+        expect(vm.codeEvidenceIds).toEqual([])
+        await save(wrapper)
+        expect((vi.mocked(updateAssessment).mock.calls[0]?.[0] as any).code_evidence_by_team.General).toEqual([])
+    })
+
+    it('opens supporting evidence inside DTVP without inserting a reference in the rationale', async () => {
+        const wrapper = mountCard()
+        await applyEvidence(wrapper, { evidenceId:'ev_1', summary:RATIONALE })
+        await wrapper.get('[data-testid="assessment-supporting-evidence"] button.text-cyan-300').trigger('click')
+        await flushPromises()
+        const vm = wrapper.vm as any
+        expect(vm.requestedEvidenceId).toBe('ev_1')
+        expect(vm.activeDetailTab).toBe('analysis')
+        expect(vm.details).toBe(RATIONALE)
+    })
+
+    it('keeps team and global selections separate', async () => {
+        const wrapper = mountCard()
+        const vm = wrapper.vm as any
+        vm.selectedTeam = 'TEAM-A'
+        await flushPromises()
+        await applyEvidence(wrapper, { evidenceId:'ev_team', summary:RATIONALE })
+        expect(vm.codeEvidenceIds).toEqual(['ev_team'])
+        vm.selectedTeam = ''
+        await flushPromises()
+        expect(vm.codeEvidenceIds).toEqual([])
+        expect(vm.codeEvidenceByTeam['TEAM-A']).toEqual(['ev_team'])
     })
 
     it('drops withdrawn evidence after a rejected save and keeps the draft', async () => {
         const wrapper = mountCard()
-        await applyEvidence(wrapper, { evidenceId: 'ev_1', reference: REFERENCE })
+        await applyEvidence(wrapper, { evidenceId: 'ev_1', summary: RATIONALE })
         const vm = wrapper.vm as any
-        vm.details = `Our own reasoning.\n\n${REFERENCE}`
+        vm.details = `Our own reasoning.\n\n${RATIONALE}`
         vm.state = 'IN_TRIAGE'
         await flushPromises()
         vi.mocked(updateAssessment).mockRejectedValueOnce({
@@ -183,6 +220,6 @@ describe('VulnGroupCard applies agent code evidence', () => {
 
         expect(updateAssessment).toHaveBeenCalledTimes(2)
         const retry = vi.mocked(updateAssessment).mock.calls[1]?.[0] as any
-        expect(retry.code_evidence_ids).toEqual([])
+        expect(retry.code_evidence_by_team.General).toEqual([])
     })
 })

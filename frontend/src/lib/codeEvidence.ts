@@ -179,25 +179,6 @@ export const mergeEvidenceRows = (
     })
 }
 
-const oneLine = (value: unknown) => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
-
-/**
- * The plain-text line a person adds to an assessment draft. Never the
- * Markdown body: the assessment stays short, and brackets are dropped so
- * the line cannot read as assessment markup.
- */
-export const buildEvidenceReference = (evidence: Pick<CodeEvidence, 'evidence_id' | 'title' | 'created_at' | 'author'>): string => {
-    const date = oneLine(evidence.created_at).slice(0, 10)
-    const text = `Code evidence ${oneLine(evidence.evidence_id)} from ${oneLine(evidence.author?.agent_label)} (${oneLine(evidence.author?.username)}, ${date}): ${oneLine(evidence.title)}`
-    // Parentheses frame the author; square brackets and '---' are markup.
-    return text.replace(/[[\]]/g, '').replace(/-{3,}/g, '-')
-}
-
-/** The evidence ids whose reference line (see `buildEvidenceReference`) is
- * still in `text`. An id whose line was removed or replaced is not used. */
-export const evidenceIdsReferencedIn = (ids: readonly string[], text: string): string[] =>
-    ids.filter(id => text.includes(`Code evidence ${oneLine(id)} from `))
-
 /** The evidence id a rejected save names when that evidence can no longer be
  * used (unknown, withdrawn, another project or vulnerability), else null. */
 export const unusableEvidenceId = (message: unknown): string | null => {

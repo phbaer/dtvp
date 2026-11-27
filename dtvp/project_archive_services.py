@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import hashlib
 import io
 import json
@@ -25,7 +26,7 @@ from .bundle_io import (
 from .dt_client import DTClient
 
 
-ARCHIVE_SCHEMA_VERSION = "dtvp.project-archive/v1"
+ARCHIVE_SCHEMA_VERSION = "dtvp.project-archive/v2"
 ARCHIVE_FILE_SUFFIX = ".dtvp-project-archive.zip"
 
 
@@ -53,6 +54,7 @@ class ProjectArchiveServiceDeps:
     version: str
     build_commit: str
     archive_path_provider: Callable[[], str]
+    code_evidence_store: Any = None
     now_provider: Callable[[], datetime] = lambda: datetime.now(UTC)
     sleep: Callable[[float], Any] = asyncio.sleep
 
@@ -510,6 +512,10 @@ async def export_project_archive(
             }
         )
 
+    if deps.code_evidence_store is not None:
+        evidence = await asyncio.to_thread(deps.code_evidence_store.export_project_records, normalized_name, [str(p.get('version') or '') for p in selected])
+        files['evidence/supporting-material.json'] = stable_json_bytes(evidence)
+
     checksums = {
         name: {"sha256": sha256_hex(data), "size": len(data)}
         for name, data in sorted(files.items())
@@ -581,7 +587,7 @@ def _load_project_archive(path: str) -> dict[str, Any]:
     ) as zip_file:
         manifest = _read_json_member(zip_file, "manifest.json")
         schema_version = manifest.get("schema_version")
-        if schema_version != ARCHIVE_SCHEMA_VERSION:
+        if schema_version not in {ARCHIVE_SCHEMA_VERSION, "dtvp.project-archive/v1"}:
             if isinstance(schema_version, str) and schema_version.startswith(
                 "dtvp.project-archive/v"
             ):
@@ -625,7 +631,8 @@ def _load_project_archive(path: str) -> dict[str, Any]:
                 }
             )
 
-    return {"manifest": manifest, "versions": versions}
+        evidence = _read_json_member(zip_file, 'evidence/supporting-material.json') if 'evidence/supporting-material.json' in (manifest.get('files') or {}) else None
+    return {"manifest": manifest, "versions": versions, "evidence": evidence}
 
 
 async def preview_project_archive(
@@ -676,6 +683,8 @@ async def preview_project_archive(
         "project_name": project_name,
         "versions": version_previews,
         "total_versions": len(version_previews),
+        "evidence_records": len((archive.get('evidence') or {}).get('records', [])),
+        "attachment_versions": sum(len(json.loads(item['row']['attachments_json'])) for item in (archive.get('evidence') or {}).get('records', [])),
         "total_assessments": sum(item["assessment_count"] for item in version_previews),
         "total_restorable_assessments": sum(
             item["restorable_assessment_count"] for item in version_previews
@@ -825,6 +834,15 @@ async def apply_project_archive(
         manifest.get("source") or {}
     ).get("project_name")
 
+    evidence = archive.get('evidence')
+    if evidence:
+        if deps.code_evidence_store is None:
+            raise ProjectArchiveValidationError('This archive contains evidence but evidence storage is unavailable')
+        try:
+            await asyncio.to_thread(deps.code_evidence_store.import_project_records, evidence, dry_run=True)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProjectArchiveValidationError(str(exc)) from exc
+    evidence_target_map: dict[str, dict[str, Any]] = {}
     version_results: list[dict[str, Any]] = []
     for version in archive["versions"]:
         source_project = version["project"]
@@ -870,6 +888,23 @@ async def apply_project_archive(
         except Exception:
             target_bom = {}
 
+        # Map evidence by the same unambiguous component/advisory identity used
+        # for assessments; preserve source target identities and revision history.
+        target_entries = _target_finding_entries(target_findings, target_bom)
+        for source in version.get('findings') or []:
+            match, target_entry = _find_target_finding(target_entries, source)
+            if match != 'matched' or target_entry is None:
+                continue
+            target_finding = target_entry['finding']
+            component = target_finding.get('component') or {}
+            vulnerability = target_finding.get('vulnerability') or {}
+            old_key = finding_key(source_project.get('uuid'), source)
+            evidence_target_map[old_key] = {
+                'finding_uuid': finding_key(target_uuid, target_finding),
+                'project_uuid': target_uuid, 'component_uuid': component.get('uuid'),
+                'vulnerability_uuid': vulnerability.get('uuid'),
+            }
+
         assessment_result = await _restore_version_assessments(
             deps,
             client,
@@ -892,9 +927,29 @@ async def apply_project_archive(
             }
         )
 
+    unmatched_evidence_targets = []
+    if evidence:
+        evidence = copy.deepcopy(evidence)
+        for item in evidence['records']:
+            if deps.code_evidence_store.get(item['row']['evidence_id']) is not None:
+                continue
+            targets = json.loads(item['row']['targets_json'])
+            for target in targets:
+                source_key = target.get('finding_uuid')
+                mapped = evidence_target_map.get(source_key)
+                if mapped and mapped['finding_uuid'] != source_key:
+                    target['archive_source'] = {key: target.get(key) for key in mapped}
+                    target.update(mapped)
+                elif not mapped:
+                    unmatched_evidence_targets.append(str(source_key or 'Unknown source finding'))
+            item['row']['targets_json'] = json.dumps(targets, sort_keys=True)
+    evidence_result = await asyncio.to_thread(deps.code_evidence_store.import_project_records, evidence) if evidence else None
+    if evidence_result is not None:
+        evidence_result['unmatched_target_findings'] = unmatched_evidence_targets
     return {
         "project_name": project_name,
         "mode": mode,
+        "evidence_result": evidence_result,
         "versions": version_results,
         "summary": {
             "created": sum(1 for item in version_results if item["status"] == "created"),

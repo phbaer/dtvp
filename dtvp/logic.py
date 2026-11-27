@@ -1611,7 +1611,7 @@ def _parse_assessment_blocks_uncached(details: str) -> Tuple[str, List[Dict[str,
 
         # Clean metadata from content to prevent leakage
         content = re.sub(
-            r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]",
+            r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Reviewed At|Team|State|Justification|Date):\s*[^\]]*\]",
             "",
             content,
         )
@@ -1653,6 +1653,13 @@ def _parse_assessment_blocks_uncached(details: str) -> Tuple[str, List[Dict[str,
             except ValueError:
                 pass
 
+            reviewed_at_ms = None
+            try:
+                if parsed_tags.get("Reviewed At"):
+                    reviewed_at_ms = int(parsed_tags["Reviewed At"])
+            except ValueError:
+                pass
+
             blocks.append(
                 {
                     "team": "General" if t_name.casefold() == "general" else t_name,
@@ -1661,6 +1668,7 @@ def _parse_assessment_blocks_uncached(details: str) -> Tuple[str, List[Dict[str,
                     "state": parsed_tags.get("State", "NOT_SET"),
                     "user": parsed_tags.get("Assessed By", "unknown"),
                     "reviewer": parsed_tags.get("Reviewed By"),
+                    "reviewed_at_ms": reviewed_at_ms,
                     "justification": parsed_tags.get("Justification", "NOT_SET"),
                     "rescored": rescored_val,
                     "vector": parsed_tags.get("Rescored Vector"),
@@ -1934,6 +1942,7 @@ def _attribution(block: Dict[str, Any]) -> Tuple[Any, ...]:
         None if user in (None, "", "unknown") else user,
         float(block["timestamp"]) if block.get("timestamp") else None,
         block.get("reviewer") or None,
+        block.get("reviewed_at_ms") or None,
     )
 
 
@@ -2036,6 +2045,7 @@ def keep_team_records(stored: str, new: str, *, saved_team: Optional[str]) -> st
                         "user": block.get("user"),
                         "timestamp": block.get("timestamp"),
                         "reviewer": block.get("reviewer"),
+                        "reviewed_at_ms": block.get("reviewed_at_ms"),
                     }
                 ),
             )
@@ -2072,6 +2082,39 @@ def keep_team_records(stored: str, new: str, *, saved_team: Optional[str]) -> st
             kept.append(render_team_block({**block, "historical": True}))
     result = insert_assessment_blocks(result, general, first=True)
     result = insert_assessment_blocks(result, kept)
+    return result
+
+
+def with_review_provenance(stored: str, details: str, *, reviewer: str | None = None,
+                           reviewed_at_ms: int | None = None) -> str:
+    """Stamp an explicit approval, or preserve the review of unchanged work.
+
+    History is immutable. Assessor and assessment date describe the original
+    work; reviewer and review date describe the separate approval event.
+    Client-supplied approval times are never accepted as new provenance.
+    """
+    previous = {
+        _assessment_team_key(block['team']): block
+        for block in parse_assessment_blocks(stored)[1] if not block.get('historical')
+    }
+    result = details
+    for block in parse_assessment_blocks(details)[1]:
+        if block.get('historical'):
+            continue
+        old = previous.get(_assessment_team_key(block['team']))
+        same = old is not None and _same_assessment(old, block)
+        updated = dict(block)
+        if reviewer is not None and block.get('state') not in (None, '', 'NOT_SET'):
+            updated.update(reviewer=reviewer, reviewed_at_ms=reviewed_at_ms)
+            if same:
+                updated.update(user=old.get('user'), timestamp=old.get('timestamp'))
+        elif same:
+            updated.update(reviewer=old.get('reviewer'), reviewed_at_ms=old.get('reviewed_at_ms'))
+        else:
+            # A new/changed draft cannot claim a review supplied by its caller.
+            updated.update(reviewer=None, reviewed_at_ms=None)
+        if updated != block:
+            result = replace_assessment_block(result, block['team'], render_team_block(updated))
     return result
 
 
@@ -2201,7 +2244,7 @@ def process_assessment_details(
     # 3. Clean New Content (Strip all headers and tags)
     content = re.sub(r"---.*?---", "", new_details, flags=re.DOTALL)
     content = re.sub(
-        r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State):\s*[^\]]*\]",
+        r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Reviewed At|Team|State):\s*[^\]]*\]",
         "",
         content,
     )

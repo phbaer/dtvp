@@ -27,7 +27,7 @@ def override_deps(mock_client):
     main.app.dependency_overrides = {}
 
 
-def test_update_assessment_appends_user(override_deps, mock_client):
+def test_reviewer_save_records_assessor_without_claiming_approval(override_deps, mock_client):
     client = TestClient(main.app)
 
     payload = {
@@ -63,7 +63,9 @@ def test_update_assessment_appends_user(override_deps, mock_client):
             "[Team: General] [State: NOT_AFFECTED] [Assessed By: testuser]"
             in queued_payload["details"]
         )
-        assert "[Reviewed By: testuser]" in queued_payload["details"]
+        # The reviewer is the author here; only approve=True records a review.
+        assert "[Reviewed By:" not in queued_payload["details"]
+        assert "[Reviewed At:" not in queued_payload["details"]
         # Ensure pending flag NOT added for Reviewer
         assert "[Status: Pending Review]" not in queued_payload["details"]
 

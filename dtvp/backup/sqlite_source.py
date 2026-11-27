@@ -516,6 +516,8 @@ class SqliteDumpSource:
                 **embedded(row["targets_json"], "targets"),
                 "title": row["title"],
                 "body_markdown": row["body_markdown"],
+                **({"assessment_summary": row["assessment_summary"]} if row["assessment_summary"] is not None else {}),
+                **(embedded(row["attachments_json"], "attachments") if row["attachments_json"] != "[]" else {}),
                 **embedded(row["references_json"], "references"),
                 **{
                     column: row[column]
@@ -540,19 +542,14 @@ class SqliteDumpSource:
         self, connection: sqlite3.Connection
     ) -> Iterator[dict[str, Any]]:
         for row in connection.execute(
-            "SELECT * FROM code_evidence_applications ORDER BY evidence_id, finding_uuid"
+            "SELECT * FROM code_evidence_applications ORDER BY evidence_id, finding_uuid, team, assessment_revision"
         ):
-            yield {
-                column: row[column]
-                for column in (
-                    "evidence_id",
-                    "finding_uuid",
-                    "workflow_id",
-                    "status",
-                    "applied_by",
-                    "applied_at",
-                )
-            }
+            record = {column: row[column] for column in (
+                "evidence_id", "finding_uuid", "workflow_id", "status", "applied_by", "applied_at",
+            )}
+            if row['team'] or row['assessment_revision'] != -1 or row['selected'] != 1:
+                record.update({column: row[column] for column in ('team', 'assessment_revision', 'selected')})
+            yield record
 
     def _finding_presence(self, connection: sqlite3.Connection) -> Iterator[dict[str, Any]]:
         for row in connection.execute(

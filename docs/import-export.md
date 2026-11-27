@@ -561,3 +561,22 @@ Findings with a record in DTVP carry a status (`dtvpSyncStatus` on an analysis,
 | `inactive` | Dependency-Track no longer reports the finding; the value is kept |
 | `superseded` | The value was carried over to the finding that replaced this one; kept as history. Active again if the finding returns |
 | `cancelled` | A queued export was discarded and the previous value was not known; the next import replaces the value |
+
+
+### Supporting evidence in project archives
+
+Project archive v2 carries a checksummed `evidence/supporting-material.json`
+with complete evidence records, immutable file versions and application
+history. Archive v1 remains readable. New evidence payloads are validated
+before source writes and restored transactionally in the evidence database;
+conflicting existing records are refused rather than overwritten. The
+selected releases determine which evidence records are included; each such
+record retains its complete report and history. Evidence material is bounded
+to 128 MiB per project archive; use an instance dump for larger collections.
+
+Across instances, uniquely matched finding targets retain `archive_source`
+identities. Historical application team/revision data stays source-attributed;
+it is never assigned a guessed destination revision. Unmatched targets are
+reported in the restore result. Normal assessment exports carry standalone
+rationale; evidence IDs and attachment bytes stay out of Dependency-Track and
+CycloneDX assessment prose. Consumers can download a separate evidence package.

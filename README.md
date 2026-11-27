@@ -31,6 +31,8 @@ and applies consistent decisions across releases.
   on request. Findings Dependency-Track stops reporting are kept as gone, with
   a reason, once its analysis of a BOM upload finished; the assessment of a
   replaced component is carried over to its successor, pending review.
+- MCP drafts validate every argument and can select supporting evidence for their team; evidence packages include readable, printable appendices.
+- [Standalone assessment rationale](docs/adr/0017-standalone-assessments-and-supporting-evidence.md), internal evidence associations, versioned supporting files and downloadable evidence packages.
 - Mock services for local development and testing.
 
 [Quick start](#quick-start) · [Deployment](#docker-deployment) ·
@@ -160,6 +162,11 @@ constraints, and CI conventions.
 | **Conflicting** | Assessment data disagrees or needs repair |
 | **Ready for approval** | Only the reviewer's approval is left, including a pending Global decision that covers teams without their own assessment |
 | **Assessed** | Complete with no pending approval; includes legacy assessments |
+
+The list shows **Review needed** for submitted work and incomplete assessments
+with an existing decision, and names missing team assessments separately.
+**Ready for approval** requires complete coverage. Explicit approval records
+the reviewer and approval time separately from the original assessor/date.
 
 Use the clear button in **Decision & rationale** to remove a saved Global or
 team assessment. Clearing Global leaves the team verdicts available.

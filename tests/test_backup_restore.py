@@ -714,3 +714,41 @@ def test_a_restore_cannot_swap_files_of_a_backend_on_another_dt_cache(tmp_path, 
         assert not list((production.root / "data").glob("*.pre-restore-*"))
     finally:
         release_instance(key)
+
+
+def test_supporting_files_and_team_revision_links_survive_dump_restore(tmp_path, monkeypatch):
+    from dtvp.code_evidence_services import CodeEvidenceStore
+    source = _fresh(monkeypatch, tmp_path / 'source-material')
+    populate(source)
+    store = CodeEvidenceStore(path_provider=lambda: source.code_analysis_results)
+    record = store.list_for_vulnerability('Imaging Suite', ['CVE-2026-0001'])[0]
+    evidence_id = record['evidence_id']
+    file = store.add_attachment(evidence_id, filename='observation.md', content=b'# Staging result', uploaded_by='alice')
+    store.record_application(evidence_id=evidence_id, finding_uuid='finding-test', team='Core', assessment_revision=4, selected=True, status='applied', applied_by='alice')
+    dumped = export_dump()
+    assert 'evidence-supporting-material' in _manifest(dumped.path)['required_features']
+    target = _fresh(monkeypatch, tmp_path / 'target-material')
+    assert restore_dump(dumped.path).ok
+    restored = CodeEvidenceStore(path_provider=lambda: target.code_analysis_results)
+    assert restored.download_attachment(evidence_id, file['attachment_id'])[1] == b'# Staging result'
+    assert restored.current_selection('finding-test', 'Core') == [evidence_id]
+    assert verify_deep(export_dump().path)["records"]["code_evidence"] == 2
+
+
+def test_dump_restore_preserves_separate_reviewer_and_assessor_dates(tmp_path, monkeypatch):
+    source = configure_instance(monkeypatch, tmp_path / 'approval-source')
+    keys = populate(source)
+    key = keys['synced']
+    text = ('--- [Team: General] [State: NOT_AFFECTED] [Assessed By: alice] '
+            '[Date: 1700000000000] [Reviewed By: rita] [Reviewed At: 1800000000000] '
+            '[Justification: CODE_NOT_PRESENT] ---\nNot shipped.')
+    source.outbox().enqueue_many([dict(zip(('project_uuid', 'component_uuid', 'vulnerability_uuid'), key)) |
+                                  {'state': 'NOT_AFFECTED', 'details': text, 'suppressed': False}],
+                                replace=True, author='rita', origin='assessment-approval')
+    dump = export_dump(include_access_tokens=True)
+    target = _fresh(monkeypatch, tmp_path / 'approval-target')
+    restore_dump(dump.path, options=RestoreOptions())
+    team = target.outbox().get_fields(key)['teams'][0]
+    assert (team['assessed_by'], team['assessed_at_ms'], team['reviewed_by'], team['reviewed_at_ms']) == (
+        'alice', 1700000000000, 'rita', 1800000000000)
+    assert target.outbox().list_revisions(key)[0]['origin'] == 'assessment-approval'

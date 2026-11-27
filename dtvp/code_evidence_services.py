@@ -13,7 +13,11 @@ analyzer cleanup never touch them. Withdrawing is a soft delete that keeps
 the provenance.
 """
 
+import base64
+import hashlib
+import io
 import json
+import zipfile
 import os
 import re
 import sqlite3
@@ -22,6 +26,7 @@ import uuid
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from html import escape
 from typing import Any, Callable, Iterable, Optional
 
 from .finding_keys import instance_finding_key
@@ -34,6 +39,11 @@ from .code_analysis_result_services import (
 )
 from .logic import STATE_PRIORITY
 from .sqlite_migration_services import run_sqlite_migrations
+
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024
+MAX_ATTACHMENTS = 20
+MAX_SUMMARY_LENGTH = 10000
 
 CODE_EVIDENCE_SCHEMA_VERSION = "dtvp.code-evidence/v1"
 EVIDENCE_SOURCE_MCP = "mcp"
@@ -104,6 +114,15 @@ def clean_body(value: Any) -> str:
     return _BODY_CONTROL.sub("", text).strip()
 
 
+def validate_attachment_filename(filename: str) -> None:
+    if (not filename or len(filename) > 180 or filename in {'.', '..'}
+        or filename[-1:] in {'.', ' '}
+        or any(char in filename for char in '/\\<>:"|?*')
+        or _ANY_CONTROL.search(filename)
+        or re.match(r'(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)', filename)):
+        raise CodeEvidenceError('Use a portable filename without paths or reserved characters (at most 180 characters)')
+
+
 def normalize_evidence_input(
     *,
     title: Any,
@@ -113,6 +132,7 @@ def normalize_evidence_input(
     suggested_justification: Any = None,
     confidence: Any = None,
     idempotency_key: Any = None,
+    assessment_summary: Any = None,
 ) -> dict[str, Any]:
     """Validate and clean the caller's fields; raise CodeEvidenceError."""
     clean_title = _single_line(title)
@@ -123,7 +143,7 @@ def normalize_evidence_input(
             f"The title is limited to {MAX_TITLE_LENGTH} characters"
         )
     if RESERVED_DETAIL_PATTERN.search(clean_title):
-        # The title is what a person copies into an assessment.
+        # Legacy clients copied titles into assessment references.
         raise CodeEvidenceError(
             "The title must be plain text: remove '---' separators and "
             "bracketed tags such as [Team: ...] or [State: ...]"
@@ -185,7 +205,11 @@ def normalize_evidence_input(
         raise CodeEvidenceError(
             f"idempotency_key is limited to {MAX_IDEMPOTENCY_KEY_LENGTH} characters"
         )
+    summary = clean_body(assessment_summary) or None
+    if summary and (len(summary) > MAX_SUMMARY_LENGTH or RESERVED_DETAIL_PATTERN.search(summary)):
+        raise CodeEvidenceError("assessment_summary must be plain assessment prose, at most 10000 characters, without reserved tags or separators")
     return {
+        "assessment_summary": summary,
         "title": clean_title,
         "body_markdown": body,
         "references": clean_references,
@@ -281,6 +305,8 @@ def _decode_list(value: Any) -> list[Any]:
 
 
 _COLUMNS = (
+    "assessment_summary",
+    "attachments_json",
     "evidence_id",
     "schema_version",
     "source",
@@ -306,6 +332,7 @@ _COLUMNS = (
 # A replay with the same token and idempotency key must carry exactly these
 # values; otherwise the key is being reused for different evidence.
 _REPLAY_COLUMNS = (
+    "assessment_summary",
     "project_name_lower",
     "vuln_id",
     "scope",
@@ -317,7 +344,13 @@ _REPLAY_COLUMNS = (
     "suggested_justification",
     "confidence",
 )
-_SELECT = f"SELECT {', '.join(f'e.{column}' for column in _COLUMNS)} FROM code_evidence AS e"
+# Listing evidence must never materialize every attachment body. SQLite strips
+# base64 content before returning the row; dedicated downloads read the bytes.
+_SELECT_COLUMNS = [
+    "(SELECT COALESCE(json_group_array(json_remove(value, '$.content_base64')), '[]') FROM json_each(e.attachments_json)) AS attachments_json"
+    if column == 'attachments_json' else f'e.{column}' for column in _COLUMNS
+]
+_SELECT = f"SELECT {', '.join(_SELECT_COLUMNS)} FROM code_evidence AS e"
 
 
 def _row_record(row: tuple[Any, ...], vuln_ids: list[str]) -> dict[str, Any]:
@@ -347,6 +380,8 @@ def _row_record(row: tuple[Any, ...], vuln_ids: list[str]) -> dict[str, Any]:
         ],
         "title": data["title"],
         "body_markdown": data["body_markdown"],
+        "assessment_summary": data["assessment_summary"],
+        "attachments": [{k: v for k, v in item.items() if k != "content_base64"} for item in _decode_list(data["attachments_json"])],
         "references": [
             str(reference) for reference in _decode_list(data["references_json"])
         ],
@@ -446,6 +481,7 @@ class CodeEvidenceStore:
         authority: str = EVIDENCE_AUTHORITY,
         idempotency_key: Optional[str] = None,
         source: str = EVIDENCE_SOURCE_MCP,
+        assessment_summary: Optional[str] = None,
     ) -> tuple[dict[str, Any], bool]:
         """Store one entry. Returns ``(record, created)``; a repeat with the
         same token, idempotency key and content returns the first record. The
@@ -482,6 +518,7 @@ class CodeEvidenceStore:
                     ).fetchone()
                     if existing:
                         requested = (
+                            assessment_summary,
                             project.lower(),
                             group_id,
                             scope,
@@ -528,8 +565,8 @@ class CodeEvidenceStore:
                         body_markdown, references_json, suggested_state,
                         suggested_justification, confidence, author_username,
                         token_id, agent_label, authority, idempotency_key,
-                        created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, assessment_summary
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         evidence_id,
@@ -552,6 +589,7 @@ class CodeEvidenceStore:
                         authority,
                         idempotency_key,
                         created_at,
+                        assessment_summary,
                     ),
                 )
                 connection.executemany(
@@ -657,6 +695,9 @@ class CodeEvidenceStore:
         status: str,
         applied_by: str,
         workflow_id: str = "",
+        team: str = "",
+        assessment_revision: int = -1,
+        selected: bool = True,
     ) -> dict[str, Any]:
         key = _text(evidence_id)
         finding = _text(finding_uuid)
@@ -668,6 +709,9 @@ class CodeEvidenceStore:
         application = {
             "evidence_id": key,
             "finding_uuid": finding,
+            "team": team,
+            "assessment_revision": assessment_revision,
+            "selected": selected,
             "workflow_id": _text(workflow_id),
             "status": normalized_status,
             "applied_by": _text(applied_by),
@@ -679,9 +723,9 @@ class CodeEvidenceStore:
                     """
                     INSERT INTO code_evidence_applications (
                         evidence_id, finding_uuid, workflow_id, status,
-                        applied_by, applied_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (evidence_id, finding_uuid) DO UPDATE SET
+                        applied_by, applied_at, team, assessment_revision, selected
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (evidence_id, finding_uuid, team, assessment_revision) DO UPDATE SET
                         workflow_id = excluded.workflow_id,
                         status = CASE
                             WHEN code_evidence_applications.status = 'applied'
@@ -691,6 +735,7 @@ class CodeEvidenceStore:
                                 THEN 'queued'
                             ELSE excluded.status
                         END,
+                        selected = excluded.selected,
                         applied_by = excluded.applied_by,
                         applied_at = excluded.applied_at
                     """,
@@ -701,6 +746,9 @@ class CodeEvidenceStore:
                         normalized_status,
                         application["applied_by"],
                         application["applied_at"],
+                        team,
+                        assessment_revision,
+                        int(selected),
                     ),
                 )
         return application
@@ -714,7 +762,7 @@ class CodeEvidenceStore:
             rows = connection.execute(
                 f"""
                 SELECT evidence_id, finding_uuid, workflow_id, status,
-                       applied_by, applied_at
+                       applied_by, applied_at, team, assessment_revision, selected
                 FROM code_evidence_applications
                 WHERE evidence_id IN ({placeholders})
                 ORDER BY applied_at DESC, evidence_id, finding_uuid
@@ -729,9 +777,33 @@ class CodeEvidenceStore:
                 "status": row[3],
                 "applied_by": row[4],
                 "applied_at": row[5],
+                "team": row[6],
+                "assessment_revision": row[7],
+                "selected": bool(row[8]),
             }
             for row in rows
         ]
+
+    def has_applications(self, finding_uuids: Iterable[str]) -> bool:
+        """One cheap lookup avoids per-team/finding work on ordinary saves."""
+        findings = list(dict.fromkeys(finding_uuids))
+        if not findings:
+            return False
+        with self._lock, closing(self._connect()) as db:
+            for offset in range(0, len(findings), 500):
+                chunk = findings[offset:offset + 500]
+                if db.execute('SELECT 1 FROM code_evidence_applications WHERE finding_uuid IN (' + ','.join('?' for _ in chunk) + ') LIMIT 1', chunk).fetchone():
+                    return True
+        return False
+
+    def current_selection(self, finding_uuid: str, team: str) -> list[str]:
+        with self._lock, closing(self._connect()) as db:
+            rows = db.execute("""SELECT a.evidence_id, a.selected FROM code_evidence_applications a
+                WHERE a.finding_uuid = ? AND a.team = ? AND a.assessment_revision = (
+                    SELECT MAX(b.assessment_revision) FROM code_evidence_applications b
+                    WHERE b.finding_uuid = a.finding_uuid AND b.team = a.team
+                )""", (finding_uuid, team)).fetchall()
+        return [row[0] for row in rows if row[1]]
 
     def with_applications(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The records with an ``applications`` list each."""
@@ -741,6 +813,9 @@ class CodeEvidenceStore:
         ):
             by_id.setdefault(application["evidence_id"], []).append(
                 {
+                    "team": application["team"],
+                    "assessment_revision": application["assessment_revision"],
+                    "selected": application["selected"],
                     "finding_uuid": application["finding_uuid"],
                     "status": application["status"],
                     "applied_by": application["applied_by"],
@@ -751,3 +826,255 @@ class CodeEvidenceStore:
             {**record, "applications": by_id.get(record["evidence_id"], [])}
             for record in records
         ]
+
+    def add_attachment(
+        self, evidence_id: str, *, filename: str, content: bytes,
+        uploaded_by: str, description: str = "", media_type: str = "application/octet-stream",
+        replaces_attachment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Append an immutable file version; bytes and provenance commit together."""
+        validate_attachment_filename(filename)
+        if not content or len(content) > MAX_ATTACHMENT_BYTES:
+            raise CodeEvidenceError("Attachments must contain 1 byte to 10 MiB")
+        if len(description) > 2000 or not _text(uploaded_by):
+            raise CodeEvidenceError("An uploader and a description of at most 2000 characters are required")
+        if not re.fullmatch(r"[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+", media_type):
+            raise CodeEvidenceError("Invalid media type")
+        digest = hashlib.sha256(content).hexdigest()
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                record = self._get_locked(db, evidence_id)
+                if record is None:
+                    raise CodeEvidenceNotFoundError(evidence_id)
+                if record['withdrawn']:
+                    raise CodeEvidenceWithdrawnError("Withdrawn evidence cannot receive attachments")
+                items = json.loads(db.execute("SELECT attachments_json FROM code_evidence WHERE evidence_id = ?", (evidence_id,)).fetchone()[0])
+                validate_attachments(items)
+                same_name = [item for item in items if item['filename'] == filename]
+                previous = same_name[-1] if same_name else None
+                if previous and previous['sha256'] == digest and previous['description'] == description and previous['media_type'] == media_type:
+                    db.rollback()
+                    return {k: v for k, v in previous.items() if k != 'content_base64'}
+                if (previous and replaces_attachment_id != previous['attachment_id']) or (not previous and replaces_attachment_id):
+                    raise CodeEvidenceError("A new version must name the latest attachment it replaces")
+                if len(items) >= MAX_ATTACHMENTS or sum(item['size'] for item in items) + len(content) > MAX_ATTACHMENT_TOTAL_BYTES:
+                    raise CodeEvidenceError("Evidence is limited to 20 attachment versions and 50 MiB total")
+                attachment = {
+                    'attachment_id': f"att_{uuid.uuid4().hex}", 'filename': filename,
+                    'description': description, 'media_type': media_type, 'size': len(content),
+                    'sha256': digest, 'uploaded_by': uploaded_by, 'uploaded_at': _utc_now_iso(),
+                    'version': previous['version'] + 1 if previous else 1,
+                    'replaces_attachment_id': replaces_attachment_id,
+                    'content_base64': base64.b64encode(content).decode('ascii'),
+                }
+                items.append(attachment)
+                db.execute("UPDATE code_evidence SET attachments_json = ? WHERE evidence_id = ?", (json.dumps(items), evidence_id))
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+        return {k: v for k, v in attachment.items() if k != 'content_base64'}
+
+    def attachment_records(self, evidence_id: str) -> list[dict[str, Any]]:
+        with self._lock, closing(self._connect()) as db:
+            row = db.execute("SELECT attachments_json FROM code_evidence WHERE evidence_id = ?", (evidence_id,)).fetchone()
+        if row is None:
+            raise CodeEvidenceNotFoundError(evidence_id)
+        items = json.loads(row[0])
+        validate_attachments(items)
+        return items
+
+    def download_attachment(self, evidence_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
+        item = next((item for item in self.attachment_records(evidence_id) if item['attachment_id'] == attachment_id), None)
+        if item is None:
+            raise CodeEvidenceNotFoundError(attachment_id)
+        return {k: v for k, v in item.items() if k != 'content_base64'}, base64.b64decode(item['content_base64'], validate=True)
+
+    @staticmethod
+    def _evidence_appendix(record: dict[str, Any], items: list[dict[str, Any]]) -> str:
+        """Portable, readable provenance; never invent an assessment or approval."""
+        author = record['author']
+        lines = [
+            '# Evidence appendix', '', record['title'], '',
+            f"Project: {record['project_name']}",
+            f"Vulnerabilities: {', '.join(record['vuln_ids'])}",
+            f"Recorded: {record['created_at']}",
+            f"Author: {author['username']} via {author['agent_label']} ({author['authority']})",
+            f"Scope: {record['scope']}",
+            'Evidence supports a decision; it is not a reviewer approval.',
+        ]
+        if record.get('withdrawn'):
+            withdrawal = record['withdrawn']
+            lines += [f"WITHDRAWN: {withdrawal['by']} at {withdrawal['at']}: {withdrawal['reason']}"]
+        lines += ['', '## Consumer and release scope']
+        for target in record['targets']:
+            lines += [f"- {target.get('component') or 'Unknown component'} "
+                      f"{target.get('component_version') or ''}; project version "
+                      f"{target.get('project_version') or 'not recorded'}"]
+        lines += ['', '## Assessment rationale', '', record.get('assessment_summary')
+                  or 'No assessment summary recorded. An author must write a standalone rationale before applying this evidence.',
+                  '', '## Source report', '', record['body_markdown']]
+        if record['references']:
+            lines += ['', '## References', *[f'- {value}' for value in record['references']]]
+        lines += ['', '## Supporting files']
+        for item in items:
+            lines += [f"- {item['filename']} (version {item['version']}, {item['size']} bytes, {item['media_type']})",
+                      f"  Uploaded by {item['uploaded_by']} at {item['uploaded_at']}",
+                      f"  SHA-256: {item['sha256']}", f"  {item['description']}"]
+        if not items:
+            lines += ['No supporting files recorded.']
+        lines += ['', '## Assessment use history', 'Historical associations; these do not imply approval.']
+        for application in record.get('applications', []):
+            revision = application.get('assessment_revision', -1)
+            lines += [f"- {application.get('team') or 'Team not recorded (legacy)'}; "
+                      f"revision {revision if revision >= 0 else 'not recorded'}; "
+                      f"{'selected' if application.get('selected', True) else 'deselected'}; "
+                      f"{application['status']}; {application['applied_by']} at {application['applied_at']}; "
+                      f"finding {application['finding_uuid']}"]
+        if not record.get('applications'):
+            lines += ['No assessment use recorded.']
+        return '\n'.join(lines) + '\n'
+
+    def evidence_package(self, evidence_id: str) -> bytes:
+        record = self.get(evidence_id)
+        if record is None:
+            raise CodeEvidenceNotFoundError(evidence_id)
+        record = self.with_applications([record])[0]
+        items = self.attachment_records(evidence_id)
+        appendix = self._evidence_appendix(record, items)
+        # Source reports and filenames are untrusted. The printable HTML is
+        # escaped text with no scripts, active links or external resources.
+        printable = ('<!doctype html><html lang="en"><meta charset="utf-8">'
+                     '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                     '<title>Evidence appendix</title>'
+                     '<style>body{font:12pt/1.5 sans-serif;max-width:70rem;margin:2rem}'
+                     'pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}'
+                     '@media print{body{margin:0}}</style><body><pre>'
+                     + escape(appendix) + '</pre></body></html>')
+        files = {'appendix.md': appendix.encode(), 'appendix.html': printable.encode(), 'evidence.json': json.dumps(record, indent=2).encode(), 'report.md': record['body_markdown'].encode()}
+        if record.get('assessment_summary'):
+            files['assessment-summary.txt'] = record['assessment_summary'].encode()
+        for item in items:
+            files[f"attachments/{item['attachment_id']}/{item['filename']}"] = base64.b64decode(item['content_base64'], validate=True)
+        manifest = {name: {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)} for name, data in files.items()}
+        files['manifest.json'] = json.dumps({'schema': 'dtvp.evidence-package/1', 'files': manifest}, indent=2).encode()
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for name, data in files.items():
+                archive.writestr(name, data)
+        return buffer.getvalue()
+
+
+    def export_project_records(self, project_name: str, versions: list[str] | None = None) -> dict[str, Any]:
+        with self._lock, closing(self._connect()) as db:
+            db.row_factory = sqlite3.Row
+            rows = []
+            total_bytes = 0
+            for stored in db.execute('SELECT * FROM code_evidence WHERE project_name_lower = ? ORDER BY evidence_id', (project_name.lower(),)):
+                row = dict(stored)
+                if versions is not None and not any(target.get('project_version') in versions for target in json.loads(row['targets_json'])):
+                    continue
+                total_bytes += len(row['attachments_json'].encode())
+                if total_bytes > 128 * 1024 * 1024:
+                    raise CodeEvidenceError('Project evidence exceeds the 128 MiB archive limit; use an instance backup')
+                rows.append(row)
+            records = []
+            for row in rows:
+                validate_attachments(json.loads(row['attachments_json']))
+                records.append({'row': row, 'vuln_ids': [item[0] for item in db.execute('SELECT vuln_id_lower FROM code_evidence_vuln_ids WHERE evidence_id = ? ORDER BY vuln_id_lower', (row['evidence_id'],))]})
+        applications = self.list_applications(row['row']['evidence_id'] for row in records)
+        return {'schema': 'dtvp.project-evidence/1', 'project_name': project_name, 'records': records, 'applications': applications}
+
+    def import_project_records(self, payload: dict[str, Any], *, dry_run: bool = False) -> dict[str, int]:
+        if payload.get('schema') != 'dtvp.project-evidence/1' or not isinstance(payload.get('records'), list) or not isinstance(payload.get('applications'), list):
+            raise CodeEvidenceError('Unsupported project evidence payload')
+        with self._lock, closing(self._connect()) as db:
+            db.execute('BEGIN IMMEDIATE')
+            try:
+                columns = [row[1] for row in db.execute('PRAGMA table_info(code_evidence)')]
+                ids = set()
+                added = 0
+                for item in payload['records']:
+                    row = item['row']
+                    if set(row) != set(columns) or row['project_name'] != payload['project_name'] or row['project_name_lower'] != payload['project_name'].lower():
+                        raise CodeEvidenceError('Invalid archived evidence identity')
+                    normalize_evidence_input(title=row['title'], body_markdown=row['body_markdown'], assessment_summary=row['assessment_summary'], references=json.loads(row['references_json']), suggested_state=row['suggested_state'], suggested_justification=row['suggested_justification'], confidence=row['confidence'], idempotency_key=row['idempotency_key'])
+                    targets = json.loads(row['targets_json'])
+                    if row['scope'] not in EVIDENCE_SCOPES or not isinstance(targets, list) or not targets or not all(isinstance(t, dict) for t in targets):
+                        raise CodeEvidenceError('Invalid archived evidence targets')
+                    validate_attachments(json.loads(row['attachments_json']))
+                    if row['evidence_id'] in ids:
+                        raise CodeEvidenceError('Duplicate archived evidence id')
+                    ids.add(row['evidence_id'])
+                    current = db.execute('SELECT ' + ','.join(columns) + ' FROM code_evidence WHERE evidence_id = ?', (row['evidence_id'],)).fetchone()
+                    if current:
+                        current_values = dict(zip(columns, current))
+                        def source_targets(raw):
+                            targets = json.loads(raw)
+                            for target in targets:
+                                source = target.pop('archive_source', {})
+                                target.update(source)
+                            return json.dumps(targets, sort_keys=True)
+                        original = {**row, 'targets_json': source_targets(row['targets_json'])}
+                        existing = {**current_values, 'targets_json': source_targets(current_values['targets_json'])}
+                        for column in ('attachments_json', 'references_json'):
+                            original[column] = json.dumps(json.loads(original[column]), sort_keys=True)
+                            existing[column] = json.dumps(json.loads(existing[column]), sort_keys=True)
+                        if original != existing:
+                            raise CodeEvidenceError('An existing evidence id has different archived content')
+                        continue
+                    db.execute('INSERT INTO code_evidence (' + ','.join(columns) + ') VALUES (' + ','.join('?' for _ in columns) + ')', [row[key] for key in columns])
+                    db.executemany('INSERT INTO code_evidence_vuln_ids VALUES (?, ?)', [(row['evidence_id'], value) for value in item['vuln_ids']])
+                    added += 1
+                for app in payload['applications']:
+                    if app['evidence_id'] not in ids or app['status'] not in APPLICATION_STATUSES:
+                        raise CodeEvidenceError('Invalid archived evidence application')
+                    columns_app = ['evidence_id','finding_uuid','team','assessment_revision','workflow_id','status','applied_by','applied_at','selected']
+                    values = {**app, 'team': app.get('team', ''), 'assessment_revision': app.get('assessment_revision', -1), 'selected': int(app.get('selected', True))}
+                    current = db.execute('SELECT ' + ','.join(columns_app) + ' FROM code_evidence_applications WHERE evidence_id=? AND finding_uuid=? AND team=? AND assessment_revision=?', (values['evidence_id'], values['finding_uuid'], values['team'], values['assessment_revision'])).fetchone()
+                    incoming = tuple(values[key] for key in columns_app)
+                    if current and tuple(current) != incoming:
+                        raise CodeEvidenceError('An existing evidence association has different archived content')
+                    if not current:
+                        db.execute('INSERT INTO code_evidence_applications (' + ','.join(columns_app) + ') VALUES (' + ','.join('?' for _ in columns_app) + ')', incoming)
+                if dry_run:
+                    db.rollback()
+                else:
+                    db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+        return {'evidence_records': len(ids), 'added': added, 'associations': len(payload['applications'])}
+
+
+def validate_attachments(items: list[dict[str, Any]]) -> None:
+    """Reject incomplete or corrupt supporting material on download and restore."""
+    if not isinstance(items, list) or len(items) > MAX_ATTACHMENTS:
+        raise CodeEvidenceError("Invalid attachment inventory")
+    total = 0
+    seen = set()
+    latest: dict[str, dict[str, Any]] = {}
+    for item in items:
+        try:
+            name = item['filename']
+            if not isinstance(name, str):
+                raise ValueError('invalid filename')
+            validate_attachment_filename(name)
+            content = base64.b64decode(item['content_base64'], validate=True)
+            if not content or len(content) > MAX_ATTACHMENT_BYTES or len(content) != item['size'] or hashlib.sha256(content).hexdigest() != item['sha256']:
+                raise ValueError('size or hash mismatch')
+            if item['attachment_id'] in seen or not re.fullmatch(r'att_[a-f0-9]{32}', item['attachment_id']):
+                raise ValueError('invalid attachment id')
+            previous = latest.get(name)
+            if item['version'] != (previous['version'] + 1 if previous else 1) or item.get('replaces_attachment_id') != (previous['attachment_id'] if previous else None):
+                raise ValueError('broken version chain')
+            if not isinstance(item['description'], str) or len(item['description']) > 2000 or not _text(item['uploaded_by']) or not _text(item['uploaded_at']) or not re.fullmatch(r'[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+', item['media_type']):
+                raise ValueError('invalid provenance')
+            seen.add(item['attachment_id'])
+            latest[name] = item
+            total += len(content)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CodeEvidenceError(f"Invalid evidence attachment: {exc}") from exc
+    if total > MAX_ATTACHMENT_TOTAL_BYTES:
+        raise CodeEvidenceError('Evidence attachments exceed 50 MiB')

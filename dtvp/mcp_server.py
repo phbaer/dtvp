@@ -41,6 +41,7 @@ from .assessment_use_cases import (
     AssessmentRequest,
     AssessmentUseCaseError,
     save_assessment,
+    validate_code_evidence,
 )
 from .general_api_routes import (
     hydrate_task_group_detail,
@@ -81,6 +82,9 @@ finding that changed after you read it: on a conflict, read it again.
 
 Optional justification sets your team's NOT_AFFECTED reason; omit to preserve
 it or pass NOT_SET to clear it. Valid values: dtvp://assessment-rules.
+Optional code_evidence_ids selects supporting evidence for your team's draft;
+omit/null to keep existing selections, [] to deselect. Evidence selection never
+approves an assessment. Pass the same arguments from preview to save.
 
 Write details as plain prose with your evidence and reasoning. Do not include
 bracketed tags or '---' separators.
@@ -88,7 +92,9 @@ bracketed tags or '---' separators.
 Use add_code_evidence to record what you found in the code (Markdown allowed).
 Evidence never changes an assessment; a person decides whether to use it.
 Check list_code_evidence first to avoid duplicates; pass an idempotency_key
-when retrying.
+when retrying. Provide assessment_summary as standalone decision rationale,
+separate from the detailed report. Use add_code_evidence_attachment to upload
+actual supporting bytes; local paths are not available to reviewers.
 """
 
 
@@ -249,6 +255,8 @@ class McpToolService:
                     "justification": block.get("justification") or "NOT_SET",
                     "assessed_by": block.get("user"),
                     "reviewed_by": block.get("reviewer"),
+                    "assessed_at_ms": int(block["timestamp"]) if block.get("timestamp") else None,
+                    "reviewed_at_ms": block.get("reviewed_at_ms"),
                     "historical": bool(block.get("historical")),
                     "rescored_cvss": block.get("rescored"),
                     "rescored_vector": block.get("vector"),
@@ -611,6 +619,7 @@ class McpToolService:
         state: str,
         details: str,
         justification: str | None = None,
+        code_evidence_ids: list[str] | None = None,
     ) -> tuple[AssessmentRequest, dict[str, bool]]:
         """The save request and each finding's existing suppression, which a
         save through this endpoint never changes."""
@@ -625,6 +634,7 @@ class McpToolService:
                 raise McpToolError("justification requires state NOT_AFFECTED")
         request = AssessmentRequest(
             justification=justification,
+            **({"code_evidence_ids": code_evidence_ids} if code_evidence_ids is not None else {}),
             instances=[
                 {
                     key: component.get(key)
@@ -672,6 +682,7 @@ class McpToolService:
         state: str,
         details: str,
         justification: str | None = None,
+        code_evidence_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         self._require_scope(token, SCOPE_READ)
         task = await self._project_task(token, project)
@@ -690,15 +701,30 @@ class McpToolService:
             state=normalized_state,
             details=text,
             justification=justification,
+            code_evidence_ids=code_evidence_ids,
         )
+        try:
+            validate_code_evidence(self.deps.route_deps, request, AGENT_ROLE)
+        except AssessmentUseCaseError as exc:
+            raise McpToolError(str(exc)) from exc
         payloads = self.deps.route_deps.build_assessment_payloads(
             request, author, AGENT_ROLE
         )
         current_by_uuid = {
             component["finding_uuid"]: current for component, current in targets
         }
+        store = getattr(self.deps.route_deps, "code_evidence_store", None)
+        chosen = {key: store.get(key) for key in request.code_evidence_ids} if store else {}
         for instance, payload in payloads:
             current = current_by_uuid[instance["finding_uuid"]]
+            previous = store.current_selection(instance["finding_uuid"], team_name) if store else []
+            selected = previous if code_evidence_ids is None else [
+                key for key, record in chosen.items()
+                if record["scope"] == "vulnerability" or any(
+                    target.get("finding_uuid") == instance["finding_uuid"]
+                    for target in record["targets"]
+                )
+            ]
             changes.append(
                 {
                     "finding_uuid": instance["finding_uuid"],
@@ -710,7 +736,9 @@ class McpToolService:
                     "changed": (
                         payload["state"] != current["state"]
                         or payload["details"] != current["details"]
+                        or set(selected) != set(previous)
                     ),
+                    "code_evidence_ids": selected,
                     "new_assessment": self._assessment_view(payload["details"]),
                 }
             )
@@ -720,6 +748,7 @@ class McpToolService:
             "team": team_name,
             "state": normalized_state,
             "saved": False,
+            **({"code_evidence_ids": request.code_evidence_ids} if code_evidence_ids is not None else {}),
             "pending_review_after_save": True,
             "expected_revisions": {
                 change["finding_uuid"]: change["revision"] for change in changes
@@ -738,6 +767,7 @@ class McpToolService:
         details: str,
         expected_revisions: dict[str, int],
         justification: str | None = None,
+        code_evidence_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         self._require_scope(token, SCOPE_WRITE)
         task = await self._project_task(token, project)
@@ -807,6 +837,7 @@ class McpToolService:
             state=normalized_state,
             details=text,
             justification=justification,
+            code_evidence_ids=code_evidence_ids,
         )
         try:
             # One transaction for every finding: all are saved or none.
@@ -882,6 +913,7 @@ class McpToolService:
         vulnerability_id: str,
         title: str,
         body_markdown: str,
+        assessment_summary: str | None = None,
         components: list[str] | None = None,
         finding_uuids: list[str] | None = None,
         references: list[str] | None = None,
@@ -904,6 +936,7 @@ class McpToolService:
             fields = normalize_evidence_input(
                 title=title,
                 body_markdown=body_markdown,
+                assessment_summary=assessment_summary,
                 references=references,
                 suggested_state=suggested_state,
                 suggested_justification=suggested_justification,
@@ -975,6 +1008,8 @@ class McpToolService:
             "evidence_id": record["evidence_id"],
             "title": record["title"],
             "body_markdown": record["body_markdown"],
+            "assessment_summary": record.get("assessment_summary"),
+            "attachments": record.get("attachments", []),
             "references": record["references"],
             "scope": record["scope"],
             "targets": record["targets"],
@@ -988,6 +1023,9 @@ class McpToolService:
                 {
                     "finding_uuid": application["finding_uuid"],
                     "applied_by": application["applied_by"],
+                    "team": application.get("team", ""),
+                    "assessment_revision": application.get("assessment_revision", -1),
+                    "selected": application.get("selected", True),
                     "applied_at": application["applied_at"],
                 }
                 for application in record.get("applications") or []
@@ -1020,6 +1058,37 @@ class McpToolService:
             "report_markdown": report[:MAX_ANALYZER_REPORT_LENGTH],
             "report_truncated": len(report) > MAX_ANALYZER_REPORT_LENGTH,
         }
+
+    async def add_code_evidence_attachment(
+        self, token: AccessToken, *, project: str, vulnerability_id: str,
+        evidence_id: str, filename: str, content_base64: str,
+        description: str = "", media_type: str = "application/octet-stream",
+        replaces_attachment_id: str | None = None,
+    ) -> dict[str, Any]:
+        import base64
+        from .code_evidence_services import MAX_ATTACHMENT_BYTES
+        self._require_scope(token, SCOPE_WRITE)
+        task = await self._project_task(token, project)
+        group = self._find_group(task, vulnerability_id)
+        record = self._evidence_store().get(evidence_id)
+        target = {"project": project, "evidence_id": evidence_id}
+        try:
+            if record is None or record['project_name'] != task.get('_project_name') or not set(record['vuln_ids']).intersection(value.lower() for value in self._group_vuln_ids(group)):
+                raise McpToolError("Evidence does not belong to this project and vulnerability")
+            if record['author']['username'] != token.username:
+                raise McpToolError("Only the evidence author may upload through MCP")
+            if len(content_base64) > ((MAX_ATTACHMENT_BYTES + 2) // 3) * 4:
+                raise McpToolError("Attachments are limited to 10 MiB")
+            content = base64.b64decode(content_base64, validate=True)
+            attachment = await asyncio.to_thread(self._evidence_store().add_attachment,
+                evidence_id, filename=filename, content=content, uploaded_by=token.username,
+                description=description, media_type=media_type, replaces_attachment_id=replaces_attachment_id)
+        except (ValueError, McpToolError) as exc:
+            await self._audit(token, action="add_code_evidence_attachment", outcome="rejected", target=target, detail=str(exc))
+            raise McpToolError(str(exc)) from exc
+        await self._audit(token, action="add_code_evidence_attachment", outcome="success",
+            target={**target, "attachment_id": attachment['attachment_id']})
+        return attachment
 
     async def list_code_evidence(
         self,
@@ -1128,7 +1197,24 @@ def build_mcp_server(service: McpToolService) -> Any:
     from mcp.server.mcpserver.exceptions import ToolError
     from mcp.types import ToolAnnotations
 
-    server = MCPServer(
+    class StrictMCPServer(MCPServer):
+        """Reject unknown fields before the SDK drops extra arguments."""
+
+        async def list_tools(self) -> list[Any]:
+            tools = await super().list_tools()
+            for tool in tools:
+                tool.input_schema["additionalProperties"] = False
+            return tools
+
+        async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+            tool = next((tool for tool in await self.list_tools() if tool.name == name), None)
+            if tool is not None:
+                unknown = set(arguments) - set(tool.input_schema.get("properties", {}))
+                if unknown:
+                    raise ToolError("Unknown arguments: " + ", ".join(sorted(unknown)))
+            return await super().call_tool(name, arguments, context)
+
+    server = StrictMCPServer(
         "dtvp",
         title="DTVP vulnerability review",
         instructions=SERVER_INSTRUCTIONS,
@@ -1246,15 +1332,19 @@ def build_mcp_server(service: McpToolService) -> Any:
         state: str,
         details: str,
         justification: str | None = None,
+        code_evidence_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Show what save_assessment would store, without saving. Returns the
         resulting assessment per finding and the expected_revisions to pass
         to save_assessment. Optional justification is a NOT_AFFECTED reason
-        from dtvp://assessment-rules; omit/null keeps it, NOT_SET clears it."""
+        from dtvp://assessment-rules; omit/null keeps it, NOT_SET clears it.
+        code_evidence_ids selects supporting evidence; omit/null preserves
+        selections, [] removes them. The same scope checks apply as on save."""
         return await call(
             ctx,
             service.preview_assessment,
             justification=justification,
+            code_evidence_ids=code_evidence_ids,
             project=project,
             vulnerability_id=vulnerability_id,
             team=team,
@@ -1272,6 +1362,7 @@ def build_mcp_server(service: McpToolService) -> Any:
         details: str,
         expected_revisions: dict[str, int],
         justification: str | None = None,
+        code_evidence_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Record one team's assessment for every finding of a vulnerability.
 
@@ -1281,11 +1372,14 @@ def build_mcp_server(service: McpToolService) -> Any:
         the save is rejected if any finding changed since. Needs a token
         with the write scope. Optional justification is a NOT_AFFECTED
         reason from dtvp://assessment-rules; omit/null keeps it, NOT_SET clears it.
+        code_evidence_ids selects supporting evidence for this team only;
+        omit/null preserves selections, [] removes them. Rationale is required.
         """
         return await call(
             ctx,
             service.save_assessment,
             justification=justification,
+            code_evidence_ids=code_evidence_ids,
             project=project,
             vulnerability_id=vulnerability_id,
             team=team,
@@ -1301,6 +1395,7 @@ def build_mcp_server(service: McpToolService) -> Any:
         vulnerability_id: str,
         title: str,
         body_markdown: str,
+        assessment_summary: str | None = None,
         components: list[str] | None = None,
         finding_uuids: list[str] | None = None,
         references: list[str] | None = None,
@@ -1311,6 +1406,7 @@ def build_mcp_server(service: McpToolService) -> Any:
     ) -> dict[str, Any]:
         """Record what you found in the code for one vulnerability.
 
+        `assessment_summary` is optional standalone assessment prose (up to 10,000 characters), editable by the reviewer.
         `body_markdown` is your evidence as Markdown (up to 20,000 characters);
         `title` is one plain line (up to 160). The evidence is about the
         whole vulnerability, or only the `components` (names) or
@@ -1328,6 +1424,7 @@ def build_mcp_server(service: McpToolService) -> Any:
             vulnerability_id=vulnerability_id,
             title=title,
             body_markdown=body_markdown,
+            assessment_summary=assessment_summary,
             components=components,
             finding_uuids=finding_uuids,
             references=references,
@@ -1336,6 +1433,22 @@ def build_mcp_server(service: McpToolService) -> Any:
             confidence=confidence,
             idempotency_key=idempotency_key,
         )
+
+    @server.tool(name="add_code_evidence_attachment", annotations=writes)
+    async def add_code_evidence_attachment(
+        ctx: Context, project: str, vulnerability_id: str, evidence_id: str,
+        filename: str, content_base64: str, description: str = "",
+        media_type: str = "application/octet-stream", replaces_attachment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload immutable supporting material to evidence you authored, up to 10 MiB.
+
+        Send base64 bytes, not local paths. Replacements name the latest attachment
+        id; all versions stay downloadable. Requires write scope.
+        """
+        return await call(ctx, service.add_code_evidence_attachment,
+            project=project, vulnerability_id=vulnerability_id, evidence_id=evidence_id,
+            filename=filename, content_base64=content_base64, description=description,
+            media_type=media_type, replaces_attachment_id=replaces_attachment_id)
 
     @server.tool(annotations=read_only)
     async def list_code_evidence(

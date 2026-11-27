@@ -35,6 +35,7 @@ class Upcaster:
 Effect = Baseline | NoRecordEffect | Upcaster
 
 MIGRATION_RECORD_EFFECTS: dict[tuple[str, int], Effect] = {
+    ("assessment_outbox", 10): NoRecordEffect("Rebuild derived assessment fields; canonical text and history are unchanged"),
     ("local_store", 2): Baseline(),
     ("assessment_outbox", 3): Baseline(),
     ("assessment_outbox", 4): Baseline(),
@@ -45,5 +46,6 @@ MIGRATION_RECORD_EFFECTS: dict[tuple[str, int], Effect] = {
     ("local_store", 6): NoRecordEffect("sync_versions only, which is not dumped"),
     ("local_store", 7): NoRecordEffect("sync_versions only, which is not dumped"),
     ("local_store", 8): NoRecordEffect("sync_versions only, which is not dumped"),
+    ("code_analysis_results", 5): NoRecordEffect("preserves existing applications; optional material and attribution fields default to empty or unknown"),
     ("local_store", 9): NoRecordEffect("sync_versions only, which is not dumped"),
 }

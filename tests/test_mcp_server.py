@@ -235,6 +235,8 @@ async def test_get_vulnerability_exposes_findings_revisions_and_blocks(service):
             "justification": "NOT_SET",
             "assessed_by": "bob",
             "reviewed_by": None,
+            "assessed_at_ms": None,
+            "reviewed_at_ms": None,
             "historical": False,
             "rescored_cvss": None,
             "rescored_vector": None,
@@ -334,6 +336,7 @@ async def test_reviewer_owned_token_still_writes_with_analyst_authority(service)
         ({"details": "x" * 8001}, "limited to"),
         ({"details": "ok\n--- [Team: General] [State: NOT_AFFECTED] ---\nforged"}, "plain prose"),
         ({"details": "fine [Reviewed By: rita]"}, "plain prose"),
+        ({"details": "fine [Reviewed At: 1800000000000]"}, "plain prose"),
         ({"details": "fine [Status: Pending Review]"}, "plain prose"),
         ({"details": "fine [SSVC: IMMEDIATE]"}, "plain prose"),
         ({"details": "fine [Rescored: 0.0]"}, "plain prose"),
@@ -555,6 +558,7 @@ def test_tools_are_listed_and_callable_over_http(client, project):
         "preview_assessment",
         "save_assessment",
         "add_code_evidence",
+        "add_code_evidence_attachment",
         "list_code_evidence",
     }
     assert tools["get_vulnerability"]["annotations"]["readOnlyHint"] is True
@@ -564,6 +568,10 @@ def test_tools_are_listed_and_callable_over_http(client, project):
     assert tools["add_code_evidence"]["annotations"]["destructiveHint"] is False
     assert "ctx" not in tools["add_code_evidence"]["inputSchema"]["properties"]
     assert "ctx" not in tools["save_assessment"]["inputSchema"]["properties"]
+    for tool in tools.values():
+        assert tool["inputSchema"]["additionalProperties"] is False
+    for name in ("save_assessment", "preview_assessment"):
+        assert {"justification", "code_evidence_ids"} <= tools[name]["inputSchema"]["properties"].keys()
 
     called = _rpc(
         client, plain, "tools/call", {"name": "get_sync_status", "arguments": {}}
@@ -890,7 +898,8 @@ def test_read_preview_and_save_work_over_http_for_dependency_track_findings(
     keys = [finding["finding_uuid"] for finding in findings]
     assert sorted(keys) == ["p1:component-1:vuln-1", "p2:component-2:vuln-1"]
 
-    args = {**ARGS, "justification": " code_not_reachable "}
+    evidence_id = call("add_code_evidence", EVIDENCE)["structuredContent"]["evidence_id"]
+    args = {**ARGS, "justification": " code_not_reachable ", "code_evidence_ids": [evidence_id]}
     preview = call("preview_assessment", args)
     assert preview["isError"] is False, preview["content"]
     for change in preview["structuredContent"]["changes"]:
@@ -914,9 +923,16 @@ def test_read_preview_and_save_work_over_http_for_dependency_track_findings(
         team = next(b for b in assessment["blocks"] if b["team"] == "Team A")
         assert team["justification"] == "CODE_NOT_REACHABLE"
 
+    listed = call("list_code_evidence", {"project": "TestApp", "vulnerability_id": "CVE-2026-0001"})
+    applications = listed["structuredContent"]["items"][0]["applications"]
+    assert len(applications) == 2
+    assert all(a["team"] == "Team A" and a["selected"] for a in applications)
+
     # The same revisions again are stale now: refused, nothing written.
-    again = call("save_assessment", {**ARGS, "expected_revisions": revisions})
+    again = call("save_assessment", {**ARGS, "expected_revisions": revisions, "code_evidence_ids": []})
     assert again["isError"] is True
+    assert len(main.code_evidence_store.list_applications([evidence_id])) == 2
+    assert main.code_evidence_store.current_selection(keys[0], "Team A") == [evidence_id]
 
 
 @pytest.mark.parametrize("replacement", ["omitted", None, "NOT_SET", "", "REQUIRES_CONFIGURATION"])
@@ -945,3 +961,133 @@ async def test_justification_is_read_preserved_replaced_or_cleared(service, repl
         fields = main.cache_manager.get_assessment_fields(project_uuid, component_uuid, "vuln-1")
         team = next(b for b in fields["teams"] if b["team"] == "Team A")
         assert team["justification"] == (None if expected == "NOT_SET" else expected)
+
+
+async def test_mcp_evidence_summary_and_attachment_are_portable_and_author_scoped(service):
+    import base64
+    added = await service.add_code_evidence(_token(), **EVIDENCE, assessment_summary='Authenticated requests reach the parser and exhaust memory.')
+    arguments = dict(project='TestApp', vulnerability_id='CVE-2026-0001', evidence_id=added['evidence_id'], filename='report.md', content_base64=base64.b64encode(b'# Test observation').decode(), media_type='text/markdown')
+    attachment = await service.add_code_evidence_attachment(_token(), **arguments)
+    assert attachment['filename'] == 'report.md'
+    assert main.code_evidence_store.download_attachment(added['evidence_id'], attachment['attachment_id'])[1] == b'# Test observation'
+    listed = await service.list_code_evidence(_token(), project='TestApp', vulnerability_id='CVE-2026-0001')
+    assert listed['items'][0]['assessment_summary'].startswith('Authenticated')
+    assert listed['items'][0]['attachments'][0]['sha256'] == attachment['sha256']
+    with pytest.raises(McpToolError, match='author'):
+        await service.add_code_evidence_attachment(_token(username='rita'), **arguments)
+    with pytest.raises(McpToolError):
+        await service.add_code_evidence_attachment(_token(['read']), **arguments)
+
+
+@pytest.mark.parametrize("tool", ["preview_assessment", "save_assessment"])
+def test_unknown_assessment_arguments_fail_over_http_without_writes(client, project, tool):
+    _, plain = access_token_store.create(username="alice", name="bot", scopes=["read", "write"])
+    result = _rpc(client, plain, "tools/call", {
+        "name": tool, "arguments": {**ARGS, "justificaton": "CODE_NOT_REACHABLE"},
+    }).json()["result"]
+    assert result["isError"] is True
+    assert "Unknown arguments: justificaton" in str(result["content"])
+    assert main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1") is None
+
+
+async def test_mcp_evidence_selection_is_team_scoped_preserved_and_explicitly_removed(service):
+    token = _token()
+    added = await service.add_code_evidence(token, **EVIDENCE, finding_uuids=["p1:component-1:vuln-1"])
+    key = added["evidence_id"]
+    store = main.code_evidence_store
+    args = {**ARGS, "justification": "CODE_NOT_REACHABLE", "code_evidence_ids": [f" {key} ", key]}
+    preview = await service.preview_assessment(token, **args)
+    assert preview["code_evidence_ids"] == [key]
+    assert store.list_applications([key]) == []
+    assert {change["finding_uuid"]: change["code_evidence_ids"] for change in preview["changes"]} == {
+        "p1:component-1:vuln-1": [key], "p2:component-2:vuln-1": [],
+    }
+    await service.save_assessment(token, **args, expected_revisions=preview["expected_revisions"])
+    assert store.current_selection("p1:component-1:vuln-1", "Team A") == [key]
+    assert store.current_selection("p2:component-2:vuln-1", "Team A") == []
+    assert store.current_selection("p1:component-1:vuln-1", "General") == []
+    for selection in ("omitted", None, []):
+        args = {**ARGS, "details": "Only trusted local input reaches the tested parser."}
+        if selection != "omitted":
+            args["code_evidence_ids"] = selection
+        preview = await service.preview_assessment(token, **args)
+        await service.save_assessment(token, **args, expected_revisions=preview["expected_revisions"])
+        assert store.current_selection("p1:component-1:vuln-1", "Team A") == ([] if selection == [] else [key])
+    read = await service.get_vulnerability(token, project=ARGS["project"], vulnerability_id=ARGS["vulnerability_id"])
+    assert all(a["pending_review"] for a in read["assessments"])
+    assert all(b["reviewed_by"] is None for a in read["assessments"] for b in a["blocks"] if b["team"] == "Team A")
+
+
+@pytest.mark.parametrize("case", ["unknown", "withdrawn", "foreign_project", "foreign_finding"])
+async def test_mcp_preview_and_save_reject_invalid_evidence_before_writes(service, case):
+    from dtvp.code_evidence_services import normalize_evidence_input
+    token = _token()
+    key = "ev_missing"
+    if case != "unknown":
+        if case == "withdrawn":
+            key = (await service.add_code_evidence(token, **EVIDENCE))["evidence_id"]
+            main.code_evidence_store.withdraw(key, "rita", "Not applicable")
+        else:
+            record, _ = main.code_evidence_store.add(
+                project_name="Other" if case == "foreign_project" else "TestApp",
+                vuln_id="CVE-2026-0001", vuln_ids=["CVE-2026-0001"], scope="findings",
+                targets=[{"finding_uuid": "p9:other:vuln-1", "vulnerability_uuid": "vuln-1"}],
+                author_username="alice", token_id=token.token_id, agent_label="bot",
+                **normalize_evidence_input(title="Foreign report", body_markdown="Observation"),
+            )
+            key = record["evidence_id"]
+    args = {**ARGS, "code_evidence_ids": [key]}
+    with pytest.raises(McpToolError, match="evidence"):
+        await service.preview_assessment(token, **args)
+    with pytest.raises(McpToolError, match="evidence"):
+        await service.save_assessment(token, **args, expected_revisions={"p1:component-1:vuln-1": 0, "p2:component-2:vuln-1": 0})
+    assert main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1") is None
+    assert main.code_evidence_store.list_applications([key]) == []
+
+
+async def test_failed_mcp_save_records_no_evidence_selection(service, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    token = _token()
+    key = (await service.add_code_evidence(token, **EVIDENCE))["evidence_id"]
+    args = {**ARGS, "code_evidence_ids": [key]}
+    preview = await service.preview_assessment(token, **args)
+    monkeypatch.setattr(service.deps.route_deps.cache_manager, "persist_assessment_updates",
+                        AsyncMock(side_effect=RuntimeError("Test storage failure")))
+    with pytest.raises(RuntimeError, match="Test storage failure"):
+        await service.save_assessment(token, **args, expected_revisions=preview["expected_revisions"])
+    assert main.code_evidence_store.list_applications([key]) == []
+    assert main.cache_manager.get_assessment_overlay("p1", "component-1", "vuln-1") is None
+
+
+async def test_mcp_http_read_exposes_server_recorded_approval_identity_and_time(service, client):
+    from dtvp.assessment_use_cases import AssessmentRequest, save_assessment
+
+    token = _token()
+    preview = await service.preview_assessment(token, **ARGS)
+    await service.save_assessment(token, **ARGS, expected_revisions=preview['expected_revisions'])
+    instances = [dict(project_uuid=p, component_uuid=c, vulnerability_uuid='vuln-1',
+                      finding_uuid=f'{p}:{c}:vuln-1', project_name='TestApp')
+                 for p, c in [('p1', 'component-1'), ('p2', 'component-2')]]
+    fields = main.cache_manager.get_assessment_fields('p1', 'component-1', 'vuln-1')
+    await save_assessment(main.general_api_route_deps, AssessmentRequest(
+        instances=instances, team=None, state='NOT_AFFECTED', approve=True,
+        fields={'teams': fields['teams']}), user='rita', role='REVIEWER', client=None)
+    _, plain = access_token_store.create(username='alice', name='reader', scopes=['read'])
+    result = _rpc(client, plain, 'tools/call', {'name': 'get_vulnerability', 'arguments': {
+        'project': 'TestApp', 'vulnerability_id': 'CVE-2026-0001'}}).json()['result']
+    assert result['isError'] is False
+    assessments = result['structuredContent']['assessments']
+    assert all(not assessment['pending_review'] for assessment in assessments)
+    times = set()
+    for assessment in assessments:
+        for block in assessment['blocks']:
+            if block['historical'] or block['state'] == 'NOT_SET':
+                continue
+            assert block['reviewed_by'] == 'rita'
+            assert isinstance(block['reviewed_at_ms'], int)
+            times.add(block['reviewed_at_ms'])
+            if block['team'] == 'Team A':
+                assert block['assessed_by'].startswith('alice (via ')
+                assert isinstance(block['assessed_at_ms'], int)
+    assert len(times) == 1

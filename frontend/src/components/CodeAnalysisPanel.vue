@@ -16,7 +16,7 @@ import { analysisQueueStore } from '../lib/analysisQueueStore'
 import { isCodeAnalysisApplicable, codeAnalysisAssessmentState, isCodeAnalysisResultWorse } from '../lib/codeAnalysisResult'
 import type { CodeAnalysisComponentRun } from '../lib/codeAnalysisResult'
 import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
-import { buildEvidenceReference, mergeEvidenceRows } from '../lib/codeEvidence'
+import { mergeEvidenceRows } from '../lib/codeEvidence'
 import type { EvidenceFilter, EvidenceRow } from '../lib/codeEvidence'
 import CodeAnalysisRunOutcome from './CodeAnalysisRunOutcome.vue'
 import CodeAnalysisRunDetails from './CodeAnalysisRunDetails.vue'
@@ -54,6 +54,7 @@ const props = defineProps<{
     reportedFindingUuids?: string[]
     /** Bumped by the card after every save, so the list marks what it used. */
     refreshKey?: number
+    focusEvidenceId?: string
 }>()
 
 const emit = defineEmits<{
@@ -62,7 +63,8 @@ const emit = defineEmits<{
     (e: 'result-change', result: CodeAnalysisAssessResponse | null, components: string[]): void
     (e: 'scope-results-change', available: boolean): void
     (e: 'proposals-change', runs: CodeAnalysisComponentRun[]): void
-    (e: 'apply-evidence', payload: { evidenceId: string; reference: string; state?: string; justification?: string }): void
+    (e: 'evidence-loaded', records: CodeEvidence[]): void
+    (e: 'apply-evidence', payload: { evidenceId: string; title: string; summary: string; state?: string; justification?: string }): void
 }>()
 
 const sessionUser = inject<Ref<{ username?: string } | null> | null>('user', null)
@@ -76,6 +78,9 @@ const evidenceLoading = ref(false)
 const evidenceFilter = ref<EvidenceFilter>('all')
 const showWithdrawn = ref(false)
 const selectedAgentId = ref<string | null>(null)
+watch([() => props.focusEvidenceId, agentEvidence], ([id]) => {
+    if (id && agentEvidence.value.some(item => item.evidence_id === id)) selectedAgentId.value = id
+})
 const loadingRunId = ref<string | null>(null)
 const evidenceBusy = ref(false)
 let evidenceLoadCounter = 0
@@ -1306,6 +1311,7 @@ const loadAgentEvidence = async () => {
         })
         if (loadId !== evidenceLoadCounter) return
         agentEvidence.value = Array.isArray(listed?.items) ? listed.items : []
+        emit('evidence-loaded', agentEvidence.value)
     } catch (err: any) {
         if (loadId !== evidenceLoadCounter) return
         historyError.value = err?.response?.data?.detail || err?.message || 'Unable to load code evidence.'
@@ -1350,7 +1356,7 @@ const selectEvidenceRow = async (row: EvidenceRow) => {
     }
 }
 
-const applyEvidenceRow = async (row: EvidenceRow, options: { useSuggestion: boolean }) => {
+const applyEvidenceRow = async (row: EvidenceRow, options: { useSuggestion: boolean; summary?: string }) => {
     if (row.kind === 'analyzer') {
         if (row.record) await applyPersistedResult(row.record)
         return
@@ -1359,7 +1365,8 @@ const applyEvidenceRow = async (row: EvidenceRow, options: { useSuggestion: bool
     if (!evidence || evidence.withdrawn) return
     emit('apply-evidence', {
         evidenceId: evidence.evidence_id,
-        reference: buildEvidenceReference(evidence),
+        title: evidence.title,
+        summary: options.summary || '',
         ...(options.useSuggestion && evidence.suggested_state
             ? {
                 state: evidence.suggested_state,
@@ -1743,6 +1750,7 @@ watch(combinedCandidateRuns, runs => {
                     :reported-finding-uuids="reportedFindingUuids"
                     :busy="evidenceBusy || (row.kind === 'analyzer' && isDeletingRun(row.id))"
                     @apply="applyEvidenceRow(row, $event)"
+                    @attachments-change="loadAgentEvidence"
                     @withdraw="withdrawEvidenceRow(row, $event)"
                     @remove="removeEvidenceRun(row)"
                     @close="closeEvidence"

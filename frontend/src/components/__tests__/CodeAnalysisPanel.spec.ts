@@ -1827,6 +1827,12 @@ describe('CodeAnalysisPanel', () => {
             expect(wrapper.find('[data-testid="evidence-row"][data-id="ev_1"]').exists()).toBe(true)
         })
 
+        it('opens an internally referenced evidence record after it loads', async () => {
+            const wrapper = await mountWithEvidence([agentEvidence()], { focusEvidenceId:'ev_1' })
+            expect(wrapper.get('[data-testid="evidence-reader"]').text()).toContain('Parser entry point is not linked')
+            expect(wrapper.get('[data-testid="evidence-row"][data-id="ev_1"]').attributes('aria-expanded')).toBe('true')
+        })
+
         it('reloads evidence and runs after a save while it stays visible', async () => {
             // In the assessment workspace the panel is never hidden, so the
             // card signals each save through refreshKey.
@@ -1880,7 +1886,7 @@ describe('CodeAnalysisPanel', () => {
             expect(stale.get('[data-testid="evidence-for"]').text()).toContain('no longer reported')
         })
 
-        it('reads agent evidence and applies only a reference unless the suggestion is chosen', async () => {
+        it('reads agent evidence and stages standalone rationale only when provided', async () => {
             const wrapper = await mountWithEvidence([agentEvidence()])
             await wrapper.get('[data-testid="evidence-row"][data-id="ev_1"]').trigger('click')
             await flushPromises()
@@ -1893,12 +1899,15 @@ describe('CodeAnalysisPanel', () => {
             expect(reader.find('a[href="https://example.org/commit/1"]').exists()).toBe(true)
             expect(reader.find('a[href^="javascript:"]').exists()).toBe(false)
             expect(reader.find('[data-testid="evidence-technical-details"]').exists()).toBe(false)
-            expect(reader.get('[data-testid="evidence-apply-box"]').text()).toContain('Adds a reference to this evidence to the Platform assessment draft.')
+            expect(reader.get('[data-testid="evidence-apply-box"]').text()).toContain('links the supporting evidence within DTVP.')
 
+            expect(reader.get('[data-testid="evidence-apply"]').attributes('disabled')).toBeDefined()
+            await reader.get('[data-testid="evidence-assessment-summary"]').setValue('The parser is not linked into the tested consumer.')
             await reader.get('[data-testid="evidence-apply"]').trigger('click')
             expect(wrapper.emitted('apply-evidence')?.[0]?.[0]).toEqual({
                 evidenceId: 'ev_1',
-                reference: 'Code evidence ev_1 from triage-bot (alice, 2026-07-06): Parser entry point is not linked',
+                title: 'Parser entry point is not linked',
+                summary: 'The parser is not linked into the tested consumer.',
             })
 
             await reader.get('[data-testid="evidence-use-suggestion"]').setValue(true)
