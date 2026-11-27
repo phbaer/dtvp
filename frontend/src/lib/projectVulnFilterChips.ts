@@ -29,6 +29,7 @@ export type ActiveFilterChipKey =
     | 'notRescored'
     | 'newFindings'
     | 'awaitingReview'
+    | 'changesRequested'
     | 'cutoff'
 
 export interface ActiveFilterChip {
@@ -74,6 +75,7 @@ export interface BuildActiveFilterChipsInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
+    changesRequestedOnly?: boolean
     cutoff: string
     cutoffMode: 'before' | 'after'
     cutoffBasis?: 'published' | 'attributed'
@@ -97,6 +99,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
+    changesRequestedOnly?: boolean
     cutoff: string
     sortBy: string
     sortOrder: 'asc' | 'desc'
@@ -181,12 +184,14 @@ export function buildActiveFilterChips({
     notRescoredOnly,
     newFindingsOnly,
     awaitingReviewOnly,
+    changesRequestedOnly,
     cutoff,
     cutoffMode,
     cutoffBasis = 'published',
 }: BuildActiveFilterChipsInput): ActiveFilterChip[] {
     const chips: ActiveFilterChip[] = []
     if (awaitingReviewOnly) chips.push({ key: 'awaitingReview', label: 'Awaiting review' })
+    if (changesRequestedOnly) chips.push({ key: 'changesRequested', label: 'Changes requested' })
     if (!hasAllOptionsSelected(lifecycleFilters, lifecycleOptions)) {
         chips.push({ key: 'lifecycle', label: `Status: ${summarizedSelection(lifecycleFilters, lifecycleOptions, 'All')}` })
     }
@@ -261,6 +266,7 @@ export function hasCustomProjectVulnFilterState({
     notRescoredOnly,
     newFindingsOnly,
     awaitingReviewOnly,
+    changesRequestedOnly,
     defaultAwaitingReviewOnly = false,
     cutoff,
     sortBy,
@@ -296,6 +302,7 @@ export function hasCustomProjectVulnFilterState({
         || cvssVersionMismatchOnly
         || notRescoredOnly
         || newFindingsOnly
+        || changesRequestedOnly
         || !!awaitingReviewOnly !== defaultAwaitingReviewOnly
         || !!cutoff
         || sortBy !== 'rescored-severity'

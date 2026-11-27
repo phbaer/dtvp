@@ -26,7 +26,7 @@ from .first_seen import (
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 22
+TASK_GROUP_QUERY_INDEX_VERSION = 23
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -543,6 +543,7 @@ def _matches_task_group_fields(
     not_rescored: bool = False,
     new_findings: bool = False,
     awaiting_review: bool = False,
+    changes_requested: bool = False,
     cutoff_end_ms: int | None = None,
     cutoff_mode: str = CUTOFF_MODE_BEFORE,
     cutoff_basis: str = DEFAULT_CUTOFF_BASIS,
@@ -612,6 +613,8 @@ def _matches_task_group_fields(
     # submitted for review and not yet approved ([Status: Pending Review]),
     # whatever the lifecycle: Ready for approval, a team's submission while
     # other teams are still open (Incomplete), or a conflicting one.
+    if changes_requested and not fields["changes_requested_teams_lower"]:
+        return False
     if awaiting_review and not fields["is_pending"]:
         return False
     if _cutoff_status(fields, cutoff_end_ms, cutoff_mode, versions, cutoff_basis) is None:
@@ -868,6 +871,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     not_rescored = 0
     new_findings = 0
     awaiting_review = 0
+    changes_requested = 0
     assessment_restore_counts = _empty_assessment_restore_counts()
     inconsistency_reason_counts = _empty_inconsistency_reason_counts()
 
@@ -897,6 +901,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             cvss_version_mismatch += 1
         if fields["not_rescored"]:
             not_rescored += 1
+        if fields["changes_requested_teams_lower"]:
+            changes_requested += 1
         if fields["has_new_findings"]:
             new_findings += 1
         if fields["is_pending"]:
@@ -941,6 +947,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "not_rescored": not_rescored,
         "new_findings": new_findings,
         "awaiting_review": awaiting_review,
+        "changes_requested": changes_requested,
         "ids": ids,
         "versions": versions,
         "tags": tags,
@@ -1285,6 +1292,7 @@ def _query_cache_key(
     not_rescored: bool = False,
     new_findings: bool = False,
     awaiting_review: bool = False,
+    changes_requested: bool = False,
     cutoff_end_ms: int | None = None,
     cutoff_mode: str = CUTOFF_MODE_BEFORE,
     cutoff_basis: str = DEFAULT_CUTOFF_BASIS,
@@ -1332,6 +1340,7 @@ def _query_cache_key(
         bool(not_rescored),
         bool(new_findings),
         bool(awaiting_review),
+        bool(changes_requested),
         cutoff_end_ms,
         cutoff_mode if cutoff_end_ms is not None else None,
         cutoff_basis if cutoff_end_ms is not None else None,
@@ -1530,6 +1539,7 @@ def query_task_groups(
     not_rescored: bool = False,
     new_findings: bool = False,
     awaiting_review: bool = False,
+    changes_requested: bool = False,
     cutoff: str = "",
     cutoff_mode: str = CUTOFF_MODE_BEFORE,
     # Empty: published (attributed for the retired parameters).
@@ -1594,6 +1604,7 @@ def query_task_groups(
         not_rescored=not_rescored,
         new_findings=new_findings,
         awaiting_review=awaiting_review,
+        changes_requested=changes_requested,
         cutoff_end_ms=end_ms,
         cutoff_mode=normalized_mode,
         cutoff_basis=basis,
@@ -1693,6 +1704,7 @@ def query_task_groups(
                 or not_rescored
                 or new_findings
                 or awaiting_review
+                or changes_requested
                 or end_ms is not None
                 or tmrescore_set
                 or automatic_assessment_set
@@ -1720,6 +1732,7 @@ def query_task_groups(
                 not_rescored=not_rescored,
                 new_findings=new_findings,
                 awaiting_review=awaiting_review,
+                changes_requested=changes_requested,
                 cutoff_end_ms=end_ms,
                 cutoff_mode=normalized_mode,
                 cutoff_basis=basis,
@@ -1843,6 +1856,7 @@ def query_task_groups(
                     "not_rescored": ("not_rescored", False),
                     "new_findings": ("new_findings", False),
                     "awaiting_review": ("awaiting_review", False),
+                    "changes_requested": ("changes_requested", False),
                     "cutoff": ("cutoff_end_ms", None),
                     "evidence": (None, None),
                 }

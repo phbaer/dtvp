@@ -52,7 +52,7 @@ export function useTaskGroupDetails({
 
     const ensureFullGroup = async (
         groupId: string,
-        options: { showLoading?: boolean; force?: boolean } = {},
+        options: { showLoading?: boolean; force?: boolean; allowStale?: boolean; cacheResult?: boolean } = {},
     ): Promise<GroupedVuln | null> => {
         const force = options.force === true
         if (!force && fullGroupCache.value[groupId]) return fullGroupCache.value[groupId]
@@ -70,7 +70,9 @@ export function useTaskGroupDetails({
             return listGroup
         }
 
-        const existingRequest = fullGroupRequests.get(groupId)
+        // A strict reopen must not inherit another caller's stale fallback.
+        const requestKey = JSON.stringify([groupId, options.allowStale !== false, options.cacheResult !== false])
+        const existingRequest = fullGroupRequests.get(requestKey)
         const showLoading = options.showLoading !== false
         if (existingRequest) {
             if (!showLoading) return existingRequest
@@ -89,25 +91,25 @@ export function useTaskGroupDetails({
                 if (generation !== cacheGeneration || currentTaskId.value !== taskId) {
                     return null
                 }
-                cacheGroup(fullGroup)
+                if (options.cacheResult !== false) cacheGroup(fullGroup)
                 return fullGroup
             })
             .catch((err) => {
                 if (generation === cacheGeneration) {
                     console.error('Failed to fetch vulnerability details:', err)
                 }
-                return generation === cacheGeneration ? listGroup || null : null
+                return generation === cacheGeneration && options.allowStale !== false ? listGroup || null : null
             })
             .finally(() => {
-                if (fullGroupRequests.get(groupId) === request) {
-                    fullGroupRequests.delete(groupId)
+                if (fullGroupRequests.get(requestKey) === request) {
+                    fullGroupRequests.delete(requestKey)
                 }
                 if (showLoading && generation === cacheGeneration) {
                     selectedGroupLoading.value = false
                 }
             })
 
-        fullGroupRequests.set(groupId, request)
+        fullGroupRequests.set(requestKey, request)
         return request
     }
 
@@ -117,7 +119,7 @@ export function useTaskGroupDetails({
 
     const refreshGroup = async (
         groupId: string,
-        options: { showLoading?: boolean } = {},
+        options: { showLoading?: boolean; allowStale?: boolean; cacheResult?: boolean } = {},
     ): Promise<GroupedVuln | null> => {
         return ensureFullGroup(groupId, { ...options, force: true })
     }

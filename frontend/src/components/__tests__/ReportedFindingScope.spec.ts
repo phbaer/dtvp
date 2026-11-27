@@ -30,4 +30,37 @@ describe('reported component versions', () => {
         expect(wrapper.text()).toContain('Missing findings do not prove a product version is unaffected.')
         expect(wrapper.text()).not.toContain('only-this-team')
     })
+
+    it('shows only the selected team’s own current decisions, resolving aliases and retaining conflicting states', () => {
+        const wrapper = mount(ReportedFindingScope, { props: {
+            team: 'Runtime', teamAliases: ['Legacy Runtime'],
+            instances: [{
+                component_name: 'library', component_version: '2.0', project_version: '7.1',
+                analysis_state: 'EXPLOITABLE',
+                analysis_details: [
+                    '--- [Team: General] [State: EXPLOITABLE] ---\nGlobal state.',
+                    '--- [Team: Legacy Runtime] [State: NOT_AFFECTED] ---\nAlias decision.',
+                    '--- [Team: Runtime] [State: FALSE_POSITIVE] ---\nConflicting team decision.',
+                    '--- [Team: Runtime] [State: RESOLVED] [Historical: yes] ---\nOld decision.',
+                ].join('\n\n'),
+            }],
+        } })
+        expect(wrapper.get('h4').text()).toBe('Reported components for Runtime')
+        expect(wrapper.findAll('thead th').at(-1)?.text()).toBe('Runtime assessment')
+        expect(wrapper.findAll('tbody tr').map(row => row.findAll('td').at(-1)?.text()))
+            .toEqual(['False positive', 'Not affected'])
+        expect(wrapper.find('tbody')!.text()).not.toContain('Exploitable')
+        expect(wrapper.find('tbody')!.text()).not.toContain('Resolved')
+    })
+
+    it('does not present a Global decision as an explicit team decision', () => {
+        const wrapper = mount(ReportedFindingScope, { props: {
+            team: 'Security', instances: [{
+                component_name: 'library', analysis_state: 'EXPLOITABLE',
+                analysis_details: '--- [Team: General] [State: EXPLOITABLE] ---\nGlobal decision.',
+            }],
+        } })
+        expect(wrapper.get('tbody').text()).toContain('Not assessed by this team')
+        expect(wrapper.get('tbody').text()).not.toContain('Exploitable')
+    })
 })

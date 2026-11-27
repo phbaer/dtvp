@@ -44,6 +44,7 @@ const mountHarness = (options: {
     viewMode?: string
     taskWindowActive?: boolean
     refreshTaskWindow?: () => Promise<unknown> | unknown
+    onAssessmentChanged?: (group: GroupedVuln) => void
 } = {}) => {
     const groups = ref(options.groups || [makeGroup()])
     const fullGroupCache = ref<Record<string, GroupedVuln>>(options.fullCache || {})
@@ -77,6 +78,7 @@ const mountHarness = (options: {
                 fetchStats,
                 isTaskWindowActive,
                 refreshTaskWindow,
+                onAssessmentChanged: options.onAssessmentChanged,
             })
             return {}
         },
@@ -98,6 +100,18 @@ const mountHarness = (options: {
 }
 
 describe('useProjectAssessmentUpdates', () => {
+    it('records successful and partially successful operations, excluding failed or empty results', () => {
+        const onAssessmentChanged = vi.fn()
+        const harness = mountHarness({ onAssessmentChanged })
+        const group = harness.groups.value[0]!
+        for (const dtvp_results of [[], [{ status: 'error' }]]) {
+            harness.updates.handleLocalAssessmentUpdate(group, { dtvp_results })
+        }
+        expect(onAssessmentChanged).not.toHaveBeenCalled()
+        harness.updates.handleLocalAssessmentUpdate(group, { dtvp_results: [{ status: 'success', uuid: 'finding-1', new_state: 'NOT_AFFECTED' }, { status: 'error' }] })
+        expect(onAssessmentChanged).toHaveBeenCalledOnce()
+        harness.wrapper.unmount()
+    })
     it('uses per-finding details for mixed SSVC instead of copying the first result', () => {
         const group = makeGroup()
         const first = group.affected_versions[0]!.components[0]!

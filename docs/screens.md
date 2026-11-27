@@ -101,7 +101,17 @@ exact UTC dates. First attribution follows the visible findings.
 
 ## Vulnerability Review Details
 
+The **Changes requested** quick view and status toggle isolate open reviewer
+requests. **History** in the project toolbar reopens recently viewed or
+changed vulnerabilities without changing the list filters; **Changes only**
+helps locate saved assessments that need correction.
+
 ### Vulnerability Card Context
+
+**Where it was found** keeps wide version matrices inside a keyboard-focusable
+scroll region. Component names stay fixed when scrolling across versions;
+version headers stay fixed when scrolling down through many components.
+The same bounds apply in the phone overlay, desktop inspector and workspace.
 
 ![Vulnerability card overview](screenshots/vuln-card-overview.png)
 
@@ -111,7 +121,7 @@ The Context tab uses three clearly separated sections in a fixed reading order: 
 
 ![Assessment tab of a team](screenshots/vuln-card-team-assessment.png)
 
-The Assessment tab starts with the Global and team tabs, the selected team's affected components and the last assessor. **Reported components by product version** keeps each product release paired with the reported component version and its saved finding assessment, including in the workspace. It follows the current team filter; missing findings do not establish that a release is unaffected. **About this vulnerability** shows the title, the first three lines of the description as plain text (sanitised like the Context rendering; **Show more** expands it in place) and the key facts on one line: the affected components and versions in scope, what an attacker needs according to the CVSS vector (for example "network, low complexity, no privileges, no user interaction"), the CWE, the source's fix advice and the references. The summary folds to one line. The decision and rationale follow, and the tabs and actions stay visible while scrolling. On the Global tab, reviewers see the [team overview](#team-overview) above the advisory summary. Below the decision, **Show generated text** (reviewers, collapsed) shows the stored text read-only with **Copy**; it is generated from the fields and is what is exported, so it is not editable. **More** → **Clean up assessment…** opens the [cleanup](#assessment-cleanup); **More** → **Clear assessment…** in the action bar clears the open team's or the Global assessment, or the whole of it (see [Review workflows](review-workflows.md)), after a confirmation naming the findings, components and versions.
+The Assessment tab starts with the Global and team tabs, the selected team's reported component names and versions and the last assessor. **Reported components for <team>** lists only findings whose resolved ownership includes that team, with their product versions and that team's own current assessment. The same component name can belong to different teams at different versions; the table, component chips and advisory summary preserve that distinction. Team aliases are resolved; General and other teams' decisions do not substitute for the team's own block. **Show all teams** lets a reviewer choose another team independently of the outer list filter. Global is explicitly labelled **Reported components — all teams** and shows the full scope. Missing ownership or assessment stays explicit; a report or missing finding does not establish actual affectedness. **About this vulnerability** shows the title, the first three lines of the description as plain text (sanitised like the Context rendering; **Show more** expands it in place) and the key facts on one line: the affected components and versions in scope, what an attacker needs according to the CVSS vector (for example "network, low complexity, no privileges, no user interaction"), the CWE, the source's fix advice and the references. The summary folds to one line. The decision and rationale follow, and the tabs and actions stay visible while scrolling. On the Global tab, reviewers see the [team overview](#team-overview) above the advisory summary. Below the decision, **Show generated text** (reviewers, collapsed) shows the stored text read-only with **Copy**; it is generated from the fields and is what is exported, so it is not editable. **More** → **Clean up assessment…** opens the [cleanup](#assessment-cleanup); **More** → **Clear assessment…** in the action bar clears the open team's or the Global assessment, or the whole of it (see [Review workflows](review-workflows.md)), after a confirmation naming the findings, components and versions.
 
 For a saved decision, the clear button in **Decision & rationale** and the
 **Not Set** option both open the scoped confirmation.

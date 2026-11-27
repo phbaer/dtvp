@@ -38,6 +38,7 @@ export interface BuildTaskVulnGroupListQueryInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
+    changesRequestedOnly?: boolean
     cutoff: string
     cutoffMode: 'before' | 'after'
     cutoffBasis: 'published' | 'attributed'
@@ -129,6 +130,7 @@ export function buildTaskVulnGroupListQuery({
     notRescoredOnly,
     newFindingsOnly,
     awaitingReviewOnly,
+    changesRequestedOnly,
     cutoff,
     cutoffMode,
     cutoffBasis,
@@ -192,6 +194,7 @@ export function buildTaskVulnGroupListQuery({
         not_rescored: notRescoredOnly || parsedSearch.notRescoredOnly,
         new_findings: newFindingsOnly || parsedSearch.newFindingsOnly,
         awaiting_review: awaitingReviewOnly || parsedSearch.awaitingReviewOnly,
+        changes_requested: !!changesRequestedOnly,
         cutoff: cutoff || '',
         cutoff_mode: cutoffMode,
         cutoff_basis: cutoffBasis,

@@ -109,7 +109,7 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
 </script>
 
 <template>
-    <div class="space-y-3" data-testid="finding-matrix">
+    <div class="min-w-0 max-w-full space-y-3" data-testid="finding-matrix">
         <div
             v-if="hasDifferences && banner"
             data-testid="finding-differences-banner"
@@ -135,12 +135,19 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
             </button>
         </div>
 
-        <div class="overflow-x-auto rounded border border-gray-700/70">
+        <p v-if="matrix.versions.length > 4" class="text-[11px] text-gray-400">
+            {{ matrix.versions.length }} product versions. Scroll across to compare; component names stay visible.
+        </p>
+        <div
+            data-testid="finding-matrix-scroll" role="region" aria-label="Components by product version"
+            tabindex="0"
+            class="isolate max-h-[26rem] w-full min-w-0 max-w-full overflow-auto overscroll-contain rounded border border-gray-700/70 focus-visible:outline focus-visible:outline-blue-400"
+        >
             <table class="w-full border-collapse text-left text-xs">
                 <caption class="sr-only">Components by project versions with the assessment state of each finding</caption>
                 <thead>
                     <tr class="bg-gray-900/70 text-[10px] uppercase tracking-wider text-gray-500">
-                        <th scope="col" class="px-3 py-2 font-bold">
+                        <th scope="col" class="sticky left-0 top-0 z-30 min-w-40 max-w-56 border-r border-gray-700 bg-gray-950 px-3 py-2 font-bold">
                             Component
                             <span class="ml-1 font-normal normal-case tracking-normal text-gray-600" data-testid="finding-matrix-summary">
                                 {{ matrix.rows.length }} component{{ matrix.rows.length === 1 ? '' : 's' }} · {{ matrix.versions.length }} version{{ matrix.versions.length === 1 ? '' : 's' }}
@@ -150,7 +157,7 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                             v-for="version in matrix.versions"
                             :key="version"
                             scope="col"
-                            class="whitespace-nowrap px-2 py-2 text-center font-mono font-bold normal-case tracking-normal text-gray-300"
+                            class="sticky top-0 z-20 min-w-24 bg-gray-950 px-2 py-2 text-center font-mono font-bold normal-case tracking-normal text-gray-300"
                             data-testid="context-project-version"
                         >
                             {{ version }}
@@ -169,10 +176,10 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                 <tbody>
                     <template v-for="row in matrix.rows" :key="row.key">
                         <tr class="border-t border-gray-800" data-testid="finding-matrix-row">
-                            <th scope="row" class="px-3 py-1.5 font-normal">
+                            <th scope="row" class="sticky left-0 z-10 min-w-40 max-w-56 border-r border-gray-700 bg-gray-950 px-3 py-1.5 font-normal">
                                 <button
                                     type="button"
-                                    class="flex items-center gap-1.5 whitespace-nowrap text-left font-mono text-gray-200 hover:text-white"
+                                    class="flex max-w-48 items-start gap-1.5 text-left font-mono text-gray-200 hover:text-white"
                                     :aria-expanded="expandedRows.has(row.key) ? 'true' : 'false'"
                                     :title="expandedRows.has(row.key) ? 'Hide the dependency chains' : 'Show how this component enters the product'"
                                     data-testid="finding-matrix-row-toggle"
@@ -180,8 +187,7 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                                 >
                                     <ChevronDown v-if="expandedRows.has(row.key)" :size="12" class="shrink-0 text-gray-500" />
                                     <ChevronRight v-else :size="12" class="shrink-0 text-gray-500" />
-                                    <span>{{ row.name }}</span>
-                                    <span v-if="row.version" class="text-gray-500">@{{ row.version }}</span>
+                                    <span class="min-w-0 break-all">{{ row.name }}<span v-if="row.version" class="text-gray-500">@{{ row.version }}</span></span>
                                 </button>
                                 <span class="mt-0.5 flex flex-wrap gap-1 pl-[18px]">
                                     <span
@@ -189,7 +195,7 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                                         :key="entry.team"
                                         data-testid="finding-matrix-team"
                                         :data-catch-all="entry.catchAll ? 'true' : undefined"
-                                        class="whitespace-nowrap rounded border px-1 py-px text-[9px] font-semibold"
+                                        class="max-w-48 truncate whitespace-nowrap rounded border px-1 py-px text-[9px] font-semibold"
                                         :class="entry.catchAll
                                             ? 'border-amber-700/50 bg-amber-950/30 text-amber-200'
                                             : 'border-blue-800/40 bg-blue-950/20 text-blue-300'"

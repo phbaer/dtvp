@@ -40,6 +40,8 @@ def as_user(client, tmp_path, monkeypatch):
 
 
 def test_canonical_query_sorts_parameters_and_list_values():
+    assert canonical_query("changes_requested=true") == "changes_requested=true"
+    assert canonical_query("changes_requested=false") == ""
     assert canonical_query("?sort=id&lifecycle=OPEN&lifecycle=INCOMPLETE&q=+log4j+") == (
         "lifecycle=INCOMPLETE&lifecycle=OPEN&q=log4j&sort=id"
     )

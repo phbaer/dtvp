@@ -137,6 +137,73 @@ describe('VulnGroupCard', () => {
         })
     })
 
+    it.each(['', 'Security'])('shows the selected team’s actual component versions independently of outer filter %s', async activeTeamFilter => {
+        const global = '--- [Team: General] [State: EXPLOITABLE] ---\nGlobal decision.'
+        const component = (version: string, team: string, state: string) => ({
+            ...mockComponents[0], component_version: version,
+            component_uuid: `lib-${version}`, finding_uuid: `finding-${version}`,
+            project_version: undefined, tags: [team],
+            analysis_state: 'EXPLOITABLE',
+            analysis_details: `${global}\n\n--- [Team: ${team}] [State: ${state}] ---\nOwn decision.`,
+            // The finding's resolved ownership, not an ancestor name, decides
+            // which team sees this component version.
+            dependency_chains: ['lib -> runtime-app -> App1'],
+        })
+        const group: any = {
+            ...mockGroup, tags: ['Security', 'Runtime'],
+            affected_versions: [
+                { project_version: '10.0', components: [component('1.0', 'Security', 'NOT_AFFECTED'), component('2.0', 'Runtime Old', 'FALSE_POSITIVE')] },
+                { project_version: '20.0', components: [component('3.0', 'Runtime', 'NOT_AFFECTED')] },
+            ],
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group, activeTeamFilter },
+            global: { provide: {
+                user: ref({ role: 'REVIEWER', username: 'reviewer' }),
+                teamMapping: ref({ lib: ['Security'], 'runtime-app': ['Runtime', 'Runtime Old'] }),
+            } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))!.trigger('click')
+        if (activeTeamFilter) await wrapper.get('[data-testid="toggle-assessment-team-scope"]').trigger('click')
+        await wrapper.findAll('[data-testid="review-team-tab"]').find(tab => tab.text().trim() === 'Runtime')!.trigger('click')
+        await flushPromises()
+        const scope = wrapper.get('[data-testid="reported-finding-scope"]')
+        expect(scope.get('h4').text()).toBe('Reported components for Runtime')
+        expect(scope.findAll('tbody tr').map(row => row.findAll('td').map(cell => cell.text()))).toEqual([
+            ['10.0', 'lib', '2.0', 'False positive'],
+            ['20.0', 'lib', '3.0', 'Not affected'],
+        ])
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('lib@2.0')
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).not.toContain('lib@1.0')
+        const about = wrapper.get('[data-testid="vuln-about-affects"]')
+        expect(about.text()).toContain('lib 2.0, 3.0')
+        expect(about.text()).not.toContain('lib 1.0')
+        await wrapper.findAll('button').find(button => button.text().trim() === 'Global')!.trigger('click')
+        expect(scope.get('h4').text()).toBe('Reported components — all teams')
+        expect(scope.findAll('tbody tr')).toHaveLength(3)
+        expect(wrapper.get('[data-testid="vuln-about-affects"]').text()).toContain('lib 1.0, 2.0, 3.0')
+        wrapper.unmount()
+    })
+
+    it('does not replace missing per-finding ownership with every global component', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: {
+                ...mockGroup, tags: ['Security'],
+                affected_versions: [{ ...mockGroup.affected_versions[0], components: [{ ...mockComponents[0], tags: [] }] }],
+            } },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'reviewer' }), teamMapping: ref({}) } },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))!.trigger('click')
+        await wrapper.findAll('[data-testid="review-team-tab"]').find(tab => tab.text().trim() === 'Security')!.trigger('click')
+        const scope = wrapper.get('[data-testid="reported-finding-scope"]')
+        expect(scope.find('table').exists()).toBe(false)
+        expect(scope.text()).toContain('No reported components have confirmed ownership by Security.')
+        expect(wrapper.find('[data-testid="vuln-about-affects"]').exists()).toBe(false)
+        wrapper.unmount()
+    })
+
     it('renders vulnerability details', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }

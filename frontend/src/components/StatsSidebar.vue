@@ -547,6 +547,17 @@ const handleCopy = () => {
                         <div class="space-y-1.5">
                             <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Status</label>
                             <button
+                                type="button" data-testid="filter-changes-requested"
+                                :aria-pressed="!!filters.changesRequestedOnly"
+                                title="A reviewer requested changes to at least one team assessment"
+                                @click="updateFilter('changesRequestedOnly', !filters.changesRequestedOnly)"
+                                class="flex min-h-9 w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold focus-visible:outline focus-visible:outline-blue-400"
+                                :class="filters.changesRequestedOnly ? 'border-amber-400/50 bg-amber-500/20 text-white' : 'border-white/10 bg-white/3 text-gray-300 hover:bg-white/5'"
+                            >
+                                <span>Changes requested only</span>
+                                <span class="rounded-md bg-black/20 px-1.5 py-0.5 text-[10px] tabular-nums">{{ countLabel(facets.changes_requested) }}</span>
+                            </button>
+                            <button
                                 type="button"
                                 data-testid="filter-awaiting-review"
                                 :aria-pressed="!!filters.awaitingReviewOnly"

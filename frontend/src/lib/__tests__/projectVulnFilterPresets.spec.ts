@@ -36,6 +36,12 @@ const state = (overrides: Partial<FilterState> = {}): FilterState => ({
 })
 
 describe('project filter presets', () => {
+    it('offers Changes requested independently of pending review and clears it with All', () => {
+        const selected = applyFilterPreset(state({ awaitingReviewOnly: true }), 'changes-requested', context)
+        expect(selected).toMatchObject({ changesRequestedOnly: true, awaitingReviewOnly: false, teamAssessmentFilter: 'ANY' })
+        expect(activeFilterPreset(selected, context)).toBe('changes-requested')
+        expect(applyFilterPreset(selected, 'all', context).changesRequestedOnly).toBe(false)
+    })
     it('sets only the status part and keeps the scope and More filters', () => {
         const before = state({ newFindingsOnly: true })
         const after = applyFilterPreset(before, 'awaiting-review', context)

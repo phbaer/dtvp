@@ -19,6 +19,7 @@ interface UseProjectAssessmentUpdatesOptions {
     isTaskWindowActive?: Ref<boolean>
     refreshTaskWindow?: () => Promise<unknown> | unknown
     refreshOwnership?: () => Promise<unknown> | unknown
+    onAssessmentChanged?: (group: GroupedVuln) => void
 }
 
 export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): GroupedVuln => {
@@ -80,6 +81,7 @@ export function useProjectAssessmentUpdates({
     isTaskWindowActive,
     refreshTaskWindow,
     refreshOwnership,
+    onAssessmentChanged,
 }: UseProjectAssessmentUpdatesOptions) {
     const refreshStatsIfVisible = (context: string) => {
         statsDirty.value = true
@@ -128,6 +130,12 @@ export function useProjectAssessmentUpdates({
             cacheFullGroup(updatedGroup)
         }
         updateListSummaryFromGroup(updatedGroup, { recompute: true })
+
+        if (Array.isArray(data.dtvp_results)
+            ? data.dtvp_results.some((result: any) => result.status === 'success')
+            : 'analysis_state' in data || 'analysis_details' in data) {
+            onAssessmentChanged?.(updatedGroup)
+        }
 
         if (options.refreshStats !== false) {
             refreshStatsIfVisible('assessment update')

@@ -241,6 +241,7 @@ class BulkWorkflowFilters(BaseModel):
     not_rescored: bool = False
     new_findings: bool = False
     awaiting_review: bool = False
+    changes_requested: bool = False
     cutoff: str = ""
     cutoff_mode: Literal["before", "after"] = "before"
     # Empty: published, or attributed for the retired attribution-age filter.
@@ -1254,6 +1255,7 @@ GROUP_QUERY_DEFAULTS: dict[str, Any] = {
     "not_rescored": False,
     "new_findings": False,
     "awaiting_review": False,
+    "changes_requested": False,
     "cutoff": "",
     "cutoff_mode": "before",
     "cutoff_basis": "",
@@ -1442,6 +1444,7 @@ def _register_task_routes(
         not_rescored: bool = False,
         new_findings: bool = False,
         awaiting_review: bool = False,
+        changes_requested: bool = False,
         cutoff: str = "",
         cutoff_mode: str = Query("before", pattern="^(before|after)$"),
         cutoff_basis: str = Query("", pattern="^(|published|attributed)$"),
@@ -1501,6 +1504,7 @@ def _register_task_routes(
                     "not_rescored": not_rescored,
                     "new_findings": new_findings,
                     "awaiting_review": awaiting_review,
+                    "changes_requested": changes_requested,
                     "cutoff": cutoff,
                     "cutoff_mode": cutoff_mode,
                     "cutoff_basis": cutoff_basis,
@@ -1586,6 +1590,7 @@ def _register_task_routes(
         not_rescored: bool = False,
         new_findings: bool = False,
         awaiting_review: bool = False,
+        changes_requested: bool = False,
         cutoff: str = "",
         cutoff_mode: str = Query("before", pattern="^(before|after)$"),
         cutoff_basis: str = Query("", pattern="^(|published|attributed)$"),
@@ -1640,6 +1645,7 @@ def _register_task_routes(
                     "not_rescored": not_rescored,
                     "new_findings": new_findings,
                     "awaiting_review": awaiting_review,
+                    "changes_requested": changes_requested,
                     "cutoff": cutoff,
                     "cutoff_mode": cutoff_mode,
                     "cutoff_basis": cutoff_basis,
@@ -2182,6 +2188,7 @@ def _filter_bulk_workflow_groups(
         not_rescored=filters.not_rescored,
         new_findings=filters.new_findings,
         awaiting_review=filters.awaiting_review,
+        changes_requested=filters.changes_requested,
         cutoff=filters.cutoff,
         cutoff_mode=filters.cutoff_mode,
         cutoff_basis=filters.cutoff_basis,

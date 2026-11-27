@@ -109,6 +109,7 @@ const FILTER_QUERY_KEYS = new Set([
     'cvss_mismatch',
     'not_rescored',
     'new_findings',
+    'changes_requested',
     'awaiting_review',
     'cutoff',
     'cutoff_mode',
@@ -182,6 +183,7 @@ export function useProjectVulnFilters({
     const cvssVersionMismatchOnly = ref(false)
     const notRescoredOnly = ref(false)
     const newFindingsOnly = ref(false)
+    const changesRequestedOnly = ref(false)
     const awaitingReviewOnly = ref(false)
     const cutoff = ref('')
     const cutoffMode = ref<CutoffMode>('before')
@@ -260,6 +262,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly.value = false
         notRescoredOnly.value = false
         newFindingsOnly.value = false
+        changesRequestedOnly.value = false
         awaitingReviewOnly.value = defaultAwaitingReviewOnly.value
         cutoff.value = ''
         cutoffMode.value = 'before'
@@ -357,6 +360,7 @@ export function useProjectVulnFilters({
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
         if (q.not_rescored === 'true') notRescoredOnly.value = true
         if (q.new_findings === 'true') newFindingsOnly.value = true
+        if (q.changes_requested === 'true') changesRequestedOnly.value = true
         // Awaiting review is written whenever it is on, and as false when a
         // reviewer turned it off. A link without it that holds other filters
         // (an old one) means off; one with only the sort follows the role.
@@ -423,6 +427,7 @@ export function useProjectVulnFilters({
 
         setList('inconsistency_reason', inconsistencyReasonFilters.value)
         setFlag('new_findings', newFindingsOnly.value)
+        setFlag('changes_requested', changesRequestedOnly.value)
         setList('original_severity', originalSeverityFilters.value)
         setList('ssvc', ssvcFilters.value)
         setList('evidence', evidenceFilters.value)
@@ -510,6 +515,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
         notRescoredOnly: notRescoredOnly.value,
         newFindingsOnly: newFindingsOnly.value,
+        changesRequestedOnly: changesRequestedOnly.value,
         awaitingReviewOnly: awaitingReviewOnly.value,
         cutoff: cutoff.value,
         cutoffMode: cutoffMode.value,
@@ -550,6 +556,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly.value = newFilters.cvssVersionMismatchOnly
         notRescoredOnly.value = !!newFilters.notRescoredOnly
         newFindingsOnly.value = !!newFilters.newFindingsOnly
+        changesRequestedOnly.value = !!newFilters.changesRequestedOnly
         awaitingReviewOnly.value = !!newFilters.awaitingReviewOnly
         cutoff.value = normalizeCutoff(newFilters.cutoff)
         cutoffMode.value = normalizeCutoffMode(newFilters.cutoffMode)
@@ -588,6 +595,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly,
         notRescoredOnly,
         newFindingsOnly,
+        changesRequestedOnly,
         awaitingReviewOnly,
         cutoff,
         cutoffMode,
@@ -711,6 +719,7 @@ export function useProjectVulnFilters({
         cvssVersionMismatchOnly,
         notRescoredOnly,
         newFindingsOnly,
+        changesRequestedOnly,
         awaitingReviewOnly,
         cutoff,
         cutoffMode,

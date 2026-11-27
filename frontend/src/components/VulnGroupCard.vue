@@ -2751,11 +2751,43 @@ const assessmentComponentsByTeam = computed(() => {
     }
     return componentsByTeam
 })
-const selectedAssessmentTeamComponents = computed(() => (
-    selectedTeam.value
-        ? assessmentComponentsByTeam.value.get(selectedTeam.value.toLocaleLowerCase()) || []
-        : []
-))
+/** The form's scope follows its selected team, independently of the list's
+ * team filter. Ownership is the backend-resolved ownership of each finding;
+ * a shared component name or a mapped ancestor does not identify its versions. */
+const assessmentScopeInstances = computed(() => {
+    const versionOf = new Map<unknown, string>()
+    for (const version of props.group.affected_versions || []) {
+        for (const instance of version.components || []) versionOf.set(instance, version.project_version || '')
+    }
+    const selected = selectedTeam.value ? canonicalReviewTeam(selectedTeam.value) : ''
+    return allInstances.value.filter((instance, index) => !selected || (
+        unscopedDependencyInfo.instanceTeams.value.get(unscopedDependencyInfo.getInstanceTeamKey(instance, index)) || []
+    ).some(team => canonicalReviewTeam(team) === selected)).map(instance => (
+        instance.project_version ? instance : { ...instance, project_version: versionOf.get(instance) || '' }
+    ))
+})
+const selectedAssessmentTeamAliases = computed(() => selectedTeam.value
+    ? Object.entries(teamAliasGroups.value).find(([primary]) => canonicalReviewTeam(primary) === canonicalReviewTeam(selectedTeam.value))?.[1] || []
+    : [])
+const assessmentScopeComponents = computed(() => {
+    const versionsByName = new Map<string, Set<string>>()
+    for (const instance of assessmentScopeInstances.value) {
+        const name = [instance.component_group, instance.component_name].filter(Boolean).join('/') || 'Unknown component'
+        if (!versionsByName.has(name)) versionsByName.set(name, new Set())
+        if (instance.component_version) versionsByName.get(name)!.add(instance.component_version)
+    }
+    return [...versionsByName].map(([name, versions]) => ({
+        name, versions: [...versions].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    })).sort((a, b) => a.name.localeCompare(b.name))
+})
+const assessmentScopeProjectVersions = computed(() => sortVersions([...new Set(
+    assessmentScopeInstances.value.map(instance => instance.project_version).filter((version): version is string => !!version),
+)], true))
+const selectedAssessmentTeamComponents = computed(() => selectedTeam.value
+    ? [...new Set(assessmentScopeInstances.value.map(instance => (
+        `${[instance.component_group, instance.component_name].filter(Boolean).join('/') || 'Unknown component'}@${instance.component_version || '(unknown)'}`
+    )))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    : [])
 const stringifyAssessmentTicketValue = (value: unknown): string => {
     if (value == null || value === '') return ''
     if (typeof value === 'string') return value.trim()
@@ -3255,7 +3287,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
 <template>
     <div
         ref="cardEl"
-        class="vuln-card relative rounded-lg border transition-colors"
+        class="vuln-card relative min-w-0 max-w-full rounded-lg border transition-colors"
         :class="[
             isWorkspace ? 'flex h-full flex-col overflow-hidden'
                 : inModal ? 'h-full min-h-0 overflow-y-auto overscroll-contain'
@@ -3523,7 +3555,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
         <div
             ref="contextPaneEl"
             data-testid="workspace-context-pane"
-            :class="isWorkspace ? 'min-h-0 overflow-y-auto overscroll-contain pb-4 pr-1' : 'contents'"
+            :class="isWorkspace ? 'min-h-0 min-w-0 overflow-y-auto overscroll-contain pb-4 pr-1' : 'contents'"
             :role="isWorkspace ? 'region' : undefined"
             :aria-label="isWorkspace ? 'Context' : undefined"
         >
@@ -3907,7 +3939,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                                     {{ component }}
                                 </span>
                                 <span v-if="selectedAssessmentTeamComponents.length === 0" class="text-amber-300">
-                                    No mapped component
+                                    No confirmed component ownership
                                 </span>
                             </span>
                             <!-- Block header metadata (read-only) -->
@@ -3995,7 +4027,11 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         />
                     </section>
 
-                    <ReportedFindingScope :instances="matrixInstances" />
+                    <ReportedFindingScope
+                        :instances="assessmentScopeInstances"
+                        :team="selectedTeam"
+                        :teamAliases="selectedAssessmentTeamAliases"
+                    />
 
                     <VulnAboutSummary
                         :vulnId="group.id"
@@ -4004,8 +4040,8 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         :cwes="group.cwes"
                         :recommendation="group.recommendation"
                         :cvssVector="group.cvss_vector"
-                        :components="uniqueComponents"
-                        :projectVersions="visibleProjectVersions"
+                        :components="assessmentScopeComponents"
+                        :projectVersions="assessmentScopeProjectVersions"
                         :links="externalLinks"
                         :collapsed="isWorkspace"
                     />

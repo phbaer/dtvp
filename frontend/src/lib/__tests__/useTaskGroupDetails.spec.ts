@@ -41,6 +41,44 @@ const createHarness = (
 }
 
 describe('useTaskGroupDetails', () => {
+    it('can defer replacing the open finding until navigation checks its draft', async () => {
+        const api = await import('../api')
+        const original = group('CVE-1')
+        const fresh = { ...original, title: 'Updated on the server' }
+        vi.mocked(api.getTaskVulnGroup).mockResolvedValue(fresh)
+        const { details } = createHarness({ 'CVE-1': group('CVE-1', true) })
+        details.cacheGroup(original)
+        await expect(details.refreshGroup('CVE-1', { cacheResult: false, allowStale: false })).resolves.toEqual(fresh)
+        expect(details.selectedGroup.value?.title).toBe('full')
+        details.cacheGroup(fresh)
+        expect(details.selectedGroup.value?.title).toBe('Updated on the server')
+    })
+    it('does not inherit a concurrent caller’s stale fallback during strict reopening', async () => {
+        const api = await import('../api')
+        const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+        let fail!: (reason: Error) => void
+        vi.mocked(api.getTaskVulnGroup)
+            .mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+            .mockRejectedValueOnce(new Error('Unavailable'))
+        const summary = group('CVE-1', true)
+        const { details } = createHarness({ 'CVE-1': summary })
+        const background = details.refreshGroup('CVE-1')
+        await expect(details.refreshGroup('CVE-1', { allowStale: false })).resolves.toBeNull()
+        fail(new Error('Background unavailable'))
+        await expect(background).resolves.toEqual(summary)
+        log.mockRestore()
+    })
+    it('does not reopen stale details when a strict history refresh fails', async () => {
+        const api = await import('../api')
+        const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.mocked(api.getTaskVulnGroup).mockRejectedValue(new Error('Unavailable'))
+        const { details } = createHarness({ 'CVE-1': group('CVE-1', true) })
+        details.cacheGroup(group('CVE-1'))
+        await expect(details.refreshGroup('CVE-1', { allowStale: false })).resolves.toBeNull()
+        // Failure does not destroy a draft already open in the inspector.
+        expect(details.selectedGroup.value?.id).toBe('CVE-1')
+        log.mockRestore()
+    })
     it('refreshes evidence without changing group identity or resetting assessment drafts', async () => {
         const api = await import('../api')
         const full = { ...group('CVE-2026-1234'), evidence_sources: ['NOT_CHECKED'] }

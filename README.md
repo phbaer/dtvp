@@ -132,10 +132,14 @@ constraints, and CI conventions.
 
 1. Open a project to review vulnerabilities across its versions.
 2. Filter by lifecycle, team, component, version, or evidence; open a finding
-   for context and assessment details. The assessment pane shows which component
-   version is reported in each product version, alongside its saved assessment.
+   for context and assessment details. Each team's assessment shows its own
+   reported component names and versions, their product versions, and that
+   team's saved decisions. Global explicitly shows all teams' findings.
    Combined decisions use the [shared assessment order](docs/assessment-model.md#the-global-decision),
    with False positive the least concerning completed outcome.
+   **History** reopens recently viewed or changed vulnerabilities, including
+   findings hidden by the current filters. See [Recent activity](docs/review-workflows.md#recent-activity).
+   Use **Changes requested** for assessments a reviewer returned to a team.
 3. Record team assessments, optionally using earlier team assessments,
    threat-model or code-analysis proposals. Reviewers approve global decisions
    and adjust CVSS scores. **Reset to Original** removes saved rescoring on

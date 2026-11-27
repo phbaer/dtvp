@@ -155,8 +155,8 @@ const collectConsoleErrors = (page: Page) => {
     return errors;
 };
 
-async function openAssessment(page: Page, group: typeof pendingGlobal) {
-    await page.goto('/project/TestProject?awaiting_review=false');
+async function openAssessment(page: Page, group: typeof pendingGlobal, path = '/project/TestProject?awaiting_review=false') {
+    await page.goto(path);
     const row = page.locator(`.vuln-card[data-group-id="${group.id}"]`);
     await expect(row).toBeVisible({ timeout: 20000 });
     await row.click();
@@ -167,6 +167,163 @@ async function openAssessment(page: Page, group: typeof pendingGlobal) {
 }
 
 test.describe('Lifecycle: a pending Global decision and approval', () => {
+    test('team assessment shows only that team’s component versions even outside the outer team filter', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const group = groupOf('INCOMPLETE', [
+            finding(1, { tags: ['Core'], component_version: '1.2.0' }),
+            finding(2, { tags: ['K-Core'], component_version: '1.7.0' }),
+            finding(3, { tags: ['Core'], component_version: '2.0.0' }),
+        ]);
+        await mockShell(page, group);
+        const inspector = await openAssessment(page, group, '/project/TestProject?awaiting_review=false&teams=Core');
+        await expect(inspector.getByTestId('reported-finding-scope').locator('tbody tr')).toHaveCount(2);
+        await inspector.getByTestId('toggle-assessment-team-scope').click();
+        await inspector.getByRole('button', { name: 'Global', exact: true }).click();
+        await expect(inspector.getByTestId('reported-finding-scope').locator('tbody tr')).toHaveCount(3);
+        await inspector.getByTestId('review-team-tab').filter({ hasText: 'K-Core' }).click();
+        const scope = inspector.getByTestId('reported-finding-scope');
+        await expect(scope.getByRole('heading')).toHaveText('Reported components for K-Core');
+        await expect(scope.locator('tbody tr')).toHaveCount(1);
+        await expect(scope.locator('tbody td')).toHaveText(['2.0', 'node-lib', '1.7.0', 'Not affected']);
+        await expect(inspector.getByTestId('assessment-team-components')).toContainText('node-lib@1.7.0');
+        await expect(inspector.getByTestId('vuln-about-affects')).not.toContainText('1.2.0');
+        await inspector.getByRole('button', { name: 'Global', exact: true }).click();
+        await expect(scope.getByRole('heading')).toHaveText('Reported components — all teams');
+        await expect(scope.locator('tbody tr')).toHaveCount(3);
+    });
+
+    test('filters Changes requested independently of Awaiting review and survives reload', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const requested = groupOf('INCOMPLETE', [finding(1)]);
+        Object.assign(requested.list_metadata, { is_pending: false, changes_requested_teams: ['K-Core'] });
+        const pending = { ...pendingGlobal, id: 'CVE-OTHER-PENDING' };
+        await mockShell(page, requested);
+        await mockGroupedVulnTask(page, { taskId: 'task-ws', groups: [requested, pending] });
+        await page.goto('/project/TestProject');
+        await page.getByTestId('filter-preset-changes-requested').click();
+        const requestedRow = page.locator(`.vuln-card[data-group-id="${requested.id}"]`);
+        await expect(requestedRow).toBeVisible();
+        await expect(page.locator('.vuln-card[data-group-id="CVE-OTHER-PENDING"]')).toHaveCount(0);
+        await expect(page).toHaveURL(/changes_requested=true/);
+        await expect(page.getByTestId('filter-awaiting-review')).toHaveAttribute('aria-pressed', 'false');
+        await page.reload();
+        await expect(requestedRow).toBeVisible();
+        await expect(page.getByTestId('filter-preset-changes-requested')).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.getByTestId('filter-changes-requested')).toHaveAttribute('aria-pressed', 'true');
+        Object.assign(requested.list_metadata, { changes_requested_teams: [] });
+        await page.reload();
+        await expect(page.locator('.vuln-card')).toHaveCount(0);
+        await page.getByTestId('filter-changes-requested').click();
+        await expect(page.locator('.vuln-card[data-group-id]')).toHaveCount(2);
+    });
+
+    test('history preserves an unsaved assessment and reports an unavailable finding', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await mockShell(page, pendingGlobal);
+        const inspector = await openAssessment(page, pendingGlobal);
+        await inspector.locator('#analysis-details-textarea').fill('Keep this unsaved rationale.');
+        await page.getByTestId('project-activity-toggle').click();
+        await page.getByTestId('project-activity-menu').getByRole('button').filter({ hasText: pendingGlobal.id }).first().click();
+        await expect(page.getByRole('heading', { name: 'Unsaved assessment' })).toBeVisible();
+        await page.getByRole('button', { name: 'Stay', exact: true }).click();
+        await expect(inspector.locator('#analysis-details-textarea')).toHaveValue('Keep this unsaved rationale.');
+        // Discard allows reopening, but a failed fetch must leave the finding
+        // available to retry rather than silently showing cached data as fresh.
+        await page.route('**/api/tasks/task-ws/groups/*', route => route.fulfill({ status: 404, json: { detail: 'No longer available' } }));
+        await page.getByTestId('project-activity-toggle').click();
+        await page.getByTestId('project-activity-menu').getByRole('button').filter({ hasText: pendingGlobal.id }).first().click();
+        await page.getByRole('button', { name: 'Discard', exact: true }).click();
+        await expect(page.getByRole('alert').filter({ hasText: 'could not be reopened' })).toBeVisible();
+        await expect(inspector).toBeVisible();
+    });
+
+    test('history also protects edits made while the requested finding is loading', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await mockShell(page, pendingGlobal);
+        const inspector = await openAssessment(page, pendingGlobal);
+        let finish!: () => void;
+        let started!: () => void;
+        const requested = new Promise<void>(resolve => { started = resolve });
+        const responseReady = new Promise<void>(resolve => { finish = resolve });
+        await page.route('**/api/tasks/task-ws/groups/*', async route => {
+            started();
+            await responseReady;
+            await route.fulfill({ json: { ...pendingGlobal, title: 'Fresh server details' } });
+        });
+        await page.getByTestId('project-activity-toggle').click();
+        await page.getByTestId('project-activity-menu').getByRole('button').filter({ hasText: pendingGlobal.id }).first().click();
+        await requested;
+        await inspector.locator('#analysis-details-textarea').fill('Edited while history was loading.');
+        finish();
+        await expect(page.getByRole('heading', { name: 'Unsaved assessment' })).toBeVisible();
+        await page.getByRole('button', { name: 'Stay', exact: true }).click();
+        await expect(inspector.locator('#analysis-details-textarea')).toHaveValue('Edited while history was loading.');
+        await expect(inspector).not.toContainText('Fresh server details');
+    });
+
+    for (const width of [430, 1440]) {
+        test(`recent activity reopens a filtered-out finding after reload at ${width}px`, async ({ page }) => {
+            await page.setViewportSize({ width, height: 900 });
+            await mockShell(page, pendingGlobal);
+            const inspector = await openAssessment(page, pendingGlobal);
+            await inspector.getByRole('button', { name: 'Close details', exact: true }).click();
+            const search = page.getByPlaceholder('Search CVE, component, team, assignee, version...');
+            await search.fill('no-such-vulnerability');
+            await expect(page.locator('.vuln-card')).toHaveCount(0);
+            await page.reload();
+            await expect(search).toHaveValue('no-such-vulnerability');
+            await page.getByTestId('project-activity-toggle').click();
+            const history = page.getByTestId('project-activity-menu');
+            await expect(history).toBeVisible();
+            const bounds = await history.boundingBox();
+            expect(bounds!.x).toBeGreaterThanOrEqual(0);
+            expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+            await history.getByRole('button').filter({ hasText: pendingGlobal.id }).first().click();
+            await expect(inspector).toBeVisible();
+            await expect(inspector).toContainText(pendingGlobal.id);
+            await expect(search).toHaveValue('no-such-vulnerability');
+            await expect(page.locator('.vuln-card[data-group-id]')).toHaveCount(0);
+            await inspector.getByRole('button', { name: 'Close details', exact: true }).click();
+            await page.getByTestId('project-activity-toggle').click();
+            await history.getByRole('button', { name: 'Clear history', exact: true }).click();
+            await expect(history).toContainText('No recent vulnerability activity.');
+            await page.keyboard.press('Escape');
+            await expect(history).toHaveCount(0);
+            await expect(page.getByTestId('project-activity-toggle')).toBeFocused();
+        });
+    }
+
+    for (const width of [430, 1280, 1600]) {
+        test(`many product versions scroll inside Where it was found at ${width}px`, async ({ page }) => {
+            await page.setViewportSize({ width, height: 900 });
+            const group = groupOf('NEEDS_APPROVAL', Array.from({ length: 30 }, (_, i) => finding(i + 1)));
+            await mockShell(page, group);
+            const inspector = await openAssessment(page, group);
+            await inspector.getByRole('tab', { name: /Context/ }).click();
+            const checkMatrix = async () => {
+                const scroll = page.getByTestId('finding-matrix-scroll');
+                await expect(scroll).toBeVisible();
+                const dimensions = await scroll.evaluate(element => ({
+                    width: element.clientWidth, content: element.scrollWidth,
+                    right: element.getBoundingClientRect().right,
+                }));
+                expect(dimensions.content).toBeGreaterThan(dimensions.width);
+                expect(dimensions.right).toBeLessThanOrEqual(width + 1);
+                const label = scroll.getByTestId('finding-matrix-row-toggle').first();
+                const before = await label.boundingBox();
+                await scroll.evaluate(element => { element.scrollLeft = element.scrollWidth });
+                const after = await label.boundingBox();
+                expect(Math.abs(after!.x - before!.x)).toBeLessThan(2);
+                expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+            };
+            await checkMatrix();
+            if (width === 1600) {
+                await inspector.getByTestId('workspace-toggle').click();
+                await checkMatrix();
+            }
+        });
+    }
+
     test('keeps reported component versions visible during review and team assessment', async ({ page }) => {
         const group = groupOf('NEEDS_APPROVAL', [
             finding(1, { component_version: '1.2.0' }),
@@ -174,20 +331,20 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
         ]);
         await mockShell(page, group);
         const inspector = await openAssessment(page, group);
-        const assertScope = async (scope: ReturnType<Page['getByTestId']>) => {
+        const assertScope = async (scope: ReturnType<Page['getByTestId']>, team = false) => {
             await expect(scope).toBeVisible();
             const rows = scope.locator('tbody tr');
             await expect(rows).toHaveCount(2);
-            await expect(rows.nth(0).locator('td')).toHaveText(['1.0', 'node-lib', '1.2.0', 'In triage']);
+            await expect(rows.nth(0).locator('td')).toHaveText(['1.0', 'node-lib', '1.2.0', team ? 'Not affected' : 'In triage']);
             await expect(rows.nth(1).locator('td')).toHaveText(['2.0', 'node-lib', '1.7.0', 'Not affected']);
         };
         await assertScope(inspector.getByTestId('reported-finding-scope'));
         await inspector.getByTestId('review-team-tab').filter({ hasText: 'K-Core' }).click();
-        await assertScope(inspector.getByTestId('reported-finding-scope'));
+        await assertScope(inspector.getByTestId('reported-finding-scope'), true);
         await page.setViewportSize({ width: 1600, height: 1000 });
         await inspector.getByTestId('workspace-toggle').click();
         const workspace = page.getByRole('dialog', { name: `Assessment workspace for ${group.id}` });
-        await assertScope(workspace.getByTestId('workspace-assessment-pane').getByTestId('reported-finding-scope'));
+        await assertScope(workspace.getByTestId('workspace-assessment-pane').getByTestId('reported-finding-scope'), true);
     });
 
     for (const pending of [true, false]) {
@@ -248,6 +405,13 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
         await expect(inspector.getByTestId('rescore-reset-hint')).toHaveCount(0);
         await expect(inspector.getByTestId('lifecycle-badge').first()).toContainText('Incomplete');
         await expect(inspector.getByTestId('assessment-approve-button')).toHaveCount(0);
+        await inspector.getByRole('button', { name: 'Close details', exact: true }).click();
+        await page.getByTestId('project-activity-toggle').click();
+        const activity = page.getByTestId('project-activity-menu');
+        await activity.getByLabel('Changes only').check();
+        await expect(activity).toContainText('Assessment updated');
+        await expect(activity).toContainText(group.id);
+        await page.keyboard.press('Escape');
         expect(errors).toEqual([]);
     });
 

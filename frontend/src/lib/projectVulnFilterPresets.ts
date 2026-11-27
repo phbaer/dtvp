@@ -31,6 +31,7 @@ export interface FilterState {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
+    changesRequestedOnly?: boolean
     /** First-seen cutoff (ADR 0015): `YYYY-MM-DD`, `<N>d`, or ''. */
     cutoff: string
     cutoffMode: 'before' | 'after'
@@ -48,6 +49,7 @@ export interface FilterOption {
 export type FilterPresetKey =
     | 'needs-assessment'
     | 'awaiting-review'
+    | 'changes-requested'
     | 'conflicting'
     | 'new-findings'
     | 'all'
@@ -67,6 +69,7 @@ export interface FilterPreset {
 export const FILTER_PRESETS: readonly FilterPreset[] = [
     { key: 'needs-assessment', label: 'Needs my assessment', detail: 'Open or incomplete; with teams selected, theirs is missing' },
     { key: 'awaiting-review', label: 'Awaiting review', detail: 'Submitted, not yet approved' },
+    { key: 'changes-requested', label: 'Changes requested', detail: 'A reviewer requested changes to a team assessment' },
     { key: 'conflicting', label: 'Conflicting', detail: 'Assessments disagree or need repair' },
     { key: 'new-findings', label: 'New findings', detail: 'Reported after the assessment' },
     { key: 'all', label: 'All', detail: 'Every status' },
@@ -83,6 +86,7 @@ const presetStatus = (key: FilterPresetKey, state: FilterState, context: PresetC
     const status = {
         lifecycleFilters: [...VISIBLE_LIFECYCLE_FILTERS],
         awaitingReviewOnly: false,
+        changesRequestedOnly: false,
         inconsistencyReasonFilters: [] as InconsistencyReason[],
         newFindingsOnly: false,
         teamAssessmentFilter: 'ANY',
@@ -92,6 +96,8 @@ const presetStatus = (key: FilterPresetKey, state: FilterState, context: PresetC
         if (hasTeams(state)) status.teamAssessmentFilter = 'MISSING'
     } else if (key === 'awaiting-review') {
         status.awaitingReviewOnly = true
+    } else if (key === 'changes-requested') {
+        status.changesRequestedOnly = true
     } else if (key === 'conflicting') {
         status.inconsistencyReasonFilters = [...context.inconsistencyReasons]
     } else if (key === 'new-findings') {
@@ -118,6 +124,7 @@ export const activeFilterPreset = (
     const status = presetStatus(key, state, context)
     return sameSet(state.lifecycleFilters, status.lifecycleFilters)
         && !!state.awaitingReviewOnly === status.awaitingReviewOnly
+        && !!state.changesRequestedOnly === status.changesRequestedOnly
         && sameSet(state.inconsistencyReasonFilters || [], status.inconsistencyReasonFilters)
         && !!state.newFindingsOnly === status.newFindingsOnly
         && (state.teamAssessmentFilter || 'ANY') === status.teamAssessmentFilter

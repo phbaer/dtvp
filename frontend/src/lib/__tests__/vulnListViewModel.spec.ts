@@ -84,6 +84,23 @@ it('sorts completed assessments with false positive last and keeps unassessed wo
     expect(sortVulnListItems(items, 'analysis', 'desc').map(item => item.id)).toEqual([...expected].reverse())
 })
 
+it.each([false, true])('filters review change requests independently of pending review (summary=%s)', summary => {
+    const requested = makeGroup({ id: 'requested', list_metadata: { lifecycle: 'INCOMPLETE', changes_requested_teams: ['Team A'] } })
+    if (summary) requested.affected_versions = []
+    else {
+        const marker = btoa(JSON.stringify({ team: 'Team A', rationale: 'Check the release scope.', reviewer: 'rita', requested_at_ms: 1794000000000 }))
+            .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+        requested.affected_versions[0]!.components[0]!.analysis_details = `[Team Changes Requested: ${marker}]`
+    }
+    const items = buildVulnListItems([
+        requested,
+        makeGroup({ id: 'pending', affected_versions: [], list_metadata: { lifecycle: 'NEEDS_APPROVAL', is_pending: true } }),
+        makeGroup({ id: 'other' }),
+    ], {})
+    expect(deriveVulnListFilterModel(items, baseFilters({ changesRequestedOnly: true })).matchingItems.map(item => item.id)).toEqual(['requested'])
+    expect(deriveVulnListFilterModel(items, baseFilters({ changesRequestedOnly: true, awaitingReviewOnly: true })).matchingItems).toEqual([])
+})
+
 describe('vulnListViewModel', () => {
     it('finds documented team work across global lifecycles and keeps Missing separate', () => {
         const items = buildVulnListItems([

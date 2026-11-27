@@ -248,11 +248,22 @@ between In triage and Resolved when sorting by analysis state. This
 order does not change the advisory severity or overwrite a reviewer’s General
 block; see [ADR 0018](adr/0018-completed-assessment-priority.md).
 
-The assessment pane also lists each reported component version under its
-product version, using the current team filter. Saved finding states are
-shown separately: a scanner report alone does not establish affectedness,
-and an absent finding does not establish that a release is unaffected.
-Unknown product and component versions are labelled explicitly.
+The assessment pane lists the selected team's reported component names and
+versions, paired with their product versions. It uses each finding's resolved
+team ownership, including aliases and inherited dependency ownership, rather
+than selecting every version of a matching component name. Selecting another
+team through **Show all teams** changes this scope independently of the outer
+list filter. The component chips and advisory summary use the same scope;
+Global explicitly shows all teams' findings.
+
+The team table shows that team's own current assessment blocks, resolving
+aliases and keeping conflicting states separate. A General block or the
+finding's combined state is not presented as an explicit team decision;
+without its own block the table says **Not assessed by this team**. A scanner
+report alone does not establish affectedness, and an absent finding does not
+establish that a release is unaffected. Missing ownership is shown explicitly
+instead of falling back to the global component list. Unknown product and
+component versions are labelled explicitly.
 
 - **Export.** The state DTVP writes to Dependency-Track for a finding is its
   effective decision (`calculate_aggregated_state`): the same derived worst

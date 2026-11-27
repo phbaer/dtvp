@@ -29,6 +29,7 @@ import {
 } from '../lib/useProjectVulnSearchControls'
 import { useProjectViewLayout } from '../lib/useProjectViewLayout'
 import { useProjectAssessmentUpdates } from '../lib/useProjectAssessmentUpdates'
+import { useProjectActivityHistory, type ProjectActivity } from '../lib/useProjectActivityHistory'
 import { useProjectVulnSelection } from '../lib/useProjectVulnSelection'
 import { useTaskGroupDetails } from '../lib/useTaskGroupDetails'
 import { useTaskGroupWindows } from '../lib/useTaskGroupWindows'
@@ -76,6 +77,7 @@ import BulkWorkflowModal from '../components/BulkWorkflowModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
 import SavedViewsMenu from '../components/SavedViewsMenu.vue'
+import ProjectActivityMenu from '../components/ProjectActivityMenu.vue'
 import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from '@lucide/vue'
 import CycloneDxExportMenu from '../components/CycloneDxExportMenu.vue'
 import SourceSyncMenu from '../components/SourceSyncMenu.vue'
@@ -130,6 +132,11 @@ const closeSelectedGroupWithDraftGuard = async () => {
     closeSelectedGroup()
 }
 const user = inject<any>('user', { role: 'ANALYST' })
+const activity = useProjectActivityHistory(
+    computed(routeProjectName), computed(() => (user?.value ?? user)?.username || ''),
+)
+const activityError = ref('')
+const activityBusy = ref(false)
 const currentUserRole = computed(() => (user?.value ?? user)?.role || 'ANALYST')
 const groups = ref<GroupedVuln[]>([])
 const currentVulnTaskId = ref<string | null>(null)
@@ -531,6 +538,7 @@ const {
     notRescoredOnly,
     newFindingsOnly,
     awaitingReviewOnly,
+    changesRequestedOnly,
     cutoff,
     cutoffMode,
     cutoffBasis,
@@ -664,6 +672,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
+    changesRequestedOnly: changesRequestedOnly.value,
     cutoff: cutoff.value,
     cutoffMode: cutoffMode.value,
     cutoffBasis: cutoffBasis.value,
@@ -794,6 +803,7 @@ const listFilterOptions = computed(() => ({
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
+    changesRequestedOnly: changesRequestedOnly.value,
     cutoff: cutoff.value,
     cutoffMode: cutoffMode.value,
     cutoffBasis: cutoffBasis.value,
@@ -993,6 +1003,39 @@ const {
     findListGroup,
 })
 
+watch(() => [selectedGroup.value?.id, loadedProjectName.value, activity.key.value], () => {
+    if (isProjectReviewRouteActive() && loadedProjectName.value === routeProjectName() && selectedGroup.value) {
+        activity.record(selectedGroup.value, 'opened')
+    }
+})
+watch(activity.key, () => { activityError.value = '' })
+
+const openActivity = async (entry: ProjectActivity) => {
+    if (activityBusy.value) return
+    const context = activity.key.value
+    const taskId = currentVulnTaskId.value
+    activityBusy.value = true
+    activityError.value = ''
+    try {
+        if (!await confirmSelectedDraftBeforeLeave() || context !== activity.key.value) return
+        const sourceId = selectedGroupId.value
+        const group = await refreshTaskGroupDetail(entry.id, { showLoading: false, allowStale: false, cacheResult: false })
+        if (context !== activity.key.value || taskId !== currentVulnTaskId.value || sourceId !== selectedGroupId.value) return
+        if (!group) {
+            activityError.value = `${entry.id} could not be reopened. It may no longer be available; try again after refreshing the project.`
+            return
+        }
+        // A fetch can take long enough for another edit to be made.
+        if (!await confirmSelectedDraftBeforeLeave() || context !== activity.key.value || taskId !== currentVulnTaskId.value) return
+        cacheFullGroup(group)
+        selectGroup(group)
+    } catch {
+        if (context === activity.key.value) activityError.value = `${entry.id} could not be reopened. Please try again.`
+    } finally {
+        activityBusy.value = false
+    }
+}
+
 // A refresh after a change (a save, an approval, a reload, new evidence)
 // asks for the rows again in place and keeps the selection steady; see
 // listSelectionAnchor. Only a new query (filters, sort) starts at the top.
@@ -1054,6 +1097,7 @@ const {
     isTaskWindowActive: isTaskWindowListActive,
     refreshTaskWindow: refreshActiveTaskWindowAndDetails,
     refreshOwnership: fetchVulns,
+    onAssessmentChanged: group => activity.record(group, 'updated'),
 })
 
 const reloadingGroupIds = ref<Set<string>>(new Set())
@@ -1393,6 +1437,7 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
+    changesRequestedOnly: changesRequestedOnly.value,
     cutoff: cutoff.value,
     cutoffMode: cutoffMode.value,
     cutoffBasis: cutoffBasis.value,
@@ -1455,6 +1500,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'newFindings':
             newFindingsOnly.value = false
             break
+        case 'changesRequested':
+            changesRequestedOnly.value = false
+            break
         case 'awaitingReview':
             // Through the update, so a reviewer's choice outlives a reload.
             handleFilterUpdate({ ...filterState.value, awaitingReviewOnly: false })
@@ -1482,6 +1530,7 @@ const customFilterArgs = computed(() => ({
     notRescoredOnly: notRescoredOnly.value,
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
+    changesRequestedOnly: changesRequestedOnly.value,
     cutoff: cutoff.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
@@ -1726,6 +1775,11 @@ watch(currentUserRole, (role) => {
                         </button>
                     </div>
                 </div>
+                <ProjectActivityMenu
+                    :entries="activity.entries.value" :persistent="activity.persistent.value"
+                    :busy="activityBusy" :error="activityError"
+                    @open="openActivity" @clear="activity.clear"
+                />
                 <GoneFindingsPanel
                     :project-name="($route.params.name as string)"
                     :can-acknowledge="projectHeaderState.isReviewer.value"

@@ -8,6 +8,8 @@ Paths and commands refer to the repository root unless stated otherwise.
   - [Cutoff](#cutoff)
   - [Cutoff and the FDA guidance](#cutoff-and-the-fda-guidance)
   - [Saved views and short links](#saved-views-and-short-links)
+  - [Recent activity](#recent-activity)
+  - [Changes requested](#changes-requested)
 - [Bulk Changes](#bulk-changes)
 - [Project Archives](#project-archives)
 
@@ -26,6 +28,7 @@ counts leave out their own category. The sidebar is described in the
 | Quick views | Sidebar, top | none: they set the status filters below |
 | Team, their assessment (Any, Not recorded, Recorded) | Sidebar | `teams` (old links: `tag`), `team_assessment` (role default) |
 | Awaiting review | Sidebar, Status | `awaiting_review` (role default: on for reviewers, off for analysts; old links: `lifecycle=NEEDS_APPROVAL`) |
+| Changes requested | Quick views; Sidebar, Status | `changes_requested=true` (off by default) |
 | Status: Open, Incomplete (with Conflicting), Ready for approval, Assessed | Sidebar | `lifecycle` (role default; old values `CONFLICTING`, `INCONSISTENT`, `ASSESSED_LEGACY` are mapped, `NEEDS_APPROVAL` see Awaiting review) |
 | Analysis state | Sidebar | `analysis` (all) |
 | Project versions | Sidebar | `versions` (all) |
@@ -44,6 +47,38 @@ facets. The Open selection matches the displayed `OPEN` lifecycle category, and
 vulnerability-ID searches are combined with all active filters. A retired
 parameter of a saved link is read as its replacement and replaced in the
 address bar.
+
+### Changes requested
+
+The **Changes requested** quick view lists vulnerabilities with an open
+reviewer request for at least one team assessment. It turns off **Awaiting
+review only** and includes every lifecycle; search, team, version and other
+scope filters still apply. The **Changes requested only** toggle under
+Status can also be combined with other filters. Its count ignores its own
+toggle and respects the remaining filters.
+
+This filter is separate from pending approval: a request needs a revised
+assessment from a team. Resubmitting or withdrawing the last request removes
+the finding from this view. `changes_requested=true` works in copied URLs,
+saved views, task-window queries and Bulk Changes scoped to the current list.
+
+### Recent activity
+
+Use **History** in the project toolbar to reopen a vulnerability you viewed
+or changed. **Changes only** lists successful assessment updates, including
+partial successes, so a saved mistake is easy to find again. Entries show
+the vulnerability ID, title, action and time. Reopening fetches the current
+details without changing the list filters, even if the finding left the
+review queue. Unsaved edits use the usual Save, Discard or Stay prompt;
+unavailable findings show an error and remain in the history for retry.
+
+The last 50 activities are kept per account and project in this browser and
+survive reloads. Only navigation metadata is stored, not assessment contents.
+If browser storage is unavailable, history lasts until reload. **Clear
+history** clears this account/project's local list. Other tabs synchronize
+local history changes; this is a convenience list, not a durable audit log
+or an undo operation. Use the finding's **History** section to inspect its
+recorded assessment revisions before saving a correction.
 
 ### Awaiting review
 

@@ -17,7 +17,7 @@ const props = defineProps<{
     cwes?: Array<{ id: number, name?: string | null }> | null
     recommendation?: string | null
     cvssVector?: string | null
-    /** Affected components in scope, with their versions. */
+    /** Reported components in the selected assessment scope, with their versions. */
     components: Array<{ name: string, versions: string[] }>
     /** Project versions the components in scope are found in. */
     projectVersions: string[]
@@ -166,7 +166,7 @@ const cweNames = computed(() => (props.cwes || [])
             </button>
             <dl data-testid="vuln-about-facts" class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] leading-snug">
                 <div v-if="components.length" class="flex min-w-0 gap-1" data-testid="vuln-about-affects">
-                    <dt class="shrink-0 text-gray-500">Affects</dt>
+                    <dt class="shrink-0 text-gray-500">Reported</dt>
                     <dd class="min-w-0 text-gray-300">
                         <span class="font-mono">{{ componentSummary.join(' · ') }}</span>
                         <template v-if="hiddenComponents"> +{{ hiddenComponents }} more</template>

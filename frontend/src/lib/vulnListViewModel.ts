@@ -61,6 +61,7 @@ export interface VulnListViewFilters {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
+    changesRequestedOnly?: boolean
     cutoff: string
     cutoffMode: 'before' | 'after'
     cutoffBasis?: 'published' | 'attributed'
@@ -168,6 +169,7 @@ export const deriveVulnListResultCounts = (
         not_rescored: 0,
         new_findings: 0,
         awaiting_review: 0,
+        changes_requested: 0,
         ids: {},
         versions: {},
         tags: {},
@@ -207,6 +209,7 @@ export const deriveVulnListResultCounts = (
         if (item.notRescored) counts.not_rescored = (counts.not_rescored || 0) + 1
         if (item.hasNewFindings) counts.new_findings = (counts.new_findings || 0) + 1
         if (item.isPending) counts.awaiting_review = (counts.awaiting_review || 0) + 1
+        if (item.changesRequestedTeams?.length) counts.changes_requested = (counts.changes_requested || 0) + 1
 
         incrementUniqueResultCounts(counts.ids!, [item.id, ...(item.group.aliases || [])])
         incrementUniqueResultCounts(counts.versions, item.versions)
@@ -562,6 +565,7 @@ export const deriveVulnListFilterModel = (
         notRescoredOnly: filters.notRescoredOnly,
         newFindingsOnly: filters.newFindingsOnly,
         awaitingReviewOnly: filters.awaitingReviewOnly,
+        changesRequestedOnly: filters.changesRequestedOnly,
         cutoff: filters.cutoff,
         cutoffMode: filters.cutoffMode,
         cutoffBasis: filters.cutoffBasis,
@@ -679,6 +683,7 @@ export const deriveVulnListFacetCounts = (
         ['not_rescored', { notRescoredOnly: false }],
         ['new_findings', { newFindingsOnly: false }],
         ['awaiting_review', { awaitingReviewOnly: false }],
+        ['changes_requested', { changesRequestedOnly: false }],
     ]
     const parsed = typeof filters.smartSearch === 'string' ? parseVulnSearchQuery(filters.smartSearch) : filters.smartSearch
     const searchOverrides: Partial<Record<keyof TaskVulnGroupListCounts, Partial<ParsedVulnSearchQuery>>> = {

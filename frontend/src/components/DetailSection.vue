@@ -15,7 +15,7 @@ const id = useId()
 
 <template>
     <section
-        class="overflow-hidden rounded-lg border border-gray-700/70 bg-gray-900/45 shadow-sm shadow-black/10"
+        class="min-w-0 max-w-full overflow-hidden rounded-lg border border-gray-700/70 bg-gray-900/45 shadow-sm shadow-black/10"
         :aria-labelledby="`${id}-title`"
         :aria-describedby="help ? `${id}-help` : undefined"
     >

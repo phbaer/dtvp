@@ -41,6 +41,15 @@ const mountHarness = (options: {
 }
 
 describe('useProjectVulnFilters', () => {
+    it('roundtrips and resets the Changes requested filter', async () => {
+        const { wrapper, filters } = mountHarness({ query: { changes_requested: 'true', awaiting_review: 'false' } })
+        await nextTick()
+        expect(filters.changesRequestedOnly.value).toBe(true)
+        expect(filters.filterUrl.value).toContain('changes_requested=true')
+        filters.resetFilters()
+        expect(filters.changesRequestedOnly.value).toBe(false)
+        wrapper.unmount()
+    })
     it('Documented preserves lifecycle, roundtrips URLs, and resets to Any', async () => {
         vi.useFakeTimers()
         const { filters, wrapper, router } = mountHarness({ role: 'REVIEWER', query: { teams: ['Security'], lifecycle: ['READY_FOR_APPROVAL'] } })

@@ -121,6 +121,7 @@ export interface VulnListFilterInput {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
+    changesRequestedOnly?: boolean
     cutoff?: string
     cutoffMode?: CutoffMode
     cutoffBasis?: CutoffBasis
@@ -156,6 +157,7 @@ export interface CompiledVulnListFilters {
     notRescoredOnly?: boolean
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
+    changesRequestedOnly?: boolean
     cutoff: string
     cutoffMode: CutoffMode
     cutoffBasis: CutoffBasis
@@ -1025,6 +1027,7 @@ export function compileVulnListFilters(
         notRescoredOnly: !!filters.notRescoredOnly,
         newFindingsOnly: !!filters.newFindingsOnly,
         awaitingReviewOnly: !!filters.awaitingReviewOnly,
+        changesRequestedOnly: !!filters.changesRequestedOnly,
         cutoff: normalizeCutoff(filters.cutoff),
         cutoffMode: normalizeCutoffMode(filters.cutoffMode),
         cutoffBasis: normalizeCutoffBasis(filters.cutoffBasis),
@@ -1248,6 +1251,7 @@ export function matchesCompiledListFilters(
         return false
     }
 
+    if (filters.changesRequestedOnly && !item.changesRequestedTeams?.length) return false
     if (filters.awaitingReviewOnly && !item.isPending) {
         return false
     }
