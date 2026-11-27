@@ -13,7 +13,7 @@ import { sortVersions } from './version'
 
 export type DependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
 
-interface TaggedComponentInfo {
+export interface TaggedComponentInfo {
     name: string
     versions: string[]
     tag: string

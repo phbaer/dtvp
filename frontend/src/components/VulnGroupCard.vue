@@ -31,6 +31,7 @@ import CustomSelect from './CustomSelect.vue'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import VulnGroupAssessmentDetails from './VulnGroupAssessmentDetails.vue'
 import FindingMatrix from './FindingMatrix.vue'
+import TeamMappedComponents from './TeamMappedComponents.vue'
 import ReportedFindingScope from './ReportedFindingScope.vue'
 import CalculatorModal from './CalculatorModal.vue'
 import SsvcCalculator from './SsvcCalculator.vue'
@@ -3719,42 +3720,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                     No components in this vulnerability currently resolve to {{ activeTeamScope }}.
                 </div>
 
-            <!-- The matrix shows each component's team; this says which
-                 mapped component gives it: the component itself, one above
-                 it in a chain, or the catch-all. -->
-            <div
-                v-if="triggeringTaggedComponents.length > 0"
-                data-testid="triggering-team-components"
-                class="min-w-0 space-y-2 rounded border border-gray-800/80 bg-gray-950/30 p-3"
-            >
-                <h5 class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    Team-mapped components
-                    <span
-                        class="inline-flex cursor-help normal-case tracking-normal"
-                        title="The components whose team mapping assigns the teams above: the affected component itself or a component above it in a dependency chain. Without a mapping the catch-all '*' assigns the team."
-                    >
-                        <Info :size="11" aria-hidden="true" />
-                    </span>
-                </h5>
-                <div class="flex flex-wrap gap-1.5 overflow-x-auto pb-1">
-                    <span
-                        v-for="comp in triggeringTaggedComponents"
-                        :key="comp.name"
-                        data-testid="triggering-team-component"
-                        :data-catch-all="comp.catchAll ? 'true' : undefined"
-                        class="inline-flex shrink-0 items-center whitespace-nowrap px-2 py-0.5 rounded text-[11px] font-mono border"
-                        :class="comp.catchAll ? 'bg-amber-950/30 text-amber-100 border-amber-700/50' : 'bg-gray-800 text-gray-300 border-gray-700'"
-                        :title="comp.catchAll
-                            ? `Neither this component nor any component of its chain is in the team mapping, so the catch-all '*' gives the team ${comp.tag}. Add one of these names to the mapping to give it a team.`
-                            : undefined"
-                    >
-                        {{ comp.name }}
-                        <span v-if="comp.versions.length" class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
-                        <span v-if="comp.under?.length" class="ml-1 font-sans text-amber-200/70">under {{ comp.under.join(', ') }}</span>
-                        <span class="ml-2 text-[10px] font-normal" :class="comp.catchAll ? 'text-amber-300' : 'text-blue-300'">({{ comp.tag }}<template v-if="comp.catchAll">; no team mapping, catch-all '*'</template>)</span>
-                    </span>
-                </div>
-            </div>
+                <TeamMappedComponents :components="triggeringTaggedComponents" />
             </DetailSection>
 
             <DetailSection

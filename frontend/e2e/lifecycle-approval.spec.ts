@@ -300,6 +300,10 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
             const group = groupOf('NEEDS_APPROVAL', Array.from({ length: 30 }, (_, i) => finding(i + 1)));
             await mockShell(page, group);
             const inspector = await openAssessment(page, group);
+            const reported = inspector.getByTestId('reported-finding-scope');
+            await expect(reported.locator('tbody tr')).toHaveCount(1);
+            await expect(reported.locator('tbody td').first()).toContainText('1.0, 2.0, 3.0');
+            await expect(reported.locator('tbody td').first()).toContainText('30.0');
             await inspector.getByRole('tab', { name: /Context/ }).click();
             const checkMatrix = async () => {
                 const scroll = page.getByTestId('finding-matrix-scroll');
@@ -322,6 +326,37 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
                 await inspector.getByTestId('workspace-toggle').click();
                 await checkMatrix();
             }
+        });
+    }
+
+    for (const width of [430, 1600]) {
+        test(`long mapped-component lists stay compact and expandable at ${width}px`, async ({ page }) => {
+            await page.setViewportSize({ width, height: 900 });
+            const group = groupOf('NEEDS_APPROVAL', [
+                ...Array.from({ length: 30 }, (_, index) => finding(index + 1, {
+                    component_name: 'core-lib', component_version: `${index + 1}.0.0`, tags: ['Core'],
+                })),
+                ...Array.from({ length: 10 }, (_, index) => finding(index + 31, {
+                    component_name: `unmapped-${index}`, tags: ['Unknown'],
+                })),
+            ]);
+            group.tags = ['Core', 'Unknown'];
+            await mockShell(page, group);
+            const inspector = await openAssessment(page, group);
+            await inspector.getByRole('tab', { name: /Context/ }).click();
+            const mapped = inspector.getByTestId('triggering-team-components');
+            await mapped.scrollIntoViewIfNeeded();
+            await expect(mapped.getByTestId('triggering-team-component')).toHaveCount(4);
+            const core = mapped.getByTestId('triggering-team-component').filter({ hasText: 'core-lib' });
+            await expect(core).not.toContainText('30.0.0');
+            await core.getByRole('button', { name: /Show all/ }).click();
+            await expect(core).toContainText('30.0.0');
+            await mapped.getByRole('button', { name: /Show all 11 components/ }).click();
+            await expect(mapped.getByTestId('triggering-team-component')).toHaveCount(11);
+            const bounds = await mapped.boundingBox();
+            expect(bounds!.height).toBeLessThan(350);
+            expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+            expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
         });
     }
 

@@ -117,6 +117,13 @@ The same bounds apply in the phone overlay, desktop inspector and workspace.
 
 The Context tab uses three clearly separated sections in a fixed reading order: advisory description and references; where the vulnerability was found, as a matrix of components by project versions with each component's team and the assessment state of each finding (a component row opens its dependency chains); and the existing assessment evidence. Below the matrix, **Team-mapped components** names the components whose team mapping gives those teams: the affected component itself, one above it in a dependency chain, or the catch-all `*`. A note on the team filter appears only when it hides findings. What a section is for is in the tooltip of the info icon next to its title (and read out by screen readers), not in a subtitle.
 
+The team-mapped component list initially shows four components and up to three
+component versions/product contexts each. Expand an entry for every version,
+or show all components in its bounded scroll area. The assessment tables
+comma-group product versions for the same component version and decision;
+component versions share a row only when their complete release coverage and
+assessment agree. Different coverage and decisions remain separate.
+
 ### Assessment Tab
 
 The same inspector and assessment card move between the desktop panel and

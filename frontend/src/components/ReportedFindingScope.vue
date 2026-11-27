@@ -33,10 +33,27 @@ const rows = computed(() => {
             unique.set(key, { key, product, component, version, state })
         }
     }
-    return [...unique.values()].sort((left, right) =>
-        left.product.localeCompare(right.product, undefined, { numeric: true })
+    const compare = (left: string, right: string) => left.localeCompare(right, undefined, { numeric: true })
+    const releases = new Map<string, { component: string; version: string; state: string; products: Set<string> }>()
+    for (const row of unique.values()) {
+        const key = JSON.stringify([row.component, row.version, row.state])
+        if (!releases.has(key)) releases.set(key, { ...row, products: new Set() })
+        releases.get(key)!.products.add(row.product)
+    }
+    // Combine component versions only when their release coverage and decision
+    // are identical. Independent lists would invent version/release matches.
+    const grouped = new Map<string, { key: string; component: string; versions: string[]; products: string[]; state: string }>()
+    for (const row of releases.values()) {
+        const products = [...row.products].sort(compare)
+        const key = JSON.stringify([row.component, products, row.state])
+        if (!grouped.has(key)) grouped.set(key, { key, component: row.component, products, versions: [], state: row.state })
+        grouped.get(key)!.versions.push(row.version)
+    }
+    for (const row of grouped.values()) row.versions.sort(compare)
+    return [...grouped.values()].sort((left, right) =>
+        compare(left.products[0]!, right.products[0]!)
         || left.component.localeCompare(right.component)
-        || left.version.localeCompare(right.version, undefined, { numeric: true })
+        || compare(left.versions[0]!, right.versions[0]!)
         || left.state.localeCompare(right.state),
     )
 })
@@ -51,17 +68,17 @@ const rows = computed(() => {
                 <caption class="sr-only">{{ team ? `Component versions reported for ${team} in each product version and its own saved assessments` : 'Reported component versions in each product version and their saved finding assessments' }}</caption>
                 <thead class="text-gray-400">
                     <tr>
-                        <th scope="col" class="px-2 py-1">Product version</th>
+                        <th scope="col" class="px-2 py-1">Product versions</th>
                         <th scope="col" class="px-2 py-1">Component</th>
-                        <th scope="col" class="px-2 py-1">Component version</th>
+                        <th scope="col" class="px-2 py-1">Component versions</th>
                         <th scope="col" class="px-2 py-1">{{ team ? `${team} assessment` : 'Saved finding assessment' }}</th>
                     </tr>
                 </thead>
                 <tbody class="text-gray-200">
                     <tr v-for="row in rows" :key="row.key" class="border-t border-gray-700/60">
-                        <td class="px-2 py-1 font-mono">{{ row.product }}</td>
+                        <td class="break-words px-2 py-1 font-mono">{{ row.products.join(', ') }}</td>
                         <td class="break-all px-2 py-1 font-mono">{{ row.component }}</td>
-                        <td class="px-2 py-1 font-mono">{{ row.version }}</td>
+                        <td class="break-words px-2 py-1 font-mono">{{ row.versions.join(', ') }}</td>
                         <td class="px-2 py-1">{{ row.state === 'NOT_SET' ? (team ? 'Not assessed by this team' : 'Not assessed') : stateLabel(row.state) }}</td>
                     </tr>
                 </tbody>

@@ -3,6 +3,26 @@ import { describe, expect, it } from 'vitest'
 import ReportedFindingScope from '../ReportedFindingScope.vue'
 
 describe('reported component versions', () => {
+    it.each([undefined, 'Security'])('comma-groups equivalent coverage without inventing release/version associations for %s', team => {
+        const finding = (product: string, version: string, state = 'NOT_AFFECTED') => ({
+            project_version: product, component_name: 'lib', component_version: version,
+            analysis_state: state, analysis_details: `--- [Team: Security] [State: ${state}] ---\nReviewed.`,
+        })
+        const instances = ['1.0', '2.0'].flatMap(product => ['3.0', '4.0'].map(version => finding(product, version)))
+        const wrapper = mount(ReportedFindingScope, { props: { team, instances } })
+        const rows = () => wrapper.findAll('tbody tr').map(row => row.findAll('td').map(cell => cell.text()))
+        expect(rows()).toEqual([['1.0, 2.0', 'lib', '3.0, 4.0', 'Not affected']])
+        wrapper.unmount()
+        const differing = mount(ReportedFindingScope, { props: { team, instances: [
+            ...instances, finding('5.0', '4.0'), finding('2.0', '3.0', 'EXPLOITABLE'),
+        ] } })
+        const cells = differing.findAll('tbody tr').map(row => row.findAll('td').map(cell => cell.text()))
+        expect(cells).toContainEqual(['1.0, 2.0', 'lib', '3.0', 'Not affected'])
+        expect(cells).toContainEqual(['1.0, 2.0, 5.0', 'lib', '4.0', 'Not affected'])
+        expect(cells).toContainEqual(['2.0', 'lib', '3.0', 'Exploitable'])
+        expect(cells).toHaveLength(3)
+    })
+
     it('keeps release, component version and saved state associated, including conflicting states', () => {
         const finding = { project_version: '2.0', component_name: 'lib', component_version: '1.7', analysis_state: 'NOT_AFFECTED' }
         const wrapper = mount(ReportedFindingScope, { props: { instances: [

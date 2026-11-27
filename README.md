@@ -134,7 +134,9 @@ constraints, and CI conventions.
 2. Filter by lifecycle, team, component, version, or evidence; open a finding
    for context and assessment details. Each team's assessment shows its own
    reported component names and versions, their product versions, and that
-   team's saved decisions. Global explicitly shows all teams' findings.
+   team's saved decisions. Global explicitly shows all teams' findings. Equivalent release/component versions are comma-grouped;
+   different release coverage or decisions remain separate. Long team-mapping
+   lists show a compact preview with expandable details.
    Resizing the screen keeps the selected team and unsaved assessment fields.
    Combined decisions use the [shared assessment order](docs/assessment-model.md#the-global-decision),
    with False positive the least concerning completed outcome.

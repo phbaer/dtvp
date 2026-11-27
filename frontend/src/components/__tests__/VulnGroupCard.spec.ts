@@ -181,7 +181,10 @@ describe('VulnGroupCard', () => {
         expect(about.text()).not.toContain('lib 1.0')
         await wrapper.findAll('button').find(button => button.text().trim() === 'Global')!.trigger('click')
         expect(scope.get('h4').text()).toBe('Reported components — all teams')
-        expect(scope.findAll('tbody tr')).toHaveLength(3)
+        expect(scope.findAll('tbody tr').map(row => row.findAll('td').map(cell => cell.text()))).toEqual([
+            ['10.0', 'lib', '1.0, 2.0', 'Exploitable'],
+            ['20.0', 'lib', '3.0', 'Exploitable'],
+        ])
         expect(wrapper.get('[data-testid="vuln-about-affects"]').text()).toContain('lib 1.0, 2.0, 3.0')
         wrapper.unmount()
     })

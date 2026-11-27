@@ -254,7 +254,10 @@ team ownership, including aliases and inherited dependency ownership, rather
 than selecting every version of a matching component name. Selecting another
 team through **Show all teams** changes this scope independently of the outer
 list filter. The component chips and advisory summary use the same scope;
-Global explicitly shows all teams' findings.
+Global explicitly shows all teams' findings. Repeated product versions are
+comma-separated. Component versions combine only when they have identical
+release coverage and assessment state; grouping never invents a component/
+release association or hides a different decision.
 
 The team table shows that team's own current assessment blocks, resolving
 aliases and keeping conflicting states separate. A General block or the
