@@ -25,6 +25,7 @@ import { calculateScoreFromVector } from '../lib/cvss'
 import { hasGlobalAssessmentData } from '../lib/assessmentCleanup'
 import { buildTeamAliasGroups, type TeamRosterEntry } from '../lib/team-mapping'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
+import { useApprovalConfirmation } from '../lib/useApprovalConfirmation'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssVectorDisplay from './CvssVectorDisplay.vue'
 import CustomSelect from './CustomSelect.vue'
@@ -83,22 +84,31 @@ const renderedDescription = computed(() => renderAdvisoryMarkdown(props.group.de
 
 const handleCloseOnEscape = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
+        if (approvalConfirmation.armed.value) {
+            e.preventDefault()
+            approvalConfirmation.cancel()
+            return
+        }
         if (genericModal.value.show) {
+            e.preventDefault()
             handleModalResponse(false)
         } else if (showConflictModal.value) {
+            e.preventDefault()
             showConflictModal.value = false
         } else if (showCalculatorModal.value) {
+            e.preventDefault()
             showCalculatorModal.value = false
         } else if (isWorkspace.value && showMoreMenu.value) {
             // In the workspace the first Esc closes the menu, a second one
             // leaves the workspace.
+            e.preventDefault()
             showMoreMenu.value = false
         }
     }
 }
 
 onMounted(() => {
-    globalThis.addEventListener('keydown', handleCloseOnEscape)
+    globalThis.addEventListener('keydown', handleCloseOnEscape, true)
     globalThis.addEventListener('resize', handleViewportResize)
     getKnownUsers().then(users => { knownUsers.value = users }).catch(() => {})
     if (props.inModal && canApprove.value) void openApproval(false)
@@ -106,7 +116,7 @@ onMounted(() => {
 
 onUnmounted(() => {
     if (formHighlightTimer) clearTimeout(formHighlightTimer)
-    globalThis.removeEventListener('keydown', handleCloseOnEscape)
+    globalThis.removeEventListener('keydown', handleCloseOnEscape, true)
     globalThis.removeEventListener('resize', handleViewportResize)
     if (expanded.value && openCardCount > 0) {
         openCardCount -= 1
@@ -813,6 +823,7 @@ const hasOpenOverlay = () => Boolean(
     || showCalculatorModal.value
     || showClearModal.value
     || reviewModal.value.show
+    || approvalConfirmation.armed.value
     || Boolean(reviewRequest.value)
     || showMoreMenu.value
 )
@@ -1586,7 +1597,8 @@ const openApproval = async (prefill = true) => {
 
 const requestApproval = (e?: Event) => {
     e?.stopPropagation() // Prevent card expansion
-    void openApproval()
+    if (e && 'detail' in e && Number(e.detail) > 1) return
+    void beginApprovalConfirmation()
 }
 
 const approvalBlockedReason = computed(() => {
@@ -1609,10 +1621,10 @@ const canApproveNow = computed(() => (
 
 /** Saves the Global assessment as shown and clears the pending status. */
 const approveAssessment = async () => {
-    if (!canApproveNow.value) return
+    if (!canApproveNow.value || !approvalConfirmation.consume()) return
     updating.value = true
     try {
-        await handleUpdate(true, true) // force=true, isApprove=true
+        await handleUpdate(false, true) // Keep revision checks; confirmation was already explicit.
         approvalPrefilled.value = false
     } finally {
         updating.value = false
@@ -2332,35 +2344,7 @@ const handleUpdate = async (force = false, isApprove = false, resubmit = false) 
 
     updating.value = true
     try {
-        const currentUser = user.value?.username || 'unknown'
-        const preparedSubmission = prepareAssessmentSubmission({
-            allInstances: allInstances.value,
-            originalAnalysis: originalAnalysis.value,
-            selectedTeam: selectedTeam.value,
-            state: state.value,
-            details: details.value,
-            justification: justification.value,
-            currentAssigned: currentAssigned.value,
-            evidenceReviewed: evidenceReviewed.value,
-            versionCoverageChecked: versionCoverageChecked.value,
-            ticket: ticketReference.value,
-            // Saved with the Global assessment only, like SSVC.
-            response: selectedTeam.value ? undefined : response.value,
-            teamDrafts: teamDrafts.value,
-            takeoverSources: takeoverSources.value,
-            isReviewer: isReviewer.value,
-            pendingVector: pendingVector.value,
-            pendingScore: pendingScore.value,
-            resetRescoring: resetRescoring.value,
-            initialVector: initialVector.value,
-            initialScore: initialScore.value,
-            originalVector: props.group.cvss_vector || '',
-            originalScore: props.group.cvss_score ?? props.group.cvss ?? null,
-            currentUser,
-            isApprove,
-            suppressed: suppressed.value,
-            force,
-        })
+        const preparedSubmission = prepareCurrentSubmission(force, isApprove)
         const targetTeam = preparedSubmission.targetTeam
         teamDrafts.value = preparedSubmission.nextDrafts
 
@@ -2383,7 +2367,7 @@ const handleUpdate = async (force = false, isApprove = false, resubmit = false) 
         const reviewText = ssvcTouched.value && !selectedTeam.value
             ? ssvcReviewText(preparedSubmission.reviewText, pendingSsvc.value)
             : preparedSubmission.reviewText
-        if (!await confirmAssessmentReview(force, reviewText)) {
+        if (!await confirmAssessmentReview(force || isApprove, reviewText)) {
             return
         }
 
@@ -2411,7 +2395,10 @@ const handleUpdate = async (force = false, isApprove = false, resubmit = false) 
 
         await handleAssessmentUpdateResults(results, finalState, finalText)
     } catch (err: any) {
-        if (resubmit && err?.response?.status === 409) {
+        if (isApprove && err?.response?.status === 409) {
+            await showAlert('Approval changed',
+                'The saved assessment changed. Reload the details and review the Global decision again before approving.')
+        } else if (resubmit && err?.response?.status === 409) {
             await showAlert('Resubmission changed',
                 'The saved assessment changed. Reload the details before resubmitting.')
         } else {
@@ -3264,6 +3251,82 @@ const teamBlockStateColor = (state?: string): string => {
 watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefreshKey.value] as const, () => {
     void checkRepair()
 }, { immediate: true })
+// Use the same domain projection for the inline review and the actual save.
+const prepareCurrentSubmission = (force: boolean, isApprove: boolean) => prepareAssessmentSubmission({
+            allInstances: allInstances.value,
+            originalAnalysis: originalAnalysis.value,
+            selectedTeam: selectedTeam.value,
+            state: state.value,
+            details: details.value,
+            justification: justification.value,
+            currentAssigned: currentAssigned.value,
+            evidenceReviewed: evidenceReviewed.value,
+            versionCoverageChecked: versionCoverageChecked.value,
+            ticket: ticketReference.value,
+            // Saved with the Global assessment only, like SSVC.
+            response: selectedTeam.value ? undefined : response.value,
+            teamDrafts: teamDrafts.value,
+            takeoverSources: takeoverSources.value,
+            isReviewer: isReviewer.value,
+            pendingVector: pendingVector.value,
+            pendingScore: pendingScore.value,
+            resetRescoring: resetRescoring.value,
+            initialVector: initialVector.value,
+            initialScore: initialScore.value,
+            originalVector: props.group.cvss_vector || '',
+            originalScore: props.group.cvss_score ?? props.group.cvss ?? null,
+            currentUser: user.value?.username || 'unknown',
+            isApprove,
+            suppressed: suppressed.value,
+            force,
+        })
+const approvalPreview = computed(() => prepareCurrentSubmission(false, true))
+const approvalFingerprint = computed(() => JSON.stringify({
+    id: props.group.id, team: selectedTeam.value, tab: activeDetailTab.value,
+    payload: approvalPreview.value.payload, original: originalAnalysis.value,
+    ssvc: [ssvcTouched.value, pendingSsvc.value], runs: [...codeAnalysisRunIds.value],
+    evidence: [...dirtyEvidenceTeams.value].map(team => [team, codeEvidenceByTeam.value[team] || []]),
+    task: vulnTaskId.value, filter: props.activeTeamFilter,
+    scoring: [props.group.cvss, props.group.cvss_score, props.group.cvss_vector, props.group.rescored_cvss, props.group.rescored_vector],
+    ownership: [teamMapping.value, teamRoster.value],
+    overlays: [showMoreMenu.value, genericModal.value.show, reviewModal.value.show, showCalculatorModal.value, showConflictModal.value],
+}))
+const approvalVersionCount = computed(() => new Set((props.group.affected_versions || [])
+    .filter(version => version.components?.length)
+    .map(version => version.project_uuid || version.project_version || '(unknown)')).size)
+const approvalCvssSummary = computed(() => {
+    const score = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1) : 'unknown'
+    const base = props.group.cvss_score ?? props.group.cvss
+    const before = score(props.group.rescored_cvss ?? base)
+    const after = score(approvalPreview.value.payload.fields?.rescored_score ?? base)
+    const vectorChanges = (props.group.rescored_vector || props.group.cvss_vector || '')
+        !== (approvalPreview.value.payload.fields?.rescored_vector || props.group.cvss_vector || '')
+    return `${before === after ? after : `${before} → ${after}`}${vectorChanges ? ' (vector changes)' : ''}`
+})
+const approvalSuppressionSummary = computed(() => {
+    const saved = new Set(allInstances.value.map(instance => Boolean(
+        originalAnalysis.value[instance.finding_uuid]?.isSuppressed ?? instance.is_suppressed,
+    )))
+    const before = saved.size > 1 ? 'Mixed suppression' : saved.has(true) ? 'Suppressed' : 'Not suppressed'
+    const after = suppressed.value ? 'Suppressed' : 'Not suppressed'
+    return before === after ? after : `${before} → ${after}`
+})
+const approvalConfirmation = useApprovalConfirmation(approvalFingerprint, canApproveNow)
+const beginApprovalConfirmation = async () => {
+    const groupId = props.group.id
+    await openApproval()
+    await nextTick()
+    if (props.group.id === groupId) approvalConfirmation.arm()
+}
+const activateApproval = (event: MouseEvent) => {
+    if (event.detail > 1) return // A double/triple click is one gesture.
+    if (approvalConfirmation.armed.value) void approveAssessment()
+    else void beginApprovalConfirmation()
+}
+const preventRepeatedApprovalKey = (event: KeyboardEvent) => {
+    if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault()
+}
+
 </script>
 
 <template>
@@ -3401,23 +3464,8 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                     <Loader2 v-else :size="12" class="animate-spin" />
                     {{ assessmentPersistenceStatus.label }}
                 </div>
-                <div class="my-1.5 flex max-w-full flex-wrap items-center gap-2" data-testid="assessment-actions">
-                    <button
-                        v-if="canApprove"
-                        type="button"
-                        :disabled="approvalAtForm && !canApproveNow"
-                        :title="approvalAtForm
-                            ? (approvalBlockedReason || (groupGlobalDecision.source === 'manual'
-                                ? 'Save this Global assessment and remove the pending review status'
-                                : 'Record this Global decision (the worst team assessment unless you changed it) as the Global assessment and remove the pending review status'))
-                            : 'Open the Global assessment to check and approve it'"
-                        data-testid="assessment-approve-button"
-                        :class="[actionButton, actionButtonApprove]"
-                        @click="approvalAtForm ? approveAssessment() : requestApproval()"
-                    >
-                        <CheckCircle :size="13" />
-                        {{ approvalAtForm ? 'Approve' : 'Review & approve' }}
-                    </button>
+                <div class="my-1.5 ml-auto flex max-w-full flex-wrap items-center justify-end gap-2" :class="canApprove || (isReviewer && effectiveAssessmentWorst) ? 'w-full' : ''" data-testid="assessment-actions">
+                    <div class="flex items-center gap-2">
                     <button
                         type="button"
                         @click="() => handleUpdate(false, false, selectedTeamChangeRequests.length > 0)"
@@ -3426,7 +3474,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         data-testid="assessment-submit-button"
                         :class="[actionButton, canApprove ? actionButtonSecondary : actionButtonPrimary]"
                     >
-                        {{ assessmentActionLabel }}
+                        {{ canApprove ? 'Save draft' : assessmentActionLabel }}
                     </button>
                     <button
                         type="button"
@@ -3516,6 +3564,43 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             </button>
                         </div>
                     </div>
+                    <button
+                        v-if="canApprove" type="button" data-testid="approval-cancel"
+                        :aria-hidden="!approvalConfirmation.armed.value" :disabled="!approvalConfirmation.armed.value"
+                        :class="[actionButton, actionButtonSecondary, !approvalConfirmation.armed.value && 'invisible']"
+                        @click="approvalConfirmation.cancel()"
+                    >Cancel</button>
+                    </div>
+                    <div v-if="canApprove || (isReviewer && effectiveAssessmentWorst)" class="grid w-full grid-cols-[minmax(0,1fr)_11rem] items-stretch gap-2 sm:w-auto sm:grid-cols-[auto_11rem]">
+                        <button
+                            v-if="isReviewer && effectiveAssessmentWorst" type="button" data-testid="use-effective-assessment-summary"
+                            :disabled="updating || loadingDetails"
+                            title="Use worst for Global: prepare the worst team decision and rationale; nothing is saved. An existing Global decision is replaced only by this explicit action."
+                            :class="[actionButton, actionButtonSecondary, 'h-10 justify-center whitespace-normal px-2 text-center leading-tight']"
+                            @click="applyEffectiveAssessmentSummary"
+                        >Use worst for Global</button>
+                        <span v-else aria-hidden="true"></span>
+                        <button
+                            v-if="canApprove" type="button" data-testid="assessment-approve-button"
+                            :disabled="(approvalAtForm && !canApproveNow) || (approvalConfirmation.armed.value && !approvalConfirmation.ready.value)"
+                            :title="approvalConfirmation.armed.value ? 'Confirm this reviewed Global decision with a fresh click; nothing is saved automatically.' : (approvalBlockedReason || 'Review the Global decision before approving it')"
+                            :class="[actionButton, actionButtonApprove, 'h-10 w-44 justify-center']"
+                            @click="activateApproval" @keydown="preventRepeatedApprovalKey"
+                        >
+                            <CheckCircle :size="13" />
+                            {{ approvalConfirmation.armed.value ? 'Confirm approval' : approvalAtForm ? 'Approve' : 'Review & approve' }}
+                        </button>
+                    </div>
+                    <section
+                        v-if="approvalConfirmation.armed.value" data-testid="approval-confirmation" aria-label="Approval confirmation"
+                        class="w-full basis-full rounded border border-green-700/60 bg-green-950/35 px-3 py-2 text-xs text-green-100"
+                    >
+                        <p role="status">Global: <strong>{{ stateLabelOf(approvalPreview.finalState) }}</strong> · All teams · {{ allInstances.length }} findings · {{ approvalVersionCount }} product versions</p>
+                        <p class="mt-1">{{ groupGlobalDecision.source === 'manual' ? 'Reviewing the Global form; the saved reviewer decision was not automatically replaced.' : 'Reviewing the Global form, including any draft taken from the team assessments.' }}</p>
+                        <p class="mt-1">CVSS: {{ approvalCvssSummary }} · {{ approvalSuppressionSummary }}</p>
+                        <p v-if="ssvcTouched" class="mt-1">Updated SSVC answers and rationale are included.</p>
+                        <p class="mt-1 text-green-200/75">Check the decision, rationale and scope below. {{ approvalConfirmation.ready.value ? 'Confirm approval to save; Escape or Cancel returns to editing.' : 'Confirmation enables after a short pause; nothing is saved automatically.' }}</p>
+                    </section>
                 </div>
             </div>
             <div
@@ -3950,6 +4035,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             :overview="teamOverview"
                             :worstState="effectiveAssessmentWorst?.state || ''"
                             :globalDecision="groupGlobalDecision"
+                            :showUseWorstAction="false"
                             @open="openTeamFromOverview"
                             @use-as-global="row => handleAdoptTeamBlock(row, false)"
                             @use-worst="applyEffectiveAssessmentSummary"

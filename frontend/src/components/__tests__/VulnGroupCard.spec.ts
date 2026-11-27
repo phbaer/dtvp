@@ -1019,7 +1019,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.find('[data-testid="effective-team-assessment-summary"]').exists()).toBe(false)
 
         expect(wrapper.get('[data-testid="global-rationale-guidance"]').text()).toContain('write a synthesis here')
-        await summary.get('[data-testid="use-effective-assessment-summary"]').trigger('click')
+        await wrapper.get('[data-testid="use-effective-assessment-summary"]').trigger('click')
         await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
         expect((wrapper.vm as any).details).toContain('Assessed Teams: Runtime, Security')
@@ -2113,7 +2113,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.get('[data-testid="assessment-more-menu"]').text()).toContain('Clear assessment')
     })
 
-    it('lets a reviewer approve a pending assessment in one step', async () => {
+    it('requires a delayed confirmation before a reviewer approves a pending assessment', async () => {
         const pending = JSON.parse(JSON.stringify(mockGroup))
         pending.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
         pending.affected_versions[0].components[0].analysis_details =
@@ -2136,7 +2136,12 @@ describe('VulnGroupCard', () => {
         expect(wrapper.find('[data-testid="approve-btn"]').exists()).toBe(false)
 
         const approve = wrapper.get('[data-vuln-card-sticky-nav] [data-testid="assessment-approve-button"]')
-        expect(approve.text()).toBe('Approve')
+        expect(approve.text()).toBe('Confirm approval')
+        expect(approve.attributes('disabled')).toBeDefined()
+        await approve.trigger('click')
+        expect(updateAssessment).not.toHaveBeenCalled()
+        await new Promise(resolve => setTimeout(resolve, 710))
+        await flushPromises()
         await approve.trigger('click')
         await flushPromises()
 
@@ -2772,8 +2777,10 @@ describe('VulnGroupCard', () => {
             await flushPromises()
             expect((wrapper.vm as any).selectedTeam).toBe('')
             expect((wrapper.vm as any).activeDetailTab).toBe('overview')
-            expect(approve().text()).toBe('Approve')
-
+            expect(approve().text()).toBe('Confirm approval')
+            expect(updateAssessment).not.toHaveBeenCalled()
+            await new Promise(resolve => setTimeout(resolve, 710))
+            await flushPromises()
             await approve().trigger('click')
             await flushPromises()
             expect(updateAssessment).toHaveBeenCalledTimes(1)
@@ -2782,6 +2789,52 @@ describe('VulnGroupCard', () => {
             expect(payload.fields.pending_review).toBeFalsy()
             // The approval is said in so many words; the server asks for it.
             expect(payload.approve).toBe(true)
+            expect(payload.force).toBe(false)
+            expect(Object.keys(payload.original_analysis)).not.toHaveLength(0)
+        })
+
+        it('cancels a prepared approval on edits, current assessment changes and Escape', async () => {
+            const group = pendingGroup()
+            const wrapper = await mountCard({ group, role: 'REVIEWER' })
+            const approve = () => wrapper.get('[data-testid="assessment-approve-button"]')
+            await approve().trigger('click')
+            await flushPromises()
+            expect(wrapper.find('[data-testid="approval-confirmation"]').exists()).toBe(true)
+            await wrapper.get('#analysis-details-textarea').setValue('A revised Global rationale.')
+            expect(wrapper.find('[data-testid="approval-confirmation"]').exists()).toBe(false)
+            await approve().trigger('click')
+            await flushPromises()
+            globalThis.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+            await flushPromises()
+            expect(wrapper.find('[data-testid="approval-confirmation"]').exists()).toBe(false)
+            expect(wrapper.props('workspace')).toBe(true)
+            await approve().trigger('click')
+            await flushPromises()
+            const newer = JSON.parse(JSON.stringify(group))
+            newer.affected_versions[0].components[0].dtvp_revision = 99
+            await wrapper.setProps({ group: newer })
+            expect(wrapper.find('[data-testid="approval-confirmation"]').exists()).toBe(false)
+            expect(updateAssessment).not.toHaveBeenCalled()
+            wrapper.unmount()
+        })
+
+        it('ignores repeated activations and never approves when the delay alone expires', async () => {
+            const wrapper = await mountCard({ group: pendingGroup(), role: 'REVIEWER' })
+            const approve = wrapper.get('[data-testid="assessment-approve-button"]')
+            await approve.trigger('click')
+            await flushPromises()
+            await new Promise(resolve => setTimeout(resolve, 710))
+            await flushPromises()
+            expect(updateAssessment).not.toHaveBeenCalled()
+            await approve.trigger('click', { detail: 2 })
+            const repeated = new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true })
+            approve.element.dispatchEvent(repeated)
+            expect(repeated.defaultPrevented).toBe(true)
+            expect(updateAssessment).not.toHaveBeenCalled()
+            await approve.trigger('click', { detail: 1 })
+            await flushPromises()
+            expect(updateAssessment).toHaveBeenCalledTimes(1)
+            wrapper.unmount()
         })
 
         it('saves a reviewer\'s change to a pending assessment without approving it', async () => {

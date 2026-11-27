@@ -179,6 +179,10 @@ The list shows **Review needed** for submitted work and incomplete assessments
 with an existing decision, and names missing team assessments separately.
 **Ready for approval** requires complete coverage. Explicit approval records
 the reviewer and approval time separately from the original assessor/date.
+Approval uses an inline confirmation: review the Global decision and scope,
+then confirm after a short pause. Edits cancel confirmation; stale revisions
+require a fresh review. **Use worst for Global** sits beside approval and only
+fills the draft; **Save draft** remains separate.
 
 Use the clear button in **Decision & rationale** to remove a saved Global or
 team assessment. Clearing Global leaves the team verdicts available.

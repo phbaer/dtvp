@@ -229,7 +229,9 @@ test.describe('Team overview on the Global assessment', () => {
         await expect(approve).toHaveText('Review & approve');
         await approve.click();
         await expect(inspector.locator('#analysis-state-select')).toContainText('Exploitable');
-        await expect(approve).toHaveAttribute('title', /the worst team assessment unless you changed it/);
+        await expect(approve).toHaveText('Confirm approval')
+        await expect(inspector.getByTestId('approval-confirmation')).toContainText('Global: Exploitable')
+        await expect(approve).toBeEnabled();
         const note = inspector.getByTestId('approval-prefilled-note');
         await expect(note).toContainText('it is derived: the worst of the team assessments, Exploitable (H-Core)');
         await expect(note).toContainText('Approve records it as the Global assessment unless you change it here');
@@ -267,7 +269,7 @@ test.describe('Team overview on the Global assessment', () => {
         await expect(global).toContainText('Global: set by reviewer: Not affected');
         await expect(global.getByTestId('team-overview-global-differs'))
             .toHaveText('· differs from the worst team assessment (Exploitable, H-Core)');
-        await global.getByTestId('team-overview-use-worst').click();
+        await inspector.getByTestId('use-effective-assessment-summary').click();
         await expect(inspector.locator('#analysis-state-select')).toContainText('Exploitable');
         expect(saves).toEqual([]);
         expect(errors).toEqual([]);

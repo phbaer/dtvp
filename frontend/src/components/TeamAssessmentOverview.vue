@@ -12,15 +12,16 @@ import {
     type TeamOverview,
     type TeamOverviewRow,
 } from '../lib/teamOverview'
-import type { GlobalDecision } from '../lib/assessment-helpers'
+import { STATE_PRIORITY, type GlobalDecision } from '../lib/assessment-helpers'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     overview: TeamOverview
     /** The worst team state, for "Use worst for Global"; '' for none. */
     worstState?: string
     /** The saved effective Global decision: set by a reviewer, or derived. */
     globalDecision?: GlobalDecision | null
-}>()
+    showUseWorstAction?: boolean
+}>(), { showUseWorstAction: true })
 
 const emit = defineEmits<{
     (e: 'open', team: string): void
@@ -67,7 +68,7 @@ const differsFromDerived = computed(() => !!decision.value
     && !!decision.value.derived
     && decision.value.derived.state !== decision.value.state)
 const DERIVED_HELP = 'No reviewer has set the Global decision, so it is the worst team assessment '
-    + '(Exploitable, then In triage, False positive, Not affected, Resolved). '
+    + `(${Object.keys(STATE_PRIORITY).filter(state => state !== 'NOT_SET').sort((a, b) => STATE_PRIORITY[a]! - STATE_PRIORITY[b]!).map(stateLabel).join(', ')}). `
     + 'It is what the findings export; approving records it as the Global assessment.'
 
 const day = (timestamp?: number) => (timestamp ? new Date(timestamp).toLocaleDateString() : '')
@@ -97,6 +98,7 @@ const rowTitle = (row: TeamOverviewRow) => [
                 <span class="text-gray-500">Worst: <strong class="text-gray-200">{{ stateLabel(worstState) }}</strong></span>
                 <button
                     type="button"
+                    v-if="showUseWorstAction !== false"
                     data-testid="use-effective-assessment-summary"
                     class="rounded bg-purple-700/70 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-purple-600"
                     title="Fill the Global form with the worst team decision and a summary of all teams; nothing is saved."
@@ -129,6 +131,7 @@ const rowTitle = (row: TeamOverviewRow) => [
                     <span data-testid="team-overview-global-differs" class="text-amber-200">· differs from the worst team assessment ({{ stateLabel(decision.derived.state) }}, {{ decision.derived.teams.join(', ') }})</span>
                     <button
                         type="button"
+                        v-if="showUseWorstAction !== false"
                         data-testid="team-overview-use-worst"
                         class="rounded border border-purple-600/60 px-2 py-0.5 text-[10px] font-bold text-purple-200 hover:bg-purple-900/40"
                         title="Fill the Global form with the worst team decision; nothing is saved."

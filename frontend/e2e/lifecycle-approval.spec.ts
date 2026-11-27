@@ -167,6 +167,90 @@ async function openAssessment(page: Page, group: typeof pendingGlobal, path = '/
 }
 
 test.describe('Lifecycle: a pending Global decision and approval', () => {
+    for (const width of [430, 1440, 1600]) {
+        test(`inline approval requires a fresh confirmation and keeps its position at ${width}px`, async ({ page }) => {
+            await page.setViewportSize({ width, height: 1000 });
+            const group = structuredClone(pendingGlobal);
+            await mockShell(page, group);
+            const saves: any[] = [];
+            await page.route('**/api/assessment', async route => {
+                saves.push(route.request().postDataJSON());
+                await route.fulfill({ json: [...findingsOf(group)].map(([uuid, finding]) => ({
+                    status: 'success', uuid, new_state: finding.analysis_state,
+                    new_details: finding.analysis_details.replace('[Status: Pending Review]', ''), revision: 1,
+                })) });
+            });
+            const inspector = await openAssessment(page, group);
+            if (width === 1600) await inspector.getByTestId('workspace-toggle').click();
+            const approve = inspector.getByTestId('assessment-approve-button');
+            const before = await approve.boundingBox();
+            const worst = inspector.getByTestId('use-effective-assessment-summary');
+            expect((await worst.boundingBox())!.height).toBeGreaterThanOrEqual(32);
+            await approve.dblclick({ delay: 30 });
+            await expect(approve).toHaveText('Confirm approval');
+            await expect(inspector.getByTestId('approval-confirmation')).toContainText('All teams');
+            await expect(approve).toBeEnabled();
+            expect(saves).toEqual([]);
+            const after = await approve.boundingBox();
+            expect(Math.abs(after!.x - before!.x)).toBeLessThan(2);
+            expect(Math.abs(after!.y - before!.y)).toBeLessThan(2);
+            expect(after!.width).toBeCloseTo(before!.width, 0);
+            await page.keyboard.press('Escape');
+            await expect(inspector.getByTestId('approval-confirmation')).toHaveCount(0);
+            await expect(inspector).toBeVisible();
+            if (width === 1600) await expect(inspector).toHaveAttribute('data-workspace', 'open');
+            await approve.focus();
+            await page.keyboard.down('Enter');
+            await expect(approve).toHaveText('Confirm approval');
+            await expect(approve).toBeEnabled();
+            await page.keyboard.down('Enter'); // A repeated, held key cannot approve.
+            expect(saves).toEqual([]);
+            await page.keyboard.up('Enter');
+            await approve.focus();
+            await page.keyboard.press('Enter');
+            await expect.poll(() => saves.length).toBe(1);
+            expect(saves[0].approve).toBe(true);
+            expect(saves[0].force).toBe(false);
+            expect(Object.keys(saves[0].original_analysis).length).toBeGreaterThan(0);
+        });
+    }
+
+    test('a concurrent assessment change rejects approval without offering a forced retry', async ({ page }) => {
+        await mockShell(page, pendingGlobal);
+        const saves: any[] = [];
+        await page.route('**/api/assessment', async route => {
+            saves.push(route.request().postDataJSON());
+            await route.fulfill({ status: 409, json: { detail: 'Assessment revision changed' } });
+        });
+        const inspector = await openAssessment(page, pendingGlobal);
+        const approve = inspector.getByTestId('assessment-approve-button');
+        await approve.click();
+        await expect(approve).toHaveText('Confirm approval');
+        await expect(approve).toBeEnabled();
+        await approve.click();
+        await expect(page.getByText('Approval changed', { exact: true })).toBeVisible();
+        await expect(page.getByText(/Reload the details and review the Global decision/)).toBeVisible();
+        expect(saves).toHaveLength(1);
+        expect(saves[0].force).toBe(false);
+        await expect(page.getByTestId('approval-confirmation')).toHaveCount(0);
+        await expect(page.getByRole('button', { name: /overwrite|force/i })).toHaveCount(0);
+    });
+
+    test('editing the draft or switching teams cancels approval confirmation', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await mockShell(page, pendingGlobal);
+        const inspector = await openAssessment(page, pendingGlobal);
+        const approve = inspector.getByTestId('assessment-approve-button');
+        await approve.click();
+        await expect(inspector.getByTestId('approval-confirmation')).toBeVisible();
+        await inspector.locator('#analysis-details-textarea').fill('Reviewed rationale changed.');
+        await expect(inspector.getByTestId('approval-confirmation')).toHaveCount(0);
+        await approve.click();
+        await expect(inspector.getByTestId('approval-confirmation')).toBeVisible();
+        await inspector.getByTestId('review-team-tab').filter({ hasText: 'K-Core' }).click();
+        await expect(inspector.getByTestId('approval-confirmation')).toHaveCount(0);
+    });
+
     test('team assessment shows only that team’s component versions even outside the outer team filter', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         const group = groupOf('INCOMPLETE', [

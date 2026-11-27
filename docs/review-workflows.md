@@ -652,12 +652,24 @@ of its rationale; teams that disagree with each other or with the Global
 decision come first and are highlighted, missing teams next. **Open** switches
 to a team's tab and keeps the Global draft; **Use as Global** takes over a
 team's state and justification without its text. The reviewer adjusts the
-decision or the CVSS vector where needed and presses Approve, which saves the Global assessment and
-removes the pending status in one step. On a collapsed card the Approve button
-in the header opens this view; it does not approve by itself. In the assessment
-workspace the form is always visible, so on the Global form the button reads
-Approve directly once the Global decision is recorded or the reviewer has
-prepared a draft with **Review & approve**.
+decision or the CVSS vector where needed. **Use worst for Global**, beside
+approval, explicitly replaces the Global draft with the worst saved team
+decision and rationale; it saves nothing. **Save draft** remains separate.
+
+**Approve** changes to **Confirm approval** in the same position. On another
+team, **Review & approve** first opens the Global form. The inline confirmation
+shows the final decision, all-team finding/version scope, CVSS changes and
+suppression. After 700 ms a fresh activation saves and approves; the pause
+never triggers a save. Double clicks and a held Enter key cannot confirm.
+**Cancel** or Escape returns to editing. Changing the draft, team, finding or
+loaded assessment revision cancels confirmation. Escape cancels confirmation
+before leaving the workspace. Existing manual Global decisions stay intact
+unless the reviewer explicitly replaces them. Approval preserves revision
+checks: a concurrent assessment change is rejected and requires reloading and
+reviewing again. There is no undo action.
+
+On a collapsed card the header approval action opens this view and arms the
+same confirmation; it does not save by itself.
 
 Approval removes the pending status while recording a Global decision. The server asks for it in so
 many words: `POST /api/assessment` accepts `approve: true` from reviewers, and

@@ -198,14 +198,17 @@ test.describe('Stable vulnerability list', () => {
         const inspector = page.getByTestId('vuln-detail-inspector');
         const approve = inspector.getByTestId('assessment-approve-button');
         await expect(approve).toBeVisible({ timeout: 15000 });
-        if ((await approve.textContent())?.includes('Review')) await approve.click();
-        await expect(approve).toHaveText('Approve', { timeout: 10000 });
+        await expect(approve).toBeEnabled({ timeout: 10000 });
+        await approve.click();
+        await expect(approve).toHaveText('Confirm approval');
         await expect(approve).toBeEnabled({ timeout: 10000 });
         await approve.click();
 
         await expect(row(page, selectedId)).toHaveCount(0, { timeout: 15000 });
         await expect(row(page, nextId)).toHaveAttribute('aria-selected', 'true', { timeout: 10000 });
         await expect(page).toHaveURL(new RegExp(`vuln=${nextId}`));
+        await expect(inspector.getByTestId('approval-confirmation')).toHaveCount(0);
+        await expect(inspector.getByTestId('assessment-approve-button')).not.toHaveText('Confirm approval');
         await expect(page.getByTestId('list-announcement')).toHaveText(`${selectedId} left the list; selected ${nextId}, the next vulnerability.`);
         await page.waitForTimeout(500);
         expect(Math.abs(await rowOffset(page, nextId) - offset)).toBeLessThanOrEqual(4);
