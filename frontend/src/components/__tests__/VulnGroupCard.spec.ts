@@ -723,7 +723,7 @@ describe('VulnGroupCard', () => {
         // Explanations are tooltips (and screen-reader descriptions), not subtitles.
         expect(whereFound.find('header p').exists()).toBe(false)
         expect(whereFound.get('[data-testid="detail-section-help"]').attributes('title'))
-            .toContain('Every affected component by project version')
+            .toContain('Every reported component by product version')
     })
 
     it('shows the generated text read-only instead of an editable raw text', async () => {

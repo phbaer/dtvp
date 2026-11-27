@@ -117,9 +117,10 @@ explicitly; the reviewer can define it differently by hand"):
 14. **The Global decision is the worst team decision unless a reviewer set
     it.** The effective Global decision is the reviewer's General block when
     it decides (manual); otherwise it is derived: the worst state among the
-    current team blocks that decide, in the one order DTVP uses for every
-    "worst" (Exploitable > In triage > False positive > Not affected >
-    Resolved), with every team of that state named and the justification of
+    current team blocks that decide, in the
+    [shared assessment order](../assessment-model.md#the-global-decision)
+    (amended by [ADR 0018](0018-completed-assessment-priority.md)),
+    with every team of that state named and the justification of
     the first of them. `list_metadata` and MCP carry its source, state and
     teams; the team overview, the state chip and the approval note point to
     it; an approval without a General block records it as the General

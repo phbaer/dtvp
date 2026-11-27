@@ -88,6 +88,30 @@ def test_one_worst_state_order_on_both_sides():
     assert states == sorted(states, key=order.index)
 
 
+@pytest.mark.parametrize(("left", "right", "expected"), [
+    ("FALSE_POSITIVE", "NOT_AFFECTED", "NOT_AFFECTED"),
+    ("FALSE_POSITIVE", "RESOLVED", "RESOLVED"),
+    ("NOT_AFFECTED", "RESOLVED", "RESOLVED"),
+    ("RESOLVED", "IN_TRIAGE", "IN_TRIAGE"),
+    ("IN_TRIAGE", "EXPLOITABLE", "EXPLOITABLE"),
+    ("FALSE_POSITIVE", "NOT_SET", "FALSE_POSITIVE"),
+])
+def test_completed_assessment_priority_in_derived_and_exported_decisions(left, right, expected):
+    for first, second in ((left, right), (right, left)):
+        text = (
+            f"--- [Team: A] [State: {first}] ---\nFirst.\n\n"
+            f"--- [Team: B] [State: {second}] ---\nSecond."
+        )
+        assert calculate_aggregated_state(text) == expected
+        approved = with_derived_global_block(text, "reviewer", 1794000000000)
+        general = next(block for block in parse_assessment_blocks(approved)[1] if block["team"] == "General")
+        assert general["state"] == expected
+        # An explicit reviewer decision continues to take precedence.
+        assert calculate_aggregated_state(
+            text + "\n\n--- [Team: General] [State: FALSE_POSITIVE] ---\nReviewed."
+        ) == "FALSE_POSITIVE"
+
+
 def test_an_approval_records_the_derived_decision_as_the_general_block():
     text = (
         "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n"

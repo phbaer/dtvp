@@ -237,10 +237,22 @@ The **effective Global decision** of a vulnerability is:
 - otherwise **none**.
 
 The worst-state order, worst first, is the one order DTVP uses for every
-"worst": **Exploitable > In triage > False positive > Not affected >
-Resolved** (then Not set). Repair, the analyzer verdicts of Apply Automatic
+"worst": **Exploitable > In triage > Resolved > Not affected >
+False positive** (then Not set). Repair, the analyzer verdicts of Apply Automatic
 Assessments (Affected → Exploitable; Probably affected and Inconclusive →
 In triage; Not affected) and the finding matrix use the same order.
+False positive is the least concerning completed outcome. Not set is excluded
+from deciding team blocks; it remains unassessed, not a safe outcome. This
+same order sorts completed outcomes in work lists; unassessed findings appear
+between In triage and Resolved when sorting by analysis state. This
+order does not change the advisory severity or overwrite a reviewer’s General
+block; see [ADR 0018](adr/0018-completed-assessment-priority.md).
+
+The assessment pane also lists each reported component version under its
+product version, using the current team filter. Saved finding states are
+shown separately: a scanner report alone does not establish affectedness,
+and an absent finding does not establish that a release is unaffected.
+Unknown product and component versions are labelled explicitly.
 
 - **Export.** The state DTVP writes to Dependency-Track for a finding is its
   effective decision (`calculate_aggregated_state`): the same derived worst

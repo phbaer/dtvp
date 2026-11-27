@@ -12,7 +12,7 @@ from .severity_services import SEVERITIES, group_original_severity
 from .ssvc_services import FILTER_VALUES as SSVC_FILTER_VALUES
 from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
 from .evidence_services import evidence_sources, evidence_counts
-from .logic import _parse_assessment_blocks
+from .logic import STATE_PRIORITY, _parse_assessment_blocks
 from .first_seen import (
     BASIS_ATTRIBUTED,
     CUTOFF_BASES,
@@ -26,17 +26,14 @@ from .first_seen import (
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 21
+TASK_GROUP_QUERY_INDEX_VERSION = 22
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
 ANALYSIS_STATE_ORDER = {
-    "EXPLOITABLE": 0,
-    "IN_TRIAGE": 1,
-    "NOT_SET": 2,
-    "RESOLVED": 3,
-    "FALSE_POSITIVE": 4,
-    "NOT_AFFECTED": 5,
+    **STATE_PRIORITY,
+    # Unassessed findings remain ahead of completed decisions in work lists.
+    "NOT_SET": 1.5,
 }
 
 

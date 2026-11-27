@@ -75,6 +75,15 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
     ...overrides,
 })
 
+it('sorts completed assessments with false positive last and keeps unassessed work ahead', () => {
+    const expected = ['EXPLOITABLE', 'IN_TRIAGE', 'NOT_SET', 'RESOLVED', 'NOT_AFFECTED', 'FALSE_POSITIVE']
+    const items = buildVulnListItems([...expected].reverse().map(state => makeGroup({
+        id: state, list_metadata: { technical_state: state, lifecycle: 'ASSESSED' },
+    })), {})
+    expect(sortVulnListItems(items, 'analysis', 'asc').map(item => item.id)).toEqual(expected)
+    expect(sortVulnListItems(items, 'analysis', 'desc').map(item => item.id)).toEqual([...expected].reverse())
+})
+
 describe('vulnListViewModel', () => {
     it('finds documented team work across global lifecycles and keeps Missing separate', () => {
         const items = buildVulnListItems([

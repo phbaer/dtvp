@@ -625,8 +625,8 @@ const ANALYSIS_OPTIONS = [
     { value: 'EXPLOITABLE', label: 'Exploitable', color: 'bg-red-600' },
     { value: 'IN_TRIAGE', label: 'In Triage', color: 'bg-amber-500' },
     { value: 'RESOLVED', label: 'Resolved', color: 'bg-purple-500' },
-    { value: 'FALSE_POSITIVE', label: 'False Positive', color: 'bg-teal-500' },
-    { value: 'NOT_AFFECTED', label: 'Not Affected', color: 'bg-green-500' }
+    { value: 'NOT_AFFECTED', label: 'Not Affected', color: 'bg-green-500' },
+    { value: 'FALSE_POSITIVE', label: 'False Positive', color: 'bg-teal-500' }
 ]
 
 const allLifecycleFilterValues = computed(() => LIFECYCLE_OPTIONS.map(option => option.value))

@@ -167,6 +167,29 @@ async function openAssessment(page: Page, group: typeof pendingGlobal) {
 }
 
 test.describe('Lifecycle: a pending Global decision and approval', () => {
+    test('keeps reported component versions visible during review and team assessment', async ({ page }) => {
+        const group = groupOf('NEEDS_APPROVAL', [
+            finding(1, { component_version: '1.2.0' }),
+            finding(2, { component_version: '1.7.0', analysis_state: 'NOT_AFFECTED' }),
+        ]);
+        await mockShell(page, group);
+        const inspector = await openAssessment(page, group);
+        const assertScope = async (scope: ReturnType<Page['getByTestId']>) => {
+            await expect(scope).toBeVisible();
+            const rows = scope.locator('tbody tr');
+            await expect(rows).toHaveCount(2);
+            await expect(rows.nth(0).locator('td')).toHaveText(['1.0', 'node-lib', '1.2.0', 'In triage']);
+            await expect(rows.nth(1).locator('td')).toHaveText(['2.0', 'node-lib', '1.7.0', 'Not affected']);
+        };
+        await assertScope(inspector.getByTestId('reported-finding-scope'));
+        await inspector.getByTestId('review-team-tab').filter({ hasText: 'K-Core' }).click();
+        await assertScope(inspector.getByTestId('reported-finding-scope'));
+        await page.setViewportSize({ width: 1600, height: 1000 });
+        await inspector.getByTestId('workspace-toggle').click();
+        const workspace = page.getByRole('dialog', { name: `Assessment workspace for ${group.id}` });
+        await assertScope(workspace.getByTestId('workspace-assessment-pane').getByTestId('reported-finding-scope'));
+    });
+
     for (const pending of [true, false]) {
         test(`shows Review needed with missing teams when pending=${pending}`, async ({ page }) => {
             const text = `--- [Team: K-Core] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.${pending ? '\n\n[Status: Pending Review]' : ''}`;

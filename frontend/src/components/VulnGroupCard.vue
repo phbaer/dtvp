@@ -31,6 +31,7 @@ import CustomSelect from './CustomSelect.vue'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import VulnGroupAssessmentDetails from './VulnGroupAssessmentDetails.vue'
 import FindingMatrix from './FindingMatrix.vue'
+import ReportedFindingScope from './ReportedFindingScope.vue'
 import CalculatorModal from './CalculatorModal.vue'
 import SsvcCalculator from './SsvcCalculator.vue'
 import { summarizeSsvc, ssvcReviewText, stripSsvcDocumentation, type SsvcSelection } from '../lib/ssvc'
@@ -130,11 +131,11 @@ const emit = defineEmits([
 
 const ANALYSIS_STATES = [
     { value: 'NOT_SET', label: 'Not Set', description: 'No decision for this assessment.' },
-    { value: 'NOT_AFFECTED', label: 'Not Affected', description: 'The component is not affected by this vulnerability.' },
     { value: 'EXPLOITABLE', label: 'Exploitable', description: 'The vulnerability is exploitable in this component.' },
     { value: 'IN_TRIAGE', label: 'In Triage', description: 'The vulnerability is currently being investigated.' },
-    { value: 'FALSE_POSITIVE', label: 'False Positive', description: 'This finding is a false positive.' },
     { value: 'RESOLVED', label: 'Resolved', description: 'The vulnerability has been resolved or mitigated.' },
+    { value: 'NOT_AFFECTED', label: 'Not Affected', description: 'The component is not affected by this vulnerability.' },
+    { value: 'FALSE_POSITIVE', label: 'False Positive', description: 'This finding is a false positive.' },
 ]
 
 const JUSTIFICATION_OPTIONS = [
@@ -3655,7 +3656,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
 
             <DetailSection
                 title="Where it was found"
-                help="Every affected component by project version, with its team and the assessment of each finding. Open a component to see how it enters the product."
+                help="Every reported component by product version, with its team and the assessment of each finding. Open a component to see how it enters the product."
                 data-testid="where-found"
                 bodyClass="space-y-3"
             >
@@ -3993,6 +3994,8 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             @show-former="showFormerTeamAssessments"
                         />
                     </section>
+
+                    <ReportedFindingScope :instances="matrixInstances" />
 
                     <VulnAboutSummary
                         :vulnId="group.id"

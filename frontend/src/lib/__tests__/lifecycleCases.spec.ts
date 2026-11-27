@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import lifecycleCasesJson from './fixtures/lifecycle_cases.json'
 import stateOrder from './fixtures/state_order.json'
-import { getGroupGlobalDecision, getGroupInconsistencyReasons, getGroupLifecycle, STATE_PRIORITY } from '../assessment-helpers'
+import { getGlobalDecision, getGroupGlobalDecision, getGroupInconsistencyReasons, getGroupLifecycle, parseAssessmentBlocks, STATE_PRIORITY } from '../assessment-helpers'
 import { classifyGroup } from '../group-classifier'
 import { getApprovalUnavailableReason, getGroupAssessmentSyncIssues } from '../assessmentSyncIssues'
 
@@ -75,6 +75,22 @@ describe('the lifecycle decision table', () => {
     it('uses the one worst-state order', () => {
         const order = Object.keys(STATE_PRIORITY).sort((left, right) => STATE_PRIORITY[left]! - STATE_PRIORITY[right]!)
         expect(order).toEqual(stateOrder)
+    })
+
+    it.each([
+        ['FALSE_POSITIVE', 'NOT_AFFECTED', 'NOT_AFFECTED'],
+        ['FALSE_POSITIVE', 'RESOLVED', 'RESOLVED'],
+        ['NOT_AFFECTED', 'RESOLVED', 'RESOLVED'],
+        ['RESOLVED', 'IN_TRIAGE', 'IN_TRIAGE'],
+        ['IN_TRIAGE', 'EXPLOITABLE', 'EXPLOITABLE'],
+        ['FALSE_POSITIVE', 'NOT_SET', 'FALSE_POSITIVE'],
+    ])('combines %s and %s as %s', (left, right, expected) => {
+        const text = `--- [Team: A] [State: ${left}] ---\nFirst.\n\n--- [Team: B] [State: ${right}] ---\nSecond.`
+        const blocks = parseAssessmentBlocks(text)
+        expect(getGlobalDecision(blocks).state).toBe(expected)
+        expect(getGlobalDecision([...blocks].reverse()).state).toBe(expected)
+        const manual = parseAssessmentBlocks(`${text}\n\n--- [Team: General] [State: FALSE_POSITIVE] ---\nReviewed.`)
+        expect(getGlobalDecision(manual).state).toBe('FALSE_POSITIVE')
     })
 
     it('says that approving the Global assessment completes a group it covers', () => {

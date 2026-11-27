@@ -22,3 +22,4 @@ Decision status and implementation status are tracked separately in each record.
 | [0015: A cutoff on the published or first-attributed date, and saved views with short links](0015-saved-views-cutoff-and-short-links.md) | Accepted | Implemented ([PR #360](https://git.baer.one/phbaer/dtvp/pulls/360)) |
 | [0016: Changes requested for a team assessment](0016-team-assessment-changes-requested.md) | Proposed | Implemented |
 | [0017: Standalone assessments with supporting evidence in DTVP](0017-standalone-assessments-and-supporting-evidence.md) | Accepted; amends decision 3 and export consequences of 0006 | Implemented on feature branch, not deployed |
+| [0018: False positive is the least concerning completed assessment](0018-completed-assessment-priority.md) | Accepted; amends ordering in 0014 | Implemented |

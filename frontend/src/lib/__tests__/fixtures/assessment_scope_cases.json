@@ -1058,7 +1058,7 @@
     ],
     "inconsistency_reasons": [],
     "lifecycle": "ASSESSED",
-    "technical_state": "FALSE_POSITIVE"
+    "technical_state": "NOT_AFFECTED"
   },
   {
     "name": "two teams that decide different states, repeated in every version",
@@ -1086,7 +1086,7 @@
     ],
     "inconsistency_reasons": [],
     "lifecycle": "ASSESSED",
-    "technical_state": "FALSE_POSITIVE"
+    "technical_state": "NOT_AFFECTED"
   },
   {
     "name": "two findings with different SSVC records",

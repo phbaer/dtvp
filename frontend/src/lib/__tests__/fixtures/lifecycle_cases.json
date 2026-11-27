@@ -1225,7 +1225,7 @@
         "vulnerability_uuid": "vulnerability-1",
         "project_version": "1.0",
         "analysis_state": "NOT_AFFECTED",
-        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamC] [State: RESOLVED] [Assessed By: carl] [Justification: NOT_SET] ---\nFixed."
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamC] [State: FALSE_POSITIVE] [Assessed By: carl] [Justification: NOT_SET] ---\nIncorrect package match."
       },
       {
         "project_uuid": "project-2",
@@ -1233,7 +1233,7 @@
         "vulnerability_uuid": "vulnerability-1",
         "project_version": "2.0",
         "analysis_state": "NOT_AFFECTED",
-        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamC] [State: RESOLVED] [Assessed By: carl] [Justification: NOT_SET] ---\nFixed."
+        "analysis_details": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] [Justification: CODE_NOT_PRESENT] ---\nNot shipped.\n\n--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.\n\n--- [Team: TeamC] [State: FALSE_POSITIVE] [Assessed By: carl] [Justification: NOT_SET] ---\nIncorrect package match."
       }
     ],
     "lifecycle": "ASSESSED",

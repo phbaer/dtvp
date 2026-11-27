@@ -1,4 +1,5 @@
 import type { FilterCounts, TeamCounts } from './group-classifier'
+import { STATE_PRIORITY } from './assessment-helpers'
 import { addTeamCounts } from './group-classifier'
 import { evidenceSources } from './evidence'
 import { expandLifecycleSelection, VISIBLE_LIFECYCLE_FILTERS } from './projectLifecycleFilters'
@@ -262,12 +263,9 @@ export const deriveVulnListResultCounts = (
 }
 
 const ANALYSIS_STATE_ORDER: Record<string, number> = {
-    EXPLOITABLE: 0,
-    IN_TRIAGE: 1,
-    NOT_SET: 2,
-    RESOLVED: 3,
-    FALSE_POSITIVE: 4,
-    NOT_AFFECTED: 5,
+    ...STATE_PRIORITY,
+    // Unassessed findings stay ahead of completed decisions in work lists.
+    NOT_SET: 1.5,
 }
 
 const createFilterCounts = (): FilterCounts => ({

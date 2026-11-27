@@ -200,9 +200,9 @@ def get_auto_analysis_guidance_path() -> str:
 STATE_PRIORITY = {
     "EXPLOITABLE": 0,
     "IN_TRIAGE": 1,
-    "FALSE_POSITIVE": 2,
+    "RESOLVED": 2,
     "NOT_AFFECTED": 3,
-    "RESOLVED": 4,
+    "FALSE_POSITIVE": 4,
     "NOT_SET": 5,
 }
 

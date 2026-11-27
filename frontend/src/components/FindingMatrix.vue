@@ -223,7 +223,7 @@ const cellOf = (row: (typeof matrix.value.rows)[number], version: string) => row
                                     <span v-if="cellOf(row, version)!.isNew" class="rounded bg-emerald-500/20 px-1 text-emerald-200">new</span>
                                     <span v-if="cellOf(row, version)!.suppressed" class="rounded bg-gray-500/30 px-1 text-gray-200">suppressed</span>
                                 </span>
-                                <span v-else class="text-gray-700" title="Not found in this project version">–</span>
+                                <span v-else class="text-gray-700" title="No finding reported for this component in this product version; affectedness is unknown">–</span>
                             </td>
                         </tr>
                         <tr v-if="expandedRows.has(row.key)" class="border-t border-gray-800/60 bg-gray-950/40" data-testid="finding-matrix-chains">

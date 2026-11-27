@@ -84,6 +84,19 @@ def _query(index: dict, **overrides) -> dict:
     return query_services.query_task_groups(index, **options)
 
 
+def test_analysis_sort_keeps_unassessed_work_ahead_and_false_positive_last():
+    expected = ["EXPLOITABLE", "IN_TRIAGE", "NOT_SET", "RESOLVED", "NOT_AFFECTED", "FALSE_POSITIVE"]
+    groups = []
+    for number, state in enumerate(reversed(expected)):
+        group = _group(number)
+        group["list_metadata"]["technical_state"] = state
+        groups.append(group)
+    index = query_services.build_task_group_query_index(groups)
+    for order, states in (("asc", expected), ("desc", list(reversed(expected)))):
+        result = _query(index, sort_by="analysis", sort_order=order)
+        assert [item["list_metadata"]["technical_state"] for item in result["items"]] == states
+
+
 def test_identical_concurrent_queries_share_one_computation(monkeypatch):
     groups = [_group(index) for index in range(100)]
     query_index = query_services.build_task_group_query_index(groups)
