@@ -2136,57 +2136,37 @@ watch(currentUserRole, (role) => {
             </div>
         </div>
 
-        <div
-            v-if="isDesktopDetailOpen"
-            class="hidden h-full min-h-0 min-w-[48rem] overflow-hidden lg:block"
-        >
+        <!-- One inspector moves between the grid and the overlay. A viewport
+             change must not recreate the assessment card or discard its draft. -->
+        <Teleport to="body" :disabled="isDesktopInspector">
             <div
-                v-if="selectedGroupLoading && !selectedGroup"
-                class="flex h-full items-center justify-center rounded-2xl border border-white/5 bg-gray-900/40 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                v-if="(selectedGroup || selectedGroupLoading) && viewMode === 'analysis'"
+                :class="isDesktopInspector
+                    ? 'h-full min-h-0 min-w-[48rem] overflow-hidden'
+                    : 'fixed inset-0 z-[60] bg-gray-950/95 p-2'"
             >
-                Loading vulnerability details...
+                <div
+                    v-if="selectedGroupLoading && !selectedGroup"
+                    class="flex h-full items-center justify-center rounded-2xl border border-white/5 bg-gray-900/40 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                >
+                    Loading vulnerability details...
+                </div>
+                <VulnDetailInspector
+                    v-else-if="selectedGroup"
+                    ref="detailInspectorRef"
+                    :group="selectedGroup"
+                    :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
+                    :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
+                    :activeTeamFilter="tagFilter"
+                    :workspaceAvailable="isWorkspaceViewport"
+                    class="h-full"
+                    @close="closeSelectedGroupWithDraftGuard"
+                    @update="handleTeamMappingUpdated"
+                    @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
+                />
             </div>
-            <VulnDetailInspector
-                v-else-if="selectedGroup"
-                ref="detailInspectorRef"
-                :group="selectedGroup"
-                :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
-                :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
-                :activeTeamFilter="tagFilter"
-                :workspaceAvailable="isWorkspaceViewport"
-                class="h-full"
-                @close="closeSelectedGroupWithDraftGuard"
-                @update="handleTeamMappingUpdated"
-                @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
-            />
-        </div>
+        </Teleport>
     </div>
-
-    <Teleport to="body">
-        <div
-            v-if="(selectedGroup || selectedGroupLoading) && viewMode === 'analysis' && !isDesktopInspector"
-            class="fixed inset-0 z-[60] bg-gray-950/95 p-2"
-        >
-            <div
-                v-if="selectedGroupLoading && !selectedGroup"
-                class="flex h-full items-center justify-center text-xs font-semibold uppercase tracking-wide text-gray-500"
-            >
-                Loading vulnerability details...
-            </div>
-            <VulnDetailInspector
-                v-else-if="selectedGroup"
-                ref="detailInspectorRef"
-                :group="selectedGroup"
-                :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
-                :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
-                :activeTeamFilter="tagFilter"
-                :workspaceAvailable="isWorkspaceViewport"
-                @close="closeSelectedGroupWithDraftGuard"
-                @update="handleTeamMappingUpdated"
-                @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
-            />
-        </div>
-    </Teleport>
 
     <Teleport to="body">
         <div

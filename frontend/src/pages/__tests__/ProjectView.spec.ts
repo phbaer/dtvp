@@ -3,7 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { drainTaskVulnGroupDetails, getAssessmentDetails, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
 import { projectHeaderState } from '../../lib/projectHeaderStore'
 import { useRoute } from 'vue-router'
-import { defaultAnalysisFilters, defaultLifecycleFilters, defaultStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
+import { defaultAnalysisFilters, defaultLifecycleFilters, defaultStatusFilters, mountProjectView, setProjectViewViewport, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
     drainTaskVulnGroupDetails: vi.fn(),
@@ -329,6 +329,23 @@ describe('ProjectView.vue', () => {
         expect(replaceSpy).toHaveBeenCalledWith(expect.objectContaining({
             query: expect.objectContaining({ vuln: 'CVE-2' }),
         }))
+    })
+
+    it('preserves the inspector instance when moving between the overlay and desktop panel', async () => {
+        const mockGroups = [{ id: 'CVE-1', title: 'First', affected_versions: [] }]
+        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
+        const wrapper = await mountProjectView({ routeName: 'TestProject', viewportWidth: 1280 })
+        await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('select', mockGroups[0])
+        await flushPromises()
+        const original = wrapper.findComponent({ name: 'VulnDetailInspector' }).vm
+        for (const width of [1600, 430, 1600]) {
+            setProjectViewViewport(width)
+            await flushPromises()
+            const inspectors = wrapper.findAllComponents({ name: 'VulnDetailInspector' })
+            expect(inspectors).toHaveLength(1)
+            expect(inspectors[0]!.vm).toBe(original)
+        }
+        wrapper.unmount()
     })
 
     it.each([

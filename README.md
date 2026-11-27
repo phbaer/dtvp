@@ -135,6 +135,7 @@ constraints, and CI conventions.
    for context and assessment details. Each team's assessment shows its own
    reported component names and versions, their product versions, and that
    team's saved decisions. Global explicitly shows all teams' findings.
+   Resizing the screen keeps the selected team and unsaved assessment fields.
    Combined decisions use the [shared assessment order](docs/assessment-model.md#the-global-decision),
    with False positive the least concerning completed outcome.
    **History** reopens recently viewed or changed vulnerabilities, including

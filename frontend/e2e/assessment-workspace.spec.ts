@@ -563,6 +563,31 @@ test.describe('Assessment workspace', () => {
         expect(await insideAfterTab(false)).toBe(true);
     });
 
+    test('keeps the selected team and unsaved rationale across responsive inspector moves', async ({ page }) => {
+        const errors = collectConsoleErrors(page);
+        await page.setViewportSize({ width: 1280, height: 900 });
+        const inspector = await selectVulnerability(page);
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        const team = inspector.getByTestId('review-team-tab').filter({ hasText: 'Security' });
+        await team.click();
+        const details = inspector.locator('#analysis-details-textarea');
+        await details.fill('Security rationale survives a viewport change.');
+        // DOM identity also catches remounts that restore only a few fields.
+        await details.evaluate(element => { element.setAttribute('data-resize-draft', 'original'); });
+        for (const width of [1600, 430, 1600]) {
+            await page.setViewportSize({ width, height: 900 });
+            await expect(team).toHaveAttribute('aria-pressed', 'true');
+            await expect(details).toHaveValue('Security rationale survives a viewport change.');
+            await expect(details).toHaveAttribute('data-resize-draft', 'original');
+        }
+        await inspector.getByTestId('workspace-toggle').click();
+        const workspace = page.getByRole('dialog', { name: `Assessment workspace for ${workspaceGroup.id}` });
+        await expect(workspace.getByTestId('review-team-tab').filter({ hasText: 'Security' })).toHaveAttribute('aria-pressed', 'true');
+        await expect(workspace.locator('#analysis-details-textarea')).toHaveValue('Security rationale survives a viewport change.');
+        await expect(workspace.locator('#analysis-details-textarea')).toHaveAttribute('data-resize-draft', 'original');
+        expect(errors).toEqual([]);
+    });
+
     test('opens from the overlay below the side-panel breakpoint', async ({ page }) => {
         const errors = collectConsoleErrors(page);
         await page.setViewportSize({ width: 1300, height: 800 });

@@ -176,6 +176,7 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
         ]);
         await mockShell(page, group);
         const inspector = await openAssessment(page, group, '/project/TestProject?awaiting_review=false&teams=Core');
+        await inspector.getByRole('button', { name: 'Core', exact: true }).click();
         await expect(inspector.getByTestId('reported-finding-scope').locator('tbody tr')).toHaveCount(2);
         await inspector.getByTestId('toggle-assessment-team-scope').click();
         await inspector.getByRole('button', { name: 'Global', exact: true }).click();
