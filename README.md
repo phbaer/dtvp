@@ -22,9 +22,10 @@ and applies consistent decisions across releases.
 - Analyzer results are applied only when Agentyzer marks them eligible; see
   [Analysis integrations](docs/analysis-integrations.md#analyzer-result-validity).
 - Optional access for AI agents: personal access tokens and an MCP endpoint to
-  read vulnerabilities, draft team assessments that stay pending review, and
-  add code evidence that a person reviews beside the Agentyzer runs. Agent evidence
-  follows the visible dependency findings, separately from analyzer application targets.
+  read vulnerabilities, draft team assessments (including justification) that
+  stay pending review, and add code evidence that a person reviews beside the
+  Agentyzer runs. Agent evidence follows the visible dependency findings,
+  separately from analyzer application targets.
 - Local-first: DTVP imports from Dependency-Track, works on its own database,
   which is the record for assessments, and exports them back automatically or
   on request. Findings Dependency-Track stops reporting are kept as gone, with

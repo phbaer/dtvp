@@ -30,6 +30,7 @@ from .access_token_services import (
     looks_like_access_token,
 )
 from .assessment_model import (
+    ANALYSIS_JUSTIFICATIONS,
     RESERVED_DETAIL_PATTERN,
     analysis_response,
     set_shared_response,
@@ -77,6 +78,9 @@ You write one team's assessment at a time. Your change is recorded as that
 team's draft and stays pending until a human reviewer approves it. You cannot
 approve, write the General assessment, change CVSS or SSVC, or overwrite a
 finding that changed after you read it: on a conflict, read it again.
+
+Optional justification sets your team's NOT_AFFECTED reason; omit to preserve
+it or pass NOT_SET to clear it. Valid values: dtvp://assessment-rules.
 
 Write details as plain prose with your evidence and reasoning. Do not include
 bracketed tags or '---' separators.
@@ -242,6 +246,7 @@ class McpToolService:
                 {
                     "team": block.get("team"),
                     "state": block.get("state"),
+                    "justification": block.get("justification") or "NOT_SET",
                     "assessed_by": block.get("user"),
                     "reviewed_by": block.get("reviewer"),
                     "historical": bool(block.get("historical")),
@@ -605,10 +610,21 @@ class McpToolService:
         team: str,
         state: str,
         details: str,
+        justification: str | None = None,
     ) -> tuple[AssessmentRequest, dict[str, bool]]:
         """The save request and each finding's existing suppression, which a
         save through this endpoint never changes."""
+        if justification is not None:
+            justification = justification.strip().upper() or "NOT_SET"
+            if justification not in (*ANALYSIS_JUSTIFICATIONS, "NOT_SET"):
+                raise McpToolError(
+                    "Invalid justification; use one of: "
+                    + ", ".join((*ANALYSIS_JUSTIFICATIONS, "NOT_SET"))
+                )
+            if justification != "NOT_SET" and state != "NOT_AFFECTED":
+                raise McpToolError("justification requires state NOT_AFFECTED")
         request = AssessmentRequest(
+            justification=justification,
             instances=[
                 {
                     key: component.get(key)
@@ -655,6 +671,7 @@ class McpToolService:
         team: str,
         state: str,
         details: str,
+        justification: str | None = None,
     ) -> dict[str, Any]:
         self._require_scope(token, SCOPE_READ)
         task = await self._project_task(token, project)
@@ -668,7 +685,11 @@ class McpToolService:
         author = f"{token.username} (via {agent_label(token)})"
         changes = []
         request, _suppressed = self._request(
-            targets, team=team_name, state=normalized_state, details=text
+            targets,
+            team=team_name,
+            state=normalized_state,
+            details=text,
+            justification=justification,
         )
         payloads = self.deps.route_deps.build_assessment_payloads(
             request, author, AGENT_ROLE
@@ -716,6 +737,7 @@ class McpToolService:
         state: str,
         details: str,
         expected_revisions: dict[str, int],
+        justification: str | None = None,
     ) -> dict[str, Any]:
         self._require_scope(token, SCOPE_WRITE)
         task = await self._project_task(token, project)
@@ -780,7 +802,11 @@ class McpToolService:
 
         client = await self.deps.get_dt_client()
         request, suppressed = self._request(
-            targets, team=team_name, state=normalized_state, details=text
+            targets,
+            team=team_name,
+            state=normalized_state,
+            details=text,
+            justification=justification,
         )
         try:
             # One transaction for every finding: all are saved or none.
@@ -1219,13 +1245,16 @@ def build_mcp_server(service: McpToolService) -> Any:
         team: str,
         state: str,
         details: str,
+        justification: str | None = None,
     ) -> dict[str, Any]:
         """Show what save_assessment would store, without saving. Returns the
         resulting assessment per finding and the expected_revisions to pass
-        to save_assessment."""
+        to save_assessment. Optional justification is a NOT_AFFECTED reason
+        from dtvp://assessment-rules; omit/null keeps it, NOT_SET clears it."""
         return await call(
             ctx,
             service.preview_assessment,
+            justification=justification,
             project=project,
             vulnerability_id=vulnerability_id,
             team=team,
@@ -1242,6 +1271,7 @@ def build_mcp_server(service: McpToolService) -> Any:
         state: str,
         details: str,
         expected_revisions: dict[str, int],
+        justification: str | None = None,
     ) -> dict[str, Any]:
         """Record one team's assessment for every finding of a vulnerability.
 
@@ -1249,11 +1279,13 @@ def build_mcp_server(service: McpToolService) -> Any:
         approves it. `team` must be responsible for the vulnerability.
         `expected_revisions` maps each finding_uuid to the revision you read;
         the save is rejected if any finding changed since. Needs a token
-        with the write scope.
+        with the write scope. Optional justification is a NOT_AFFECTED
+        reason from dtvp://assessment-rules; omit/null keeps it, NOT_SET clears it.
         """
         return await call(
             ctx,
             service.save_assessment,
+            justification=justification,
             project=project,
             vulnerability_id=vulnerability_id,
             team=team,
@@ -1333,7 +1365,7 @@ def build_mcp_server(service: McpToolService) -> Any:
     @server.resource(
         "dtvp://assessment-rules",
         name="assessment-rules",
-        description="States, component ownership, and CVSS rescoring rules in force",
+        description="States, justifications, component ownership, and CVSS rescoring rules in force",
         mime_type="application/json",
     )
     def assessment_rules() -> str:
@@ -1341,6 +1373,7 @@ def build_mcp_server(service: McpToolService) -> Any:
         return json.dumps(
             {
                 "analysis_states": list(ANALYSIS_STATES),
+                "analysis_justifications": [*ANALYSIS_JUSTIFICATIONS, "NOT_SET"],
                 "team_mapping": route_deps.load_team_mapping(),
                 "rescore_rules": route_deps.load_rescore_rules() or {},
             },

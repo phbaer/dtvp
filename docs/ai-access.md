@@ -103,7 +103,8 @@ Each assessment variant can include `changes_requested` with the
 reviewer requests or withdraws changes in the browser. An ordinary MCP
 draft preserves any outstanding request.
 
-The resource `dtvp://assessment-rules` returns the valid states, the team
+The resource `dtvp://assessment-rules` returns the valid states and
+`analysis_justifications` (including `NOT_SET`), the team
 mapping, and the CVSS rescoring rules in force. Team groups are reviewer-only
 in the REST API and are not included.
 
@@ -111,6 +112,18 @@ A vulnerability is addressed by project name and its ID or an alias. The first
 read of a project builds the same grouped snapshot the web UI uses and may take
 a while on a large project; the tool reports progress and asks the client to
 retry if it exceeds two minutes.
+
+`preview_assessment` and `save_assessment` accept an optional `justification`
+for the target team's `NOT_AFFECTED` assessment, such as `CODE_NOT_REACHABLE`.
+Values are trimmed and uppercased; unknown values and nonempty reasons with
+other states are rejected. Omit it or pass `null` to preserve each finding's
+existing team justification; `NOT_SET` or an empty string clears it.
+`get_vulnerability` and preview results include `justification` in each
+assessment block (`NOT_SET` when unset). Pass the same arguments from preview
+to save, together with `expected_revisions`.
+
+Justification support verified 2026-11-26 against `tests/test_mcp_server.py`,
+including the MCP HTTP preview/save/read flow; no live deployment check.
 
 ## Code Evidence
 

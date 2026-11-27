@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable, Iterable, Optional
 
 from .finding_keys import instance_finding_key
-from .assessment_model import RESERVED_DETAIL_PATTERN
+from .assessment_model import ANALYSIS_JUSTIFICATIONS, RESERVED_DETAIL_PATTERN
 from .code_analysis_result_services import (
     CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE,
     _sqlite_path_for_configured_path,
@@ -46,18 +46,7 @@ EVIDENCE_SCOPES = (SCOPE_VULNERABILITY, SCOPE_COMPONENTS, SCOPE_FINDINGS)
 
 EVIDENCE_STATES = tuple(STATE_PRIORITY)
 EVIDENCE_CONFIDENCES = ("low", "medium", "high")
-# Dependency-Track's justifications, the values CycloneDX also knows.
-EVIDENCE_JUSTIFICATIONS = (
-    "CODE_NOT_PRESENT",
-    "CODE_NOT_REACHABLE",
-    "REQUIRES_CONFIGURATION",
-    "REQUIRES_DEPENDENCY",
-    "REQUIRES_ENVIRONMENT",
-    "PROTECTED_BY_COMPILER",
-    "PROTECTED_AT_RUNTIME",
-    "PROTECTED_AT_PERIMETER",
-    "PROTECTED_BY_MITIGATING_CONTROL",
-)
+EVIDENCE_JUSTIFICATIONS = ANALYSIS_JUSTIFICATIONS
 APPLICATION_STATUSES = ("applied", "queued", "failed")
 
 MAX_TITLE_LENGTH = 160

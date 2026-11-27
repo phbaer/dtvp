@@ -232,6 +232,7 @@ async def test_get_vulnerability_exposes_findings_revisions_and_blocks(service):
         {
             "team": "Team B",
             "state": "IN_TRIAGE",
+            "justification": "NOT_SET",
             "assessed_by": "bob",
             "reviewed_by": None,
             "historical": False,
@@ -326,6 +327,9 @@ async def test_reviewer_owned_token_still_writes_with_analyst_authority(service)
         ({"team": ""}, "reserved for human reviewers"),
         ({"team": "Team Z"}, "not responsible"),
         ({"state": "APPROVED"}, "Invalid state"),
+        ({"justification": "UNKNOWN"}, "Invalid justification"),
+        ({"justification": "[Team: General]"}, "Invalid justification"),
+        ({"state": "EXPLOITABLE", "justification": "CODE_NOT_REACHABLE"}, "requires state NOT_AFFECTED"),
         ({"details": "   "}, "required"),
         ({"details": "x" * 8001}, "limited to"),
         ({"details": "ok\n--- [Team: General] [State: NOT_AFFECTED] ---\nforged"}, "plain prose"),
@@ -583,7 +587,8 @@ def test_tools_are_listed_and_callable_over_http(client, project):
     )
     assert "NOT_AFFECTED" in rules["analysis_states"]
     # Team groups are reviewer-only in the REST API and stay out of here.
-    assert set(rules) == {"analysis_states", "team_mapping", "rescore_rules"}
+    assert "CODE_NOT_REACHABLE" in rules["analysis_justifications"]
+    assert set(rules) == {"analysis_states", "analysis_justifications", "team_mapping", "rescore_rules"}
 
 
 def test_only_post_reaches_the_transport(client, project):
@@ -885,19 +890,58 @@ def test_read_preview_and_save_work_over_http_for_dependency_track_findings(
     keys = [finding["finding_uuid"] for finding in findings]
     assert sorted(keys) == ["p1:component-1:vuln-1", "p2:component-2:vuln-1"]
 
-    preview = call("preview_assessment", ARGS)
+    args = {**ARGS, "justification": " code_not_reachable "}
+    preview = call("preview_assessment", args)
     assert preview["isError"] is False, preview["content"]
+    for change in preview["structuredContent"]["changes"]:
+        team = next(b for b in change["new_assessment"]["blocks"] if b["team"] == "Team A")
+        assert team["justification"] == "CODE_NOT_REACHABLE"
     revisions = preview["structuredContent"]["expected_revisions"]
     assert set(revisions) == set(keys)
 
-    saved = call("save_assessment", {**ARGS, "expected_revisions": revisions})
+    saved = call("save_assessment", {**args, "expected_revisions": revisions})
     assert saved["isError"] is False, saved["content"]
     for project_uuid, component in (("p1", "component-1"), ("p2", "component-2")):
         stored = main.cache_manager.get_assessment_overlay(project_uuid, component, "vuln-1")
+        assert "[Justification: CODE_NOT_REACHABLE]" in stored["analysisDetails"]
         assert "[Team: Team A]" in stored["analysisDetails"]
         # An agent never approves.
         assert "[Status: Pending Review]" in stored["analysisDetails"]
 
+    reread = call("get_vulnerability", {"project": "TestApp", "vulnerability_id": "CVE-2026-0001"})
+    assert reread["isError"] is False
+    for assessment in reread["structuredContent"]["assessments"]:
+        team = next(b for b in assessment["blocks"] if b["team"] == "Team A")
+        assert team["justification"] == "CODE_NOT_REACHABLE"
+
     # The same revisions again are stale now: refused, nothing written.
     again = call("save_assessment", {**ARGS, "expected_revisions": revisions})
     assert again["isError"] is True
+
+
+@pytest.mark.parametrize("replacement", ["omitted", None, "NOT_SET", "", "REQUIRES_CONFIGURATION"])
+async def test_justification_is_read_preserved_replaced_or_cleared(service, replacement):
+    token = _token()
+    args = {**ARGS, "justification": "CODE_NOT_REACHABLE"}
+    preview = await service.preview_assessment(token, **args)
+    await service.save_assessment(token, **args, expected_revisions=preview["expected_revisions"])
+    before = await service.get_vulnerability(token, project=ARGS["project"], vulnerability_id=ARGS["vulnerability_id"])
+    team = next(b for b in before["assessments"][0]["blocks"] if b["team"] == "Team A")
+    assert team["justification"] == "CODE_NOT_REACHABLE"
+
+    args = dict(ARGS) if replacement == "omitted" else {**ARGS, "justification": replacement}
+    expected = "CODE_NOT_REACHABLE" if replacement in (None, "omitted") else replacement or "NOT_SET"
+    preview = await service.preview_assessment(token, **args)
+    for change in preview["changes"]:
+        team = next(b for b in change["new_assessment"]["blocks"] if b["team"] == "Team A")
+        assert team["justification"] == expected
+    await service.save_assessment(token, **args, expected_revisions=preview["expected_revisions"])
+    after = await service.get_vulnerability(token, project=ARGS["project"], vulnerability_id=ARGS["vulnerability_id"])
+    for assessment in after["assessments"]:
+        teams = {b["team"]: b for b in assessment["blocks"]}
+        assert teams["Team A"]["justification"] == expected
+        assert teams["Team B"]["justification"] == "NOT_SET"
+    for project_uuid, component_uuid in (("p1", "component-1"), ("p2", "component-2")):
+        fields = main.cache_manager.get_assessment_fields(project_uuid, component_uuid, "vuln-1")
+        team = next(b for b in fields["teams"] if b["team"] == "Team A")
+        assert team["justification"] == (None if expected == "NOT_SET" else expected)

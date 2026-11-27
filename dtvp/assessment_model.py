@@ -46,6 +46,19 @@ ANALYSIS_RESPONSES = (
 )
 RESPONSE_NOT_SET = "NOT_SET"
 
+# Dependency-Track's justifications, the values CycloneDX also knows.
+ANALYSIS_JUSTIFICATIONS = (
+    "CODE_NOT_PRESENT",
+    "CODE_NOT_REACHABLE",
+    "REQUIRES_CONFIGURATION",
+    "REQUIRES_DEPENDENCY",
+    "REQUIRES_ENVIRONMENT",
+    "PROTECTED_BY_COMPILER",
+    "PROTECTED_AT_RUNTIME",
+    "PROTECTED_AT_PERIMETER",
+    "PROTECTED_BY_MITIGATING_CONTROL",
+)
+
 # Structure of the stored assessment text. Text written by an agent, and any
 # text copied into an assessment from outside, must not contain it.
 RESERVED_DETAIL_PATTERN = re.compile(
