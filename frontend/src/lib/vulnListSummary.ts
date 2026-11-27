@@ -1,6 +1,7 @@
 import type { AffectedVersion, GroupedVuln, Instance } from '../types'
 import {
     getAssessedTeams,
+    getGroupMcpAssessmentTeams,
     getGroupInconsistencyReasons,
     normalizeTags,
 } from './assessment-helpers'
@@ -96,6 +97,7 @@ export const summarizeGroupForList = (
             is_assessed: isAssessed,
             technical_state: classification.technicalState,
             assessed_teams: normalizeAssessedTeams(getAssessedTeams(group), teamMapping),
+            mcp_assessment_teams: normalizeAssessedTeams(getGroupMcpAssessmentTeams(group), teamMapping),
             changes_requested_teams: normalizeAssessedTeams(getGroupChangesRequestedTeams(group), teamMapping),
             assessment_restore_count: group.assessment_restore_count ?? 0,
             assessment_restore_recoverable_count: group.assessment_restore_recoverable_count ?? 0,

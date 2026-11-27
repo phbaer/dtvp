@@ -32,6 +32,7 @@ export interface FilterState {
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
     changesRequestedOnly?: boolean
+    mcpAssessmentsOnly?: boolean
     /** First-seen cutoff (ADR 0015): `YYYY-MM-DD`, `<N>d`, or ''. */
     cutoff: string
     cutoffMode: 'before' | 'after'

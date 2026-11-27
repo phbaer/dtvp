@@ -320,6 +320,9 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "assessed_teams_lower": {
             _lower(value) for value in _string_list(assessed_teams)
         },
+        "mcp_assessment_teams_lower": {
+            _lower(value) for value in _string_list(metadata.get("mcp_assessment_teams"))
+        },
         "changes_requested_teams_lower": {
             _lower(value) for value in _string_list(metadata.get("changes_requested_teams"))
         },
@@ -544,6 +547,7 @@ def _matches_task_group_fields(
     new_findings: bool = False,
     awaiting_review: bool = False,
     changes_requested: bool = False,
+    mcp_assessments: bool = False,
     cutoff_end_ms: int | None = None,
     cutoff_mode: str = CUTOFF_MODE_BEFORE,
     cutoff_basis: str = DEFAULT_CUTOFF_BASIS,
@@ -613,6 +617,8 @@ def _matches_task_group_fields(
     # submitted for review and not yet approved ([Status: Pending Review]),
     # whatever the lifecycle: Ready for approval, a team's submission while
     # other teams are still open (Incomplete), or a conflicting one.
+    if mcp_assessments and not fields["mcp_assessment_teams_lower"]:
+        return False
     if changes_requested and not fields["changes_requested_teams_lower"]:
         return False
     if awaiting_review and not fields["is_pending"]:
@@ -872,6 +878,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     new_findings = 0
     awaiting_review = 0
     changes_requested = 0
+    mcp_assessments = 0
     assessment_restore_counts = _empty_assessment_restore_counts()
     inconsistency_reason_counts = _empty_inconsistency_reason_counts()
 
@@ -901,6 +908,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             cvss_version_mismatch += 1
         if fields["not_rescored"]:
             not_rescored += 1
+        if fields["mcp_assessment_teams_lower"]:
+            mcp_assessments += 1
         if fields["changes_requested_teams_lower"]:
             changes_requested += 1
         if fields["has_new_findings"]:
@@ -948,6 +957,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "new_findings": new_findings,
         "awaiting_review": awaiting_review,
         "changes_requested": changes_requested,
+        "mcp_assessments": mcp_assessments,
         "ids": ids,
         "versions": versions,
         "tags": tags,
@@ -1293,6 +1303,7 @@ def _query_cache_key(
     new_findings: bool = False,
     awaiting_review: bool = False,
     changes_requested: bool = False,
+    mcp_assessments: bool = False,
     cutoff_end_ms: int | None = None,
     cutoff_mode: str = CUTOFF_MODE_BEFORE,
     cutoff_basis: str = DEFAULT_CUTOFF_BASIS,
@@ -1341,6 +1352,7 @@ def _query_cache_key(
         bool(new_findings),
         bool(awaiting_review),
         bool(changes_requested),
+        bool(mcp_assessments),
         cutoff_end_ms,
         cutoff_mode if cutoff_end_ms is not None else None,
         cutoff_basis if cutoff_end_ms is not None else None,
@@ -1540,6 +1552,7 @@ def query_task_groups(
     new_findings: bool = False,
     awaiting_review: bool = False,
     changes_requested: bool = False,
+    mcp_assessments: bool = False,
     cutoff: str = "",
     cutoff_mode: str = CUTOFF_MODE_BEFORE,
     # Empty: published (attributed for the retired parameters).
@@ -1605,6 +1618,7 @@ def query_task_groups(
         new_findings=new_findings,
         awaiting_review=awaiting_review,
         changes_requested=changes_requested,
+        mcp_assessments=mcp_assessments,
         cutoff_end_ms=end_ms,
         cutoff_mode=normalized_mode,
         cutoff_basis=basis,
@@ -1705,6 +1719,7 @@ def query_task_groups(
                 or new_findings
                 or awaiting_review
                 or changes_requested
+                or mcp_assessments
                 or end_ms is not None
                 or tmrescore_set
                 or automatic_assessment_set
@@ -1733,6 +1748,7 @@ def query_task_groups(
                 new_findings=new_findings,
                 awaiting_review=awaiting_review,
                 changes_requested=changes_requested,
+                mcp_assessments=mcp_assessments,
                 cutoff_end_ms=end_ms,
                 cutoff_mode=normalized_mode,
                 cutoff_basis=basis,
@@ -1857,6 +1873,7 @@ def query_task_groups(
                     "new_findings": ("new_findings", False),
                     "awaiting_review": ("awaiting_review", False),
                     "changes_requested": ("changes_requested", False),
+                    "mcp_assessments": ("mcp_assessments", False),
                     "cutoff": ("cutoff_end_ms", None),
                     "evidence": (None, None),
                 }

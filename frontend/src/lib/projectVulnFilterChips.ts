@@ -30,6 +30,7 @@ export type ActiveFilterChipKey =
     | 'newFindings'
     | 'awaitingReview'
     | 'changesRequested'
+    | 'mcpAssessments'
     | 'cutoff'
 
 export interface ActiveFilterChip {
@@ -76,6 +77,7 @@ export interface BuildActiveFilterChipsInput {
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
     changesRequestedOnly?: boolean
+    mcpAssessmentsOnly?: boolean
     cutoff: string
     cutoffMode: 'before' | 'after'
     cutoffBasis?: 'published' | 'attributed'
@@ -100,6 +102,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
     changesRequestedOnly?: boolean
+    mcpAssessmentsOnly?: boolean
     cutoff: string
     sortBy: string
     sortOrder: 'asc' | 'desc'
@@ -185,6 +188,7 @@ export function buildActiveFilterChips({
     newFindingsOnly,
     awaitingReviewOnly,
     changesRequestedOnly,
+    mcpAssessmentsOnly,
     cutoff,
     cutoffMode,
     cutoffBasis = 'published',
@@ -192,6 +196,7 @@ export function buildActiveFilterChips({
     const chips: ActiveFilterChip[] = []
     if (awaitingReviewOnly) chips.push({ key: 'awaitingReview', label: 'Awaiting review' })
     if (changesRequestedOnly) chips.push({ key: 'changesRequested', label: 'Changes requested' })
+    if (mcpAssessmentsOnly) chips.push({ key: 'mcpAssessments', label: 'MCP assessments' })
     if (!hasAllOptionsSelected(lifecycleFilters, lifecycleOptions)) {
         chips.push({ key: 'lifecycle', label: `Status: ${summarizedSelection(lifecycleFilters, lifecycleOptions, 'All')}` })
     }
@@ -267,6 +272,7 @@ export function hasCustomProjectVulnFilterState({
     newFindingsOnly,
     awaitingReviewOnly,
     changesRequestedOnly,
+    mcpAssessmentsOnly,
     defaultAwaitingReviewOnly = false,
     cutoff,
     sortBy,
@@ -303,6 +309,7 @@ export function hasCustomProjectVulnFilterState({
         || notRescoredOnly
         || newFindingsOnly
         || changesRequestedOnly
+        || mcpAssessmentsOnly
         || !!awaitingReviewOnly !== defaultAwaitingReviewOnly
         || !!cutoff
         || sortBy !== 'rescored-severity'

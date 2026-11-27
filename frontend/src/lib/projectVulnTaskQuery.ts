@@ -39,6 +39,7 @@ export interface BuildTaskVulnGroupListQueryInput {
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
     changesRequestedOnly?: boolean
+    mcpAssessmentsOnly?: boolean
     cutoff: string
     cutoffMode: 'before' | 'after'
     cutoffBasis: 'published' | 'attributed'
@@ -131,6 +132,7 @@ export function buildTaskVulnGroupListQuery({
     newFindingsOnly,
     awaitingReviewOnly,
     changesRequestedOnly,
+    mcpAssessmentsOnly,
     cutoff,
     cutoffMode,
     cutoffBasis,
@@ -195,6 +197,7 @@ export function buildTaskVulnGroupListQuery({
         new_findings: newFindingsOnly || parsedSearch.newFindingsOnly,
         awaiting_review: awaitingReviewOnly || parsedSearch.awaitingReviewOnly,
         changes_requested: !!changesRequestedOnly,
+        mcp_assessments: !!mcpAssessmentsOnly,
         cutoff: cutoff || '',
         cutoff_mode: cutoffMode,
         cutoff_basis: cutoffBasis,

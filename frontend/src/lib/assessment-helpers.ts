@@ -1221,6 +1221,17 @@ export function getAssessedTeams(group: GroupedVuln): Set<string> {
     return new Set(getGroupAssessmentSummary(group).assessedTeams);
 }
 
+/** Active saved agent assessments; historical or empty blocks do not count. */
+export function getGroupMcpAssessmentTeams(group: GroupedVuln): string[] {
+    const summary = getGroupAssessmentSummary(group);
+    if (!summary.allInstances.some(instance => typeof (instance.analysis_details ?? instance.analysisDetails) === 'string')) {
+        return group.list_metadata?.mcp_assessment_teams || [];
+    }
+    return [...new Set(summary.blocks.filter(block => summary.assessedTeams.has(block.team)
+        && block.state !== 'NOT_SET' && / \(via [A-Za-z0-9 ._-]+\)$/.test(block.user || ''))
+        .map(block => block.team))];
+}
+
 export function hasGlobalAssessmentForGroup(group: GroupedVuln): boolean {
     return getGroupAssessmentSummary(group).hasGlobalAssessment;
 }

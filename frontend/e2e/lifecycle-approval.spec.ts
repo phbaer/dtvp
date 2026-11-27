@@ -302,6 +302,31 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
         await expect(page.locator('.vuln-card[data-group-id]')).toHaveCount(2);
     });
 
+    test('filters MCP assessments independently and preserves the choice on reload', async ({ page }) => {
+        const agent = structuredClone(pendingGlobal);
+        agent.id = 'CVE-MCP-ONLY';
+        Object.assign(agent.list_metadata, { mcp_assessment_teams: ['Core'], is_pending: false, lifecycle: 'ASSESSED' });
+        const human = structuredClone(pendingGlobal);
+        human.id = 'CVE-HUMAN-ONLY';
+        Object.assign(human.list_metadata, { mcp_assessment_teams: [] });
+        await mockShell(page, human);
+        await mockGroupedVulnTask(page, { taskId: 'task-ws', groups: [agent, human] });
+        await page.goto('/project/TestProject?awaiting_review=false');
+        await expect(page.locator('.vuln-card[data-group-id]')).toHaveCount(2);
+        await page.getByTestId('filter-mcp-assessments').click();
+        await expect(page).toHaveURL(/mcp_assessments=true/);
+        await expect(page.locator('.vuln-card[data-group-id="CVE-MCP-ONLY"]')).toBeVisible();
+        await expect(page.locator('.vuln-card[data-group-id="CVE-HUMAN-ONLY"]')).toHaveCount(0);
+        await page.reload();
+        await expect(page.getByTestId('filter-mcp-assessments')).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('.vuln-card[data-group-id]')).toHaveCount(1);
+        await page.getByTestId('filter-awaiting-review').click();
+        await expect(page.locator('.vuln-card[data-group-id]')).toHaveCount(0);
+        await page.getByTestId('filter-awaiting-review').click();
+        await page.getByTestId('filter-mcp-assessments').click();
+        await expect(page.locator('.vuln-card[data-group-id]')).toHaveCount(2);
+    });
+
     test('history preserves an unsaved assessment and reports an unavailable finding', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await mockShell(page, pendingGlobal);

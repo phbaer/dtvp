@@ -110,6 +110,7 @@ const FILTER_QUERY_KEYS = new Set([
     'not_rescored',
     'new_findings',
     'changes_requested',
+    'mcp_assessments',
     'awaiting_review',
     'cutoff',
     'cutoff_mode',
@@ -184,6 +185,7 @@ export function useProjectVulnFilters({
     const notRescoredOnly = ref(false)
     const newFindingsOnly = ref(false)
     const changesRequestedOnly = ref(false)
+    const mcpAssessmentsOnly = ref(false)
     const awaitingReviewOnly = ref(false)
     const cutoff = ref('')
     const cutoffMode = ref<CutoffMode>('before')
@@ -263,6 +265,7 @@ export function useProjectVulnFilters({
         notRescoredOnly.value = false
         newFindingsOnly.value = false
         changesRequestedOnly.value = false
+        mcpAssessmentsOnly.value = false
         awaitingReviewOnly.value = defaultAwaitingReviewOnly.value
         cutoff.value = ''
         cutoffMode.value = 'before'
@@ -361,6 +364,7 @@ export function useProjectVulnFilters({
         if (q.not_rescored === 'true') notRescoredOnly.value = true
         if (q.new_findings === 'true') newFindingsOnly.value = true
         if (q.changes_requested === 'true') changesRequestedOnly.value = true
+        if (q.mcp_assessments === 'true') mcpAssessmentsOnly.value = true
         // Awaiting review is written whenever it is on, and as false when a
         // reviewer turned it off. A link without it that holds other filters
         // (an old one) means off; one with only the sort follows the role.
@@ -428,6 +432,7 @@ export function useProjectVulnFilters({
         setList('inconsistency_reason', inconsistencyReasonFilters.value)
         setFlag('new_findings', newFindingsOnly.value)
         setFlag('changes_requested', changesRequestedOnly.value)
+        setFlag('mcp_assessments', mcpAssessmentsOnly.value)
         setList('original_severity', originalSeverityFilters.value)
         setList('ssvc', ssvcFilters.value)
         setList('evidence', evidenceFilters.value)
@@ -516,6 +521,7 @@ export function useProjectVulnFilters({
         notRescoredOnly: notRescoredOnly.value,
         newFindingsOnly: newFindingsOnly.value,
         changesRequestedOnly: changesRequestedOnly.value,
+        mcpAssessmentsOnly: mcpAssessmentsOnly.value,
         awaitingReviewOnly: awaitingReviewOnly.value,
         cutoff: cutoff.value,
         cutoffMode: cutoffMode.value,
@@ -557,6 +563,7 @@ export function useProjectVulnFilters({
         notRescoredOnly.value = !!newFilters.notRescoredOnly
         newFindingsOnly.value = !!newFilters.newFindingsOnly
         changesRequestedOnly.value = !!newFilters.changesRequestedOnly
+        mcpAssessmentsOnly.value = !!newFilters.mcpAssessmentsOnly
         awaitingReviewOnly.value = !!newFilters.awaitingReviewOnly
         cutoff.value = normalizeCutoff(newFilters.cutoff)
         cutoffMode.value = normalizeCutoffMode(newFilters.cutoffMode)
@@ -596,6 +603,7 @@ export function useProjectVulnFilters({
         notRescoredOnly,
         newFindingsOnly,
         changesRequestedOnly,
+        mcpAssessmentsOnly,
         awaitingReviewOnly,
         cutoff,
         cutoffMode,
@@ -720,6 +728,7 @@ export function useProjectVulnFilters({
         notRescoredOnly,
         newFindingsOnly,
         changesRequestedOnly,
+        mcpAssessmentsOnly,
         awaitingReviewOnly,
         cutoff,
         cutoffMode,

@@ -62,6 +62,7 @@ export interface VulnListViewFilters {
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
     changesRequestedOnly?: boolean
+    mcpAssessmentsOnly?: boolean
     cutoff: string
     cutoffMode: 'before' | 'after'
     cutoffBasis?: 'published' | 'attributed'
@@ -170,6 +171,7 @@ export const deriveVulnListResultCounts = (
         new_findings: 0,
         awaiting_review: 0,
         changes_requested: 0,
+        mcp_assessments: 0,
         ids: {},
         versions: {},
         tags: {},
@@ -210,6 +212,7 @@ export const deriveVulnListResultCounts = (
         if (item.hasNewFindings) counts.new_findings = (counts.new_findings || 0) + 1
         if (item.isPending) counts.awaiting_review = (counts.awaiting_review || 0) + 1
         if (item.changesRequestedTeams?.length) counts.changes_requested = (counts.changes_requested || 0) + 1
+        if (item.mcpAssessmentTeams?.length) counts.mcp_assessments = (counts.mcp_assessments || 0) + 1
 
         incrementUniqueResultCounts(counts.ids!, [item.id, ...(item.group.aliases || [])])
         incrementUniqueResultCounts(counts.versions, item.versions)
@@ -566,6 +569,7 @@ export const deriveVulnListFilterModel = (
         newFindingsOnly: filters.newFindingsOnly,
         awaitingReviewOnly: filters.awaitingReviewOnly,
         changesRequestedOnly: filters.changesRequestedOnly,
+        mcpAssessmentsOnly: filters.mcpAssessmentsOnly,
         cutoff: filters.cutoff,
         cutoffMode: filters.cutoffMode,
         cutoffBasis: filters.cutoffBasis,
@@ -684,6 +688,7 @@ export const deriveVulnListFacetCounts = (
         ['new_findings', { newFindingsOnly: false }],
         ['awaiting_review', { awaitingReviewOnly: false }],
         ['changes_requested', { changesRequestedOnly: false }],
+        ['mcp_assessments', { mcpAssessmentsOnly: false }],
     ]
     const parsed = typeof filters.smartSearch === 'string' ? parseVulnSearchQuery(filters.smartSearch) : filters.smartSearch
     const searchOverrides: Partial<Record<keyof TaskVulnGroupListCounts, Partial<ParsedVulnSearchQuery>>> = {

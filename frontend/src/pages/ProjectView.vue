@@ -539,6 +539,7 @@ const {
     newFindingsOnly,
     awaitingReviewOnly,
     changesRequestedOnly,
+    mcpAssessmentsOnly,
     cutoff,
     cutoffMode,
     cutoffBasis,
@@ -673,6 +674,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
     changesRequestedOnly: changesRequestedOnly.value,
+    mcpAssessmentsOnly: mcpAssessmentsOnly.value,
     cutoff: cutoff.value,
     cutoffMode: cutoffMode.value,
     cutoffBasis: cutoffBasis.value,
@@ -804,6 +806,7 @@ const listFilterOptions = computed(() => ({
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
     changesRequestedOnly: changesRequestedOnly.value,
+    mcpAssessmentsOnly: mcpAssessmentsOnly.value,
     cutoff: cutoff.value,
     cutoffMode: cutoffMode.value,
     cutoffBasis: cutoffBasis.value,
@@ -1438,6 +1441,7 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
     changesRequestedOnly: changesRequestedOnly.value,
+    mcpAssessmentsOnly: mcpAssessmentsOnly.value,
     cutoff: cutoff.value,
     cutoffMode: cutoffMode.value,
     cutoffBasis: cutoffBasis.value,
@@ -1500,6 +1504,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'newFindings':
             newFindingsOnly.value = false
             break
+        case 'mcpAssessments':
+            mcpAssessmentsOnly.value = false
+            break
         case 'changesRequested':
             changesRequestedOnly.value = false
             break
@@ -1531,6 +1538,7 @@ const customFilterArgs = computed(() => ({
     newFindingsOnly: newFindingsOnly.value,
     awaitingReviewOnly: awaitingReviewOnly.value,
     changesRequestedOnly: changesRequestedOnly.value,
+    mcpAssessmentsOnly: mcpAssessmentsOnly.value,
     cutoff: cutoff.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,

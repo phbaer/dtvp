@@ -116,6 +116,25 @@ def test_changes_requested_filter_has_independent_counts_and_cache_keys():
     assert [group["id"] for group in bulk] == [groups[0]["id"]]
 
 
+def test_mcp_assessments_filter_has_independent_counts_and_cache_keys():
+    groups = [_group(i) for i in range(3)]
+    groups[0]["list_metadata"]["mcp_assessment_teams"] = ["Team A"]
+    groups[1]["list_metadata"].update({"is_pending": True, "lifecycle": "NEEDS_APPROVAL"})
+    index = query_services.build_task_group_query_index(groups)
+    assert _query(index)["filtered"] == 3
+    result = _query(index, mcp_assessments=True)
+    assert [item["id"] for item in result["items"]] == [groups[0]["id"]]
+    assert result["counts"]["facets"]["mcp_assessments"] == 1
+    assert _query(index, awaiting_review=True)["items"][0]["id"] == groups[1]["id"]
+    assert _query(index, mcp_assessments=True, awaiting_review=True)["filtered"] == 0
+    assert _query(index, mcp_assessments=True, q="not-found")["counts"]["facets"]["mcp_assessments"] == 0
+    assert _query(index, mcp_assessments=False)["filtered"] == 3
+    bulk = general_api_routes._filter_bulk_workflow_groups(
+        index, general_api_routes.BulkWorkflowFilters(mcp_assessments=True)
+    )
+    assert [group["id"] for group in bulk] == [groups[0]["id"]]
+
+
 def test_identical_concurrent_queries_share_one_computation(monkeypatch):
     groups = [_group(index) for index in range(100)]
     query_index = query_services.build_task_group_query_index(groups)

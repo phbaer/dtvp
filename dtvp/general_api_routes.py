@@ -242,6 +242,7 @@ class BulkWorkflowFilters(BaseModel):
     new_findings: bool = False
     awaiting_review: bool = False
     changes_requested: bool = False
+    mcp_assessments: bool = False
     cutoff: str = ""
     cutoff_mode: Literal["before", "after"] = "before"
     # Empty: published, or attributed for the retired attribution-age filter.
@@ -1256,6 +1257,7 @@ GROUP_QUERY_DEFAULTS: dict[str, Any] = {
     "new_findings": False,
     "awaiting_review": False,
     "changes_requested": False,
+    "mcp_assessments": False,
     "cutoff": "",
     "cutoff_mode": "before",
     "cutoff_basis": "",
@@ -1445,6 +1447,7 @@ def _register_task_routes(
         new_findings: bool = False,
         awaiting_review: bool = False,
         changes_requested: bool = False,
+        mcp_assessments: bool = False,
         cutoff: str = "",
         cutoff_mode: str = Query("before", pattern="^(before|after)$"),
         cutoff_basis: str = Query("", pattern="^(|published|attributed)$"),
@@ -1505,6 +1508,7 @@ def _register_task_routes(
                     "new_findings": new_findings,
                     "awaiting_review": awaiting_review,
                     "changes_requested": changes_requested,
+                    "mcp_assessments": mcp_assessments,
                     "cutoff": cutoff,
                     "cutoff_mode": cutoff_mode,
                     "cutoff_basis": cutoff_basis,
@@ -1591,6 +1595,7 @@ def _register_task_routes(
         new_findings: bool = False,
         awaiting_review: bool = False,
         changes_requested: bool = False,
+        mcp_assessments: bool = False,
         cutoff: str = "",
         cutoff_mode: str = Query("before", pattern="^(before|after)$"),
         cutoff_basis: str = Query("", pattern="^(|published|attributed)$"),
@@ -1646,6 +1651,7 @@ def _register_task_routes(
                     "new_findings": new_findings,
                     "awaiting_review": awaiting_review,
                     "changes_requested": changes_requested,
+                    "mcp_assessments": mcp_assessments,
                     "cutoff": cutoff,
                     "cutoff_mode": cutoff_mode,
                     "cutoff_basis": cutoff_basis,
@@ -2189,6 +2195,7 @@ def _filter_bulk_workflow_groups(
         new_findings=filters.new_findings,
         awaiting_review=filters.awaiting_review,
         changes_requested=filters.changes_requested,
+        mcp_assessments=filters.mcp_assessments,
         cutoff=filters.cutoff,
         cutoff_mode=filters.cutoff_mode,
         cutoff_basis=filters.cutoff_basis,

@@ -72,9 +72,11 @@ const countsForGroups = (groups: GroupedTaskItem[]) => {
     const dependency_relationship = { direct: 0, transitive: 0, unknown: 0 };
     let awaiting_review = 0;
     let changes_requested = 0;
+    let mcp_assessments = 0;
     for (const group of groups) {
         if (group.list_metadata?.is_pending) awaiting_review++;
         if (group.list_metadata?.changes_requested_teams?.length) changes_requested++;
+        if (group.list_metadata?.mcp_assessment_teams?.length) mcp_assessments++;
         for (const key of Object.keys(lifecycle)) if (matchesLifecycle(group, [key])) lifecycle[key]!++;
         const state = group.list_metadata?.technical_state || 'NOT_SET';
         analysis[state] = (analysis[state] || 0) + 1;
@@ -89,7 +91,7 @@ const countsForGroups = (groups: GroupedTaskItem[]) => {
             else count.open++;
         }
     }
-    return { total: groups.length, lifecycle, analysis, dependency_relationship, tags, team_tags, cvss_version_mismatch: 0, awaiting_review, changes_requested };
+    return { total: groups.length, lifecycle, analysis, dependency_relationship, tags, team_tags, cvss_version_mismatch: 0, awaiting_review, changes_requested, mcp_assessments };
 };
 
 /** No saved views and the built-in default (ADR 0015); specs override it. */
@@ -150,6 +152,7 @@ export async function mockGroupedVulnTask(
         const selectedTeams = [...url.searchParams.getAll('teams'), ...(team ? [team] : [])].map(name => name.toLowerCase());
         const awaitingReview = url.searchParams.get('awaiting_review') === 'true';
         const changesRequested = url.searchParams.get('changes_requested') === 'true';
+        const mcpAssessments = url.searchParams.get('mcp_assessments') === 'true';
         const textTerms = (url.searchParams.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean);
         const cutoff = url.searchParams.get('cutoff') || '';
         const cutoffMode = url.searchParams.get('cutoff_mode') || 'before';
@@ -171,6 +174,7 @@ export async function mockGroupedVulnTask(
             if (selectedTeams.length && teamAssessment !== 'ANY' && status !== teamAssessment) return false;
             if (awaitingReview && !group.list_metadata?.is_pending) return false;
             if (changesRequested && !group.list_metadata?.changes_requested_teams?.length) return false;
+            if (mcpAssessments && !group.list_metadata?.mcp_assessment_teams?.length) return false;
             return matchesLifecycle(group, lifecycleFilters);
         });
         const requestedOffset = url.searchParams.get('cursor') || url.searchParams.get('offset') || '0';

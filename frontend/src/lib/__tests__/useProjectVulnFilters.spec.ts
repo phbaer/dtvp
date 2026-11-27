@@ -50,6 +50,15 @@ describe('useProjectVulnFilters', () => {
         expect(filters.changesRequestedOnly.value).toBe(false)
         wrapper.unmount()
     })
+    it('roundtrips and resets the MCP assessments filter', async () => {
+        const { wrapper, filters } = mountHarness({ query: { mcp_assessments: 'true', awaiting_review: 'false' } })
+        await nextTick()
+        expect(filters.mcpAssessmentsOnly.value).toBe(true)
+        expect(filters.filterUrl.value).toContain('mcp_assessments=true')
+        filters.resetFilters()
+        expect(filters.mcpAssessmentsOnly.value).toBe(false)
+        wrapper.unmount()
+    })
     it('Documented preserves lifecycle, roundtrips URLs, and resets to Any', async () => {
         vi.useFakeTimers()
         const { filters, wrapper, router } = mountHarness({ role: 'REVIEWER', query: { teams: ['Security'], lifecycle: ['READY_FOR_APPROVAL'] } })

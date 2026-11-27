@@ -399,6 +399,7 @@ export interface TaskVulnGroupListQuery {
     new_findings?: boolean;
     awaiting_review?: boolean;
     changes_requested?: boolean;
+    mcp_assessments?: boolean;
     cutoff?: string;
     cutoff_mode?: 'before' | 'after';
     cutoff_basis?: 'published' | 'attributed';
@@ -560,6 +561,7 @@ export interface TaskVulnGroupListCounts {
     new_findings?: number;
     awaiting_review?: number;
     changes_requested?: number;
+    mcp_assessments?: number;
     ids?: Record<string, number>;
     versions: Record<string, number>;
     tags: Record<string, number>;

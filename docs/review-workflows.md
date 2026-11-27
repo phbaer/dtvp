@@ -29,6 +29,7 @@ counts leave out their own category. The sidebar is described in the
 | Team, their assessment (Any, Not recorded, Recorded) | Sidebar | `teams` (old links: `tag`), `team_assessment` (role default) |
 | Awaiting review | Sidebar, Status | `awaiting_review` (role default: on for reviewers, off for analysts; old links: `lifecycle=NEEDS_APPROVAL`) |
 | Changes requested | Quick views; Sidebar, Status | `changes_requested=true` (off by default) |
+| MCP assessments only | Sidebar | `mcp_assessments=true` (off by default; independent of review status) |
 | Status: Open, Incomplete (with Conflicting), Ready for approval, Assessed | Sidebar | `lifecycle` (role default; old values `CONFLICTING`, `INCONSISTENT`, `ASSESSED_LEGACY` are mapped, `NEEDS_APPROVAL` see Awaiting review) |
 | Analysis state | Sidebar | `analysis` (all) |
 | Project versions | Sidebar | `versions` (all) |
@@ -619,6 +620,16 @@ the banner keeps one version for the findings chosen, or clears a stray one,
 after a preview (it points to Repair… when a repair would make the findings
 agree); see
 [Cleaning up an inconsistent assessment](import-export.md#cleaning-up-an-inconsistent-assessment).
+
+### MCP assessments
+
+**MCP assessments only** selects vulnerabilities with at least one active,
+recorded team assessment attributed to an MCP agent. Historical and empty
+blocks do not count; approval alone does not remove the MCP origin. This
+filter is independent of **Awaiting review**: enable both to review pending
+agent submissions. Other team/version filters retain their existing meaning.
+Counts exclude this filter itself. The choice persists in copied URLs
+(`mcp_assessments=true`), saved views and current-list Bulk Changes.
 
 ### Approving
 

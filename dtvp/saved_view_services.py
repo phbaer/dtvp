@@ -82,6 +82,7 @@ FILTER_PARAMETERS: dict[str, Any] = {
     "automatic_assessment_rescore": _LIST,
     "awaiting_review": _TRUE_FALSE,
     "changes_requested": _FLAG,
+    "mcp_assessments": _FLAG,
     "new_findings": _FLAG,
     "not_rescored": _FLAG,
     "cvss_mismatch": _FLAG,

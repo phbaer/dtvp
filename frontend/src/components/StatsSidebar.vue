@@ -545,6 +545,15 @@ const handleCopy = () => {
                         </div>
 
                         <div class="space-y-1.5">
+                            <button type="button" data-testid="filter-mcp-assessments"
+                                :aria-pressed="!!filters.mcpAssessmentsOnly"
+                                title="At least one active team assessment was submitted through MCP, including assessments already approved"
+                                @click="updateFilter('mcpAssessmentsOnly', !filters.mcpAssessmentsOnly)"
+                                class="flex min-h-9 w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold focus-visible:outline focus-visible:outline-blue-400"
+                                :class="filters.mcpAssessmentsOnly ? 'border-cyan-400/50 bg-cyan-500/20 text-white' : 'border-white/10 bg-white/3 text-gray-300 hover:bg-white/5'">
+                                <span>MCP assessments only</span>
+                                <span class="rounded-md bg-black/20 px-1.5 py-0.5 text-[10px] tabular-nums">{{ countLabel(facets.mcp_assessments) }}</span>
+                            </button>
                             <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Status</label>
                             <button
                                 type="button" data-testid="filter-changes-requested"

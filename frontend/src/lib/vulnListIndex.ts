@@ -8,6 +8,7 @@ import { resolveCanonicalTeamName } from './team-mapping'
 import { getGroupChangesRequestedTeams } from './assessmentChanges'
 import {
     getAssessedTeams,
+    getGroupMcpAssessmentTeams,
     getGroupInconsistencyReasons,
     hasCvssVersionMismatch,
     normalizeTags,
@@ -49,6 +50,7 @@ export interface VulnListItem {
     normalizedTags: string[]
     assessedTeams: Set<string>
     changesRequestedTeams?: string[]
+    mcpAssessmentTeams?: string[]
     missingTeamTagsLower: string[]
     componentNames: string[]
     componentNamesLower: string[]
@@ -122,6 +124,7 @@ export interface VulnListFilterInput {
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
     changesRequestedOnly?: boolean
+    mcpAssessmentsOnly?: boolean
     cutoff?: string
     cutoffMode?: CutoffMode
     cutoffBasis?: CutoffBasis
@@ -158,6 +161,7 @@ export interface CompiledVulnListFilters {
     newFindingsOnly?: boolean
     awaitingReviewOnly?: boolean
     changesRequestedOnly?: boolean
+    mcpAssessmentsOnly?: boolean
     cutoff: string
     cutoffMode: CutoffMode
     cutoffBasis: CutoffBasis
@@ -876,6 +880,7 @@ export function buildVulnListItem(
         normalizedTags,
         assessedTeams,
         changesRequestedTeams,
+        mcpAssessmentTeams: normalizeTags(getGroupMcpAssessmentTeams(group), teamMapping),
         // The same rule as the team counters (coversAllTeams).
         missingTeamTagsLower: allTagText.filter(tag => {
             const canonical = normalizeTags([tag], teamMapping)[0] || tag
@@ -1028,6 +1033,7 @@ export function compileVulnListFilters(
         newFindingsOnly: !!filters.newFindingsOnly,
         awaitingReviewOnly: !!filters.awaitingReviewOnly,
         changesRequestedOnly: !!filters.changesRequestedOnly,
+        mcpAssessmentsOnly: !!filters.mcpAssessmentsOnly,
         cutoff: normalizeCutoff(filters.cutoff),
         cutoffMode: normalizeCutoffMode(filters.cutoffMode),
         cutoffBasis: normalizeCutoffBasis(filters.cutoffBasis),
@@ -1252,6 +1258,7 @@ export function matchesCompiledListFilters(
     }
 
     if (filters.changesRequestedOnly && !item.changesRequestedTeams?.length) return false
+    if (filters.mcpAssessmentsOnly && !item.mcpAssessmentTeams?.length) return false
     if (filters.awaitingReviewOnly && !item.isPending) {
         return false
     }

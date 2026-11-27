@@ -217,7 +217,10 @@ Plain search still matches team names, without selecting teams. `team:` tokens
 resolve to visible team selections; ambiguous matches require a choice.
 Filters combine with AND across categories and OR within a category. Option
 counts exclude their own category; result totals and bulk actions include all
-filters. Specialist controls live under **More filters**; the threat-model and
+filters. **MCP assessments only** selects vulnerabilities with an active team assessment
+submitted through MCP, including approved assessments; combine it with
+**Awaiting review** for pending submissions. It persists in URLs and saved views
+and applies to Bulk Changes. Specialist controls live under **More filters**; the threat-model and
 automatic-assessment filters sit in its legacy section until their removal in
 2.1.0. Selections persist in shared URLs (retired parameters of saved links are
 mapped; see [filters](docs/review-workflows.md#project-review)); Reset returns

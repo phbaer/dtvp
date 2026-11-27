@@ -666,3 +666,20 @@ describe('vulnListViewModel', () => {
         expect(counts.cutoff).toBe(1)
     })
 })
+
+
+it.each([true, false])('filters MCP assessments independently of pending approval (summary=%s)', summary => {
+    const agent = makeGroup({ id: 'agent', affected_versions: [], list_metadata: { lifecycle: 'ASSESSED', mcp_assessment_teams: ['Team A'] } })
+    const human = makeGroup({ id: 'human', affected_versions: [], list_metadata: { lifecycle: 'INCOMPLETE', is_pending: true } })
+    if (!summary) {
+        agent.affected_versions = makeGroup({}).affected_versions
+        agent.affected_versions[0]!.components[0]!.analysis_details = '--- [Team: Team A] [State: NOT_AFFECTED] [Assessed By: rita (via Codex)] ---\nReviewed.'
+        human.affected_versions = makeGroup({}).affected_versions
+        human.affected_versions[0]!.components[0]!.analysis_details = '--- [Team: Team A] [State: NOT_AFFECTED] [Historical: yes] [Assessed By: rita (via Codex)] ---\nOld.\n--- [Team: Team B] [State: NOT_SET] [Assessed By: rita (via Codex)] ---\nDraft.'
+    }
+    const items = buildVulnListItems([agent, human], {})
+    const model = deriveVulnListFilterModel(items, baseFilters({ mcpAssessmentsOnly: true }))
+    expect(model.matchingItems.map(item => item.id)).toEqual(['agent'])
+    expect(deriveVulnListFacetCounts(items, baseFilters({ mcpAssessmentsOnly: true }), deriveVulnListStaticStats(items)).mcp_assessments).toBe(1)
+    expect(deriveVulnListFilterModel(items, baseFilters({ mcpAssessmentsOnly: true, awaitingReviewOnly: true })).matchingItems).toEqual([])
+})
