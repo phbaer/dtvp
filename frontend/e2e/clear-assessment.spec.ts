@@ -172,6 +172,30 @@ test.describe('Clear assessment', () => {
         expect(errors).toEqual([]);
     });
 
+    test('clears shared Global fields and Awaiting review without a General block, keeping team evidence', async ({ page }) => {
+        const state = { details: `[Rescored: 0.0] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N] [Response: UPDATE]\n\n${TEAM_TEXT}\n\n[Status: Pending Review]`, clears: [] as unknown[] };
+        await mockShell(page, state, true);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto('/project/TestProject?awaiting_review=false');
+        await page.locator(`.vuln-card[data-group-id="${group.id}"]`).click();
+        const inspector = page.getByTestId('vuln-detail-inspector');
+        await inspector.getByRole('tab', { name: /Assessment/ }).click();
+        await expect(inspector.getByRole('tab', { name: /Assessment/ })).toContainText('Pending');
+        await inspector.getByRole('button', { name: 'Clear Global assessment…', exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: 'Clear assessment' });
+        await expect(dialog.getByTestId('clear-all')).toHaveCount(0);
+        await expect(dialog).toContainText('Team decisions, rationale, authors and change requests are kept');
+        await dialog.getByTestId('clear-confirm').click();
+        await expect(dialog).toHaveCount(0);
+        expect(state.clears).toEqual([expect.objectContaining({ team: 'General' })]);
+        expect(state.details).toBe(TEAM_TEXT);
+        await expect(inspector.getByRole('tab', { name: /Assessment/ })).not.toContainText('Pending');
+        await expect(inspector.getByTestId('clear-selected-assessment')).toHaveCount(0);
+        await inspector.getByTestId('review-team-tab').click();
+        await expect(inspector.locator('#analysis-details-textarea')).toHaveValue('The parser is not shipped.');
+        await expect(inspector.locator('#analysis-state-select')).toContainText('Not Affected');
+    });
+
     test('clears the saved Global decision from Not Set and keeps the effective team verdict', async ({ page }) => {
         const state = { details: `${GLOBAL_TEXT}\n\n${TEAM_TEXT}`, clears: [] as unknown[] };
         await mockShell(page, state, true);

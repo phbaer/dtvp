@@ -51,6 +51,7 @@ from .code_analysis_assessment_services import record_application_eligible
 from .logic import (
     active_assessment_block,
     calculate_aggregated_state,
+    clear_global_assessment,
     historical_blocks_of,
     insert_assessment_blocks,
     parse_assessment_blocks,
@@ -1049,7 +1050,8 @@ async def delete_assessment(
     treated as a loss and repaired.
 
     ``team`` is a team name, "General" for the global assessment, or ``None``
-    for everything including suppression. Removing the General assessment or
+    for everything. General clears shared review fields and suppression too,
+    even without a General block; it keeps team records. Removing General or
     everything needs the reviewer role. Findings where there is nothing to
     remove are left untouched and not returned.
     """
@@ -1117,11 +1119,16 @@ def _cleared_payload(
 ) -> dict[str, Any] | None:
     """The finding with ``team``'s assessment (``None``: all of it) removed;
     ``None`` when there is nothing to remove."""
-    details = remove_assessment_blocks(current["details"], team)
-    suppressed = False if team is None else bool(current["suppressed"])
+    global_clear = _is_general(team)
+    details = (
+        clear_global_assessment(current["details"]) if global_clear
+        else remove_assessment_blocks(current["details"], team)
+    )
+    suppressed = False if team is None or global_clear else bool(current["suppressed"])
     was_pending = bool(_PENDING_REVIEW.search(current["details"]))
     if (
         details
+        and not global_clear
         and calculate_aggregated_state(details) != "NOT_SET"
         # What remains was not reviewed in this form; a reviewer's
         # deletion is not an approval of what was pending.
@@ -1136,6 +1143,14 @@ def _cleared_payload(
         == remove_assessment_blocks(before, "").strip()
         and suppressed == bool(current["suppressed"])
     )
+    if global_clear:
+        # A pending marker may be the only Global field. Removing it is a
+        # real change even when the preserved team blocks are identical.
+        unchanged = (
+            details.strip() == current["details"].strip()
+            and state == current["state"]
+            and suppressed == bool(current["suppressed"])
+        )
     if unchanged:
         return None
     return _payload(instance, state, details, suppressed)

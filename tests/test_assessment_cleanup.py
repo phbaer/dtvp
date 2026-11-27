@@ -82,14 +82,14 @@ def _same(left, right):
     return " ".join(left.split()) == " ".join(right.split())
 
 
-async def _seed(*texts, states=None, suppressed=None):
+async def _seed(*texts, states=None, suppressed=None, origin="import"):
     await dt_cache.cache_manager.persist_assessment_updates(
         [
             {**_key(instance), "state": (states or {}).get(index, calculate_aggregated_state(text)),
              "details": text, "suppressed": (suppressed or {}).get(index, False)}
             for index, (instance, text) in enumerate(zip(FINDINGS, texts))
         ],
-        origin="import",
+        origin=origin,
     )
 
 
@@ -556,3 +556,49 @@ async def test_a_save_gives_a_later_finding_the_response_the_others_agree_on(dep
     )
 
     assert all("[Response: UPDATE]" in _details(instance) for instance in FINDINGS)
+
+
+async def test_global_cleanup_preview_removes_pending_only_without_changing_teams(deps):
+    from dtvp.assessment_model import parse_assessment, version_override, with_version_override
+    from dtvp.assessment_review import changes_requests, with_changes_requests
+
+    requests = [{'team': 'Identity', 'rationale': 'More evidence', 'reviewer': 'rita', 'requested_at_ms': 1794822866568}]
+    scope = {'label': '7.x exception', 'reason': 'Different configuration'}
+    text = with_changes_requests(with_version_override(f'{TEAMS}\n\n{PENDING}', scope), requests)
+    await _seed(text, origin="assessment-changes-requested")
+    assert changes_requests(_details(EARLY)) == requests
+    before = parse_assessment('NOT_AFFECTED', _details(EARLY), False)
+    preview = await clean_up_assessment(deps, [EARLY], action='clear', team='General', source=None,
+                                       user='rita', role='REVIEWER', dry_run=True)
+    assert preview[0]['changed'] is True
+    after = preview[0]['after']
+    assert PENDING not in after['details']
+    assert parse_assessment(after['state'], after['details'], False)['teams'] == before['teams']
+    assert version_override(after['details']) == scope
+    assert changes_requests(after['details']) == requests
+    assert PENDING in _details(EARLY)  # preview writes nothing
+    await clean_up_assessment(deps, [EARLY], action='clear', team='General', source=None,
+                              user='rita', role='REVIEWER')
+    assert PENDING not in _details(EARLY)
+
+
+async def test_global_cleanup_removes_ssvc_and_general_while_retaining_team_metadata(deps):
+    from dtvp.assessment_model import parse_assessment
+
+    historical = (
+        '--- [Team: Retired] [State: EXPLOITABLE] [Assessed By: earlier-author] '
+        '[Reviewed By: earlier-reviewer] [Date: 1700000000000] [Historical: yes] '
+        '[Rescored: 9.8] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H] ---\n'
+        'Historical evidence.'
+    )
+    await _seed(f'{WITH_SSVC}\n\n{historical}')
+    before = parse_assessment('NOT_AFFECTED', _details(EARLY), False)
+    expected_teams = [team for team in before['teams'] if team['team'] != 'General']
+    await clean_up_assessment(deps, [EARLY], action='clear', team='General', source=None,
+                              user='rita', role='REVIEWER')
+    after = parse_assessment(_stored(EARLY)['analysisState'], _details(EARLY), False)
+    assert after['teams'] == expected_teams
+    assert after['pending_review'] is False
+    assert after['rescored_score'] is None and after['rescored_vector'] is None
+    assert after['free_text'] == '' and after['response'] is None
+    assert read_record(_details(EARLY)) is None

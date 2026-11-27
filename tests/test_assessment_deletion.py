@@ -229,3 +229,32 @@ def test_an_access_token_cannot_delete(client, assessed, monkeypatch):
     )
     assert response.status_code == 403
     assert _stored() is None
+
+
+async def test_global_cleanup_without_general_clears_shared_fields_but_keeps_team_assessments(
+    client, assessed, mock_dt_client
+):
+    from dtvp.assessment_model import parse_assessment
+
+    details = f'[Rescored: 0.0] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N] [Response: UPDATE]\n\n{TEAM_A}\n\n{TEAM_B}\n\n[Status: Pending Review]'
+    await main.cache_manager.persist_assessment_updates([
+        {**{key: INSTANCE[key] for key in ('project_uuid', 'component_uuid', 'vulnerability_uuid')},
+         'state': 'EXPLOITABLE', 'details': details, 'suppressed': True}
+    ], origin='individual-assessment')
+    before = parse_assessment('EXPLOITABLE', _stored()['analysisDetails'], True)
+    with patch('dtvp.main.get_user_role', return_value='REVIEWER'):
+        response = client.post('/api/assessment/delete', json={'instances': [INSTANCE], 'team': 'General'})
+    assert response.status_code == 200
+    stored = _stored()
+    after = parse_assessment(stored['analysisState'], stored['analysisDetails'], stored['isSuppressed'])
+    assert after['teams'] == before['teams']
+    assert after['state'] == 'EXPLOITABLE'  # derived from the preserved teams
+    assert after['pending_review'] is False
+    assert after['rescored_score'] is None and after['rescored_vector'] is None
+    assert after['response'] is None and after['suppressed'] is False
+    await main.cache_manager.flush_pending_updates(mock_dt_client)
+    exported = mock_dt_client.update_analysis.await_args.kwargs
+    assert '[Status: Pending Review]' not in exported['details']
+    assert '[Team: Team A]' in exported['details'] and '[Team: Team B]' in exported['details']
+    with patch('dtvp.main.get_user_role', return_value='REVIEWER'):
+        assert client.post('/api/assessment/delete', json={'instances': [INSTANCE], 'team': 'General'}).status_code == 422

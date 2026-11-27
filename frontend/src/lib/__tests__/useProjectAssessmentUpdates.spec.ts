@@ -322,3 +322,18 @@ describe('applyAssessmentDataToGroup without finding keys', () => {
         expect(details).toEqual(['First text', 'Second text'])
     })
 })
+
+
+describe('Global-only cleanup result', () => {
+    it('clears displayed rescoring and updates only the persisted findings', () => {
+        const group = makeGroup({ rescored_cvss: 0, rescored_vector: 'old-vector' })
+        const teamText = '--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: analyst] ---\nKept evidence.'
+        const updated = applyAssessmentDataToGroup(group, {
+            rescored_cvss: null, rescored_vector: null,
+            dtvp_results: [{ uuid: 'finding-1', new_state: 'NOT_AFFECTED', new_details: teamText, suppressed: false, revision: 2 }],
+        })
+        expect(updated.rescored_cvss).toBeNull()
+        expect(updated.rescored_vector).toBeNull()
+        expect(updated.affected_versions[0]!.components[0]!.analysis_details).toBe(teamText)
+    })
+})

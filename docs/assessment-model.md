@@ -280,7 +280,7 @@ See [ADR 0016](adr/0016-team-assessment-changes-requested.md).
 | `NEEDS_APPROVAL` | Ready for approval | `READY_FOR_APPROVAL` | **Approve** ([Approving](review-workflows.md#approving)); when teams have no block of their own the card says "Approve the Global assessment to complete it" | Reviewer |
 | `ASSESSED` | Assessed | `ASSESSED` | Nothing to do | |
 | `ASSESSED_LEGACY` | Assessed, with a **Legacy** badge | `ASSESSED` (old links: `ASSESSED_LEGACY`) | Nothing to do; a structured save replaces it | |
-| (flag `is_pending`) | Awaiting review (row badge, quick view, toggle) | `awaiting_review=true`; the status value `NEEDS_APPROVAL` (deprecated) | Approve when Ready for approval; nothing else removes the marker ([Approving](review-workflows.md#approving)) | Reviewer |
+| (flag `is_pending`) | Awaiting review (row badge, quick view, toggle) | `awaiting_review=true`; the status value `NEEDS_APPROVAL` (deprecated) | [Approve](review-workflows.md#approving) when Ready for approval, or [clear the Global fields](import-export.md#clearing-an-assessment) while keeping team assessments | Reviewer |
 
 "Pending review" is the marker `[Status: Pending Review]` in the text, not a
 state. As a **lifecycle value** `NEEDS_APPROVAL` means Ready for approval.
@@ -317,6 +317,14 @@ only owner, no block counts as a former team's.
 CVSS rescoring is data-driven through `RESCORE_RULES_PATH` (default
 `data/rescore_rules.json`). The shipped `NOT_AFFECTED` and `FALSE_POSITIVE`
 transitions support CVSS 2.0, 3.0, 3.1, and 4.0 and produce exactly `0.0`.
+On the Global form, **Reset to Original** explicitly removes saved rescoring
+on the next save, even when its vector already equals the source or the
+source has no numeric score. The form derives a missing source score from
+its vector; without a source vector it does not invent one. The reset stays
+pending across team tabs, can be discarded, and is replaced by a subsequent
+CVSS edit or a new Global state with a rescoring rule. A reset alone keeps
+team assessments and their derived Global decision; it creates no General
+assessment. Team-tab navigation does not apply Global rescoring rules.
 Vectors preserve their original CVSS version and base metrics. A rescored
 vector stored in a different CVSS version than Dependency-Track supplies (for
 example a CVSS 3.1 rescore of a vulnerability that only has a CVSS 2.0 vector)

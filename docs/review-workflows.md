@@ -612,19 +612,24 @@ workspace the form is always visible, so on the Global form the button reads
 Approve directly once the Global decision is recorded or the reviewer has
 prepared a draft with **Review & approve**.
 
-Only this approval removes the pending status. The server asks for it in so
+Approval removes the pending status while recording a Global decision. The server asks for it in so
 many words: `POST /api/assessment` accepts `approve: true` from reviewers, and
-refuses it from anyone else (403). Everything else keeps a pending assessment
-pending, whoever does it:
+refuses it from anyone else (403). Ordinary saves and repairs keep a pending assessment
+pending:
 
 - a reviewer's **Save** of a pending assessment;
-- a reviewer's clear of a team's or the General assessment, as long as a
+- a reviewer's clear of a team's assessment, as long as a
   decision remains;
 - **Repair Assessments**, including its Synchronize stage, which carries the
   pending status to every finding it writes.
 
 A reviewer's assessment of something that was not pending is stored as the
 client sends it.
+
+**Clear Global assessment…** is the separate reviewer cleanup for Global
+fields, including the pending-review marker. It keeps team assessments and
+their attribution intact and records no approval. See
+[Clearing an assessment](import-export.md#clearing-an-assessment) for its scope.
 
 ### Requesting changes
 

@@ -40,6 +40,8 @@ interface PrepareAssessmentSubmissionInput {
     isReviewer: boolean
     pendingVector: string
     pendingScore: number | null
+    /** Explicit removal, even when the displayed values already match the source. */
+    resetRescoring?: boolean
     initialVector: string
     initialScore: number | null
     originalVector?: string
@@ -310,6 +312,8 @@ export const prepareAssessmentSubmission = (
         originalVector: input.originalVector,
         originalScore: input.originalScore,
     })
+    const effectiveRescoredTags = input.isReviewer && !input.selectedTeam && input.resetRescoring
+        ? [] : rescoredTags
 
     // Whether this save decides the response: a reviewer's Global save.
     const sendsResponse = input.isReviewer && input.response !== undefined
@@ -327,7 +331,7 @@ export const prepareAssessmentSubmission = (
             cleanStructuredAssessmentDetails(draft.details),
             input.currentUser,
             draft.justification,
-            teamName === targetTeam ? rescoredTags : undefined,
+            teamName === targetTeam ? effectiveRescoredTags : undefined,
             !input.isApprove,
             draft.assigned,
             {

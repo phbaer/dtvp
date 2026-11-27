@@ -12,6 +12,7 @@ import {
     cleanupChanges,
     cleanupFindingKey,
     cleanupVersions,
+    hasGlobalAssessmentData,
     isGeneral,
     teamStatus,
 } from '../lib/assessmentCleanup'
@@ -67,7 +68,8 @@ const scopeLabel = computed(() => scopeName.value.toLocaleLowerCase() === 'gener
 const has = (team: string) => props.assessedTeams.some(
     assessed => assessed.toLocaleLowerCase() === team.toLocaleLowerCase())
 const canClearScope = computed(() =>
-    has(scopeName.value) && (props.isReviewer || scopeName.value.toLocaleLowerCase() !== 'general'))
+    (has(scopeName.value) || (isGeneral(scopeName.value) && hasGlobalAssessmentData(props.instances || [])))
+    && (props.isReviewer || !isGeneral(scopeName.value)))
 const canClearAll = computed(() => !props.scopeOnly && props.isReviewer && props.assessedTeams.length > 0)
 const clearDialog = ref<HTMLDialogElement | null>(null)
 watch(clearDialog, dialog => dialog?.showModal?.())
@@ -121,6 +123,8 @@ const labelOf = computed(() => {
 const teams = computed(() => assessedTeamsOf(findings.value))
 const scopeOptions = computed(() => [
     ...(props.isReviewer ? [{ value: WHOLE, label: 'The whole assessment', status: null }] : []),
+    ...(props.isReviewer && hasGlobalAssessmentData(findings.value) && !teams.value.some(isGeneral)
+        ? [{ value: 'General', label: 'The Global assessment', status: null }] : []),
     ...teams.value
         .filter(team => props.isReviewer || !isGeneral(team))
         .map(team => ({
@@ -287,7 +291,8 @@ const applyCleanup = async () => {
                                 <span class="block text-xs text-gray-400">
                                     Its decision and text are removed. Other teams' assessments stay as they are.
                                     <template v-if="scopeName.toLocaleLowerCase() === 'general'">
-                                        The SSVC decision and the response stored with it are removed too.
+                                        Rescoring, SSVC, response, suppression, Global rationale and Awaiting review are cleared too.
+                                        Team decisions, rationale, authors and change requests are kept.
                                         Any remaining team verdicts determine the effective state.
                                     </template>
                                 </span>

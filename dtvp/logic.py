@@ -7,6 +7,11 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .finding_keys import finding_key
+from .assessment_review import (
+    changes_requests,
+    strip_changes_requests,
+    with_changes_requests,
+)
 from .assessment_model import (
     RESPONSE_TAG_PATTERN,
     analysis_response,
@@ -1743,6 +1748,22 @@ def _deduplicate_assessment_blocks(
         ):
             unique[key] = (existing_index, candidate)
     return [block for _index, block in sorted(unique.values(), key=lambda item: item[0])]
+
+
+def clear_global_assessment(details: str) -> str:
+    """Clear the current General block and shared Global fields, keeping
+    team blocks, historical records, change requests and the version scope.
+    Unlike removing a block, this also works without a General block."""
+    text = strip_changes_requests(_PENDING_MARKER.sub("", details or ""))
+    kept = [
+        text[start:end].strip()
+        for start, end, key, historical in _team_block_spans(text)
+        if key != "general" or historical
+    ]
+    return with_changes_requests(
+        with_version_override("\n\n".join(kept), version_override(details)),
+        changes_requests(details),
+    )
 
 
 def remove_assessment_blocks(details: str, team: Optional[str] = None) -> str:

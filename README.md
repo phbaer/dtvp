@@ -132,7 +132,11 @@ constraints, and CI conventions.
    for context and assessment details.
 3. Record team assessments, optionally using earlier team assessments,
    threat-model or code-analysis proposals. Reviewers approve global decisions
-   and adjust CVSS scores; a [team overview](docs/screens.md#team-overview)
+   and adjust CVSS scores. **Reset to Original** removes saved rescoring on
+   the next Global save, including a rescore identical to the source vector;
+   **Clear Global assessment…** clears Global fields and Awaiting review
+   while keeping all team assessments, even without a saved General block;
+   a [team overview](docs/screens.md#team-overview)
    on the Global assessment shows what every team decided, disagreeing and
    missing teams first. A save never drops another team's assessment; a
    block it leaves out is kept as historical, and a team's historical block

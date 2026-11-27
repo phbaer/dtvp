@@ -1192,6 +1192,90 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
     }
 
+    it('removes a redundant rescore with no source score while preserving the derived team decision', async () => {
+        const vector = 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H'
+        const teamText = '--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: analyst] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.'
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: {
+                ...mockGroup, cvss: undefined, cvss_score: undefined,
+                cvss_vector: vector, rescored_cvss: 5.9, rescored_vector: vector,
+                affected_versions: [{ ...mockGroup.affected_versions[0], components: [{
+                    ...mockComponents[0], analysis_state: 'NOT_AFFECTED',
+                    analysis_details: `[Rescored: 5.9] [Rescored Vector: ${vector}]\n\n${teamText}\n\n[Status: Pending Review]`,
+                }] }],
+            } },
+            global: { provide: {
+                user: ref({ role: 'REVIEWER', username: 'tester' }),
+                rescoreRules: ref(defaultRescoreRules),
+            }, stubs: { teleport: true } },
+        })
+        await openReviewTab(wrapper)
+        const vm = wrapper.vm as any
+        expect(vm.state).toBe('NOT_SET')
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled')).toBeDefined()
+        await wrapper.get('button[title="Reset to Original"]').trigger('click')
+        expect(vm.pendingVector).toBe(vector)
+        expect(vm.pendingScore).toBe(5.9)
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled')).toBeUndefined()
+        vm.selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
+        vm.selectedTeam = ''
+        await wrapper.vm.$nextTick()
+        expect(vm.pendingVector).toBe(vector)
+        expect(vm.resetRescoring).toBe(true)
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled')).toBeUndefined()
+        const saving = vm.handleUpdate(false)
+        await flushPromises()
+        vm.handleReviewConfirm()
+        await saving
+        const payload = vi.mocked(updateAssessment).mock.calls.at(-1)![0]
+        expect(payload.fields).toMatchObject({ rescored_score: null, rescored_vector: null })
+        expect(payload.fields!.teams.map(team => team.team)).toEqual(['Security'])
+        expect(payload.fields!.teams[0]).toMatchObject({ assessed_by: 'analyst', details: 'Not reachable.' })
+        expect(vm.resetRescoring).toBe(false)
+        wrapper.unmount()
+    })
+
+    it('resets a score-only rescore without inventing a vector, and discards the reset', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, cvss: undefined, cvss_score: undefined,
+                cvss_vector: '', rescored_cvss: 4.2, rescored_vector: null } },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) }, stubs: { teleport: true } },
+        })
+        await openReviewTab(wrapper)
+        await wrapper.get('button[title="Reset to Original"]').trigger('click')
+        const vm = wrapper.vm as any
+        expect(vm.pendingVector).toBe('')
+        expect(vm.pendingScore).toBeNull()
+        expect(vm.resetRescoring).toBe(true)
+        vm.discardUnsavedDraft()
+        await wrapper.vm.$nextTick()
+        expect(vm.pendingScore).toBe(4.2)
+        expect(vm.resetRescoring).toBe(false)
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled')).toBeDefined()
+        wrapper.unmount()
+    })
+
+    it('keeps a new vector entered after a reset', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, rescored_cvss: 0,
+                rescored_vector: `${mockGroup.cvss_vector}/MC:N/MI:N/MA:N` } },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) }, stubs: { teleport: true } },
+        })
+        await openReviewTab(wrapper)
+        await wrapper.get('button[title="Reset to Original"]').trigger('click')
+        const vector = 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L'
+        await wrapper.get('#cvss-vector-input').setValue(vector)
+        const vm = wrapper.vm as any
+        expect(vm.resetRescoring).toBe(false)
+        const saving = vm.handleUpdate(false)
+        await flushPromises()
+        vm.handleReviewConfirm()
+        await saving
+        expect(vi.mocked(updateAssessment).mock.calls.at(-1)![0].fields!.rescored_vector).toBe(vector)
+        wrapper.unmount()
+    })
+
     it('keeps the rescored score when switching between assessment tabs', async () => {
         const rescoredVector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N'
         const wrapper = mount(VulnGroupCard, {

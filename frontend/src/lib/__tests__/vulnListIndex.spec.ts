@@ -742,6 +742,23 @@ describe('vulnListIndex', () => {
         expect(matchesLifecycleFilter(ready, ['READY_FOR_APPROVAL'])).toBe(true)
     })
 
+    it.each(['EXPLOITABLE', 'NOT_AFFECTED'])('keeps a pending Core-only decision incomplete while K-Core has not assessed (%s)', state => {
+        const group = makeGroup({ tags: ['Core', 'DE-Core', 'K-Core'] })
+        const instance = group.affected_versions[0]!.components[0]!
+        instance.tags = ['Core', 'DE-Core', 'K-Core']
+        instance.analysis_state = state
+        instance.analysis_details = `--- [Team: Core] [State: ${state}] [Assessed By: analyst] [Justification: CODE_NOT_REACHABLE] ---\nTeam decision.\n\n[Status: Pending Review]`
+        const mapping = { 'vp-est-srv': ['Core', 'DE-Core'], 'vp-auth-server': 'K-Core' }
+        for (const value of [group, summarizeGroupForList(group, mapping)]) {
+            const item = buildVulnListItem(value, mapping)
+            expect(item.lifecycle).toBe('INCOMPLETE')
+            expect(item.isApprovalReady).toBe(false)
+            expect(matchesLifecycleFilter(item, ['READY_FOR_APPROVAL'])).toBe(false)
+            expect(matchesCompiledLifecycleFilter(item, compileVulnStateFilters({ lifecycleFilters: ['READY_FOR_APPROVAL'] }))).toBe(false)
+            expect(matchesLifecycleFilter(item, ['NEEDS_APPROVAL'])).toBe(true)
+        }
+    })
+
     it('partitions visible lifecycle categories and includes legacy in Assessed', () => {
         const states = ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL', 'ASSESSED', 'ASSESSED_LEGACY']
         const items = states.map((lifecycle, index) => buildVulnListItem(makeGroup({

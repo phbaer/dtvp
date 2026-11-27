@@ -167,6 +167,49 @@ async function openAssessment(page: Page, group: typeof pendingGlobal) {
 }
 
 test.describe('Lifecycle: a pending Global decision and approval', () => {
+    test('resets redundant rescoring without approving a Core-only decision missing K-Core', async ({ page }) => {
+        const vector = 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H';
+        const team = '--- [Team: Core] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_REACHABLE] ---\nNot reachable.';
+        const savedText = `${team}\n\n[Status: Pending Review]`;
+        const group = groupOf('INCOMPLETE', [finding(1, {
+            analysis_state: 'NOT_AFFECTED',
+            analysis_details: `[Rescored: 5.9] [Rescored Vector: ${vector}]\n\n${savedText}`,
+        })]);
+        Object.assign(group, { cvss: null, cvss_score: null, cvss_vector: vector, rescored_cvss: 5.9, rescored_vector: vector });
+        Object.assign(group.list_metadata, { covers_all_teams: false, assessed_teams: ['Core'], technical_state: 'NOT_AFFECTED' });
+        await mockShell(page, group);
+        const errors = collectConsoleErrors(page);
+        const saves: any[] = [];
+        await page.route('**/api/assessment', async route => {
+            saves.push(route.request().postDataJSON());
+            Object.assign(group, { rescored_cvss: null, rescored_vector: null });
+            const results = [...findingsOf(group)].map(([uuid, entry]) => {
+                entry.analysis_details = savedText;
+                entry.dtvp_revision++;
+                return { status: 'success', uuid, new_state: 'NOT_AFFECTED', new_details: savedText, revision: entry.dtvp_revision };
+            });
+            await route.fulfill({ json: results });
+        });
+        const inspector = await openAssessment(page, group);
+        await expect(inspector.getByTestId('lifecycle-badge').first()).toContainText('Incomplete');
+        await expect(inspector.getByTestId('assessment-approve-button')).toHaveCount(0);
+        const save = inspector.getByTestId('assessment-submit-button');
+        await expect(save).toBeDisabled();
+        await inspector.getByTitle('Reset to Original', { exact: true }).click();
+        await expect(inspector.getByTestId('rescore-reset-hint')).toBeVisible();
+        await expect(save).toBeEnabled();
+        await save.click();
+        await page.getByRole('button', { name: 'Submit', exact: true }).click();
+        await expect.poll(() => saves.length).toBe(1);
+        expect(saves[0].fields).toMatchObject({ rescored_score: null, rescored_vector: null });
+        expect(saves[0].fields.teams.map((entry: any) => entry.team)).toEqual(['Core']);
+        expect(saves[0].approve).toBeUndefined();
+        await expect(inspector.getByTestId('rescore-reset-hint')).toHaveCount(0);
+        await expect(inspector.getByTestId('lifecycle-badge').first()).toContainText('Incomplete');
+        await expect(inspector.getByTestId('assessment-approve-button')).toHaveCount(0);
+        expect(errors).toEqual([]);
+    });
+
     test('is ready for approval, and the card says that approving completes it', async ({ page }) => {
         await mockShell(page, pendingGlobal);
         const errors = collectConsoleErrors(page);

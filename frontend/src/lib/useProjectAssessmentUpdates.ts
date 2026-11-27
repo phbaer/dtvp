@@ -29,8 +29,8 @@ export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): Group
     const isSave = 'analysis_state' in data || 'analysis_details' in data
     const updated: GroupedVuln = {
         ...group,
-        rescored_cvss: isSave ? data.rescored_cvss : group.rescored_cvss,
-        rescored_vector: isSave ? data.rescored_vector : group.rescored_vector,
+        rescored_cvss: isSave || 'rescored_cvss' in data ? data.rescored_cvss : group.rescored_cvss,
+        rescored_vector: isSave || 'rescored_vector' in data ? data.rescored_vector : group.rescored_vector,
         assignees: data.assignees !== undefined ? data.assignees : group.assignees,
         affected_versions: group.affected_versions.map(version => ({
             ...version,

@@ -154,12 +154,23 @@ describe('ClearAssessmentModal', () => {
         const wrapper = mountModal({ team: '', isReviewer: true })
         await wrapper.setProps({ show: true })
         expect(wrapper.text()).toContain('Only the Global assessment')
-        expect(wrapper.text()).toContain('The SSVC decision and the response stored with it are removed too')
+        expect(wrapper.text()).toContain('Rescoring, SSVC, response, suppression, Global rationale and Awaiting review are cleared too')
         expect(wrapper.text()).not.toContain('goes to review')
 
         await wrapper.get('[data-testid="clear-all"]').setValue(true)
         await wrapper.get('[data-testid="clear-confirm"]').trigger('click')
         expect(wrapper.emitted('confirm')).toEqual([[null]])
+    })
+
+    it('clears Global fields without a General block and never offers team deletion in scope-only mode', async () => {
+        const wrapper = mountModal({ team: '', isReviewer: true, scopeOnly: true, assessedTeams: ['Core'],
+            instances: [{ analysis_details: '--- [Team: Core] [State: NOT_AFFECTED] ---\nCore evidence.\n\n[Status: Pending Review]' }] })
+        await wrapper.setProps({ show: true })
+        expect(wrapper.text()).toContain('Only the Global assessment')
+        expect(wrapper.text()).toContain('Team decisions, rationale, authors and change requests are kept')
+        expect(wrapper.find('[data-testid="clear-all"]').exists()).toBe(false)
+        await wrapper.get('[data-testid="clear-confirm"]').trigger('click')
+        expect(wrapper.emitted('confirm')).toEqual([['General']])
     })
 
     it('offers nothing an analyst may not clear and shows server errors', async () => {

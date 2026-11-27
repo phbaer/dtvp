@@ -1,4 +1,5 @@
-import { parseAssessmentBlocks } from './assessment-helpers'
+import { assessmentTextToFields, parseAssessmentBlocks } from './assessment-helpers'
+import { stripTeamChangesRequests } from './assessmentChanges'
 import { buildFindingMatrix, compareVariants, type MatrixInstance, type MatrixVariant } from './findingMatrix'
 import type { AssessmentCleanupValue } from './api'
 
@@ -24,6 +25,14 @@ export const activeTeams = (details: string | null | undefined): string[] => {
 }
 
 export const isGeneral = (team: string | null | undefined) => String(team || '').toLocaleLowerCase() === 'general'
+
+/** Shared Global fields can exist without a saved General block. */
+export const hasGlobalAssessmentData = (instances: readonly MatrixInstance[]): boolean => instances.some(instance => {
+    const fields = assessmentTextToFields(stripTeamChangesRequests(String(instance.analysis_details || '')))
+    return Boolean(instance.is_suppressed || fields.pending_review || fields.response
+        || fields.rescored_score != null || fields.rescored_vector || fields.free_text?.trim()
+        || fields.teams.some(team => isGeneral(team.team) && !team.historical))
+})
 
 export interface CleanupDifference {
     key: string

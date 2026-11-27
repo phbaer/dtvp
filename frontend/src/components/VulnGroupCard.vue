@@ -22,6 +22,7 @@ import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAss
 import { isCodeAnalysisApplicable, buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
 import { evidenceIdsReferencedIn, unusableEvidenceId } from '../lib/codeEvidence'
 import { calculateScoreFromVector } from '../lib/cvss'
+import { hasGlobalAssessmentData } from '../lib/assessmentCleanup'
 import { buildTeamAliasGroups, type TeamRosterEntry } from '../lib/team-mapping'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
@@ -234,8 +235,9 @@ const sourceOutOfDate = computed(() => allInstances.value.some((instance: any) =
 // Tell the list about a change that did not come from the save form, the
 // way a save does. `update` would mean "ownership changed" and makes the
 // project view run the whole project query again and rebuild this card.
-const emitRefreshedAssessment = () => {
+const emitRefreshedAssessment = (globalCleared = false) => {
     emit('update:assessment', {
+        ...(globalCleared ? { rescored_cvss: null, rescored_vector: null } : {}),
         dtvp_results: allInstances.value.map((instance: any) => ({
             status: 'success',
             uuid: instance.finding_uuid,
@@ -369,10 +371,17 @@ const suppressedInstanceCount = computed(() => allInstances.value.filter(instanc
 const clearModalMode = ref<'clear' | 'cleanup'>('clear')
 const clearSelectedOnly = ref(false)
 const selectedAssessmentName = computed(() => selectedTeam.value || 'Global')
+const canClearGlobalAssessment = computed(() => isReviewer.value && hasGlobalAssessmentData(
+    allInstances.value.map(instance => ({
+        ...instance,
+        analysis_details: originalAnalysis.value[instance.finding_uuid]?.analysisDetails
+            ?? instance.analysis_details ?? '',
+    })),
+))
 const canClearSelectedAssessment = computed(() => (
     selectedTeam.value
         ? assessedTeamNames.value.some(team => assessmentTeamKey(team) === assessmentTeamKey(selectedTeam.value))
-        : isReviewer.value && hasSavedGlobalAssessment.value
+        : canClearGlobalAssessment.value
 ))
 const openClearModal = (selectedOnly = false) => {
     clearAssessmentError.value = ''
@@ -472,6 +481,8 @@ const confirmClearAssessment = async (team: string | null) => {
                 if (assessmentTeamKey(name) === clearedKey) takeoverSources.value.delete(name)
             }
             if (clearedKey === 'general') {
+                resetRescoring.value = false
+                isManualBaseMode.value = false
                 ssvcTouched.value = false
                 responseTouched.value = false
                 pendingSsvc.value = savedSsvc.value.record
@@ -484,7 +495,7 @@ const confirmClearAssessment = async (team: string | null) => {
         }
         await refreshDetails()
         historyRefreshKey.value += 1
-        emitRefreshedAssessment()
+        emitRefreshedAssessment(team === null || clearedKey === 'general')
     } catch (err: any) {
         clearAssessmentError.value = err?.response?.status === 409
             ? 'The assessment changed while this dialog was open. Reload and try again.'
@@ -652,6 +663,7 @@ const handleViewportResize = () => {
 
 const pendingScore = ref<number | null>(null)
 const pendingVector = ref<string>('')
+const resetRescoring = ref(false)
 const activeVersion = ref<CvssVersion>('3.1')
 const cvssInstance = ref<any>(null)
 const isManualBaseMode = ref(false)
@@ -778,6 +790,7 @@ const changeResponse = (value: string) => {
 }
 
 const discardUnsavedDraft = () => {
+    resetRescoring.value = false
     ssvcTouched.value = false
     responseTouched.value = false
     pendingSsvc.value = savedSsvc.value.record
@@ -1721,10 +1734,15 @@ const resetVector = () => {
                  cvssInstance.value = new Cvss2(original)
              }
         } catch {}
-        updateVectorString()
     } else {
-        resetToDefault(activeVersion.value)
+        pendingVector.value = ''
+        cvssInstance.value = null
     }
+    pendingScore.value = props.group.cvss_score ?? props.group.cvss
+        ?? calculateScoreFromVector(original || '')
+    // Reset is an explicit removal, including a redundant stored rescore.
+    resetRescoring.value = true
+    formTouched.value = true
 }
 
 const clearVector = () => {
@@ -1747,12 +1765,14 @@ watch(pendingVector, (newVector) => {
 
 watch(pendingVector, (newVector, oldVector) => {
     if (!isInternalUpdate.value && newVector !== oldVector) {
+        resetRescoring.value = false
         formTouched.value = true
     }
 }, { flush: 'sync' })
 
 watch(pendingScore, (newScore, oldScore) => {
     if (!isInternalUpdate.value && !isDerivedCvssScoreUpdate.value && newScore !== oldScore) {
+        resetRescoring.value = false
         formTouched.value = true
     }
 }, { flush: 'sync' })
@@ -1866,10 +1886,11 @@ const updateFormFromGroup = (force = true) => {
         // A rescored vector can be stored without its score. Derive it here:
         // the vector watcher only runs when the vector changes, so it does
         // not recover the score when this form is rebuilt for another tab.
-        const storedRescoredVector = props.group.rescored_vector || ''
-        pendingScore.value = props.group.rescored_cvss
+        const storedRescoredVector = resetRescoring.value ? '' : props.group.rescored_vector || ''
+        pendingScore.value = (resetRescoring.value ? null : props.group.rescored_cvss)
             ?? (storedRescoredVector ? calculateScoreFromVector(storedRescoredVector) : null)
-            ?? props.group.cvss_score ?? props.group.cvss ?? null
+            ?? props.group.cvss_score ?? props.group.cvss
+            ?? calculateScoreFromVector(props.group.cvss_vector || '')
         pendingVector.value = storedRescoredVector || props.group.cvss_vector || ''
         // Keep activeVersion in sync with the actual vector version
         const pv = pendingVector.value
@@ -2057,6 +2078,7 @@ watch(selectedTeam, (_newTeam, oldTeam) => {
 })
 
 watch(() => props.group.id, () => {
+    resetRescoring.value = false
     takeoverSources.value.clear()
     teamTabChosen.value = false
 })
@@ -2161,10 +2183,11 @@ watch(state, (newState, oldState) => {
     // We check `loadingDetails` to avoid rescoring during the initial data load.
     // Note: syncAllAssessments calls applyStateRescore() directly to
     // bypass the newState !== oldState guard when syncing.
-    if (!loadingDetails.value && !updating.value && newState !== oldState && isReviewer.value) {
+    if (!isInternalUpdate.value && !selectedTeam.value && !loadingDetails.value
+        && !updating.value && newState !== oldState && isReviewer.value) {
         applyStateRescore(newState)
     }
-})
+}, { flush: 'sync' })
 
 const refreshDetails = async () => {
     loadingDetails.value = true
@@ -2287,6 +2310,7 @@ const handleUpdate = async (force = false, isApprove = false, resubmit = false) 
             isReviewer: isReviewer.value,
             pendingVector: pendingVector.value,
             pendingScore: pendingScore.value,
+            resetRescoring: resetRescoring.value,
             initialVector: initialVector.value,
             initialScore: initialScore.value,
             originalVector: props.group.cvss_vector || '',
@@ -2410,7 +2434,7 @@ const assessmentScoreTitle = computed(() => {
     const vector = pendingVector.value || props.group.rescored_vector || props.group.cvss_vector || ''
     return vector ? `CVSS vector: ${vector}` : 'No CVSS vector available'
 })
-const hasUnsavedDraft = computed(() => formTouched.value || ssvcTouched.value || responseTouched.value)
+const hasUnsavedDraft = computed(() => formTouched.value || ssvcTouched.value || responseTouched.value || resetRescoring.value)
 const assessmentMissingFields = computed(() => {
     if (isReviewer.value) return []
     const missing: string[] = []
@@ -2426,7 +2450,7 @@ const canApplyAssessment = computed(() => (
     !updating.value
     && !loadingDetails.value
     && totalTargeted.value > 0
-    && (formTouched.value || ((ssvcTouched.value || responseTouched.value) && !selectedTeam.value)
+    && (formTouched.value || ((ssvcTouched.value || responseTouched.value || resetRescoring.value) && !selectedTeam.value)
         || (Boolean(vulnTaskId.value) && selectedTeamChangeRequests.value.length > 0
             && state.value !== 'NOT_SET' && Boolean(details.value.trim())))
     && assessmentMissingFields.value.length === 0
@@ -2932,6 +2956,7 @@ const assessedTeams = computed(() => {
 })
 
 const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalState: string, finalText: string) => {
+    if (!selectedTeam.value && results.every(result => result.status === 'success')) resetRescoring.value = false
     if (!selectedTeam.value && results.every(result => result.status === 'success')) ssvcTouched.value = false
     const savedResult = buildSavedAssessmentResultState({
         success,
@@ -3400,7 +3425,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             <button
                                 type="button"
                                 role="menuitem"
-                                :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
+                                :disabled="updating || loadingDetails || (assessedTeamNames.length === 0 && !canClearGlobalAssessment)"
                                 class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-indigo-200 hover:bg-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-40"
                                 data-testid="assessment-cleanup-button"
                                 @click="showMoreMenu = false; openCleanupModal()"
@@ -3426,7 +3451,7 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                             <button
                                 type="button"
                                 role="menuitem"
-                                :disabled="updating || loadingDetails || assessedTeamNames.length === 0"
+                                :disabled="updating || loadingDetails || (assessedTeamNames.length === 0 && !canClearGlobalAssessment)"
                                 class="flex w-full items-center gap-1.5 px-3 py-2 text-left font-semibold text-red-300 hover:bg-red-950/50 disabled:cursor-not-allowed disabled:opacity-40"
                                 data-testid="assessment-clear-button"
                                 @click="showMoreMenu = false; openClearModal()"
@@ -4243,6 +4268,9 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                                         <span class="shrink-0 font-bold uppercase">Original:</span>
                                         <span class="truncate italic">{{ group.cvss_vector }}</span>
                                     </div>
+                                    <p v-if="resetRescoring" data-testid="rescore-reset-hint" role="status" class="mt-1 text-xs text-amber-200">
+                                        Rescoring will be removed when you save the Global assessment.
+                                    </p>
                                 </div>
 
                                 <div class="flex items-center justify-between">

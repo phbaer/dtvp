@@ -238,8 +238,15 @@ scope. The confirmation names the affected findings, components and versions:
   General tab). The other teams' text, and the team's own historical
   assessments, are kept exactly as they were; only when historical
   assessments are all the team has are they deleted. Clearing the
-  General (Global) assessment also removes the SSVC decision and response.
-  The effective state is derived from any remaining team verdicts.
+  General (Global) assessment clears the current General block, shared
+  rationale, rescoring, SSVC, response, suppression and the pending-review
+  marker. **Clear Global assessment…** is available even without a General
+  block when shared Global fields remain. Team decisions, rationale,
+  assessors, reviewers, tickets, historical records and change requests are
+  preserved, as is the finding's version override. The effective state is
+  derived from the remaining team verdicts; no team assessment is added or
+  approved. Awaiting review disappears, while missing team coverage remains
+  Incomplete. A subsequent team submission marks the assessment pending again.
 - **The whole assessment**: every team, the General assessment, rescoring,
   SSVC, and suppression. The vulnerability is open again.
 
@@ -287,6 +294,10 @@ takes the kept finding's state, rescoring, response, SSVC record, review
 status and suppression; with the Global assessment its General block (with
 the SSVC record) and response; with a team, that team's block, and the
 result of an analyst goes to review.
+
+Clearing the Global scope uses the same Global-only clearing rules as
+**Clear Global assessment…**, including removal of the pending-review marker
+when no General block exists.
 
 Reviewers can clean up every scope. Analysts clean up team assessments only.
 
