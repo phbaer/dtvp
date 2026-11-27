@@ -27,6 +27,8 @@ vi.mock('@lucide/vue', () => ({
     Search: { template: '<span />' },
     ShieldCheck: { template: '<span />' },
     Bug: { template: '<span />' },
+    Network: { template: '<span />' },
+    Wrench: { template: '<span />' },
     GitBranch: { template: '<span />' },
     Eye: { template: '<span />' },
     ClipboardCopy: { template: '<span />' },

@@ -138,6 +138,8 @@ constraints, and CI conventions.
    different release coverage or decisions remain separate. Long team-mapping
    lists show a compact preview with expandable details.
    Resizing the screen keeps the selected team and unsaved assessment fields.
+   **About this vulnerability** keeps advisory facts compact with labelled icons
+   and hover explanations; component coverage stays in the reported-components table.
    Combined decisions use the [shared assessment order](docs/assessment-model.md#the-global-decision),
    with False positive the least concerning completed outcome.
    **History** reopens recently viewed or changed vulnerabilities, including

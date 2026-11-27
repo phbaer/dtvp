@@ -174,18 +174,14 @@ describe('VulnGroupCard', () => {
             ['10.0', 'lib', '2.0', 'False positive'],
             ['20.0', 'lib', '3.0', 'Not affected'],
         ])
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('lib@2.0')
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).not.toContain('lib@1.0')
-        const about = wrapper.get('[data-testid="vuln-about-affects"]')
-        expect(about.text()).toContain('lib 2.0, 3.0')
-        expect(about.text()).not.toContain('lib 1.0')
+        expect(wrapper.find('[data-testid="assessment-team-components"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="vuln-about-affects"]').exists()).toBe(false)
         await wrapper.findAll('button').find(button => button.text().trim() === 'Global')!.trigger('click')
         expect(scope.get('h4').text()).toBe('Reported components — all teams')
         expect(scope.findAll('tbody tr').map(row => row.findAll('td').map(cell => cell.text()))).toEqual([
             ['10.0', 'lib', '1.0, 2.0', 'Exploitable'],
             ['20.0', 'lib', '3.0', 'Exploitable'],
         ])
-        expect(wrapper.get('[data-testid="vuln-about-affects"]').text()).toContain('lib 1.0, 2.0, 3.0')
         wrapper.unmount()
     })
 
@@ -720,6 +716,7 @@ describe('VulnGroupCard', () => {
                         '',
                         ...Array.from({ length: 4 }, (_, index) => `Paragraph ${index + 2} explains more.`).flatMap(line => [line, '']),
                     ].join('\n'),
+                    aliases: ['CVE-2026-0002', 'CVE-2026-0002'],
                     cwes: [{ id: 125, name: 'Out-of-bounds Read' }],
                     recommendation: 'Upgrade to **2.0**.',
                 },
@@ -739,7 +736,7 @@ describe('VulnGroupCard', () => {
             .compareDocumentPosition(review.get('[data-testid="assessment-decision-section"]').element)
             & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
         expect(about.get('[data-testid="vuln-about-toggle"]').attributes('aria-expanded')).toBe('true')
-        expect(about.get('[data-testid="vuln-about-title"]').text()).toBe('Test Vulnerability')
+        expect(about.find('[data-testid="vuln-about-title"]').exists()).toBe(false)
 
         // Plain text, sanitised: no markup, no script text.
         const description = about.get('[data-testid="vuln-about-description"]')
@@ -755,18 +752,18 @@ describe('VulnGroupCard', () => {
         expect(more.text()).toBe('Show less')
         expect(more.attributes('aria-expanded')).toBe('true')
 
-        expect(about.get('[data-testid="vuln-about-affects"]').text()).toContain('lib 1.0')
-        expect(about.get('[data-testid="vuln-about-affects"]').text()).toContain('in version 1.0')
+        expect(about.find('[data-testid="vuln-about-affects"]').exists()).toBe(false)
+        expect(review.get('[data-testid="reported-finding-scope"]').text()).toContain('lib')
         expect(about.get('[data-testid="vuln-about-attack"]').text())
             .toContain('network, low complexity, no privileges, no user interaction')
-        expect(about.get('[data-testid="vuln-about-cwe"]').text()).toContain('CWE-125 Out-of-bounds Read')
+        expect(about.get('[data-testid="vuln-about-cwe"]').text()).toContain('CWE-125')
         expect(about.get('[data-testid="vuln-about-fix"] dd').text()).toBe('Upgrade to 2.0.')
-        expect(about.findAll('a').map(link => link.text())).toEqual(['NVD', 'MITRE'])
+        expect(about.findAll('a').map(link => link.text())).toEqual(['NVD', 'MITRE', 'NVD (CVE-2026-0002)'])
 
         // The block folds to one line.
         await about.get('[data-testid="vuln-about-toggle"]').trigger('click')
         expect(about.find('[data-testid="vuln-about-description"]').exists()).toBe(false)
-        expect(about.text()).toContain('Test Vulnerability')
+        expect(about.text()).toContain('A crafted document makes the parser')
     })
 
     it('lists the team-mapped components once and notes the team filter only when it hides findings', async () => {
@@ -935,8 +932,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         const proposal = wrapper.get('[data-testid="automatic-assessment-proposal"]')
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component:')
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('lib')
+        expect(wrapper.get('[data-testid="reported-finding-scope"]').text()).toContain('lib')
         expect(proposal.text()).toContain('Analyzer proposal')
         expect(proposal.text()).toContain('Reachable parser use.')
         expect(proposal.text()).toContain('The request path reaches the parser.')
@@ -1202,8 +1198,7 @@ describe('VulnGroupCard', () => {
         await wrapper.findAll('[data-testid="review-team-tab"]')
             .find(tab => tab.text() === 'Runtime')
             ?.trigger('click')
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component:')
-        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('worker')
+        expect(wrapper.get('[data-testid="reported-finding-scope"]').text()).toContain('worker')
 
         await wrapper.get('[data-testid="toggle-assessment-team-scope"]').trigger('click')
         await wrapper.vm.$nextTick()
@@ -2674,7 +2669,7 @@ describe('VulnGroupCard', () => {
             const about = assessmentPane(wrapper).get('[data-testid="vuln-about"]')
             const toggle = about.get('[data-testid="vuln-about-toggle"]')
             expect(toggle.attributes('aria-expanded')).toBe('false')
-            expect(about.text()).toContain('Test Vulnerability')
+            expect(about.text()).toContain('A bad vulnerability')
             expect(about.find('[data-testid="vuln-about-description"]').exists()).toBe(false)
             await toggle.trigger('click')
             expect(about.get('[data-testid="vuln-about-description"]').text()).toBe('A bad vulnerability')

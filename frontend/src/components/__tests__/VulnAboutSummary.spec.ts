@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import VulnAboutSummary from '../VulnAboutSummary.vue'
 
 const mountSummary = (props: Record<string, unknown> = {}) => mount(VulnAboutSummary, {
-    props: { vulnId: 'CVE-1', components: [], projectVersions: [], links: [], ...props },
+    props: { links: [], ...props },
 })
 
 describe('VulnAboutSummary', () => {
@@ -17,28 +17,36 @@ describe('VulnAboutSummary', () => {
         expect(attack('').exists()).toBe(false)
     })
 
-    it('shows no title equal to the id, a placeholder without description, and no expander for short text', () => {
-        const wrapper = mountSummary({ title: 'CVE-1', description: '' })
+    it('keeps the advisory title in the main header, with an empty-description placeholder', () => {
+        const wrapper = mountSummary({ description: '' })
         expect(wrapper.find('[data-testid="vuln-about-title"]').exists()).toBe(false)
         expect(wrapper.get('[data-testid="vuln-about-description"]').text()).toBe('No description available.')
         expect(wrapper.find('[data-testid="vuln-about-more"]').exists()).toBe(false)
     })
 
-    it('summarises components, versions and several CWEs', () => {
+    it('keeps compact CWE identifiers with full names on hover and for assistive technology', () => {
         const wrapper = mountSummary({
-            components: [
-                { name: 'a', versions: ['1'] }, { name: 'b', versions: [] },
-                { name: 'c', versions: ['2', '3'] }, { name: 'd', versions: ['4'] },
-            ],
-            projectVersions: ['2.0', '1.0'],
             cwes: [{ id: 79, name: 'XSS' }, { id: 20 }],
         })
-        const affects = wrapper.get('[data-testid="vuln-about-affects"]').text()
-        expect(affects).toContain('a 1 · b · c 2, 3')
-        expect(affects).toContain('+1 more')
-        expect(affects).toContain('in 2 versions')
+        expect(wrapper.find('[data-testid="vuln-about-affects"]').exists()).toBe(false)
         const cwe = wrapper.get('[data-testid="vuln-about-cwe"]')
-        expect(cwe.text()).toContain('CWE-79, CWE-20')
-        expect(cwe.attributes('title')).toBe('CWE-79: XSS')
+        expect(cwe.get('dd').text()).toBe('CWE-79, CWE-20')
+        expect(cwe.attributes('title')).toContain('CWE-79: XSS')
+        expect(cwe.get('dd').attributes('aria-label')).toBe('CWE-79: XSS\nCWE-20')
+        expect(cwe.find('svg').exists()).toBe(true)
+    })
+
+    it('gives advisory icons descriptive hover and accessible labels without repeating link icons', () => {
+        const wrapper = mountSummary({
+            cvssVector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L',
+            recommendation: 'Upgrade.', links: [{ label: 'NVD', url: 'https://nvd.nist.gov/' }, { label: 'MITRE', url: 'https://www.cve.org/' }],
+        })
+        const facts = wrapper.findAll('dt')
+        expect(facts.map(term => term.attributes('title'))).toEqual([
+            'CVSS attack conditions from the advisory base vector', 'Advisory remediation recommendation', 'External advisory references',
+        ])
+        expect(facts.every(term => term.find('svg[aria-hidden="true"]').exists() && term.find('.sr-only').text())).toBe(true)
+        expect(wrapper.get('[data-testid="vuln-about-references"]').findAll('svg')).toHaveLength(1)
+        expect(wrapper.findAll('a').map(link => link.text())).toEqual(['NVD', 'MITRE'])
     })
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
-import { ChevronDown, ChevronRight, ExternalLink } from '@lucide/vue'
+import { Bug, ChevronDown, ChevronRight, ExternalLink, Network, Wrench } from '@lucide/vue'
 import { markdownToPlainText } from '../lib/safeMarkdown'
 
 /**
@@ -11,23 +11,16 @@ import { markdownToPlainText } from '../lib/safeMarkdown'
  * workspace, where the Context pane shows the description, it starts folded.
  */
 const props = defineProps<{
-    vulnId: string
-    title?: string | null
     description?: string | null
     cwes?: Array<{ id: number, name?: string | null }> | null
     recommendation?: string | null
     cvssVector?: string | null
-    /** Reported components in the selected assessment scope, with their versions. */
-    components: Array<{ name: string, versions: string[] }>
-    /** Project versions the components in scope are found in. */
-    projectVersions: string[]
     links: Array<{ label: string, url: string }>
     /** Start folded to one line: the assessment workspace shows the full
      * description beside the form. */
     collapsed?: boolean
 }>()
 
-const MAX_COMPONENTS = 3
 // Longer text, or more blocks than fit, is clamped with "Show more".
 const CLAMP_CHARACTERS = 260
 const CLAMP_LINES = 3
@@ -37,10 +30,6 @@ const open = ref(!props.collapsed)
 watch(() => props.collapsed, collapsed => { open.value = !collapsed })
 const showAll = ref(false)
 
-const shownTitle = computed(() => {
-    const title = (props.title || '').trim()
-    return title && title !== props.vulnId ? title : ''
-})
 const text = computed(() => markdownToPlainText(props.description || ''))
 // Whether the clamped text is cut off, measured where there is layout;
 // estimated from its length where there is none.
@@ -71,13 +60,6 @@ onMounted(() => {
 })
 onUnmounted(() => observer?.disconnect())
 const recommendation = computed(() => markdownToPlainText(props.recommendation || '').replace(/\n/g, ' '))
-
-const componentSummary = computed(() => props.components
-    .slice(0, MAX_COMPONENTS)
-    .map(component => component.versions.length
-        ? `${component.name} ${component.versions.join(', ')}`
-        : component.name))
-const hiddenComponents = computed(() => Math.max(0, props.components.length - MAX_COMPONENTS))
 
 const METRICS: Record<string, Record<string, string>> = {
     AV: { N: 'network', A: 'adjacent network', L: 'local', P: 'physical access' },
@@ -111,15 +93,10 @@ const attackConditions = computed(() => {
     return words.join(', ')
 })
 
-/** One CWE with its name; several by number, the names in the tooltip. */
-const cweSummary = computed(() => {
-    const cwes = props.cwes || []
-    if (cwes.length === 1) return [`CWE-${cwes[0].id}`, cwes[0].name].filter(Boolean).join(' ')
-    return cwes.map(cwe => `CWE-${cwe.id}`).join(', ')
-})
+/** Keep identifiers compact; the full classifications remain available in the hover/accessibility text. */
+const cweSummary = computed(() => (props.cwes || []).map(cwe => `CWE-${cwe.id}`).join(', '))
 const cweNames = computed(() => (props.cwes || [])
-    .filter(cwe => cwe.name)
-    .map(cwe => `CWE-${cwe.id}: ${cwe.name}`)
+    .map(cwe => [`CWE-${cwe.id}`, cwe.name].filter(Boolean).join(': '))
     .join('\n'))
 </script>
 
@@ -142,12 +119,11 @@ const cweNames = computed(() => (props.cwes || [])
                 <ChevronRight v-else :size="13" aria-hidden="true" />
                 About this vulnerability
             </button>
-            <span v-if="!open && (shownTitle || text)" class="min-w-0 truncate font-normal text-gray-500">
-                {{ shownTitle || text }}
+            <span v-if="!open && text" aria-hidden="true" class="min-w-0 truncate font-normal text-gray-500">
+                {{ text }}
             </span>
         </h4>
         <div v-if="open" :id="`${id}-body`" class="mt-1.5 space-y-1.5 pl-[18px]">
-            <p v-if="shownTitle" class="text-sm font-semibold text-gray-100" data-testid="vuln-about-title">{{ shownTitle }}</p>
             <p
                 ref="descriptionEl"
                 data-testid="vuln-about-description"
@@ -165,30 +141,20 @@ const cweNames = computed(() => (props.cwes || [])
                 {{ showAll ? 'Show less' : 'Show more' }}
             </button>
             <dl data-testid="vuln-about-facts" class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] leading-snug">
-                <div v-if="components.length" class="flex min-w-0 gap-1" data-testid="vuln-about-affects">
-                    <dt class="shrink-0 text-gray-500">Reported</dt>
-                    <dd class="min-w-0 text-gray-300">
-                        <span class="font-mono">{{ componentSummary.join(' · ') }}</span>
-                        <template v-if="hiddenComponents"> +{{ hiddenComponents }} more</template>
-                        <span v-if="projectVersions.length" class="text-gray-500">
-                            in {{ projectVersions.length === 1 ? `version ${projectVersions[0]}` : `${projectVersions.length} versions` }}
-                        </span>
-                    </dd>
-                </div>
-                <div v-if="attackConditions" class="flex min-w-0 gap-1" data-testid="vuln-about-attack" :title="cvssVector || undefined">
-                    <dt class="shrink-0 text-gray-500">Attack</dt>
+                <div v-if="attackConditions" class="flex min-w-0 gap-1" data-testid="vuln-about-attack" :title="`CVSS attack conditions from the advisory base vector: ${cvssVector}`">
+                    <dt class="shrink-0 text-gray-500" title="CVSS attack conditions from the advisory base vector"><Network :size="13" aria-hidden="true" /><span class="sr-only">CVSS attack conditions (advisory)</span></dt>
                     <dd class="min-w-0 text-gray-300">{{ attackConditions }}</dd>
                 </div>
-                <div v-if="cweSummary" class="flex min-w-0 gap-1" data-testid="vuln-about-cwe" :title="cweNames || undefined">
-                    <dt class="sr-only">Weakness</dt>
-                    <dd class="min-w-0 text-gray-300">{{ cweSummary }}</dd>
+                <div v-if="cweSummary" class="flex min-w-0 gap-1" data-testid="vuln-about-cwe" :title="`Reported weakness classifications\n${cweNames}`">
+                    <dt class="shrink-0 text-gray-500" title="Reported weakness classifications (CWE)"><Bug :size="13" aria-hidden="true" /><span class="sr-only">Weakness classifications</span></dt>
+                    <dd class="min-w-0 text-gray-300" :aria-label="cweNames">{{ cweSummary }}</dd>
                 </div>
                 <div v-if="recommendation" class="flex min-w-0 basis-full gap-1" data-testid="vuln-about-fix">
-                    <dt class="shrink-0 text-gray-500">Fix</dt>
+                    <dt class="shrink-0 text-gray-500" title="Advisory remediation recommendation"><Wrench :size="13" aria-hidden="true" /><span class="sr-only">Advisory remediation recommendation</span></dt>
                     <dd class="min-w-0 text-gray-300">{{ recommendation }}</dd>
                 </div>
-                <div v-if="links.length" class="flex min-w-0 items-center gap-1.5">
-                    <dt class="sr-only">References</dt>
+                <div v-if="links.length" class="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="vuln-about-references">
+                    <dt class="shrink-0 text-gray-500" title="External advisory references"><ExternalLink :size="13" aria-hidden="true" /><span class="sr-only">External advisory references</span></dt>
                     <dd v-for="link in links" :key="link.url">
                         <a
                             :href="link.url"
@@ -196,7 +162,6 @@ const cweNames = computed(() => (props.cwes || [])
                             rel="noopener noreferrer"
                             class="inline-flex items-center gap-0.5 text-blue-300 hover:text-blue-200"
                         >
-                            <ExternalLink :size="9" aria-hidden="true" />
                             {{ link.label }}
                         </a>
                     </dd>

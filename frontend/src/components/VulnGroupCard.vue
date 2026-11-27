@@ -2467,7 +2467,7 @@ const externalLinks = computed(() => {
             links.push({ label: `GitHub (${alias})`, url: `https://github.com/advisories/${encodeURIComponent(alias)}` })
         }
     }
-    return links
+    return [...new Map(links.map(link => [link.url, link])).values()]
 })
 
 const assessmentScoreTitle = computed(() => {
@@ -2769,25 +2769,6 @@ const assessmentScopeInstances = computed(() => {
 })
 const selectedAssessmentTeamAliases = computed(() => selectedTeam.value
     ? Object.entries(teamAliasGroups.value).find(([primary]) => canonicalReviewTeam(primary) === canonicalReviewTeam(selectedTeam.value))?.[1] || []
-    : [])
-const assessmentScopeComponents = computed(() => {
-    const versionsByName = new Map<string, Set<string>>()
-    for (const instance of assessmentScopeInstances.value) {
-        const name = [instance.component_group, instance.component_name].filter(Boolean).join('/') || 'Unknown component'
-        if (!versionsByName.has(name)) versionsByName.set(name, new Set())
-        if (instance.component_version) versionsByName.get(name)!.add(instance.component_version)
-    }
-    return [...versionsByName].map(([name, versions]) => ({
-        name, versions: [...versions].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
-    })).sort((a, b) => a.name.localeCompare(b.name))
-})
-const assessmentScopeProjectVersions = computed(() => sortVersions([...new Set(
-    assessmentScopeInstances.value.map(instance => instance.project_version).filter((version): version is string => !!version),
-)], true))
-const selectedAssessmentTeamComponents = computed(() => selectedTeam.value
-    ? [...new Set(assessmentScopeInstances.value.map(instance => (
-        `${[instance.component_group, instance.component_name].filter(Boolean).join('/') || 'Unknown component'}@${instance.component_version || '(unknown)'}`
-    )))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     : [])
 const stringifyAssessmentTicketValue = (value: unknown): string => {
     if (value == null || value === '') return ''
@@ -3888,26 +3869,9 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                         </div>
 
                         <div
-                            v-if="selectedTeam || selectedBlockMetaText"
+                            v-if="selectedBlockMetaText || canRequestChanges"
                             class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-500"
                         >
-                            <span
-                                v-if="selectedTeam"
-                                data-testid="assessment-team-components"
-                                class="flex flex-wrap items-center gap-1.5"
-                            >
-                                <span>{{ selectedAssessmentTeamComponents.length === 1 ? 'Component' : 'Components' }}:</span>
-                                <span
-                                    v-for="component in selectedAssessmentTeamComponents"
-                                    :key="component"
-                                    class="rounded border border-blue-800/60 bg-blue-950/30 px-1.5 py-0.5 font-mono text-blue-200"
-                                >
-                                    {{ component }}
-                                </span>
-                                <span v-if="selectedAssessmentTeamComponents.length === 0" class="text-amber-300">
-                                    No confirmed component ownership
-                                </span>
-                            </span>
                             <!-- Block header metadata (read-only) -->
                             <span v-if="selectedBlockMetaText" data-testid="assessment-block-meta">{{ selectedBlockMetaText }}</span>
                             <button
@@ -4000,14 +3964,10 @@ watch(() => [props.group?.id, vulnTaskId.value, isReviewer.value, historyRefresh
                     />
 
                     <VulnAboutSummary
-                        :vulnId="group.id"
-                        :title="group.title"
                         :description="group.description"
                         :cwes="group.cwes"
                         :recommendation="group.recommendation"
                         :cvssVector="group.cvss_vector"
-                        :components="assessmentScopeComponents"
-                        :projectVersions="assessmentScopeProjectVersions"
                         :links="externalLinks"
                         :collapsed="isWorkspace"
                     />

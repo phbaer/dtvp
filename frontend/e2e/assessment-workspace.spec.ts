@@ -399,7 +399,8 @@ test.describe('Assessment workspace', () => {
         await inspector.getByRole('tab', { name: /Assessment/ }).click();
         const about = inspector.getByTestId('vuln-about');
         await expect(about).toBeVisible();
-        await expect(about.getByTestId('vuln-about-title')).toHaveText('Parser vulnerability');
+        await expect(about.getByTestId('vuln-about-title')).toHaveCount(0);
+        await expect(inspector.getByRole('heading', { name: 'Parser vulnerability', exact: true })).toHaveCount(1);
         const description = about.getByTestId('vuln-about-description');
         await expect(description).toContainText('Paragraph 1 of the advisory.');
         const clamped = await description.evaluate(element => element.scrollHeight > element.clientHeight + 1);
@@ -407,10 +408,14 @@ test.describe('Assessment workspace', () => {
         await about.getByTestId('vuln-about-more').click();
         await expect(about.getByTestId('vuln-about-more')).toHaveText('Show less');
         expect(await description.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
-        await expect(about.getByTestId('vuln-about-cwe')).toContainText('CWE-125 Out-of-bounds Read');
+        await expect(about.getByTestId('vuln-about-cwe')).toContainText('CWE-125');
+        await expect(about.getByTestId('vuln-about-cwe')).toHaveAttribute('title', /Out-of-bounds Read/);
         await expect(about.getByTestId('vuln-about-fix')).toContainText('Upgrade the parser to 3.0.');
         await expect(about.getByTestId('vuln-about-attack')).toContainText('network, low complexity, no privileges, no user interaction');
-        await expect(about.getByTestId('vuln-about-affects')).toContainText('in 2 versions');
+        await expect(about.getByTestId('vuln-about-affects')).toHaveCount(0);
+        await expect(about.getByTestId('vuln-about-attack').locator('dt')).toHaveAttribute('title', /CVSS attack conditions/);
+        await expect(about.getByTestId('vuln-about-attack').locator('dt svg')).toHaveCount(1);
+        await expect(about.getByTestId('vuln-about-references').locator('svg')).toHaveCount(1);
 
         // In the workspace the context shows the description; the summary is one line.
         await inspector.getByTestId('workspace-toggle').click();
@@ -418,7 +423,8 @@ test.describe('Assessment workspace', () => {
         await expect(workspace).toBeVisible();
         const folded = workspace.getByTestId('vuln-about');
         await expect(folded.getByTestId('vuln-about-toggle')).toHaveAttribute('aria-expanded', 'false');
-        await expect(folded).toContainText('Parser vulnerability');
+        await expect(folded.getByRole('heading', { name: 'About this vulnerability', exact: true })).toBeVisible();
+        await expect(folded).toContainText('Paragraph 1 of the advisory.');
         await expect(folded.getByTestId('vuln-about-description')).toHaveCount(0);
         await expect(workspace.getByTestId('assessment-decision-section')).toBeInViewport();
         await folded.getByTestId('vuln-about-toggle').click();

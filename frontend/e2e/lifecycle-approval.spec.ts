@@ -186,8 +186,8 @@ test.describe('Lifecycle: a pending Global decision and approval', () => {
         await expect(scope.getByRole('heading')).toHaveText('Reported components for K-Core');
         await expect(scope.locator('tbody tr')).toHaveCount(1);
         await expect(scope.locator('tbody td')).toHaveText(['2.0', 'node-lib', '1.7.0', 'Not affected']);
-        await expect(inspector.getByTestId('assessment-team-components')).toContainText('node-lib@1.7.0');
-        await expect(inspector.getByTestId('vuln-about-affects')).not.toContainText('1.2.0');
+        await expect(inspector.getByTestId('assessment-team-components')).toHaveCount(0);
+        await expect(inspector.getByTestId('vuln-about-affects')).toHaveCount(0);
         await inspector.getByRole('button', { name: 'Global', exact: true }).click();
         await expect(scope.getByRole('heading')).toHaveText('Reported components — all teams');
         await expect(scope.locator('tbody tr')).toHaveCount(3);

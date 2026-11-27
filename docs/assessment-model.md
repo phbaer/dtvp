@@ -253,7 +253,7 @@ versions, paired with their product versions. It uses each finding's resolved
 team ownership, including aliases and inherited dependency ownership, rather
 than selecting every version of a matching component name. Selecting another
 team through **Show all teams** changes this scope independently of the outer
-list filter. The component chips and advisory summary use the same scope;
+list filter. The reported-components table is the single detailed component/version summary;
 Global explicitly shows all teams' findings. Repeated product versions are
 comma-separated. Component versions combine only when they have identical
 release coverage and assessment state; grouping never invents a component/
